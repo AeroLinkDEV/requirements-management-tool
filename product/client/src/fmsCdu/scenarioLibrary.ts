@@ -47,9 +47,11 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   {
     id: "dead-reckoning",
     title: "Dead reckoning with DME and GPS lost",
-    objective: "Show that with the DMEs and then GPS lost the FMS dead reckons on inertial with the POS annunciator lit, and returns to GPS when it recovers.",
+    objective: "Show that with the APIRS and Doppler failed, and the DMEs and then GPS lost, the FMS dead reckons with the POS annunciator lit, and returns to GPS when it recovers.",
     maxSeconds: 900,
     steps: [
+      { when: { kind: "start" }, action: { kind: "condition", condition: "apirsFail", on: true } },
+      { when: { kind: "start" }, action: { kind: "condition", condition: "dvsFail", on: true } },
       { when: { kind: "time", seconds: 60 }, action: { kind: "condition", condition: "dmeOutage", on: true } },
       { when: { kind: "start" }, action: { kind: "expectLamp", lamp: "POS", lit: false } },
       { when: { kind: "time", seconds: 120 }, action: { kind: "condition", condition: "gpsLost", on: true } },

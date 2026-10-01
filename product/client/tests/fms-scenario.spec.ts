@@ -143,10 +143,11 @@ test('the runner can drive a bench session: poll after each flight step, and aba
   const sim = new FlightSimulator(fms)
   const runner = new ScenarioRunner(library('dead-reckoning'), fms)
   for (let t = 0; t < 130; t += 1) { now += 1000; sim.step(1); runner.poll() }
-  expect(runner.current).toBe(5)
+  // Seven steps done by 130 s: the APIRS and DVS failures, then the first five of the DR sequence.
+  expect(runner.current).toBe(7)
   runner.abandon()
   expect(runner.finished).toBe(true)
-  expect(runner.results.slice(5).map(result => result.status)).toEqual(['not reached', 'not reached'])
+  expect(runner.results.slice(7).map(result => result.status)).toEqual(['not reached', 'not reached'])
 })
 
 test('a scenario becomes test procedure text, and its run a Markdown report marked as simulation evidence', () => {

@@ -2,7 +2,7 @@ import { distanceNm, longitudeDelta, offset, type LatLon } from "./fmsModel";
 import type { NavMode } from "./navigation";
 import type { RadioFix } from "./radioNavigation";
 import type { AirData } from "./sensorPorts";
-import { ELIGIBILITY, withinLimit, type SensorSolution } from "./sensorState";
+import { accuracy95Isotropic, CIRCULAR_95, ELIGIBILITY, withinLimit, type SensorSolution } from "./sensorState";
 import { HELICOPTER_PROFILE, type AircraftProfile } from "./profile";
 
 /** A receiver's position with its 95% accuracy (HFOM) and integrity bound (HIL) kept apart (plans F2, C1). ANP is the
@@ -28,19 +28,41 @@ const drSensor = (available: boolean, accuracy95Nm: number | null, gpsDependent:
   accuracy95Nm, accuracyBasis: accuracy95Nm === null ? null : "laboratory", gpsDependent,
   integrityNm: null, naimComparisonNm: null, integrityBasis: "none", integrity: false, eligibility: ELIGIBILITY.DR });
 
-/** DR entered from a solution with no known accuracy starts from the initialization value (1 NM). */
+/** M300 1-5, 12-23: the KALMAN mode carries navigation for about 2 minutes after GPS loss (DEC-150: 2 minutes). */
+export const KALMAN_COAST_S = 120;
+/** Laboratory (plan C2): the 1-sigma residual accelerometer bias after aiding, m/s², per axis: a random constant over
+ * each coast (an AHRS-grade figure, not a CMA or APIRS value). */
+export const APIRS_ACCEL_SIGMA_MS2 = 0.02;
+/** Laboratory (plan C2): the 1-sigma error of the aiding GPS velocity, kt, per axis. */
+export const AIDING_VELOCITY_SIGMA_KT = 0.2;
+/** Laboratory: the DVS solution's 95% error grows by this fraction of the distance flown on it. */
+export const DVS_DRIFT_FRACTION = 0.01;
+const MS2_TO_KT_PER_S = 1.943844;
+/** A propagated mode entered from a solution with no known accuracy starts from the initialization value (1 NM). */
 const UNKNOWN_START_NM = 1;
+
+/** Earth-frame measurements the KALMAN and DVS modes use; the FMS rotates body axes with its heading before this. */
+export type InertialInput = { northMs2: number; eastMs2: number };
+export type DopplerInput = { northKt: number; eastKt: number };
 
 /** The estimator has no aircraft-truth input. Values for uncertainty growth are declared bench assumptions. */
 export class CivilNavigation {
+  /** The emulated INS (M300 12-23): aided by GPS with integrity, then coasting on the APIRS accelerations. sigma0 is the
+   * per-axis 1-sigma at aiding (plan C2): the aiding GPS's 95% accuracy / 2.448 (the isotropic case). */
+  private kalman: { position: LatLon; north: number; east: number; coast: number; sigma0: number } | null = null;
+  /** The DVS track since entry: its starting accuracy, the distance flown, and the start position's GPS dependency. */
+  private dvsTrack: { startAnp: number; distance: number; gpsDependent: boolean } | null = null;
+  private readonly equipment: { kalman: boolean; dvs: boolean };
   private solution: CivilSolution;
   private wind = { north: 0, east: 0 };
   private previousRadio: { position: LatLon; at: number; gpsDependent: boolean } | null = null;
   /** Whether the wind DR carries was computed from GPS velocity, or from radio fixes that were themselves GPS-dependent. */
   private windGpsDependent = false;
   private readonly parameters: AircraftProfile["parameters"];
-  constructor(initial: LatLon, parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) {
+  constructor(initial: LatLon, parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters,
+    equipment: { kalman: boolean; dvs: boolean } = { kalman: false, dvs: false }) {
     this.parameters = parameters;
+    this.equipment = equipment;
     const dr = drSensor(false, 1, false);
     this.solution = { position: { ...initial }, mode: "DR", anp: 1, gpsSource: null, gpsDependent: false, dmes: [], vor: null, uncertain: true, airValid: false, windComputed: false,
       sensors: [dr], selected: dr };
@@ -51,6 +73,24 @@ export class CivilNavigation {
     this.solution = structuredClone(solution);
     this.wind = { ...wind };
   }
+  /** KALMAN is available while aided, past its first minute and within its coast (M300 1-5, 12-24; DEC-150). */
+  private kalmanAvailable(ready: boolean) { return this.equipment.kalman && ready && this.kalman !== null && this.kalman.coast <= KALMAN_COAST_S; }
+  /**
+   * The per-axis 1-sigma position error, NM (plan C2, DF-05): three independent contributors in quadrature, the same on
+   * both axes: the aiding position, the aiding velocity (sigma_v t) and the residual bias (0.5 sigma_b t²).
+   */
+  private kalmanAxisSigma() {
+    const k = this.kalman;
+    if (!k) return Infinity;
+    const t = k.coast, velocity = AIDING_VELOCITY_SIGMA_KT * t / 3600, bias = 0.5 * APIRS_ACCEL_SIGMA_MS2 * t * t / 1852;
+    return Math.sqrt(k.sigma0 ** 2 + velocity ** 2 + bias ** 2);
+  }
+  /** KALMAN STATUS 2 SIGMA POS ERR (M300 12-24): 2 sigma; not a 95% radial figure (plan C1). */
+  get kalmanTwoSigmaNm() { return this.kalman ? 2 * this.kalmanAxisSigma() : null; }
+  /** The KALMAN solution's 95% accuracy: 2.448 sigma under the stated isotropic model (plan C1). */
+  private kalmanAccuracy95() { return accuracy95Isotropic(this.kalmanAxisSigma()); }
+  /** Power interruption (M300 12-24): the emulated INS starts again unaided. */
+  resetKalman() { this.kalman = null; }
   /** A crew position entry (SET POS): the position no longer derives from GPS. */
   initialize(position: LatLon) {
     this.solution = { ...this.solution, position: { ...position }, anp: 1, uncertain: true, gpsDependent: false };
@@ -60,7 +100,22 @@ export class CivilNavigation {
     }
   }
   update(input: { dt: number; air: AirData | null; gps: PositionMeasurement | null; uncertainGps: PositionMeasurement | null;
-    radio: RadioFix | null; radioApproved: boolean; rnp: number }): CivilSolution {
+    radio: RadioFix | null; radioApproved: boolean; rnp: number;
+    /** The emulated INS accelerations (null when the APIRS is unavailable), the Doppler ground velocity relative to
+     * the surface, the crew's water current, and whether the KALMAN mode is past its first minute (M300 12-24). */
+    apirs?: InertialInput | null; dvs?: DopplerInput | null; waterCurrent?: DopplerInput | null; kalmanReady?: boolean }): CivilSolution {
+    const dtSeconds = Math.max(0, Number.isFinite(input.dt) ? input.dt : 0);
+    // The emulated INS propagates on the APIRS whenever GPS does not aid it; without the APIRS it is lost.
+    if (this.kalman) {
+      if (!input.apirs || !this.equipment.kalman) this.kalman = null;
+      else {
+        const k = this.kalman;
+        k.north += input.apirs.northMs2 * MS2_TO_KT_PER_S * dtSeconds;
+        k.east += input.apirs.eastMs2 * MS2_TO_KT_PER_S * dtSeconds;
+        k.position = offset(k.position, Math.atan2(k.east, k.north) * 180 / Math.PI, Math.hypot(k.north, k.east) * dtSeconds / 3600);
+        k.coast += dtSeconds;
+      }
+    }
     const { air, radio } = input;
     // Transitive provenance (plan C1): a fix the prior estimate had to disambiguate inherits the prior's GPS dependency.
     const radioGpsDependent = radio !== null && radio.priorResolved && this.solution.gpsDependent;
@@ -96,6 +151,10 @@ export class CivilNavigation {
         this.windGpsDependent = true;
         this.solution.windComputed = true;
       }
+      // Aiding (plan C2): only a GPS with integrity, valid velocity words and a 95% accuracy; it restarts the coast clock.
+      if (this.equipment.kalman && !uncertain && gps.northKt !== null && gps.eastKt !== null && gps.accuracy95Nm !== null && input.apirs) {
+        this.kalman = { position: { ...gps.position }, north: gps.northKt, east: gps.eastKt, coast: 0, sigma0: gps.accuracy95Nm / CIRCULAR_95 };
+      }
     } else if (radio && input.radioApproved) {
       const previous = this.previousRadio;
       const elapsed = previous ? (radio.at - previous.at) / 1000 : 0;
@@ -111,9 +170,26 @@ export class CivilNavigation {
       if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at, gpsDependent: radioGpsDependent };
       const fix = { position: radio.position, mode: radio.mode, anp: radio.anp, dmes: radio.dmes, vor: radio.vor };
       this.solution = { ...fix, gpsSource: null, gpsDependent: radioGpsDependent, uncertain: false, airValid, windComputed, ...pending };
+    } else if (this.kalmanAvailable(input.kalmanReady === true)) {
+      // KALMAN is GPS-aided, so it is GPS-dependent (plan C1, transitive provenance).
+      this.previousRadio = null;
+      const k = this.kalman!;
+      this.solution = { position: { ...k.position }, mode: "KALMAN", anp: this.kalmanAccuracy95(), gpsSource: null, gpsDependent: true,
+        dmes: [], vor: null, uncertain: true, airValid, windComputed: false, ...pending };
+    } else if (this.equipment.dvs && input.dvs) {
+      // DVS (M300 12-20): the Doppler ground velocity relative to the surface plus the crew's water current, integrated
+      // from the position at entry, whose GPS dependency it keeps.
+      this.previousRadio = null;
+      const north = input.dvs.northKt + (input.waterCurrent?.northKt ?? 0), east = input.dvs.eastKt + (input.waterCurrent?.eastKt ?? 0);
+      const moved = Math.hypot(north, east) * dtSeconds / 3600;
+      if (this.solution.mode !== "DVS" || !this.dvsTrack) this.dvsTrack = { startAnp: this.solution.anp ?? UNKNOWN_START_NM, distance: 0, gpsDependent: this.solution.gpsDependent };
+      this.dvsTrack.distance += moved;
+      const position = offset(this.solution.position, Math.atan2(east, north) * 180 / Math.PI, moved);
+      this.solution = { position, mode: "DVS", anp: this.dvsTrack.startAnp + DVS_DRIFT_FRACTION * this.dvsTrack.distance, gpsSource: null,
+        gpsDependent: this.dvsTrack.gpsDependent, dmes: [], vor: null, uncertain: true, airValid, windComputed: false, ...pending };
     } else {
       this.previousRadio = null;
-      const dt = Math.max(0, Number.isFinite(input.dt) ? input.dt : 0);
+      const dt = dtSeconds;
       let position = this.solution.position;
       if (airValid && dt > 0) {
         const heading = air!.headingTrue * Math.PI / 180;
@@ -145,6 +221,12 @@ export class CivilNavigation {
     if (radio) sensors.push({ mode: radio.mode, available: input.radioApproved, accuracy95Nm: radio.anp, accuracyBasis: "laboratory",
       gpsDependent: radioGpsDependent, integrityNm: null, naimComparisonNm: null,
       integrityBasis: "criteria", integrity: withinLimit(radio.anp, input.rnp), eligibility: ELIGIBILITY[radio.mode] });
+    if (this.equipment.kalman && this.kalman) sensors.push({ mode: "KALMAN", available: this.kalmanAvailable(input.kalmanReady === true),
+      accuracy95Nm: this.kalmanAccuracy95(), accuracyBasis: "laboratory", gpsDependent: true,
+      integrityNm: null, naimComparisonNm: null, integrityBasis: "none", integrity: false, eligibility: ELIGIBILITY.KALMAN });
+    if (this.equipment.dvs && input.dvs) sensors.push({ mode: "DVS", available: true, accuracy95Nm: this.solution.mode === "DVS" ? this.solution.anp : null,
+      accuracyBasis: this.solution.mode === "DVS" ? "laboratory" : null, gpsDependent: this.solution.gpsDependent,
+      integrityNm: null, naimComparisonNm: null, integrityBasis: "none", integrity: false, eligibility: ELIGIBILITY.DVS });
     sensors.push(drSensor(airValid, this.solution.mode === "DR" ? this.solution.anp : null,
       this.solution.mode === "DR" ? this.solution.gpsDependent : this.solution.gpsDependent || airValid && this.windGpsDependent));
     this.solution.sensors = sensors;

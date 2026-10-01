@@ -36,6 +36,7 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "HIGH SAR SPEED", meaning: "Ground speed is above the maximum for the search pattern" },
   { text: "INDEPENDENT OP", meaning: "The FMS is no longer synchronised with the other FMS" },
   { text: "KALMAN NAV LOST", meaning: "The blended (Kalman filter) solution is no longer available" },
+  { text: "DVS NAV LOST", meaning: "The Doppler (DVS) solution can no longer be used for navigation" },
   { text: "LOW BATTERY POWER", meaning: "The internal battery is low" },
   { text: "LOW GLIDEPATH ANGLE", meaning: "The computed vertical path is shallower than 2.75 degrees" },
   { text: "MANUAL WPT SEQUENCE", meaning: "The waypoint must be sequenced manually" },

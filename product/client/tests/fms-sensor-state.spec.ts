@@ -9,6 +9,8 @@ import { NAV_OUTPUT_VOCABULARY } from '../src/fmsCdu/sensorState'
 import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
 import type { Navaid } from '../src/fmsCdu/navData'
 import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
+import { accuracy95Isotropic } from '../src/fmsCdu/sensorState'
+import { seededRandom } from '../src/fmsCdu/gnss'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // Stage F plan F2: each sensor solution carries its availability, its 95% accuracy, its integrity bound (NP) and its
@@ -242,4 +244,16 @@ test('C4: the output vocabulary names every navigation mode and each separated C
   for (const key of Object.keys(solution).filter(key => !['mode', 'available', 'integrityBasis', 'eligibility'].includes(key))) expect(named.has(key), key).toBe(true)
   expect(NAV_OUTPUT_VOCABULARY.performance).toContain('integrityBoundNm')
   expect(NAV_OUTPUT_VOCABULARY.performance).toContain('accuracyBasis')
+})
+
+test('C1 (DF-05): 2.448 sigma is the 95% radius of an isotropic independent error, and not of a correlated one', () => {
+  // Explanatory Monte Carlo with a seeded normal draw; the regression evidence is the KALMAN propagation test.
+  const next = seededRandom(7), normal = () => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next())
+  const radius95 = (draw: () => [number, number]) => { const r = Array.from({ length: 40000 }, () => Math.hypot(...draw())).sort((a, b) => a - b); return r[Math.floor(0.95 * r.length)] }
+  expect(radius95(() => [normal(), normal()])).toBeCloseTo(2.448, 1)
+  expect(accuracy95Isotropic(1)).toBeCloseTo(2.4477, 4)
+  // X = Y = Z: both marginal sigmas are 1, yet the 95% radius is sqrt(2) x 1.960 = 2.772 > 2.448.
+  const correlated = radius95(() => { const z = normal(); return [z, z] })
+  expect(correlated).toBeGreaterThan(2.7)
+  expect(correlated).toBeLessThan(2.85)
 })

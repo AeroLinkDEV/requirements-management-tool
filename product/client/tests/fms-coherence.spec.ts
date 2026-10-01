@@ -65,6 +65,8 @@ test('CHECK ANP times out on the same effective RNP the pages show, not the sens
   unit.setAircraft({ tas: 0, groundSpeed: 0, heading: 0 })
   unit.updateNavigation(0)
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   unit.setCondition('gpsLost', true)
   unit.setRnp(2)
   unit.setCondition('npa', true)
@@ -311,6 +313,8 @@ test('SET POS in dead reckoning resets the position estimate to the entry and sh
   const unit = fms()
   unit.setCondition('gpsLost', true)
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   expect(unit.navState.mode).toBe('DR')
   const truth = { ...unit.truePosition }
   press(unit, 'INIT_REF', 'LSK2L')

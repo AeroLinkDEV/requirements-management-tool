@@ -168,6 +168,8 @@ test('cold/warm FMS power-up retains TAS/position, applies the ground wind rule,
   expect(unit.planData.cruiseTas).toBe(137)
   // With no GPS/radio source, startup retains the calculated position rather than leaking plant truth.
   unit.setCondition('gpsLost', true); unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   expect(unit.initializePosition({ lat: 41, lon: -71 })).toBe(true)
   unit.powerOff(); unit.powerOn('WARM', true); now += 5000; unit.tick()
   expect(unit.position).toEqual({ lat: 41, lon: -71 })
@@ -382,6 +384,8 @@ test('the FMS reads barometric altitude as the air-data word carries it, to the 
 test('dead reckoning cannot read a changed truth position when every position sensor is unavailable', () => {
   const { unit } = setup()
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   unit.setCondition('gpsLost', true)
   const lastFix = { ...unit.position }
   // The plant can move or be repositioned independently of its failed sensors. No new measurement means no
@@ -465,6 +469,8 @@ test('civil NAV STATUS reports available navigation without claiming an unconfig
   expect(lines(unit).join('\n')).not.toMatch(/\bIRS\b/)
   expect(lines(unit).join('\n')).toContain('GPS')
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   unit.setCondition('gpsLost', true)
   expect(unit.navState.mode).toBe('DR')
   expect(lines(unit).join('\n')).toContain('DR')
@@ -487,6 +493,8 @@ test('dead reckoning uses measured motion and grows its uncertainty independentl
   const initialAnp = unit.navState.anp
   // DME first, then GPS: the aircraft goes straight from a GPS fix to dead reckoning.
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   unit.setCondition('gpsLost', true)
   expect(unit.navState.mode).toBe('DR')
   expect(unit.lamps().has('POS')).toBe(true)
@@ -661,6 +669,8 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still 
 
 test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out', () => {
   const { unit, fly } = setup()
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
   expect(lines(unit)[0]).toMatch(/^NAV STATUS/)
   expect(lines(unit)[2]).toMatch(/^GPS/)
@@ -789,6 +799,8 @@ test('E1: PROGRESS 1/4 takes a manual wind only while the FMS cannot compute one
   // mass does next.
   unit.setCondition('gpsLost', true)
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   fly(5)
   expect(unit.navState.mode).toBe('DR')
   expect(unit.windComputed).toBe(false)

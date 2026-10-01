@@ -19,6 +19,9 @@ export type SensorFrame = {
   radioHeight: Sample<number>;
   gps: readonly [Sample<GpsBus>, Sample<GpsBus>];
   radios: readonly RadioObservation[];
+  /** Plan F11: the APIRS's earth-frame accelerations (m/s²) and the Doppler's body-axis velocity over the surface (kt). */
+  apirs?: Sample<{ northMs2: number; eastMs2: number }>;
+  dvs?: Sample<{ alongKt: number; acrossKt: number }>;
 };
 export interface SensorInputPort { read(): SensorFrame | null }
 const validStamp = (sample: Sample<unknown>) => Number.isFinite(sample.at) && Number.isSafeInteger(sample.sequence)

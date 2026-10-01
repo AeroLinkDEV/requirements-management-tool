@@ -245,6 +245,8 @@ test('FMS failure lights only FAIL, blanks the display and ignores keys; recover
   unit.press('RTE')
   unit.setCondition('gpsLost', true)
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   unit.setCondition('fmsFail', true)
   expect([...unit.lamps()]).toEqual(['FAIL'])
   expect(lines(unit).every(line => line.trim() === '')).toBe(true)
@@ -266,6 +268,8 @@ test('GPS loss raises GPS NAV LOST and falls back to radio updating; with no DME
   expect(lines(unit)[12]).toMatch(/^VOR\/DME/)
   expect(lines(unit)[10]).toMatch(/^1\.00\/0\.5\dNM/)
   unit.setCondition('dmeOutage', true)
+  // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   expect(unit.lamps().has('POS')).toBe(true)
   expect(lines(unit)[12]).toMatch(/^DR/)
   unit.press('NEXT')
