@@ -156,8 +156,12 @@ export class CivilNavigation {
       // source is approved, judge GPS against its independent position and accuracy before retaining it.
       // The laboratory NAIM comparison (plan F5): |GPS - backup| + the backup's 95% accuracy. No formula is sourced. The
       // backup qualifies only as an approved radio fix with integrity that does not depend on GPS (plan C1).
-      const qualifies = radio !== null && input.radioApproved && withinLimit(radio.anp, input.rnp) && !radioGpsDependent;
-      const comparison = qualifies ? distanceNm(input.uncertainGps.position, radio.position) + radio.anp : null;
+      // Step 2 evaluates an independent backup separately from step 3's radio winner. A more accurate GPS-dependent
+      // fix must not hide another mode that qualifies as a GPS-independent integrity backup.
+      const backup = input.radioApproved
+        ? chooseRadio(fixes.filter(fix => withinLimit(fix.anp, input.rnp) && !fixGpsDependent(fix)), "GPS", input.rnp)
+        : null;
+      const comparison = backup ? distanceNm(input.uncertainGps.position, backup.position) + backup.anp : null;
       naim = comparison;
       // Retained while the laboratory comparison is strictly below the limit (plan F5); it never becomes the ANP (C1).
       if (comparison === null || withinLimit(comparison, input.rnp)) {

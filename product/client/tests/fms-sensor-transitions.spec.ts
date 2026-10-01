@@ -1,9 +1,11 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { CivilNavigation, type PositionMeasurement } from '../src/fmsCdu/civilNavigation'
+import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator, legGeometry } from '../src/fmsCdu/flight'
 import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { NAV_MODES, type NavMode } from '../src/fmsCdu/navigation'
 import type { RadioFix } from '../src/fmsCdu/radioNavigation'
+import { FMS_OUTPUT_TAGS } from '../src/fmsCdu/outputTags'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { MODE_HYSTERESIS_M, MODE_TRANSITIONS, transitionAlert } from '../src/fmsCdu/sensorTransitions'
 
@@ -15,13 +17,45 @@ const air = { at: 0, headingTrue: 90, tasKt: 100, altitudeFt: 1000 }
 const gps = (position = HERE): PositionMeasurement =>
   ({ position, receiver: 1, accuracy95Nm: 0.02, hilNm: 0.1, northKt: 0, eastKt: 100 })
 const fix = (mode: RadioFix['mode'], anp: number, position = offset(HERE, mode === 'DME/DME' ? 0 : 180, 0.3)): RadioFix =>
-  ({ position, at: 0, anp, mode, dmes: mode === 'DME/DME' ? ['AAA', 'BBB'] : ['VVV'], vor: mode === 'VOR/DME' ? 'VVV' : null, priorResolved: false })
+  ({ position, at: 0, anp, mode, dmes: mode === 'DME/DME' ? ['AAA', 'BBB'] : ['VVV'], vor: mode === 'VOR/DME' ? 'VVV' : null,
+    assumedElevation: [], terrainElevation: [], rejected: [], accuracyBasis: 'laboratory', priorResolved: false })
 const equipped = () => new CivilNavigation(HERE, undefined, { kalman: true, dvs: true })
 type Update = Parameters<CivilNavigation['update']>[0]
 const input = (overrides: Partial<Update> = {}): Update =>
   ({ dt: 1, air, gps: null, uncertainGps: null, radio: null, radios: [], radioApproved: true, rnp: 2,
     apirs: { northMs2: 0, eastMs2: 0 }, dvs: null, waterCurrent: null, kalmanReady: false, ...overrides })
 const metres = (m: number) => m / 1852
+
+test('F3 regression: loss of VOR/DME integrity to DME/DME raises the receiver-failure alert despite nominal priority', () => {
+  const nav = equipped()
+  nav.update(input({ rnp: 0.5, radios: [fix('VOR/DME', 0.3)] }))
+  const reverted = nav.update(input({ rnp: 0.5, radios: [fix('VOR/DME', 0.5), fix('DME/DME', 0.4)] }))
+  expect(reverted.mode).toBe('DME/DME')
+  expect(transitionAlert('VOR/DME', 'DME/DME', reverted.sensors, { vorDmeReceiversFailed: true })).toBe('VOR/DME NAV LOST')
+  expect(transitionAlert('VOR/DME', 'DME/DME', reverted.sensors)).toBeNull()
+})
+
+test('F3 regression: a GPS-dependent best radio fix does not hide an independent integrity backup from NAIM', () => {
+  const nav = equipped()
+  nav.update(input({ gps: gps() }))
+  const dependent = { ...fix('DME/DME', 0.2, HERE), priorResolved: true }
+  const independent = fix('VOR/DME', 0.3, HERE)
+  const result = nav.update(input({ rnp: 1, uncertainGps: { ...gps(offset(HERE, 0, 2)), hilNm: 1.5 },
+    radios: [dependent, independent] }))
+  // The independent VOR/DME comparison is 2.0 + 0.3 NM, outside RNP 1; step 2 cannot retain GPS.
+  expect(result.mode).toBe('DME/DME')
+  expect(result.sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeCloseTo(2.3, 6)
+})
+
+test('F3 step 2: uncertain GPS stays ahead of KALMAN and DVS without a qualifying radio backup', () => {
+  const nav = equipped()
+  nav.update(input({ gps: gps(), kalmanReady: true }))
+  const result = nav.update(input({ uncertainGps: { ...gps(), hilNm: 3 },
+    kalmanReady: true, dvs: { northKt: 0, eastKt: 100 } }))
+  expect(result.mode).toBe('GPS')
+  expect(result.uncertain).toBe(true)
+  for (const mode of ['KALMAN', 'DVS']) expect(result.sensors.find(sensor => sensor.mode === mode)).toMatchObject({ available: true, integrity: false })
+})
 
 test('F3: DME/DME to VOR/DME waits for 100 m of accuracy advantage; VOR/DME to DME/DME does not', () => {
   const nav = equipped()
@@ -64,6 +98,14 @@ const SOURCE: Record<NavMode, Partial<Update>> = {
   DR: {},
 }
 
+// Independent alert oracle from plan F3's loss rows; do not derive policy expectations from MODE_TRANSITIONS.
+const LOSS_DESTINATIONS: Record<NavMode, NavMode[]> = {
+  GPS: ['DME/DME', 'VOR/DME', 'KALMAN', 'DVS', 'DR'],
+  'DME/DME': ['VOR/DME', 'KALMAN', 'DVS', 'DR'],
+  'VOR/DME': ['DME/DME', 'KALMAN', 'DVS', 'DR'],
+  KALMAN: ['DVS', 'DR'], DVS: ['DR'], DR: [],
+}
+
 test('F3: the transition table covers every ordered pair of equipped modes', () => {
   expect(MODE_TRANSITIONS).toHaveLength(NAV_MODES.length * (NAV_MODES.length - 1))
   const keys = new Set(MODE_TRANSITIONS.map(row => `${row.from}>${row.to}`))
@@ -79,7 +121,9 @@ for (const row of MODE_TRANSITIONS) {
     const after = nav.update(input(SOURCE[row.to]))
     expect(after.mode).toBe(row.to)
     // Driven with each row's condition met (E-17's receiver failure for VOR/DME); without it the conditional message is absent.
-    expect(transitionAlert(row.from, row.to, after.sensors, { vorDmeReceiversFailed: true })).toBe(row.message)
+    const expectedAlert = LOSS_DESTINATIONS[row.from].includes(row.to) ? `${row.from} NAV LOST` : null
+    expect(row.message).toBe(expectedAlert)
+    expect(transitionAlert(row.from, row.to, after.sensors, { vorDmeReceiversFailed: true })).toBe(expectedAlert)
     if (row.messageCondition) expect(transitionAlert(row.from, row.to, after.sensors)).toBeNull()
     const step = distanceNm(before.position, after.position)
     if (row.continuity === 'measured') expect(distanceNm(after.position, SOURCE[row.to].gps?.position ?? SOURCE[row.to].radios![0].position)).toBeLessThan(1e-9)
@@ -142,26 +186,40 @@ test('F3 step 2 precedes step 3: an uncertain GPS whose NAIM comparison is below
 test('F3 annunciation: INT lights when GPS NAV LOST forces a reversion, stays lit on radio, and clears when GPS with integrity returns; crew deselection lights nothing', () => {
   let now = Date.UTC(2026, 8, 30, 14)
   const fms = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(fms)
+  const bus = () => fmsOutputs(fms, sim).gpsIntegrityAnnunciation
   const step = (seconds: number) => { for (let t = 0; t < seconds; t++) { now += 1000; fms.updateNavigation(1) } }
   step(5)
-  expect(fms.gpsIntegrityAnnunciation).toBe(false)
+  expect(bus()).toEqual({ value: false, status: 'NORMAL' })
+  fms.setCondition('gpsIntegrity', true)
+  step(2)
+  expect(fms.navState.mode).toBe('GPS')
+  expect(fms.navState.uncertain).toBe(true)
+  expect(bus()).toEqual({ value: true, status: 'NORMAL' })
+  fms.setCondition('gpsIntegrity', false)
+  step(2)
+  expect(bus()).toEqual({ value: false, status: 'NORMAL' })
   fms.setCondition('gpsLost', true)
   step(2)
   expect(fms.navState.mode).not.toBe('GPS')
   expect(fms.recallList.map(m => m.text)).toContain('GPS NAV LOST')
-  expect(fms.gpsIntegrityAnnunciation).toBe(true)
+  expect(bus()).toEqual({ value: true, status: 'NORMAL' })
   step(10)
-  expect(fms.gpsIntegrityAnnunciation).toBe(true)
+  expect(bus()).toEqual({ value: true, status: 'NORMAL' })
   fms.setCondition('gpsLost', false)
   step(2)
   expect(fms.navState.mode).toBe('GPS')
-  expect(fms.gpsIntegrityAnnunciation).toBe(false)
+  expect(bus()).toEqual({ value: false, status: 'NORMAL' })
   // The crew selects GPS out: GPS NAV LOST, but no integrity annunciation.
   fms.press('INIT_REF'); fms.press('NEXT'); fms.press('LSK5R'); fms.press('LSK6R')
   fms.press('LSK3L'); fms.press('LSK3L'); fms.press('LSK3L')
   step(2)
   expect(fms.gpsNavSelected).toBe(false)
-  expect(fms.gpsIntegrityAnnunciation).toBe(false)
+  expect(bus()).toEqual({ value: false, status: 'NORMAL' })
+  expect(FMS_OUTPUT_TAGS.gpsIntegrityAnnunciation).toMatchObject({ kind: 'data', validity: 'word' })
+  expect(FMS_OUTPUT_TAGS.gpsIntegrityAnnunciation.provenance).toMatch(/GPS.*integrity/i)
+  fms.setCondition('fmsFail', true)
+  expect(bus()).toEqual({ value: null, status: 'FAIL' })
 })
 
 test('F3 (E-17): VOR/DME NAV LOST needs every VOR or DME receiver failed; a crew-deselected station loses the mode silently', () => {

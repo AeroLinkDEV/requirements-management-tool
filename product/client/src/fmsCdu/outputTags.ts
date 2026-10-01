@@ -76,6 +76,7 @@ export const FMS_OUTPUT_TAGS: { [K in keyof FmsOutputs]: OutputTag } = {
   integrityBoundNm: data("the selected navigation solution: its integrity bound NP (the GPS HIL), separate from its accuracy"),
   integrityBasis: data("the selected navigation solution: NP against the limit, the radio modes' criteria, or none (DR)"),
   integrityValid: data("the selected navigation solution: integrity against the active error limit (M300 1-3)"),
+  gpsIntegrityAnnunciation: data("GPS INT: the GPS integrity annunciator's independent raise and clear state (M300 1-4), retained after forced reversion until GPS with integrity returns"),
   positionUncertain: data("FMS navigation: the GPS position held as uncertain (GPS POS UNCERTAIN)"),
   naimComparisonNm: data("laboratory NAIM comparison of an uncertain GPS against a qualifying radio fix: laboratory, never integrity"),
   // Stage F C3, C4 (F13 part 2): the radios and the KALMAN and DVS sources, each field a word with its own validity.

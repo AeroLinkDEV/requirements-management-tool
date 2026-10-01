@@ -16,6 +16,7 @@ export const MODE_HYSTERESIS_M = 100;
 
 /** Priority order, highest first (M300 1-4 and 12-1 as equipped; DEC-150 places DVS below KALMAN). */
 const PRIORITY = Object.fromEntries(NAV_MODES.map((mode, index) => [mode, index])) as Record<NavMode, number>;
+const RADIO = new Set<NavMode>(["DME/DME", "VOR/DME"]);
 
 /** The hysteresis of an accuracy-based transition from one radio mode to another, in metres (M300 1-3). */
 export const accuracyHysteresisM = (from: NavMode, to: NavMode) => (from === "VOR/DME" && to === "DME/DME" ? 0 : MODE_HYSTERESIS_M);
@@ -44,7 +45,9 @@ export const usable = (sensor: SensorSolution | undefined) =>
  */
 export function transitionAlert(from: NavMode, to: NavMode, sensors: readonly SensorSolution[],
   causes: { vorDmeReceiversFailed?: boolean } = {}): string | null {
-  if (from === to || from === "DR" || PRIORITY[to] < PRIORITY[from]) return null;
+  if (from === to || from === "DR") return null;
+  // Either radio mode's integrity loss raises its alert even if the other has higher nominal priority (plan F3).
+  if (PRIORITY[to] < PRIORITY[from] && !(RADIO.has(from) && RADIO.has(to))) return null;
   if (usable(sensors.find(sensor => sensor.mode === from))) return null;
   // E-17: VOR/DME NAV LOST is a VOR and/or DME receiver failure on the onside and offside computers; losing the mode for
   // any other reason (a deselected or out-of-range station) raises nothing.
@@ -64,7 +67,6 @@ export type ModeTransition = { from: NavMode; to: NavMode;
    * emulated INS's propagated position, or the previous solution carried on. */
   continuity: "measured" | "emulated INS" | "continued" };
 
-const RADIO = new Set<NavMode>(["DME/DME", "VOR/DME"]);
 const continuity = (to: NavMode): ModeTransition["continuity"] =>
   to === "KALMAN" ? "emulated INS" : to === "DVS" || to === "DR" ? "continued" : "measured";
 
@@ -78,7 +80,7 @@ export const MODE_TRANSITIONS: readonly ModeTransition[] = NAV_MODES.flatMap(fro
     : up ? `${to} becomes available${to === "GPS" ? " with integrity" : ""}`
       : `${from} loses ${from === "KALMAN" || from === "DVS" || from === "DR" ? "availability" : "integrity or availability"}`;
   return { from, to, trigger, hysteresisM: accuracy ? accuracyHysteresisM(from, to) : 0,
-    message: up || from === "DR" ? null : `${from} NAV LOST`,
-    ...(!up && from === "VOR/DME" ? { messageCondition: "its VOR or DME receivers have failed on both computers (E-17)" } : {}),
+    message: up && !accuracy || from === "DR" ? null : `${from} NAV LOST`,
+    ...((!up || accuracy) && from === "VOR/DME" ? { messageCondition: "its VOR or DME receivers have failed on both computers (E-17)" } : {}),
     continuity: continuity(to) };
 }));
