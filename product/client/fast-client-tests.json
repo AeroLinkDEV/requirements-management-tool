@@ -64,6 +64,7 @@
     "fms-fuel-pages.spec.ts",
     "fms-route-load.spec.ts",
     "fms-route-append.spec.ts",
+    "fms-stage-f-mission.spec.ts",
     "fms-obstacles.spec.ts",
     "fms-pins-approach.spec.ts",
     "fms-gps-scenario.spec.ts",
