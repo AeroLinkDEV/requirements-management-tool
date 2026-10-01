@@ -18,10 +18,8 @@ const testMatch = part === '3d' ? tiers.rendered.filter((file) => RENDERED_3D.in
 export default defineConfig({
   testDir: './tests',
   testMatch,
-  // The 3d part's eleven tests are independent and each spends most of its time in software WebGL, so two workers
-  // share them (#1232): on one worker the part reached the job's 10-minute cap on 6 of 10 advisory runs.
-  workers: part === '3d' ? 2 : 1,
-  fullyParallel: part === '3d',
+  workers: 1,
+  fullyParallel: false,
   retries: 0,
   expect: { timeout: 15_000 },
   outputDir: 'test-results/fast/rendered',
