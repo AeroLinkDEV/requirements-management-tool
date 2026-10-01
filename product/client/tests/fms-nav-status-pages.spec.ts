@@ -268,6 +268,28 @@ test('F9: the admitted Doppler surface word gates crew current for both navigati
   }
 })
 
+test('F9: DESELECT air status follows each measured validity flag in the same tick, with crew override and recovery', () => {
+  for (const input of ['TAS', 'HDG'] as const) {
+    const { fms, step, lines } = unit()
+    step(5); fms.open('DESELECT')
+    const key = input === 'TAS' ? 'LSK1L' : 'LSK2L', row = input === 'TAS' ? 2 : 4
+    expect(lines()[row]).toMatch(/^>VALID/)
+    applySensorStimulus(fms, { kind: 'airInput', ...(input === 'TAS' ? { tasValid: false } : { headingValid: false }) })
+    fms.refreshSensorInput()
+    expect(fms.navState.airValid).toBe(false)
+    expect(lines()[row]).toMatch(/^>ACQ/)
+    expect(lines()[input === 'TAS' ? 4 : 2]).toMatch(/^>VALID/)
+    fms.press(key)
+    expect(lines()[row]).toMatch(/^>DESEL/)
+    applySensorStimulus(fms, { kind: 'airInput', ...(input === 'TAS' ? { tasValid: true } : { headingValid: true }) })
+    fms.refreshSensorInput()
+    expect(lines()[row]).toMatch(/^>DESEL/)
+    fms.press(key)
+    expect(lines()[row]).toMatch(/^>VALID/)
+    expect(fms.navState.airValid).toBe(true)
+  }
+})
+
 test('F9 direct Doppler adapters cannot grant SEA correction through malformed or future measured words', () => {
   const now = Date.UTC(2026, 8, 30, 14)
   const frame = new ScriptedFms(() => new Date(now)).navigationInputs!

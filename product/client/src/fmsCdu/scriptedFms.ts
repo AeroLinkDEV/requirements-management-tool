@@ -1075,11 +1075,13 @@ export class ScriptedFms implements CduBackend {
   tacanBearingAndRange(): { bearing: number; rangeNm: number } | null {
     const station = this.tacanStation();
     const observation = station ? this.sensorFrame?.radios.find(entry => entry.station.ident === station.ident) : undefined;
+    if (!station || !observation || sampled(observation.reportedDmeIdent, this.now.getTime(), this.sensorMaxAge) !== station.ident) return null;
     const bearing = observation ? sampled(observation.bearingTrue, this.now.getTime(), this.sensorMaxAge) : null;
     const range = observation ? sampled(observation.slantRangeNm, this.now.getTime(), this.sensorMaxAge) : null;
     const variation = station ? this.magvar.field(station.position, 0, this.utcTime)?.declination : undefined;
-    if (bearing === null || range === null || variation === undefined) return null;
-    return { bearing: normalizeAngle(bearing - variation), rangeNm: range };
+    if (bearing === null || range === null || variation === undefined || !Number.isFinite(bearing) || !Number.isFinite(range) || range < 0) return null;
+    // The observation supplies station-to-aircraft radial. This page promises bearing TO the station.
+    return { bearing: normalizeAngle(bearing + 180 - variation), rangeNm: range };
   }
   /** The station the TACAN reports it is tuned to: the nearest TACAN-capable station on its channel (none while it reports nothing). */
   tacanStation(): Navaid | undefined {
@@ -1827,8 +1829,8 @@ export class ScriptedFms implements CduBackend {
     if (this.deselected.has(input)) return "DESEL";
     const now = this.now.getTime(), air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
     const sensors = this.sensorState?.sensors ?? [];
-    const valid = input === "TAS" ? air !== null && Number.isFinite(air.tasKt)
-      : input === "HDG" ? air !== null && Number.isFinite(air.headingTrue)
+    const valid = input === "TAS" ? air !== null && air.tasValid !== false && Number.isFinite(air.tasKt) && air.tasKt >= 0 && air.tasKt <= MAX_ACCEPTED_TAS_KT
+      : input === "HDG" ? air !== null && air.headingValid !== false && Number.isFinite(air.headingTrue)
       : input === "DME" ? this.lastRadioFixes.some(fix => fix.mode === "DME/DME") || this.rangeCache.size > 0
       : input === "VOR/DME/TCN" ? this.lastRadioFixes.some(fix => fix.mode === "VOR/DME")
       : input === "DVS" ? this.dopplerEarth(now) !== null

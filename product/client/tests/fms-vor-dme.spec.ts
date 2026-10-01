@@ -4,6 +4,7 @@ import { radioFixes } from '../src/fmsCdu/radioNavigation'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { applySensorStimulus } from '../src/fmsCdu/sensorStimulus'
 import { screenText } from '../src/fmsCdu/screen'
 import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
 
@@ -135,7 +136,7 @@ test('F7: a prior-resolved DME mirror cannot veto an independent VOR or its NAIM
 
 // A literal two-station dataset drives the real bench receiver, RMS request/ACK and navigation pipeline.
 test('F7: native TACAN reception follows acknowledged tuning and preserves a crew-selected station', () => {
- for (const autoEligible of [true, false]) {
+ for (const autoEligible of [false, true]) {
   const { fms, step, lines } = unit(autoEligible)
   const stations: Navaid[] = [
     { kind: 'navaid', ident: 'T1', type: 'TACAN', name: 'North fixture', frequency: '115.00', channel: '99X', position: { lat: 5 / 60, lon: 0 }, elevation: { feet: 0, source: 'data', provenance: 'fixture' } },
@@ -145,6 +146,14 @@ test('F7: native TACAN reception follows acknowledged tuning and preserves a cre
   fms.swapCycles(); fms.setAircraft({ position: { lat: 0, lon: 0 }, altitude: 3000 })
   step(5)
   expect(fms.tacanStation()!.ident).toBe('T1')
+  if (autoEligible) {
+    // Five NM north is true bearing-to 000; this fixed fixture's WMM2025 declination rounds to -4°, so MAG is004.
+    // The station-to-aircraft radial would incorrectly print184. The status page reports magnetic bearing.
+    fms.open('VOR_DME_STATUS')
+    expect(lines()[7].trimEnd()).toBe('TCN  T1  99X 004°/5NM')
+    // The T1 native fixture carries the declared -0.02 NM laboratory receiver bias.
+    expect(fms.tacanBearingAndRange()!.rangeNm).toBeCloseTo(Math.hypot(5 * Math.PI / 10800 * 3440.065, 3000 / 6076.12) - 0.02, 5)
+  }
   expect(fms.radioObservations().find(o => o.station.ident === 'T1')!.bearingTrue.status).toBe(autoEligible ? 'NORMAL' : 'NCD')
   expect(fms.lastRadioFixes.some(fix => fix.mode === 'VOR/DME')).toBe(autoEligible)
   fms.open('VOR_DME_STATUS')
@@ -162,6 +171,20 @@ test('F7: native TACAN reception follows acknowledged tuning and preserves a cre
   expect(nativeFix.vor).toBe('T2')
   expect(Math.abs(nativeFix.position.lat)).toBeLessThan(0.002)
   expect(Math.abs(nativeFix.position.lon)).toBeLessThan(0.002)
+  applySensorStimulus(fms, { kind: 'stationFault', ident: 'T2', component: 'DME', reportedIdent: 'BAD' })
+  fms.refreshSensorInput()
+  const contradicted = fms.radioObservations().find(observation => observation.station.ident === 'T2')!
+  expect(contradicted.reportedDmeIdent).toMatchObject({ status: 'NORMAL', value: 'BAD' })
+  expect(contradicted.bearingTrue.status).toBe('NORMAL')
+  expect(contradicted.slantRangeNm.status).toBe('NORMAL')
+  expect(fms.lastRadioFixes.some(fix => fix.vor === 'T2')).toBe(false)
+  expect(fms.tacanBearingAndRange()).toBeNull()
+  expect(lines()[7].trimEnd()).toBe('TCN  T2  88X')
+  applySensorStimulus(fms, { kind: 'stationFault', ident: 'T2', component: 'DME', reportedIdent: null })
+  fms.refreshSensorInput()
+  expect(fms.radioObservations().find(observation => observation.station.ident === 'T2')!.reportedDmeIdent).toMatchObject({ status: 'NORMAL', value: 'T2' })
+  expect(fms.tacanBearingAndRange()).not.toBeNull()
+  expect(fms.lastRadioFixes.some(fix => fix.vor === 'T2')).toBe(true)
   fms.setRadioFaults('tacan', { receiver: 'FAILED' }); fms.updateNavigation(0)
   expect(fms.tacanStation()).toBeUndefined()
   expect(fms.tacanBearingAndRange()).toBeNull()

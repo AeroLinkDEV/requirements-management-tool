@@ -1303,6 +1303,14 @@ test('F679 navigation status keys show actual GPS loss, crew deselection and the
   await key(page, 'INIT_REF').click(); await key(page, 'NEXT').click(); await key(page, 'LSK5R').click()
   await expectLine(page, 0, /^NAV STATUS INDEX/)
   await key(page, 'LSK6R').click(); await expectLine(page, 0, /^DESELECT/)
+  await tab(page, 'Conditions')
+  const airControls = page.getByRole('region', { name: 'Sensor fault laboratory' })
+  await airControls.getByLabel('Navigation TAS valid', { exact: true }).uncheck()
+  await expectLine(page, 2, /^>ACQ/)
+  await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('f679-tas-invalid-acq.png') })
+  await airControls.getByLabel('Navigation TAS valid', { exact: true }).check()
+  await expectLine(page, 2, /^>VALID/)
+  await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('f679-tas-recovered-valid.png') })
   await key(page, 'LSK1R').click(); await expectLine(page, 0, /^GPS DESELECT/)
   await expectLine(page, 2, /VALID/)
   await expect(row(2).locator('.cdu-green')).toHaveCount(5)
@@ -1342,4 +1350,39 @@ test('F679 navigation status keys show actual GPS loss, crew deselection and the
   const sensors = page.getByRole('region', { name: 'Sensor fault laboratory' })
   await sensors.getByLabel('Fault radio').selectOption('tacan')
   await expect(sensors.getByTestId('sensor-radio-readout')).toContainText('TACAN station none; paired navigation measurements unavailable.')
+})
+
+// Browser owner for native TACAN CDU/Conditions wiring. Fixed-column laboratory data enters through the actual loader.
+test('F7 native TACAN status and Conditions show bearing to station and withhold contradictory identity', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  await open(page); await tab(page, 'Nav data')
+  const record = Array<string>(132).fill(' ')
+  const put = (column: number, text: string) => { for (let i = 0; i < text.length; i++) record[column - 1 + i] = text[i] }
+  // Station five NM north of the frozen physical start; ICAO pairing115.00 is97X. Surveyed elevation0ft.
+  for (const [column, text] of [[1, 'S'], [5, 'D'], [14, 'T1'], [22, '0'], [23, '11500'], [28, ' T'],
+    [33, 'N45233600W075405412'], [56, 'N45233600W075405412'], [80, '00000'], [94, 'LABORATORY NORTH TACAN']] as const) put(column, text)
+  await page.getByLabel('ARINC 424 navigation data file').setInputFiles({ name: 'laboratory-north-tacan.424', mimeType: 'text/plain',
+    buffer: Buffer.from(`HDR01 LAB 2609 03-SEP-2026\n${record.join('')}\n`) })
+  await page.getByRole('button', { name: 'Activate CIFP2609', exact: true }).click()
+  await tab(page, 'Conditions')
+  const card = page.getByRole('region', { name: 'Sensor fault laboratory' })
+  await card.getByLabel('Fault radio').selectOption('tacan')
+  await expect(card.getByTestId('sensor-radio-readout')).toContainText(/TACAN station T1; paired navigation measurements bearing [\d.]+°, range [\d.]+ NM/)
+  await key(page, 'INIT_REF').click(); await key(page, 'NEXT').click(); await key(page, 'LSK5R').click(); await key(page, 'LSK3R').click()
+  // UI wiring proves bearing-to is northerly under Ottawa's magnetic reference. Exact004 MAG is owned by
+  // the fixed equatorial native fixture in fms-vor-dme; this browser does not duplicate the magnetic model oracle.
+  await expectLine(page, 7, /^TCN  T1  97X 0[0-2]\d°\/5NM/)
+  await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('f7-native-tacan-bearing-to.png') })
+  await card.screenshot({ path: test.info().outputPath('f7-native-tacan-conditions.png') })
+  await card.getByLabel('Fault station ident').fill('T1')
+  await card.getByLabel('Ground station stimulus').selectOption('DME_IDENT')
+  await card.getByLabel('DME reported ident').fill('BAD')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(card.getByTestId('sensor-radio-readout')).toContainText('paired navigation measurements unavailable')
+  await expectLine(page, 7, /^TCN  T1  97X\s*$/)
+  await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('f7-native-tacan-ident-contradiction.png') })
+  await card.getByLabel('DME reported ident').fill('')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expectLine(page, 7, /^TCN  T1  97X 0[0-2]\d°\/5NM/)
+  await expect(card.getByTestId('sensor-radio-readout')).toContainText(/paired navigation measurements bearing [\d.]+°, range [\d.]+ NM/)
 })

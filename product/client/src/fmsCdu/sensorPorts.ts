@@ -49,10 +49,12 @@ const monotonic = (sample: Sample<unknown>, previous?: Sample<unknown>) => !prev
 /** Monotonic input mailbox for an external simulator or a replay. A refused frame never replaces accepted input. */
 export class BufferedSensorPort implements SensorInputPort {
   private frame: SensorFrame | null = null;
+  /** Optional delivery may stop; only a genuinely newer accepted word can advance its watermark. */
+  private acceptedDvs: Sample<DopplerData> | undefined;
   publish(frame: SensorFrame): boolean {
     const samples = [frame.air, frame.attitude, frame.radioHeight, ...frame.gps, ...(frame.dvs ? [frame.dvs] : []), ...frame.radios.flatMap(radio => [radio.slantRangeNm, radio.bearingTrue, ...(radio.reportedDmeIdent ? [radio.reportedDmeIdent] : [])])];
     if (!samples.every(validStamp) || frame.radios.some(radio => !validPosition(radio.station.position))) return false;
-    if (frame.dvs && (!monotonic(frame.dvs, this.frame?.dvs) || frame.dvs.value !== null && !validDoppler(frame.dvs.value))) return false;
+    if (frame.dvs && (!monotonic(frame.dvs, this.acceptedDvs) || frame.dvs.value !== null && !validDoppler(frame.dvs.value))) return false;
     if (this.frame && (frame.air.at < this.frame.air.at || frame.air.sequence <= this.frame.air.sequence)) return false;
     if (!monotonic(frame.attitude, this.frame?.attitude) || !monotonic(frame.radioHeight, this.frame?.radioHeight)) return false;
     if (frame.gps.some((sample, index) => !monotonic(sample, this.frame?.gps[index]))) return false;
@@ -62,6 +64,7 @@ export class BufferedSensorPort implements SensorInputPort {
         || !!radio.reportedDmeIdent && !monotonic(radio.reportedDmeIdent, previous?.reportedDmeIdent);
     })) return false;
     this.frame = structuredClone(frame);
+    if (this.frame.dvs) this.acceptedDvs = this.frame.dvs;
     return true;
   }
   read() { return this.frame ? structuredClone(this.frame) : null; }

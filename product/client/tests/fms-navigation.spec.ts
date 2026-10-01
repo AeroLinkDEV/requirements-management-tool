@@ -317,6 +317,17 @@ test('an external sensor mailbox refuses receiver and Doppler replay even when i
     value: { alongKt: 0, acrossKt: 10, surface: 'SEA' } }
   expect(port.publish(newer)).toBe(true)
   expect(port.read()!.dvs).toEqual(newer.dvs)
+  const gap = structuredClone(newer)
+  gap.air.at += 1000; gap.air.sequence++; delete gap.dvs
+  expect(port.publish(gap)).toBe(true)
+  const afterGap = structuredClone(gap)
+  afterGap.air.at += 1000; afterGap.air.sequence++
+  afterGap.dvs = { ...newer.dvs, value: { ...newer.dvs.value!, surface: 'LAND' } }
+  expect(port.publish(afterGap)).toBe(false) // Omission cannot erase the prior SEA word's replay watermark.
+  expect(port.read()).toEqual(gap)
+  afterGap.dvs = { ...afterGap.dvs, at: afterGap.air.at, sequence: newer.dvs.sequence + 1 }
+  expect(port.publish(afterGap)).toBe(true)
+  expect(port.read()!.dvs).toEqual(afterGap.dvs)
 })
 
 test('radio AUTO acquisition restarts at the first sample in range after a loss', () => {
