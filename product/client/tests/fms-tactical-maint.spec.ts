@@ -187,7 +187,11 @@ test('IDENT shows the active and inactive database cycles; past its end the acti
   const unit = new ScriptedFms(() => new Date(START))
   expect(lines(unit)[4]).toMatch(/^DEMO-2609\s+03SEP-30SEP$/)
   expect(lines(unit)[6]).toMatch(/^DEMO-2610\s+01OCT-28OCT$/)
-  const late = setup(Date.UTC(2026, 9, 2, 12, 0, 0))
+  // Built two minutes before DEMO-2609 ends and flown past its end (the demonstration cycles follow the clock the unit
+  // is built with, so a unit built after the end would start on the next cycle).
+  const late = setup(Date.UTC(2026, 8, 30, 23, 58, 0))
+  expect(late.unit.activeCycle.id).toBe('DEMO-2609')
+  late.fly(120)
   late.unit.tick()
   expect(recalled(late.unit, 'DATABASE OUT OF DATE')).toBe(true)
   // Flagged once, not on every tick.
