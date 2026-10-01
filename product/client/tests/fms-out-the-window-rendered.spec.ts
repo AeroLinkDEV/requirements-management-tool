@@ -88,6 +88,36 @@ test('synthetic vision draws terrain behind the PFD attitude, and is flagged ins
 
 test('the scene draws only when something changes: still while the bench is paused, every frame while it flies', async ({ page }) => {
   test.setTimeout(300_000)
+  // Observe the real GPU boundary: refining flat meshes must not upload that same uniform image per tile.
+  // This is test-side observation only; model, label and photographic textures remain outside the flat count.
+  await page.addInitScript(() => {
+    const uploads = { all: 0, flat: 0, armed: false }
+    ;(window as unknown as { flatReliefUploads: typeof uploads }).flatReliefUploads = uploads
+    const classified = new WeakMap<HTMLCanvasElement, boolean>()
+    for (const type of [WebGLRenderingContext, WebGL2RenderingContext]) {
+      const prototype = type.prototype as unknown as { texImage2D: (...args: unknown[]) => void }
+      const upload = prototype.texImage2D
+      prototype.texImage2D = function (...args: unknown[]) {
+        if (!uploads.armed) return upload.apply(this, args)
+        uploads.all++
+        const image = args.find(arg => arg instanceof HTMLCanvasElement) as HTMLCanvasElement | undefined
+        if (image?.width === 256 && image.height === 256) {
+          let flat = classified.get(image)
+          if (flat === undefined) {
+            const pixels = image.getContext('2d')?.getImageData(0, 0, 256, 256).data
+            flat = !!pixels && pixels[3] === 255
+            if (pixels) for (let i = 0; flat && i < pixels.length; i += 4) {
+              flat = pixels[i] === pixels[0] && pixels[i + 1] === pixels[1]
+                && pixels[i + 2] === pixels[2] && pixels[i + 3] === 255
+            }
+            classified.set(image, flat)
+          }
+          if (flat) uploads.flat++
+        }
+        return upload.apply(this, args)
+      }
+    }
+  })
   // Flat ground (terrain off) in a small window: the globe loads in seconds even on a software renderer, where the
   // hill's tiles took minutes. The cockpit view, where a camera re-set to the same pose each frame used to keep a
   // paused view drawing; neither depends on the terrain.
@@ -96,6 +126,12 @@ test('the scene draws only when something changes: still while the bench is paus
   const view = await show(page)
   // Relief ground: with imagery, tiles go on arriving down to zoom 16 long after the globe reports itself loaded (each
   // drawn as it comes, as it should be), which on a software renderer outlasts the waits here.
+  await page.getByRole('radiogroup', { name: 'Window ground' }).getByText('Relief', { exact: true }).evaluate(control => {
+    // Arm at the user's selection, before React changes the layer, so startup's default Imagery is excluded.
+    control.addEventListener('click', () => {
+      (window as unknown as { flatReliefUploads: { armed: boolean } }).flatReliefUploads.armed = true
+    }, { capture: true, once: true })
+  })
   await choose(page, 'Window ground', 'Relief')
   const scene = view.locator('.fmsOtwScene')
   const frames = async () => Number(await scene.getAttribute('data-frames') ?? 0)
@@ -118,6 +154,9 @@ test('the scene draws only when something changes: still while the bench is paus
     return state
   }
   await expect.poll(settled, { intervals: [3000], timeout: 180_000 }).toBe('tiles loaded, still')
+  const uploads = await page.evaluate(() => (window as unknown as { flatReliefUploads: { all: number; flat: number } }).flatReliefUploads)
+  expect(uploads.all, 'the real renderer exercised the GPU upload observer').toBeGreaterThan(0)
+  expect(uploads.flat, 'uniform off-state relief is shared instead of uploaded for each refined mesh').toBeLessThanOrEqual(1)
   const still = await frames()
   await page.waitForTimeout(2000)
   expect(await frames(), 'paused: no frames drawn').toBe(still)
