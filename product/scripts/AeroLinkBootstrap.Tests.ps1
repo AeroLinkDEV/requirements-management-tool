@@ -741,6 +741,38 @@ $result | ConvertTo-Json | Set-Content -LiteralPath '__RECEIPT__' -Encoding UTF8
     $receipt = Get-Content -LiteralPath $helperReceipt -Raw | ConvertFrom-Json
     Assert-True ($receipt.HeadSha -eq $selectedSha -and $receipt.Action -eq 'BoundSourceValidated') 'C20: the native helper lost the selected revision.'
     Assert-True ((Get-FixtureHead $fixture) -eq $selectedSha) 'C20: the native helper advanced source again.'
+    # The outer controller must propagate its reconciler's selection, not re-read the later remote tip.
+    # Stop at helper invocation: no real API/PostgreSQL/ngrok process is admitted by this fixture.
+    $capture = [pscustomobject]@{ Sha=$null }
+    $sourceSelection = { param($C) [pscustomobject]@{ Canonical=$true; Action='Current'; HeadSha=$selectedSha; Reason='Fixture selected source before a later merge.' } }.GetNewClosure()
+    $captureHelper = { param($C, $R, $Sha) $capture.Sha=$Sha; throw 'Bound helper captured; fixture stop.' }.GetNewClosure()
+    $stoppedAtHelper = $false
+    try {
+        Start-AeroLinkRemoteDemo -Config $helperConfig -SourceReconciler $sourceSelection `
+            -LocalReadyTest { param($C) [pscustomobject]@{ Ready=$false; Detail='Fixture has no API.' } } `
+            -PostgresReadyTest { param($C) [pscustomobject]@{ Ready=$true; Detail='Disposable readiness adapter.' } } `
+            -ProductionHelperLauncher $captureHelper | Out-Null
+    } catch { $stoppedAtHelper = $_.Exception.Message -eq 'Bound helper captured; fixture stop.' }
+    Assert-True $stoppedAtHelper 'C20: the outer controller did not reach the bounded helper capture.'
+    Assert-True ($capture.Sha -eq $selectedSha) 'C20: the outer controller lost the reconciled source before invoking the launcher.'
+    Assert-True ((Get-FixtureRemoteMain $fixture) -ne $selectedSha) 'C20: the later merge was not still pending at helper invocation.'
+    # Re-entry remains one-shot and cannot override a disagreeing transition binding.
+    $cachedTipBeforeRefusal = Get-FixtureRemoteMain $fixture
+    Push-RemoteCommit -Fixture $fixture -FileName 'docs/another-merge.txt' -Content 'must not be fetched during disagreement'
+    $env:AEROLINK_BOOTSTRAP_REENTRY = '1'
+    $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA = $selectedSha
+    $refused = $false
+    try {
+        Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot $fixture.WorkPath `
+            -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -BoundSourceSha ('0' * 40) | Out-Null
+    } catch { $refused = $_.Exception.Message -match 'binding disagrees' }
+    finally {
+        Assert-True (-not $env:AEROLINK_BOOTSTRAP_REENTRY -and -not $env:AEROLINK_BOOTSTRAP_EXPECTED_SHA) 'C20: disagreeing re-entry did not consume its markers.'
+        Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
+    }
+    Assert-True $refused 'C20: a re-entry accepted a disagreeing transition binding.'
+    Assert-True ((Get-FixtureHead $fixture) -eq $selectedSha) 'C20: disagreeing re-entry moved source.'
+    Assert-True ((Get-FixtureRemoteMain $fixture) -eq $cachedTipBeforeRefusal) 'C20: disagreeing re-entry fetched a later merge.'
     # A binding is identity, never authority to run dirty source or a different revision.
     foreach ($expected in @('0000000000000000000000000000000000000000', 'invalid')) {
         $refused = $false
