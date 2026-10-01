@@ -25,6 +25,13 @@ export async function createRenderedNetworkGuard(baseURL: string) {
     unexpected.push(`${url.origin}${url.pathname}`)
   }
   const sockets = new Set<Socket>()
+  const trackSocket = (socket: Socket) => {
+    // Node's HTTP agent can reuse an upstream socket for many fixture assets.
+    // Own one close subscription per socket rather than one per request.
+    if (sockets.has(socket)) return
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
+  }
   let closed = false
   const server = createServer((incoming, outgoing) => {
     let url: URL
@@ -37,12 +44,12 @@ export async function createRenderedNetworkGuard(baseURL: string) {
       outgoing.writeHead(response.statusCode!, response.headers)
       response.pipe(outgoing)
     })
-    upstream.on('socket', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+    upstream.on('socket', trackSocket)
     upstream.on('error', () => { if (!outgoing.headersSent) outgoing.writeHead(502); outgoing.end() })
     outgoing.on('close', () => upstream.destroy())
     incoming.pipe(upstream)
   })
-  server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)) })
+  server.on('connection', trackSocket)
   // The allowed client uses HTTP. Never establish an opaque TLS tunnel to any service.
   server.on('connect', (incoming, socket) => {
     unexpected.push(`CONNECT ${incoming.url}`)
