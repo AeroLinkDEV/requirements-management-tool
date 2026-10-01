@@ -42,17 +42,36 @@ test('heights are fetched once per tile, sampled bilinearly, and null until the 
   expect(changes).toBeGreaterThan(0)
 })
 
-test('an installation with the relay off says so, and that status sticks', async () => {
+test('an installation with the relay off stays flat without fetching or notifying for later tiles', async () => {
   let off = true
-  const source: TerrainSource = async () => off
-    ? new Response(JSON.stringify({ code: 'terrain_relay_disabled' }), { status: 404, headers: { 'content-type': 'application/json' } })
-    : tile(() => 100)
+  let requests = 0
+  const source: TerrainSource = async () => {
+    requests++
+    return off
+      ? new Response(JSON.stringify({ code: 'terrain_relay_disabled' }), { status: 404, headers: { 'content-type': 'application/json' } })
+      : tile(() => 100)
+  }
   const tiles = new TerrainTiles(source, rawDecoder)
+  let changes = 0
+  tiles.subscribe(() => { changes++ })
   expect(await tiles.load(5, 9, 11)).toBeNull()
   expect(tiles.status).toBe('off')
+  const settledChanges = changes
+  // A new mesh/relief tile or an SVS point must not keep asking a disabled installation for heights.
+  expect(await tiles.load(5, 9, 12)).toBeNull()
+  expect(tiles.heightAt(45.5, -73.7, 11)).toBeNull()
+  await settle()
+  expect(requests).toBe(1)
+  expect(changes).toBe(settledChanges)
   off = false
-  await tiles.load(5, 9, 12)
+  expect(await tiles.load(5, 9, 13)).toBeNull()
+  expect(requests).toBe(1)
+  expect(changes).toBe(settledChanges)
   expect(tiles.status).toBe('off')
+  // Sticky off belongs to this source instance: reopening with a new cache can discover an enabled installation.
+  const reopened = new TerrainTiles(source, rawDecoder)
+  expect((await reopened.load(5, 9, 13))?.[0]).toBe(100)
+  expect(reopened.status).toBe('live')
 })
 
 test('a failing source is unreachable, a missing tile is not a failure, and a later tile brings it back', async () => {
