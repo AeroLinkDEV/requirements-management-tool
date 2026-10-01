@@ -115,12 +115,17 @@ test('the scene draws only when something changes: still while the bench is paus
   const frames = async () => Number(await scene.getAttribute('data-frames') ?? 0)
   // Settled: every tile the globe needs has loaded (slowly, on a software renderer; Cesium draws as each arrives) and
   // nothing is moving, so the count stops.
-  let previous = -1
-  // Reported as text, so a wait that does not settle says which of the two it was.
+  let previous = -1, previousRequests = ''
+  // Reported as text, so a wait that does not settle says which of the two it was, and, while drawing, who asked for the
+  // frames: the view's own requests by source, now and at the previous poll (unchanged means Cesium itself drew), and
+  // Cesium's tile-load queue (#1298).
   const settled = async () => {
     const now = await frames(), loaded = await scene.getAttribute('data-tiles-loaded') === 'true'
-    const state = `${loaded ? 'tiles loaded' : 'tiles loading'}, ${now === previous ? 'still' : 'drawing'}`
+    const requests = await scene.getAttribute('data-requests') ?? 'none'
+    const asked = `frames ${now}; requests ${requests}, at the previous poll ${previousRequests || 'none'}; tile queue ${await scene.getAttribute('data-tile-queue') ?? 'unreported'}`
+    const state = `${loaded ? 'tiles loaded' : 'tiles loading'}, ${now === previous ? 'still' : `drawing (${asked})`}`
     previous = now
+    previousRequests = requests
     return state
   }
   await expect.poll(settled, { intervals: [3000], timeout: 180_000 }).toBe('tiles loaded, still')

@@ -262,6 +262,15 @@ async function startScene(
     requestRenderMode: true, maximumRenderTimeChange: Number.POSITIVE_INFINITY,
   });
   const { scene, camera } = widget;
+  // #1298: who asked for each frame, on the scene element, so a paused view that goes on drawing says whether this code
+  // asked (and which part of it) or Cesium itself did, with Cesium's tile-load queue (it draws as tiles arrive).
+  const requested: Record<string, number> = {};
+  const request = (why: string) => {
+    requested[why] = (requested[why] ?? 0) + 1;
+    container.dataset.requests = Object.entries(requested).map(([source, count]) => `${source} ${count}`).join(", ");
+    scene.requestRender();
+  };
+  const stopQueueWatch = scene.globe.tileLoadProgressEvent.addEventListener((queued: number) => { container.dataset.tileQueue = String(queued); });
   scene.globe.depthTestAgainstTerrain = true;
   scene.globe.baseColor = Cesium.Color.fromBytes(74, 112, 62);
   scene.globe.maximumScreenSpaceError = 1.6;
@@ -277,7 +286,7 @@ async function startScene(
     groundChoice = ground;
     if (groundLayer) scene.imageryLayers.remove(groundLayer, true);
     groundLayer = scene.imageryLayers.addImageryProvider(groundProvider(ground), 0);
-    scene.requestRender();
+    request("ground");
   };
   setGround("imagery");
 
@@ -328,7 +337,7 @@ async function startScene(
   const setColouring = (colouring: TerrainColouring) => {
     colouringChoice = colouring;
     scene.globe.material = colouring === "relative" ? relative : colouring === "absolute" ? absolute : undefined;
-    scene.requestRender();
+    request("colouring");
   };
 
   const routeLine = scene.primitives.add(new Cesium.PolylineCollection());
@@ -357,12 +366,12 @@ async function startScene(
   const models = [modelPart(false), modelPart(true)];
   // The glTF helicopter (otwAircraftModel.ts), with turning rotors; the boxes and ellipsoids stay the fallback until it
   // has loaded, or if it cannot. The scene draws only on change, so it asks for a frame once the model is there.
-  const helicopter = createAircraftModel(Cesium, scene);
-  void helicopter.ready.then(outcome => { container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; scene.requestRender(); });
+  const helicopter = createAircraftModel(Cesium, { primitives: scene.primitives, requestRender: () => request("model") });
+  void helicopter.ready.then(outcome => { container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; request("model"); });
   // The FAA obstacles near the bench areas (otwObstacles.ts, Brief C), coloured as the terrain colouring colours their
   // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed").
-  const obstacles = createObstacleLayer(Cesium, scene);
-  void obstacles.ready.then(outcome => { container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; scene.requestRender(); });
+  const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, requestRender: () => request("obstacles") });
+  void obstacles.ready.then(outcome => { container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; request("obstacles"); });
   const orientation = new Cesium.HeadingPitchRoll();
   // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.
   const symbol = canvas(48);
@@ -386,7 +395,7 @@ async function startScene(
     const fraction = (performance.now() - state.at) / state.interval;
     const air = blendAircraft(state.from, state.to, fraction);
     // Still moving between two ticks: the next frame is needed too.
-    if (fraction < 1) scene.requestRender();
+    if (fraction < 1) request("blend");
     const pose = cameraPose(air, state.view, state.layout);
     // The simulation knows nothing of terrain; the eye is kept above the ground it would otherwise fly through.
     const ground = scene.globe.getHeight(Cesium.Cartographic.fromDegrees(pose.longitude, pose.latitude));
@@ -438,11 +447,11 @@ async function startScene(
   scene.postRender.addEventListener(counted);
 
   return {
-    requestRender: () => scene.requestRender(),
+    requestRender: () => request("tick"),
     setGround,
     setColouring,
     setRoute: (route, altitude) => {
-      scene.requestRender();
+      request("route");
       routeLine.removeAll(); fixes.removeAll(); labels.removeAll();
       if (!route.length) return;
       const heightsAt = routeHeights(route.map(point => constraintAltitude(point.constraint ?? undefined)), altitude);
@@ -466,6 +475,7 @@ async function startScene(
       obstacles.destroy();
       scene.preRender.removeEventListener(onFrame);
       scene.postRender.removeEventListener(counted);
+      stopQueueWatch();
       shader.dispose();
       if (!widget.isDestroyed()) widget.destroy();
     },
