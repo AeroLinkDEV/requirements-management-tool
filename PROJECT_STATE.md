@@ -503,6 +503,11 @@ display unit for engineers.
     Reports retain applied time, value and laboratory source.
     The default profile refuses external radio-head stimuli (DEC-150). These are simulator controls, not installed
     RF, AFCS sensor-loss or hardware acceptance evidence.
+  - **ADF and RMI**: ADF1/2 relative bearings pass through the typed output bus to the bench RMI. NORMAL words
+    draw bearing needles; NCD and FAIL words withdraw the needles and show the corresponding flags. A replayed
+    NDB outage resolves one unambiguous active-database NDB and affects both independent FMS receivers through
+    the shared radio world; a paired same-ident DME remains separate. These are laboratory RF/bearing models,
+    with no ADF position-navigation contribution or installed hardware acceptance claim.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or

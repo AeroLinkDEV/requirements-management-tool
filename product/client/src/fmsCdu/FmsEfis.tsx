@@ -31,18 +31,19 @@ const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCH
 /** Installation-specific bench RMI: heading-up card and two independent raw ADF pointers (M300 13-23/24).
  * Bearings are heading-relative bus words, independent of the track-up map and of MAG/TRUE card selection. */
 function Rmi({ bus, air }: { bus: FmsOutputs; air: AircraftData }) {
-  const cx = 68, cy = 279, radius = 43;
+  const cx = 88, cy = 279, radius = 43;
   const heading = air.heading - variation(bus);
-  return <g data-testid="nd-rmi" fontSize="10" textAnchor="middle">
-    <rect x="10" y="218" width="116" height="177" rx="6" fill="#05070a" stroke="#6a7384" />
-    <text x={cx} y="231" fill={WHITE}>RMI (BENCH)</text>
+  // The routed bench scales the ND; keep the RMI readable at its supported density widths.
+  return <g data-testid="nd-rmi" fontSize="18" textAnchor="middle">
+    <rect x="10" y="204" width="156" height="191" rx="6" fill="#05070a" stroke="#6a7384" />
+    <text x={cx} y="225" fill={WHITE}>RMI (BENCH)</text>
     <circle cx={cx} cy={cy} r={radius} fill="none" stroke={WHITE} />
     {angularAvailable(bus) ? <g fill={WHITE} stroke={WHITE}>
       {Array.from({ length: 12 }, (_, i) => i * 30).map(degrees => {
         const radians = (degrees - heading) * Math.PI / 180;
         return <g key={degrees}>
           <line x1={cx + radius * Math.sin(radians)} y1={cy - radius * Math.cos(radians)} x2={cx + (radius - 5) * Math.sin(radians)} y2={cy - (radius - 5) * Math.cos(radians)} />
-          {degrees % 90 === 0 ? <text x={cx + (radius - 13) * Math.sin(radians)} y={cy - (radius - 13) * Math.cos(radians) + 3} stroke="none">{["N", "E", "S", "W"][degrees / 90]}</text> : null}
+          {degrees % 90 === 0 ? <text x={cx + (radius - 17) * Math.sin(radians)} y={cy - (radius - 17) * Math.cos(radians) + 5} stroke="none">{["N", "E", "S", "W"][degrees / 90]}</text> : null}
         </g>;
       })}
     </g> : null}
@@ -59,11 +60,11 @@ function Rmi({ bus, air }: { bus: FmsOutputs; air: AircraftData }) {
           </>}
           <polygon points={`${cx},${cy - 37} ${cx - 4},${cy - 29} ${cx + 4},${cy - 29}`} stroke="none" />
         </g> : null}
-        <text x={cx} y={351 + i * 15} fill={valid ? colour : AMBER} data-testid={`rmi-${device}-value`}>{`ADF${i + 1} ${valid ? `${three(word.value!)} REL` : word.status === "FAIL" ? "FAIL" : "NCD"}`}</text>
+        <text x={cx} y={365 + i * 23} fill={valid ? colour : AMBER} data-testid={`rmi-${device}-value`}>{`ADF${i + 1} ${valid ? `${three(word.value!)} REL` : word.status === "FAIL" ? "FAIL" : "NCD"}`}</text>
       </g>;
     })}
     <circle cx={cx} cy={cy} r="3" fill={WHITE} />
-    <text x={cx} y="336" fill={angularAvailable(bus) ? WHITE : AMBER} data-testid="rmi-heading">{angular(bus, air.heading)}</text>
+    <text x={cx} y="342" fill={angularAvailable(bus) ? WHITE : AMBER} data-testid="rmi-heading">{angular(bus, air.heading)}</text>
   </g>;
 }
 
