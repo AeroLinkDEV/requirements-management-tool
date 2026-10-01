@@ -5,6 +5,7 @@ import type { ScriptedFms } from "./scriptedFms";
 import { ACTIVE_PROFILE } from "./profile";
 import { formatConstraint } from "./vnav";
 import type { IntegrityBasis } from "./sensorState";
+import type { CommandStatus, DmeDevice, RadioDevice, RadioFaults } from "./radioManagement";
 
 // The FMS output bus and the aircraft data an EFIS draws from.
 //
@@ -26,6 +27,27 @@ export type Word<T> = { value: T | null; status: WordStatus };
 const normal = <T>(value: T): Word<T> => ({ value, status: "NORMAL" });
 const ncd = <T>(): Word<T> => ({ value: null, status: "NCD" });
 const fail = <T>(): Word<T> => ({ value: null, status: "FAIL" });
+
+/** The navigation radios on the bus (the COM radios and transponders carry no navigation data). */
+export const BUS_RADIOS = ["nav1", "nav2", "dme1", "dme2", "adf", "adf2", "tacan"] as const;
+export type BusRadio = (typeof BUS_RADIOS)[number];
+/** One radio's state words (plan C3): the frequency or channel it reports, this computer's last command to it, its health. */
+export type RadioWords = {
+  activeFrequency: Word<string>;
+  commandStatus: Word<CommandStatus>;
+  controlPath: Word<RadioFaults["controlPath"]>;
+  measurementBus: Word<RadioFaults["measurementBus"]>;
+  receiver: Word<RadioFaults["receiver"]>;
+};
+type NavMeasurement = { stationIdent: Word<string>; vorRadial: Word<number> };
+type DmeMeasurement = { stationIdent: Word<string>; dmeDistance: Word<number> };
+/** Per radio, what it measures (plan C4): VOR radial (magnetic), DME slant range (NM), ADF relative bearing, TACAN bearing and distance. */
+export type RadioMeasurements = {
+  nav1: NavMeasurement; nav2: NavMeasurement; dme1: DmeMeasurement; dme2: DmeMeasurement;
+  adf: { adfBearing: Word<number> }; adf2: { adfBearing: Word<number> };
+  tacan: { tacanBearing: Word<number>; tacanDistance: Word<number> };
+};
+export type SourceStatus = { available: boolean; accuracy95Nm: number | null };
 
 /** A point of the route as the navigation display draws it. */
 export type RoutePoint = { ident: string; position: LatLon; active: boolean; constraint: string | null };
@@ -105,6 +127,17 @@ export type FmsOutputs = {
    * judged against a qualifying radio fix. It never gives integrity and is never the integrity bound.
    */
   naimComparisonNm: Word<number>;
+  /**
+   * Stage F C3, C4 (F13 part 2): each navigation radio's state words, from this computer's port on the shared radios: what
+   * it reports it is on, this computer's last command to it, and its separate health states (control path, measurement
+   * bus, receiver). FAIL from a failed FMS, or for a reading the radio cannot give (its bus lost or its receiver failed).
+   */
+  radios: Record<BusRadio, RadioWords>;
+  /** Each radio's measurements, each its own word: the station it measures, and the radial, range or bearing. */
+  radioMeasurements: RadioMeasurements;
+  /** The KALMAN and DVS solutions' availability and 95% accuracy (F11), whether or not one is selected; NCD when not equipped. */
+  kalman: Word<SourceStatus>;
+  dvs: Word<SourceStatus>;
   /** For the navigation display. */
   activeRoute: RoutePoint[];
   modifiedRoute: RoutePoint[] | null;
@@ -231,6 +264,49 @@ function navigationWords(fms: ScriptedFms, failed: boolean): NavigationWords {
   };
 }
 
+type RadioBusWords = Pick<FmsOutputs, "radios" | "radioMeasurements" | "kalman" | "dvs">;
+
+/**
+ * The radios and the KALMAN and DVS sources as words (Stage F C3, C4). A radio's health states are facts and always
+ * NORMAL words; what it reports and measures is FAIL when its measurement bus is lost or its receiver has failed, and NCD
+ * when it simply has nothing (no station, no command yet). The TACAN's bearing and distance are NCD: the bench does not
+ * measure them yet (F7).
+ */
+function radioBusWords(fms: ScriptedFms, failed: boolean): RadioBusWords {
+  const port = fms.radioPort;
+  const word = <T>(value: T | null | undefined, broken: boolean): Word<T> => (failed || broken ? fail() : value === null || value === undefined ? ncd() : normal(value));
+  const broken = (device: RadioDevice | DmeDevice) => { const faults = port?.faults(device); return !!faults && (faults.measurementBus === "LOST" || faults.receiver === "FAILED"); };
+  const radios = Object.fromEntries(BUS_RADIOS.map(device => {
+    const faults = port?.faults(device);
+    const dme = device === "dme1" || device === "dme2";
+    const reported = !port ? null : dme ? (port.dmeReceiving(device) ? port.dmeHold(device) ?? port.receiving(device === "dme1" ? "nav1" : "nav2") : null) : port.receiving(device);
+    // A DME is tuned through its NAV (or held): it takes no command of its own.
+    const command = dme ? null : [...(port?.requests ?? [])].reverse().find(request => request.device === device)?.status ?? null;
+    return [device, {
+      activeFrequency: word(reported, broken(device)), commandStatus: word(command, false),
+      controlPath: word(faults?.controlPath, false), measurementBus: word(faults?.measurementBus, false), receiver: word(faults?.receiver, false),
+    } satisfies RadioWords];
+  })) as Record<BusRadio, RadioWords>;
+  const nav = (device: "nav1" | "nav2"): NavMeasurement => ({ stationIdent: word(fms.navStation(device)?.ident, broken(device)), vorRadial: word(fms.navRadial(device), broken(device)) });
+  const dme = (device: DmeDevice): DmeMeasurement => {
+    const ranging = !!port?.dmeReceiving(device);
+    return { stationIdent: word(ranging ? fms.dmeStation(device)?.ident : null, broken(device)), dmeDistance: word(fms.dmeSlantRangeNm(device), broken(device)) };
+  };
+  const source = (mode: "KALMAN" | "DVS"): Word<SourceStatus> => {
+    const solution = fms.sensorSolutions.find(candidate => candidate.mode === mode);
+    return word(solution ? { available: solution.available, accuracy95Nm: solution.accuracy95Nm } : null, false);
+  };
+  return {
+    radios,
+    radioMeasurements: {
+      nav1: nav("nav1"), nav2: nav("nav2"), dme1: dme("dme1"), dme2: dme("dme2"),
+      adf: { adfBearing: word(fms.adfRelativeBearing("adf"), broken("adf")) }, adf2: { adfBearing: word(fms.adfRelativeBearing("adf2"), broken("adf2")) },
+      tacan: { tacanBearing: word<number>(null, broken("tacan")), tacanDistance: word<number>(null, broken("tacan")) },
+    },
+    kalman: source("KALMAN"), dvs: source("DVS"),
+  };
+}
+
 export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   const failed = fms.hasCondition("fmsFail");
   const g = sim.guidance;
@@ -246,6 +322,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     lateralFullScaleNm: cdiFullScaleNm(phase, fms.navPerformance), verticalFullScaleFt: 400, phase, rnp: fms.navPerformance.rnp, anp: fms.navPerformance.anp,
     navMode: fms.navState.mode, activeRoute: [], modifiedRoute: null, offsetTrack: null, holdFix: null, topOfDescent: null, endOfDescent: null,
     ...navigationWords(fms, failed),
+    ...radioBusWords(fms, failed),
   };
   // A failed FMS publishes failure warnings; the displays remove its data and flag it. The modes remain: they are the
   // autopilot's (basic heading and altitude hold after the reversion).

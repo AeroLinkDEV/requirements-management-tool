@@ -29,6 +29,13 @@ const isWord = (value: unknown) => typeof value === 'object' && value !== null &
 function honours(tag: OutputTag, value: unknown): boolean {
   if (tag.kind === 'data' || tag.kind === 'target') {
     if (tag.validity === 'word') return isWord(value) && ((value as { status: string }).status === 'NORMAL') === ((value as { value: unknown }).value !== null)
+    // A record of words (per device, per field): every leaf is a word that honours its own status, and there is a leaf.
+    if (tag.validity === 'word per field') {
+      if (isWord(value) || typeof value !== 'object' || value === null) return false
+      const leaves = (node: object): unknown[] => Object.values(node).flatMap(child => (isWord(child) || typeof child !== 'object' || child === null ? [child] : leaves(child)))
+      const found = leaves(value)
+      return found.length > 0 && found.every(leaf => honours({ kind: 'data', provenance: 'leaf', validity: 'word' }, leaf))
+    }
     // Not a word: its validity is not carried as a status, so it must not look like one.
     if (isWord(value)) return false
     if (tag.validity === 'always valid (laboratory)') return value !== null && value !== undefined
