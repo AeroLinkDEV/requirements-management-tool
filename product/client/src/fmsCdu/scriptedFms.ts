@@ -1146,20 +1146,23 @@ export class ScriptedFms implements CduBackend {
       const feedback = rms.dmeTuning(identity.receiver, identity.channel);
       if (!feedback || feedback.receiver !== identity.receiver || feedback.channel !== identity.channel
         || feedback.frequency !== identity.frequency || feedback.commandSequence !== identity.commandSequence) continue;
-      if (sampled(observation.slantRangeNm, now, this.sensorMaxAge) === null
-        || !rms.dmeReceiving(identity.receiver) || identity.frequency !== observation.station.frequency
+      if (!rms.dmeReceiving(identity.receiver) || identity.frequency !== observation.station.frequency
         || (identity.channel === 1 ? this.dmeStation(identity.receiver)?.ident !== observation.station.ident
           : roster.get(observation.station.ident) !== identity.frequency)) continue;
-      // A supplied ident must be fresh on arrival before the range earns cache TTL. A new bad ident also
-      // withdraws previously accepted evidence for that physical station, rather than keeping the old match.
-      if (observation.reportedDmeIdent && sampled(observation.reportedDmeIdent, now, this.sensorMaxAge) !== observation.station.ident) {
+      // A fresh received ident contradicts the cached facility even when no fresh range arrives.
+      const reportedIdent = sampled(observation.reportedDmeIdent, now, this.sensorMaxAge);
+      if (reportedIdent !== null && reportedIdent !== observation.station.ident) {
         this.rangeCache.delete(observation.station.ident); continue;
       }
       const previous = this.rangeCache.get(observation.station.ident);
-      if (previous && JSON.stringify(previous.rangeIdentity) !== JSON.stringify(identity)) this.rangeCache.delete(observation.station.ident);
-      if (!previous || !this.rangeCache.has(observation.station.ident) || observation.slantRangeNm.at > previous.slantRangeNm.at
-        || observation.slantRangeNm.at === previous.slantRangeNm.at && observation.slantRangeNm.sequence > previous.slantRangeNm.sequence)
-        this.rangeCache.set(observation.station.ident, structuredClone(observation));
+      const newRange = !previous || JSON.stringify(previous.rangeIdentity) !== JSON.stringify(identity)
+        || observation.slantRangeNm.at > previous.slantRangeNm.at
+        || observation.slantRangeNm.at === previous.slantRangeNm.at && observation.slantRangeNm.sequence > previous.slantRangeNm.sequence;
+      // Held qualified words keep their original pair and expiry. A new range needs fresh matching identity;
+      // a merely stale matching word cannot renew it or erase the previously qualified pair.
+      if (!newRange || sampled(observation.slantRangeNm, now, this.sensorMaxAge) === null
+        || observation.reportedDmeIdent && reportedIdent !== observation.station.ident) continue;
+      this.rangeCache.set(observation.station.ident, structuredClone(observation));
     }
   }
   /** The observations the radio fix uses: this frame's, with each station's cached range where this frame has none. */

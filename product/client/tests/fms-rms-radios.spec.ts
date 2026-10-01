@@ -573,6 +573,47 @@ for (const rejected of ['stale arrival', 'stale reported ident', 'receiver bus l
       const candidate = new ScriptedFms(() => new Date(arrival.air.at), { sensors: { read: () => arrival } })
       expect.soft(candidate.navState.mode, `${bound ? 'bound' : 'legacy'} new ident age ${age}ms`).toBe(age <= 2000 ? 'DME/DME' : 'DR')
     }
+    // Held raw words must keep their previously qualified pair just as an omitted frame does, without renewal.
+    for (const identAge of [0, 2000]) for (const delivery of ['held', 'omitted', 'range NCD'] as const) {
+      const held = structuredClone(frame), start = held.air.at
+      held.radios = held.radios.map(observation => ({ ...observation,
+        reportedDmeIdent: { at: start - identAge, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+      const candidate = new ScriptedFms(() => new Date(held.air.at), { sensors: { read: () => held } })
+      expect(candidate.navState.mode).toBe('DME/DME')
+      if (delivery === 'omitted') held.radios = []
+      if (delivery === 'range NCD') held.radios = held.radios.map(observation => ({ ...observation,
+        slantRangeNm: { ...observation.slantRangeNm, status: 'NCD', value: null } }))
+      held.air.at = start + (identAge === 2000 ? 1 : 2001)
+      candidate.updateNavigation((held.air.at - start) / 1000)
+      expect.soft(candidate.navState.mode, `${delivery} pair crosses 2s ident admission`).toBe('DME/DME')
+      held.air.at = start + 6000 - identAge
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${delivery} original pair at 6s expiry`).toBe('DME/DME')
+      held.air.at++
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${delivery} original pair after 6s expiry`).toBe('DR')
+    }
+    for (const next of ['new range with stale matching ident', 'fresh BAD with held range'] as const) {
+      const held = structuredClone(frame), start = held.air.at
+      held.radios = held.radios.map(observation => ({ ...observation,
+        reportedDmeIdent: { at: start, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+      const candidate = new ScriptedFms(() => new Date(held.air.at), { sensors: { read: () => held } })
+      expect(candidate.navState.mode).toBe('DME/DME')
+      held.air.at = start + 2001
+      held.radios = held.radios.map(observation => ({ ...observation,
+        ...(next === 'new range with stale matching ident'
+          ? { slantRangeNm: { ...observation.slantRangeNm, at: held.air.at, sequence: observation.slantRangeNm.sequence + 1 } }
+          : { reportedDmeIdent: { at: held.air.at, sequence: 2, status: 'NORMAL' as const, value: 'BAD' } }) }))
+      candidate.updateNavigation(2.001)
+      expect.soft(candidate.navState.mode, next).toBe(next === 'fresh BAD with held range' ? 'DR' : 'DME/DME')
+      held.radios = []
+      held.air.at = start + 6000
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${next} never renews old pair`).toBe(next === 'fresh BAD with held range' ? 'DR' : 'DME/DME')
+      held.air.at++
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${next} original pair expires`).toBe('DR')
+    }
     const accepted = structuredClone(frame)
     accepted.radios = accepted.radios.map(observation => ({ ...observation,
       reportedDmeIdent: { at: accepted.air.at, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
