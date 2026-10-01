@@ -496,17 +496,31 @@ Invoke-AeroLinkTransitionChain -InstallationRoot $Installation -Lease $lease -Ca
         $attempt = @((Read-AeroLinkTransitionEvents -Path $index).Events)[0]
         $workerPid = [int][IO.File]::ReadAllText($workerFile)
         Own $workerPid
-        $pendingAdmission = Test-AeroLinkInstallationAdmission -InstallationRoot $t12
-        Check (-not $pendingAdmission.Admitted) 'T12: while the outer is alive and working, no other attempt is admitted.'
-        Stop-Process -Id $outer.Id -Force
-        $receiptPath = (Get-AeroLinkAttemptPaths ([string]$attempt.attemptRoot)).Receipt
-        for ($i = 0; $i -lt 300 -and -not (Test-Path -LiteralPath $receiptPath); $i++) { Start-Sleep -Milliseconds 100 }
-        $witnessReceipt = Test-AeroLinkCleanupReceipt -Path $receiptPath -AttemptId ([string]$attempt.attemptId)
-        Check ($witnessReceipt.Valid -and [string]$witnessReceipt.Receipt.observedBy -eq 'witness') "T12: the witness published a valid receipt after the outer died ($($witnessReceipt.Class): $($witnessReceipt.Reason))."
-        Check ((Get-Process -Id $workerPid -ErrorAction SilentlyContinue) -eq $null) 'T12: the unleased worker was collected by the witness.'
-        $afterDeath = $null
-        for ($i = 0; $i -lt 100; $i++) { $afterDeath = Test-AeroLinkInstallationAdmission -InstallationRoot $t12; if ($afterDeath.Admitted) { break }; Start-Sleep -Milliseconds 200 }
-        Check ($afterDeath.Admitted) "T12: the next attempt is admitted after the witness receipt ($($afterDeath.Detail))."
+        $workerIdentity = Get-AeroLinkProcessIdentityRecord -ProcessId $workerPid
+        $workerWait = [IntPtr]::Zero
+        try {
+            if ($workerIdentity) { $workerWait = $K::OpenProcessWait($workerPid, $workerIdentity.StartedAtUtc) }
+            $pendingAdmission = Test-AeroLinkInstallationAdmission -InstallationRoot $t12
+            Check (-not $pendingAdmission.Admitted) 'T12: while the outer is alive and working, no other attempt is admitted.'
+            Stop-Process -Id $outer.Id -Force
+            $receiptPath = (Get-AeroLinkAttemptPaths ([string]$attempt.attemptRoot)).Receipt
+            for ($i = 0; $i -lt 300 -and -not (Test-Path -LiteralPath $receiptPath); $i++) { Start-Sleep -Milliseconds 100 }
+            $witnessReceipt = Test-AeroLinkCleanupReceipt -Path $receiptPath -AttemptId ([string]$attempt.attemptId)
+            Check ($witnessReceipt.Valid -and [string]$witnessReceipt.Receipt.observedBy -eq 'witness') "T12: the witness published a valid receipt after the outer died ($($witnessReceipt.Class): $($witnessReceipt.Reason))."
+            # Capture the original enumeration verdict before diagnostic work can move the observation boundary.
+            $workerAbsent = ((Get-Process -Id $workerPid -ErrorAction SilentlyContinue) -eq $null)
+            $workerState = if ($workerIdentity) { $K::Classify($workerPid, $workerIdentity.StartedAtUtc, $workerIdentity.ImagePath) } else { 'Unknown:no-recorded-identity' }
+            $workerSignal = if ($workerWait -ne [IntPtr]::Zero) { [string]$K::WaitHandle($workerWait, 0) } else { 'Unknown:no-handle' }
+            $observation = [ordered]@{ at = (Get-Date).ToUniversalTime().ToString('o'); workerIdentity = $workerIdentity
+                absentFromEnumeration = $workerAbsent; exactProcessWait = $workerSignal; classification = $workerState
+                witnessReceipt = $witnessReceipt }
+            Write-Host ('T12 collection observation: ' + ($observation | ConvertTo-Json -Depth 12 -Compress))
+            Check $workerAbsent "T12: the unleased worker was collected by the witness (pid=$workerPid; exactProcessWait=$workerSignal; classification=$workerState; receipt=$receiptPath)."
+            $afterDeath = $null
+            for ($i = 0; $i -lt 100; $i++) { $afterDeath = Test-AeroLinkInstallationAdmission -InstallationRoot $t12; if ($afterDeath.Admitted) { break }; Start-Sleep -Milliseconds 200 }
+            Check ($afterDeath.Admitted) "T12: the next attempt is admitted after the witness receipt ($($afterDeath.Detail))."
+        }
+        finally { if ($workerWait -ne [IntPtr]::Zero) { $K::CloseHandleChecked($workerWait) } }
     }
 
     # ---------------------------------------------------------------------------------------------------------
