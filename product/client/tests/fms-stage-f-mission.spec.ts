@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
 import { COPTER_PINS_CIFP_2609, COPTER_PINS_CIFP_2609_SHA256 } from '../src/fmsCdu/data/copterPinsCifp2609'
@@ -40,11 +41,19 @@ test('the manifest names the profile, the data files by SHA-256, the procedure, 
   const manifest = stageFMissionManifest()
   expect(manifest.profile).toEqual({ id: HELICOPTER_PROFILE.id, version: HELICOPTER_PROFILE.version, fingerprint: expect.stringMatching(/^fnv1a-[0-9a-f]{8}$/) })
   expect(manifest.navData.cycle).toBe('2609')
-  expect(manifest.navData.files).toHaveLength(1)
-  // The file's hash is the text's own.
+  expect(manifest.navData.files).toHaveLength(3)
+  // Each file's hash is its text's own.
   expect(createHash('sha256').update(COPTER_PINS_CIFP_2609, 'latin1').digest('hex')).toBe(manifest.navData.files[0].sha256)
   expect(manifest.navData.files[0].sha256).toBe(COPTER_PINS_CIFP_2609_SHA256)
-  expect(manifest.procedures).toEqual([expect.objectContaining({ airport: '87N', ident: 'R190' })])
+  for (const file of manifest.navData.files.slice(1))
+    expect(createHash('sha256').update(readFileSync(file.name)).digest('hex'), file.name).toBe(file.sha256)
+  expect(manifest.procedures.map(procedure => `${procedure.airport} ${procedure.ident}`)).toEqual(['87N R190', 'KIAG N28', 'PASD Q32'])
+  // Each procedure is in its file.
+  expect(cifp().procedures.some(procedure => procedure.airport === '87N' && procedure.ident === 'R190')).toBe(true)
+  for (const variant of manifest.ndbVariants) {
+    const { data } = parseArinc424(readFileSync(variant.file, 'latin1'), { airports: [variant.airport] })
+    expect(data.procedures.some(procedure => procedure.airport === variant.airport && procedure.ident === variant.procedure), `${variant.airport} ${variant.procedure}`).toBe(true)
+  }
   expect(manifest.clock).toEqual({ start: '2026-09-29T15:00:00Z', tickSeconds: 0.25 })
   expect(manifest.segments.map(segment => segment.id)).toEqual(['offshore', 'coastal'])
   // Offshore: no radio coverage; the start 10 NM south of 87N at 500 ft, as the 87N mission's.
@@ -59,7 +68,8 @@ test('the manifest names the profile, the data files by SHA-256, the procedure, 
   // Every fault time is inside its segment, and in order.
   for (const segment of manifest.segments)
     expect(segment.faults.map(fault => fault.at)).toEqual([...segment.faults.map(fault => fault.at)].sort((a, b) => a - b))
-  expect(manifest.pending).toHaveLength(2)
+  expect(manifest.ndbVariants.map(variant => [variant.id, variant.faults.map(fault => `${fault.fault} ${fault.at} s after the ${fault.after}`)]))
+    .toEqual([['kiag-n28', ['GPS INTEGRITY 0 s after the FAF']], ['pasd-q32', ['NDB OFF AIR 60 s after the FAF']]])
 })
 
 test('the synthetic stations are flagged and declared, with a terrain elevation, and absent from every CIFP lookup', () => {
@@ -78,6 +88,11 @@ test('the synthetic stations are flagged and declared, with a terrain elevation,
     // Never in the real data: no CIFP entry of any kind has the ident, and no CIFP station uses the frequency.
     expect(db.find(station.ident)).toEqual([])
     expect(data.entries.filter(entry => entry.kind === 'navaid' && entry.frequency === station.frequency)).toEqual([])
+  }
+  // Nor in the mission's NDB fixture files.
+  for (const variant of stageFMissionManifest().ndbVariants) {
+    const fixture = new NavDatabase(parseArinc424(readFileSync(variant.file, 'latin1'), { airports: [variant.airport] }).data)
+    for (const station of SYNTHETIC_COASTAL_STATIONS) expect(fixture.find(station.ident), `${station.ident} in ${variant.file}`).toEqual([])
   }
   // The real stations the coastal segment uses are the CIFP's own, unchanged.
   for (const ident of REAL_COASTAL_STATIONS) expect(db.find(ident).some(entry => entry.kind === 'navaid')).toBe(true)
@@ -116,7 +131,8 @@ test('from the coastal start the seven stations are in DME range and cross at us
 })
 
 test('the expected results are slots, each naming the item that will compute it: a slot is never a pass', () => {
-  for (const segment of stageFMissionManifest().segments) {
+  const manifest = stageFMissionManifest()
+  for (const segment of [...manifest.segments, ...manifest.ndbVariants]) {
     expect(segment.expected.length).toBeGreaterThan(0)
     for (const expected of segment.expected) {
       expect(expected).toMatchObject({ value: 'TODO', tolerance: 'TODO' })

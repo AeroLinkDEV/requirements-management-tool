@@ -57,8 +57,8 @@ export const REAL_COASTAL_STATIONS = ["HTO", "CCC"] as const;
 /** A data file of the mission, named with its SHA-256 (checked against the text by the owner test). */
 export type MissionDataFile = { name: string; cycle: string; sha256: string; source: string };
 
-/** A fault and when it is applied, seconds after the segment's start. */
-export type MissionFault = { at: number; fault: string; detail: string; item: string };
+/** A fault and when it is applied: seconds after the segment's start, or after a named event of the run. */
+export type MissionFault = { at: number; after?: "FAF"; fault: string; detail: string; item: string };
 
 /**
  * An expected result, computed independently of the code under test (F15). Left as a slot, with the item that will
@@ -83,9 +83,21 @@ export type StageFMissionManifest = {
   procedures: { airport: string; ident: string; source: string }[];
   clock: { start: string; tickSeconds: number };
   segments: MissionSegment[];
-  /** F15's NDB variants start separately, at KIAG and PASD, on data this extract does not hold (F16). */
-  pending: string[];
+  /**
+   * F15's NDB variants (F16), each starting separately at its own airport on its own CIFP 2609 fixture file. Their
+   * start states wait for F16's flight item; the fixture files are named here by SHA-256.
+   */
+  ndbVariants: { id: string; airport: string; procedure: string; file: string; faults: MissionFault[]; expected: ExpectedSlot[] }[];
 };
+
+/**
+ * The F16 fixture files (tests/fixtures/cifp, from FAA CIFP_260903.zip, LF line endings by .gitattributes) and their
+ * SHA-256, checked against the files by the owner test.
+ */
+export const NDB_FIXTURE_FILES: readonly MissionDataFile[] = Object.freeze([
+  { name: "tests/fixtures/cifp/kiag-2609.pc", cycle: "2609", sha256: "0e374750f220fe560fd95367cbba0e82577dc4b08f94d9a908b7cf8f0b7ffac3", source: "FAA CIFP 2609, KIAG records (F16)" },
+  { name: "tests/fixtures/cifp/pasd-2609.pc", cycle: "2609", sha256: "36337597eec6df80006a4038427ef9ebc9c49e006ebe10e9cad48ec435c441aa", source: "FAA CIFP 2609, PASD records (F16)" },
+]);
 
 const slot = (check: string, item: string): ExpectedSlot => ({ check, item, value: "TODO", tolerance: "TODO" });
 
@@ -112,13 +124,20 @@ export function stageFMissionManifest(profile: AircraftProfile = HELICOPTER_PROF
     profile: { id: profile.id, version: profile.version, fingerprint: profileFingerprint(profile) },
     navData: {
       cycle: "2609",
-      files: [{ name: "copterPinsCifp2609.ts (COPTER_PINS_CIFP_2609)", cycle: "2609", sha256: COPTER_PINS_CIFP_2609_SHA256, source: "FAA CIFP 2609, Copter PinS extract" }],
+      files: [
+        { name: "src/fmsCdu/data/copterPinsCifp2609.ts (COPTER_PINS_CIFP_2609)", cycle: "2609", sha256: COPTER_PINS_CIFP_2609_SHA256, source: "FAA CIFP 2609, Copter PinS extract" },
+        ...NDB_FIXTURE_FILES.map(file => ({ ...file })),
+      ],
     },
     facilities: {
       real: [...REAL_COASTAL_STATIONS],
       synthetic: SYNTHETIC_COASTAL_STATIONS.map(s => ({ ident: s.ident, type: s.type, position: s.position, frequency: s.frequency, channel: s.channel!, elevation: s.elevation, role: s.synthetic.role })),
     },
-    procedures: [{ airport: "87N", ident: "R190", source: "FAA CIFP 2609: COPTER RNAV (GPS) 190 via HTO, with its missed approach and the BEADS hold" }],
+    procedures: [
+      { airport: "87N", ident: "R190", source: "FAA CIFP 2609: COPTER RNAV (GPS) 190 via HTO, with its missed approach and the BEADS hold" },
+      { airport: "KIAG", ident: "N28", source: "FAA CIFP 2609: NDB approach (F16 fixture)" },
+      { airport: "PASD", ident: "Q32", source: "FAA CIFP 2609: NDB/DME approach via HBT (F16 fixture)" },
+    ],
     clock: { start: MISSION_87N_OFFSHORE_SAR.startTime!, tickSeconds: 0.25 },
     segments: [
       {
@@ -162,7 +181,25 @@ export function stageFMissionManifest(profile: AircraftProfile = HELICOPTER_PROF
         ],
       },
     ],
-    pending: ["KIAG N28 NDB variant (F16): its data is not in this extract", "PASD Q32 NDB/DME variant (F16): its data is not in this extract"],
+    ndbVariants: [
+      {
+        id: "kiag-n28", airport: "KIAG", procedure: "N28", file: NDB_FIXTURE_FILES[0].name,
+        faults: [{ at: 0, after: "FAF", fault: "GPS INTEGRITY", detail: "integrity-only loss after the FAF", item: "F16" }],
+        expected: [
+          slot("the approach flown on FMS guidance with GPS, the ADF bearing on the RMI throughout", "F16"),
+          slot("the integrity-only loss continues for 300 s, then cancels to HDG", "F16"),
+          slot("the crew's MISSED APPR restores terminal guidance", "F16"),
+        ],
+      },
+      {
+        id: "pasd-q32", airport: "PASD", procedure: "Q32", file: NDB_FIXTURE_FILES[1].name,
+        faults: [{ at: 60, after: "FAF", fault: "NDB OFF AIR", detail: "the HBT NDB goes off the air on the final", item: "F16" }],
+        expected: [
+          slot("the NDB/DME approach flown with the DME distance from HBT shown", "F16"),
+          slot("the NDB off the air on the final: its bearing flagged, the approach as the profile requires", "F16"),
+        ],
+      },
+    ],
   };
 }
 
