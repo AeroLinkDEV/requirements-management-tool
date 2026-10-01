@@ -3,7 +3,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
 import { distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { DEMO_NAV_DATA, pairedChannel, type Navaid } from '../src/fmsCdu/navData'
-import { BenchRadioReceiver, horizontalRange, solveRadio } from '../src/fmsCdu/radioNavigation'
+import { BenchRadioReceiver, horizontalRange, radioFixes } from '../src/fmsCdu/radioNavigation'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
 
@@ -128,22 +128,22 @@ function observed(stations: Navaid[], from: LatLon, altitudeFt: number, t: numbe
 test('F1: DME/DME solves from DME-only stations with their elevations, and a DME\'s own position is where its range is measured from', () => {
   // Stations on high ground, close, the aircraft at 9,000 ft: the height above each station matters to the fix.
   const east = station('DMEA', offset(AT, 90, 6), 5000), north = station('DMEB', offset(AT, 0, 5), 3000), south = station('DMEC', offset(AT, 200, 7), 6000)
-  const fix = solveRadio(observed([east, north, south], AT, 9000, 1000), offset(AT, 45, 0.5), 9000, 1000)!
+  const fix = radioFixes(observed([east, north, south], AT, 9000, 1000), offset(AT, 45, 0.5), 9000, 1000).find(fix => fix.mode === 'DME/DME')!
   expect(fix.mode).toBe('DME/DME')
   expect(distanceNm(fix.position, AT)).toBeLessThan(0.01)
   expect(fix.assumedElevation).toEqual([])
   // The same ranges solved as if every station were at sea level land well away: the elevation is what put it right.
   const seaLevel = [east, north, south].map(s => ({ ...s, elevation: { feet: 0, source: 'data' as const } }))
-  const wrong = solveRadio(observed([east, north, south], AT, 9000, 1000).map((o, i) => ({ ...o, station: seaLevel[i] })), offset(AT, 45, 0.5), 9000, 1000)
-  expect(wrong === null || distanceNm(wrong.position, AT) > 0.05).toBe(true)
+  const wrong = radioFixes(observed([east, north, south], AT, 9000, 1000).map((o, i) => ({ ...o, station: seaLevel[i] })), offset(AT, 45, 0.5), 9000, 1000).find(fix => fix.mode === 'DME/DME')
+  expect(wrong === undefined || distanceNm(wrong.position, AT) > 0.05).toBe(true)
   // A co-located DME 0.3 NM from its VOR, toward the aircraft: ranges from the DME solve to the aircraft; from the VOR they would not.
   const vorPosition = offset(AT, 90, 6)
   const split: Navaid = { ...east, type: 'VORDME', position: vorPosition, dmePosition: offset(vorPosition, 270, 0.3) }
-  const fromDme = solveRadio(observed([split, north, south], AT, 9000, 1000), offset(AT, 45, 0.5), 9000, 1000)!
+  const fromDme = radioFixes(observed([split, north, south], AT, 9000, 1000), offset(AT, 45, 0.5), 9000, 1000).find(fix => fix.mode === 'DME/DME')!
   expect(distanceNm(fromDme.position, AT)).toBeLessThan(0.01)
   // Had the range been taken from the VOR's position, the fix would be off by about the separation.
-  const fromVor = solveRadio(observed([split, north, south], AT, 9000, 1000).map((o, i) => (i === 0 ? { ...o, station: { ...split, dmePosition: undefined } } : o)), offset(AT, 45, 0.5), 9000, 1000)
-  expect(fromVor === null || distanceNm(fromVor.position, AT) > 0.1).toBe(true)
+  const fromVor = radioFixes(observed([split, north, south], AT, 9000, 1000).map((o, i) => (i === 0 ? { ...o, station: { ...split, dmePosition: undefined } } : o)), offset(AT, 45, 0.5), 9000, 1000).find(fix => fix.mode === 'DME/DME')
+  expect(fromVor === undefined || distanceNm(fromVor.position, AT) > 0.1).toBe(true)
 })
 
 test('F1: a range corrected with an assumed elevation is named in the solution, whose accuracy widens by the height uncertainty', () => {
@@ -151,8 +151,8 @@ test('F1: a range corrected with an assumed elevation is named in the solution, 
   const known = places.map((p, i) => station(`DME${'ABC'[i]}`, p, 0))
   const assumed = places.map((p, i) => station(`DME${'ABC'[i]}`, p, 0, 'assumed'))
   const altitude = 9000
-  const exact = solveRadio(observed(known, AT, altitude, 1000), AT, altitude, 1000)!
-  const unsure = solveRadio(observed(assumed, AT, altitude, 1000), AT, altitude, 1000)!
+  const exact = radioFixes(observed(known, AT, altitude, 1000), AT, altitude, 1000).find(fix => fix.mode === 'DME/DME')!
+  const unsure = radioFixes(observed(assumed, AT, altitude, 1000), AT, altitude, 1000).find(fix => fix.mode === 'DME/DME')!
   // The same place (the assumed 0 ft happens to be right here), but not the same claim about it. Pairs are ranked by their
   // accuracy, the elevation allowance included (plan C3), so the allowance may favour another pair: both are within the
   // range bias of each other.
@@ -169,7 +169,7 @@ test('F1: a range corrected with an assumed elevation is named in the solution, 
   expect(unsure.anp - exact.anp).toBeGreaterThan(Math.max(...perRange) * 0.99)
   // A terrain elevation (the ground at an invented site) widens it too, by its own, smaller allowance.
   const grounded = places.map((p, i) => station(`DME${'ABC'[i]}`, p, 0, 'terrain'))
-  const terrainFix = solveRadio(observed(grounded, AT, altitude, 1000), AT, altitude, 1000)!
+  const terrainFix = radioFixes(observed(grounded, AT, altitude, 1000), AT, altitude, 1000).find(fix => fix.mode === 'DME/DME')!
   expect(terrainFix.terrainElevation).toEqual(terrainFix.dmes)
   expect(terrainFix.assumedElevation).toEqual([])
   expect(HELICOPTER_PROFILE.parameters.terrainNavaidElevationUncertainty).toMatchObject({ value: 100, unit: 'ft', basis: 'lab' })
@@ -182,7 +182,7 @@ test('F1: a range corrected with an assumed elevation is named in the solution, 
 test('F1: a TACAN\'s range serves DME/DME like any DME (DEC-150: TACAN on)', () => {
   const places = [offset(AT, 90, 6), offset(AT, 0, 5), offset(AT, 200, 7)]
   const stations: Navaid[] = places.map((p, i) => ({ ...station(`TAC${i}`, p, 500), type: 'TACAN' as const, channel: '83X' }))
-  const fix = solveRadio(observed(stations, AT, 5000, 1000), offset(AT, 45, 0.5), 5000, 1000)
+  const fix = radioFixes(observed(stations, AT, 5000, 1000), offset(AT, 45, 0.5), 5000, 1000).find(fix => fix.mode === 'DME/DME')
   expect(fix).not.toBeNull()
   expect(fix!.mode).toBe('DME/DME')
   expect(fix!.dmes.every(ident => ident.startsWith('TAC'))).toBe(true)
@@ -227,7 +227,7 @@ test('SF-08: in a fix, a station whose range is refused is left out and named wi
   // Three good stations and a fourth almost directly below the aircraft with an assumed elevation: its range is refused.
   const good = [station('DMEA', offset(AT, 90, 6), 1000), station('DMEB', offset(AT, 0, 5), 1000), station('DMEC', offset(AT, 200, 7), 1000)]
   const below = station('DMEX', offset(AT, 45, 0.05), 0, 'assumed')
-  const fix = solveRadio(observed([...good, below], AT, 1500, 1000), offset(AT, 45, 0.5), 1500, 1000)!
+  const fix = radioFixes(observed([...good, below], AT, 1500, 1000), offset(AT, 45, 0.5), 1500, 1000).find(fix => fix.mode === 'DME/DME')!
   expect(fix).not.toBeNull()
   expect(fix.dmes).not.toContain('DMEX')
   expect(fix.rejected).toEqual([{ ident: 'DMEX', reason: 'near overhead: the station elevation allowance could explain the whole slant range' }])

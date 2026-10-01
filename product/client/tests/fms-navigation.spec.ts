@@ -3,7 +3,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { RNP_DEFAULTS } from '../src/fmsCdu/navigation'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
-import { BenchRadioReceiver, solveRadio } from '../src/fmsCdu/radioNavigation'
+import { BenchRadioReceiver, radioFixes } from '../src/fmsCdu/radioNavigation'
 import { BufferedSensorPort, type RadioObservation, type SensorFrame } from '../src/fmsCdu/sensorPorts'
 import type { Navaid } from '../src/fmsCdu/navData'
 import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
@@ -322,12 +322,12 @@ test('DME/DME and VOR/DME solve measured ranges and bearings rather than substit
     slantRangeNm: { at: now, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(at, station.position), altitude / 6076.12) },
     bearingTrue: { at: now, sequence: 1, status: 'NORMAL', value: bearingDeg(station.position, at) } }))
   const prior = offset(at, 220, 2)
-  const dme = solveRadio(observations, prior, altitude, now)!
+  const dme = radioFixes(observations, prior, altitude, now).find(fix => fix.mode === 'DME/DME')!
   expect(dme.mode).toBe('DME/DME')
   expect(distanceNm(dme.position, at)).toBeLessThan(0.03)
   expect(distanceNm(dme.position, prior)).toBeGreaterThan(1.9)
-  expect(solveRadio(observations, prior, altitude, now + 2001)).toBeNull()
-  const vor = solveRadio(observations.slice(1), prior, altitude, now)!
+  expect(radioFixes(observations, prior, altitude, now + 2001)).toHaveLength(0)
+  const vor = radioFixes(observations.slice(1), prior, altitude, now).find(fix => fix.mode === 'VOR/DME')!
   expect(vor.mode).toBe('VOR/DME')
   expect(distanceNm(vor.position, at)).toBeLessThan(0.01)
 })

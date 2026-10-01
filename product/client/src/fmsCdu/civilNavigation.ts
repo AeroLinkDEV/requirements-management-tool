@@ -141,7 +141,8 @@ export class CivilNavigation {
     const fixes = input.radios ?? (input.radio ? [input.radio] : []);
     // Plan F3 step 3 (and step 4's radio order when none has integrity).
     const radio = chooseRadio(fixes, this.solution.mode, input.rnp);
-    const fixGpsDependent = (fix: RadioFix) => fix.priorResolved && this.solution.gpsDependent;
+    const priorGpsDependent = this.solution.gpsDependent;
+    const fixGpsDependent = (fix: RadioFix) => fix.priorResolved && priorGpsDependent;
     // Transitive provenance (plan C1): a fix the prior estimate had to disambiguate inherits the prior's GPS dependency.
     const radioGpsDependent = radio !== null && fixGpsDependent(radio);
     const airValid = air !== null && [air.headingTrue, air.tasKt, air.altitudeFt].every(Number.isFinite)
