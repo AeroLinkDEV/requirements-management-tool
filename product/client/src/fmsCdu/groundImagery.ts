@@ -80,6 +80,12 @@ export class GroundImagery<Image = ImageBitmap> {
   }
 
   get status(): ImageryStatus { return this.current; }
+  /**
+   * Whether any tile drawn came from Esri World Imagery (the relay's worldwide fallback outside the USGS coverage,
+   * DEC-151), so the view credits Esri while its imagery is on screen, as Esri's terms require.
+   */
+  get usesEsri(): boolean { return this.esri; }
+  private esri = false;
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -116,7 +122,12 @@ export class GroundImagery<Image = ImageBitmap> {
       return null;
     }
     this.report("live");
-    return isBlankTile(decoded.sample) ? null : { image: decoded.image, partial: decoded.partial };
+    if (isBlankTile(decoded.sample)) return null;
+    if (!this.esri && response.headers.get("x-imagery-source") === "esri") {
+      this.esri = true;
+      for (const listener of this.listeners) listener();
+    }
+    return { image: decoded.image, partial: decoded.partial };
   }
 
   private report(status: ImageryStatus) {

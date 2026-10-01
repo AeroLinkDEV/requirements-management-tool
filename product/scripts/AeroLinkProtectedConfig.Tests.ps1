@@ -170,6 +170,29 @@ Write-Output 'FRESH_PROCESS_PROTECTED_CONFIG_OK'
     New-Item -ItemType Directory -Path (Split-Path -Parent $unprotectedPath) -Force | Out-Null
     New-Item -ItemType File -Path $unprotectedPath -Force | Out-Null
     Assert-Throws { Get-AeroLinkProtectedGitLabDescriptor -InstallationRoot $install -RootOverride $unprotectedRoot } 'Inherited parent directory ACL was accepted.'
+
+    # --- DEC-151: the Esri imagery key. The API reads the record itself (FmsBenchEsriImageryKey.cs), so the check is
+    # that what this store writes is what that reader expects: LocalMachine DPAPI under the shared entropy, owner-only ACL.
+    $imageryRoot = Join-Path $root 'imagery-programdata'
+    $esriKey = 'test-only-esri-key-never-emitted'
+    Assert-True (-not (Get-AeroLinkProtectedImageryDescriptor -RootOverride $imageryRoot).Configured) 'An absent Esri key was reported as configured.'
+    Assert-Throws { Set-AeroLinkProtectedImageryKey -ApiKey (New-Object Security.SecureString) -RootOverride $imageryRoot } 'An empty Esri key was accepted.'
+    Assert-Throws { Set-AeroLinkProtectedImageryKey -ApiKey (ConvertTo-SecureString 'two words' -AsPlainText -Force) -RootOverride $imageryRoot } 'An Esri key with whitespace inside was accepted.'
+    $imagery = Set-AeroLinkProtectedImageryKey -ApiKey (ConvertTo-SecureString "  $esriKey  " -AsPlainText -Force) -RootOverride $imageryRoot
+    $imageryRaw = [IO.File]::ReadAllText($imagery.Path)
+    Assert-True ($imageryRaw -notmatch [regex]::Escape($esriKey)) 'The Esri key was written in plain text.'
+    Assert-True ($imagery.PSObject.Properties.Name -notcontains 'ApiKey' -and ($imagery | Out-String) -notmatch [regex]::Escape($esriKey)) 'The Esri key receipt carried the key.'
+    $imageryRecord = $imageryRaw | ConvertFrom-Json
+    $plain = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($imageryRecord.protectedKey),
+        [Text.Encoding]::UTF8.GetBytes('AeroLink protected Esri imagery v1'), [Security.Cryptography.DataProtectionScope]::LocalMachine)
+    Assert-True ([Text.Encoding]::UTF8.GetString($plain) -eq $esriKey) 'The stored Esri key did not decrypt, trimmed, under the entropy the API reader uses.'
+    Assert-True ($imageryRecord.purpose -eq 'esri-world-imagery' -and [int]$imageryRecord.schemaVersion -eq 1) 'The Esri key record does not carry the purpose and schema the API reader requires.'
+    Assert-True ((Get-Acl -LiteralPath $imagery.Path).AreAccessRulesProtected -and (Get-Acl -LiteralPath (Split-Path -Parent $imagery.Path)).AreAccessRulesProtected) 'The Esri key file or its directory inherits permissions.'
+    $described = Get-AeroLinkProtectedImageryDescriptor -RootOverride $imageryRoot
+    Assert-True ($described.Configured -and $described.Fingerprint -eq $imagery.Fingerprint) 'The stored Esri key was not described by its fingerprint.'
+    $rotated = Set-AeroLinkProtectedImageryKey -ApiKey (ConvertTo-SecureString 'rotated-esri-key' -AsPlainText -Force) -RootOverride $imageryRoot
+    Assert-True ($rotated.Fingerprint -ne $imagery.Fingerprint) 'Rotating the Esri key kept the old fingerprint.'
+    Assert-True ((Remove-AeroLinkProtectedImageryKey -RootOverride $imageryRoot).Removed -and -not (Get-AeroLinkProtectedImageryDescriptor -RootOverride $imageryRoot).Configured) 'Removing the Esri key left it configured.'
 }
 finally {
     if (Test-Path -LiteralPath $root) {
@@ -181,4 +204,4 @@ if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     throw "Protected GitLab configuration tests failed ($($failures.Count))."
 }
-Write-Host 'Protected GitLab configuration tests passed (DPAPI roundtrip, fresh process, ACL, ownership, malformed record, and rotation).' -ForegroundColor Green
+Write-Host 'Protected GitLab configuration and Esri imagery key tests passed (DPAPI roundtrip, fresh process, ACL, ownership, malformed record, and rotation).' -ForegroundColor Green
