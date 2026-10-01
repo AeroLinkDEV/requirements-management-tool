@@ -36,6 +36,12 @@ export class DualFmsSystem {
       parameters.rmsFeedbackDelay.value, parameters.rmsFeedbackTimeout.value);
     this.settings = this.computers.map(unit => JSON.stringify(unit.computerSettings));
     this.computers.forEach((unit, index) => unit.attachComputerPorts(this.port((index + 1) as FmsSide), this.rms.port((index + 1) as FmsSide)));
+    // A radio fault a scenario step injects on either computer lands on the shared radios (F14).
+    for (const unit of this.computers) {
+      unit.radioFaultSink = (device, faults) => this.rms.setFaults(device, faults);
+      // A station off the air is off for both computers' receivers.
+      unit.stationOffAirSink = (ident, off) => this.computers.forEach(computer => computer.applyStationOffAir(ident, off));
+    }
     two.setReceiverCommandAuthority(false);
     // A mismatched persisted second computer starts independent; synchronization must be a conscious crew decision.
     if (this.compatibility(1, false)) this.operation = "INDEPENDENT";

@@ -1175,8 +1175,25 @@ export class ScriptedFms implements CduBackend {
   radioReceiving(device: RadioDevice) { return this.rms?.receiving(device) ?? null; }
   navRadioMode(device: "nav1" | "nav2") { return this.rms?.navMode(device) ?? "MAN"; }
   setNavRadioMode(device: "nav1" | "nav2", mode: "AUTO" | "MAN") { this.rms?.setNavMode(device, mode); }
-  /** Bench stimulus for this computer's own radios; two computers inject on DualFms.rms. */
-  setRadioFaults(device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) { this.ownRms?.setFaults(device, faults); }
+  /**
+   * Bench stimulus for the radios: this computer's own, or in dual operation the shared ones through the sink the dual
+   * system sets (a scenario step reaches them either way). False when there is nothing to apply it to.
+   */
+  setRadioFaults(device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) {
+    if (this.ownRms) { this.ownRms.setFaults(device, faults); return true; }
+    if (this.radioFaultSink) { this.radioFaultSink(device, faults); return true; }
+    return false;
+  }
+  /** Set by DualFmsSystem: injects a fault on the shared radios. */
+  radioFaultSink: ((device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) => void) | null = null;
+  /**
+   * Bench stimulus (F14): a VOR, DME or TACAN station off the air transmits nothing, so it is received as out of range.
+   * It is the world's, so in dual operation both computers stop receiving it (the dual system sets the sink).
+   */
+  setStationOffAir(ident: string, off: boolean) { if (this.stationOffAirSink) this.stationOffAirSink(ident, off); else this.applyStationOffAir(ident, off); }
+  applyStationOffAir(ident: string, off: boolean) { this.radioReceiver.setOffAir(ident, off); this.emit(); }
+  stationOffAir(ident: string) { return this.radioReceiver.isOffAir(ident); }
+  stationOffAirSink: ((ident: string, off: boolean) => void) | null = null;
   radioObservations() { return [...(this.sensorFrame?.radios ?? [])]; }
 
   private autoRadioStations() {

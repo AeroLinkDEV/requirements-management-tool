@@ -39,8 +39,12 @@ export class BenchRadioReceiver {
    * default both, for callers without radio management. */
   private use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null;
   private sequence = 0;
+  /** Stations off the air (Stage F F14, a bench stimulus): they transmit nothing, so they are received as if out of range. */
+  private readonly offAir = new Set<string>();
   private readonly parameters: AircraftProfile["parameters"];
   constructor(parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) { this.parameters = parameters; }
+  setOffAir(ident: string, off: boolean) { if (off) this.offAir.add(ident); else this.offAir.delete(ident); }
+  isOffAir(ident: string) { return this.offAir.has(ident); }
   tune(stations: readonly Navaid[], now: number, use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null) {
     this.use = use;
     const next = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean }>();
@@ -56,7 +60,7 @@ export class BenchRadioReceiver {
     this.sequence += 1;
     return [...this.tuning.values()].map(entry => {
       const distance = distanceNm(truth, dmeAt(entry.station));
-      const inRange = !failed && distance <= radioRange(altitudeFt);
+      const inRange = !failed && !this.offAir.has(entry.station.ident) && distance <= radioRange(altitudeFt);
       if (!inRange) { entry.since = now; entry.acquired = false; }
       else if (!entry.inRange) { entry.since = now; entry.acquired = false; }
       else if (now - entry.since >= this.parameters.radioAcquisition.value * 1000) entry.acquired = true;

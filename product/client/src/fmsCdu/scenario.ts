@@ -10,6 +10,11 @@ import { ScriptedFms } from "./scriptedFms";
 import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
 import { SURFACES, surfaceById } from "./surface";
 import type { CduFunction } from "./variants";
+import { NAV_MODES, type NavMode } from "./navigation";
+import { RADIO_NAMES, type DmeDevice, type RadioDevice, type RadioFaults } from "./radioManagement";
+
+/** The radios a scenario can fault (plan C3): every device the radio names cover. */
+const RADIO_FAULT_DEVICES = new Set<string>(Object.keys(RADIO_NAMES));
 
 // Scripted test scenarios for the FMS Test Bench (product/docs/FMS_TEST_BENCH.md, step 8). A scenario is an ordered
 // list of steps; each waits for its trigger, then acts on the simulation or checks what the crew would see. Steps
@@ -112,7 +117,13 @@ export type Action =
   /** The approach annunciated (FMS approachType). */
   | { kind: "expectApproachLevel"; level: "LPV" | "LNAV/VNAV" | "LNAV" | "NO APPR" }
   /** A receiver's own operating mode (its 273). */
-  | { kind: "expectReceiverMode"; receiver: 1 | 2; mode: GpsMode };
+  | { kind: "expectReceiverMode"; receiver: 1 | 2; mode: GpsMode }
+  /** Stage F F14: a radio's separate health states (plan C3), on this computer's radios or, in dual operation, the shared ones. */
+  | { kind: "radioFault"; device: RadioDevice | DmeDevice; controlPath?: RadioFaults["controlPath"]; measurementBus?: RadioFaults["measurementBus"]; receiver?: RadioFaults["receiver"] }
+  /** Stage F F14: a VOR, DME or TACAN station off the air (it transmits nothing), or back on it. */
+  | { kind: "stationOffAir"; ident: string; off: boolean }
+  /** The navigation solution: its mode, its accuracy basis, and whether the GPS position is held uncertain. Each field given is checked. */
+  | { kind: "expectNav"; mode?: NavMode; accuracyBasis?: "receiver" | "laboratory"; uncertain?: boolean };
 
 /** One step. An expectation not yet met waits up to `within` seconds for it before failing. */
 export type ScenarioStep = { when: Trigger; action: Action; within?: number };
@@ -229,6 +240,16 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "expectGpsSource": return a.source === "NONE" ? `check that the FMS is not navigating on GPS${within}` : `check that the FMS navigates on ${a.source}${within}`;
       case "expectApproachLevel": return `check that the approach annunciated is ${a.level}${within}`;
       case "expectReceiverMode": return `check that GPS ${a.receiver} is in ${a.mode} mode${within}`;
+      case "radioFault": {
+        const states = [a.controlPath && `control path ${a.controlPath}`, a.measurementBus && `measurement bus ${a.measurementBus}`, a.receiver && `receiver ${a.receiver}`].filter(Boolean);
+        return `set ${a.device.toUpperCase()}'s ${states.join(", ")}`;
+      }
+      case "stationOffAir": return `${a.off ? "take" : "put"} the station ${a.ident} ${a.off ? "off" : "back on"} the air`;
+      case "expectNav": {
+        const parts = [a.mode && `the FMS navigates on ${a.mode}`, a.accuracyBasis && `its accuracy is a ${a.accuracyBasis} figure`,
+          a.uncertain !== undefined && (a.uncertain ? "the GPS position is held uncertain" : "the GPS position is not held uncertain")].filter(Boolean);
+        return `check that ${parts.join(", ")}${within}`;
+      }
     }
   })();
   return when === "Then" ? `Then ${what}.` : `${when}, ${what}.`;
@@ -357,6 +378,22 @@ function actionProblem(action: unknown): string | null {
     case "expectGpsSource": return a.source === "GPS1" || a.source === "GPS2" || a.source === "NONE" ? null : "expectGpsSource needs GPS1, GPS2 or NONE";
     case "expectApproachLevel": return typeof a.level === "string" && APPROACH_LEVELS.has(a.level) ? null : "expectApproachLevel needs LPV, LNAV/VNAV, LNAV or NO APPR";
     case "expectReceiverMode": return receiver(a.receiver) && typeof a.mode === "string" && GPS_MODES.has(a.mode) ? null : `expectReceiverMode needs receiver 1 or 2 and a mode (${[...GPS_MODES].join(", ")})`;
+    case "radioFault": {
+      if (typeof a.device !== "string" || !RADIO_FAULT_DEVICES.has(a.device)) return `radioFault needs a radio (${[...RADIO_FAULT_DEVICES].join(", ")})`;
+      if (a.controlPath === undefined && a.measurementBus === undefined && a.receiver === undefined) return "radioFault needs at least one of controlPath, measurementBus and receiver";
+      if (a.controlPath !== undefined && a.controlPath !== "NORMAL" && a.controlPath !== "LOST") return "radioFault controlPath is NORMAL or LOST";
+      if (a.measurementBus !== undefined && a.measurementBus !== "NORMAL" && a.measurementBus !== "LOST") return "radioFault measurementBus is NORMAL or LOST";
+      if (a.receiver !== undefined && a.receiver !== "NORMAL" && a.receiver !== "FAILED") return "radioFault receiver is NORMAL or FAILED";
+      return null;
+    }
+    case "stationOffAir": return text(a.ident, /^[A-Z0-9]{1,4}$/) && typeof a.off === "boolean" ? null : "stationOffAir needs a station ident (1 to 4 letters or digits) and off true or false";
+    case "expectNav": {
+      if (a.mode === undefined && a.accuracyBasis === undefined && a.uncertain === undefined) return "expectNav needs at least one of mode, accuracyBasis and uncertain";
+      if (a.mode !== undefined && !(typeof a.mode === "string" && (NAV_MODES as readonly string[]).includes(a.mode))) return `expectNav mode is one of ${NAV_MODES.join(", ")}`;
+      if (a.accuracyBasis !== undefined && a.accuracyBasis !== "receiver" && a.accuracyBasis !== "laboratory") return "expectNav accuracyBasis is receiver or laboratory";
+      if (a.uncertain !== undefined && typeof a.uncertain !== "boolean") return "expectNav uncertain is true or false";
+      return null;
+    }
     default: return `unsupported action "${String(a.kind)}"`;
   }
 }
@@ -578,6 +615,13 @@ export class ScenarioRunner {
         if (!stimulusFor(fms).apply(action.receiver - 1, action.stimulus)) throw new Error(`GPS ${action.receiver} refused: ${describeGpsOp(action.stimulus)}.`);
         return;
       }
+      case "radioFault": {
+        const { kind: _kind, device, ...states } = action;
+        // A fault with nowhere to go (no radios on this computer) is an error in the run, never a silent pass.
+        if (!fms.setRadioFaults(device, states)) throw new Error(`no radios to fault: ${device.toUpperCase()}`);
+        return;
+      }
+      case "stationOffAir": fms.setStationOffAir(action.ident, action.off); return;
       default: throw new Error(`Unsupported action "${action.kind}".`);
     }
   }
@@ -669,6 +713,12 @@ export class ScenarioRunner {
       case "expectReceiverMode": {
         const mode = fms.gps[action.receiver - 1].mode;
         return { ok: mode === action.mode, actual: mode };
+      }
+      case "expectNav": {
+        const nav = fms.navState, sensor = fms.navPerformance.sensor;
+        const ok = (action.mode === undefined || nav.mode === action.mode) && (action.accuracyBasis === undefined || sensor.accuracyBasis === action.accuracyBasis)
+          && (action.uncertain === undefined || nav.uncertain === action.uncertain);
+        return { ok, actual: `${nav.mode}, accuracy ${sensor.accuracyBasis ?? "none"}${nav.uncertain ? ", GPS position uncertain" : ""}` };
       }
       default: throw new Error(`Unsupported check "${action.kind}".`);
     }
