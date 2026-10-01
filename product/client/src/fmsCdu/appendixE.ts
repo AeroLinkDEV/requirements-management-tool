@@ -47,6 +47,8 @@ export const APPENDIX_E: Readonly<Record<string, AppendixESource>> = {
   "COM1 CONTROL LOST": { page: "E-4" }, "COM2 CONTROL LOST": { page: "E-4" },
   "DME1 CONTROL LOST": { page: "E-6" }, "DME2 CONTROL LOST": { page: "E-6" },
   "NAV1 CONTROL LOST": { page: "E-13" }, "NAV2 CONTROL LOST": { page: "E-13" },
+  // Plan F3: VOR and/or DME receiver failure on both computers.
+  "VOR/DME NAV LOST": { page: "E-17" },
   "HIGH GLIDEPATH ANGLE": { page: "E-9" },
   "HIGH HOLDING SPEED": { page: "E-9" },
   "HIGH SAR SPEED": { page: "E-9" },
