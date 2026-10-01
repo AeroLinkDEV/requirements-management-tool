@@ -835,6 +835,18 @@ jobs:
       - name: Verify the API log wrapper contract
         working-directory: product/client
         run: npm run test:apilog
+      # The planner's guards police every test source (documentation references among them), but the backend
+      # Domain job that also runs them is skipped for a client-only change. #1400 merged a client spec that
+      # named a documentation file and turned main red, caught only by advisory Fast (#1408). Every
+      # client-test change selects this job, so the guards bind here too.
+      - name: Verify the changed-area classifier guards (client changes)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(Get-ChildItem -LiteralPath product/test-planner/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          if ($tests.Count -eq 0) { throw 'No planner tests were found.' }
+          & node --test $tests
+          if ($LASTEXITCODE -ne 0) { throw 'A planner test suite failed.' }
       - name: Mark test complete
         if: always()
         continue-on-error: true
