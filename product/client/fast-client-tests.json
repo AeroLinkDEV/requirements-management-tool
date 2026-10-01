@@ -73,7 +73,8 @@
     "fms-gps-lnav-only.spec.ts",
     "fms-prediction-endpoints.spec.ts",
     "fms-stage-f-configuration.spec.ts",
-    "fms-sensor-state.spec.ts"
+    "fms-sensor-state.spec.ts",
+    "fms-kalman-dvs.spec.ts"
   ],
   "rendered": [
     "layout-settled.spec.ts",

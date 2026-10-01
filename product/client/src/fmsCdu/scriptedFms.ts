@@ -15,7 +15,7 @@ import {
   type Hold, type HoldEntry, type HoldStatus, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
 } from "./fmsModel";
-import { Constellation } from "./gnss";
+import { Constellation, seededRandom } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
@@ -25,7 +25,7 @@ import {
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type Navaid, type Procedure, type ProcedureHold, type Runway, type StoredRoute } from "./navData";
 import { coldTemperatureCorrection, computeProfile, formatConstraint, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
-import { CivilNavigation, type PositionMeasurement } from "./civilNavigation";
+import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from "./civilNavigation";
 import type { SensorSolution } from "./sensorState";
 import { BenchRadioReceiver, solveRadio } from "./radioNavigation";
 import { sampled, type SensorFrame, type SensorInputPort } from "./sensorPorts";
@@ -74,6 +74,14 @@ import type { CduFunction } from "./variants";
  * labelled as a simulation on its IDENT page and is not a navigation computer.
  */
 
+/** M300 12-24: a power interruption longer than this re-initializes the KALMAN mode. */
+const KALMAN_INTERRUPT_MS = 50;
+/** The APIRS's nominal residual accelerometer bias: drawn once per power-up from the estimator's declared 1-sigma
+ * (APIRS_ACCEL_SIGMA_MS2) by a seeded draw, and constant until the next power-up (plan C2). */
+const nominalApirsBias = (seed: number) => {
+  const next = seededRandom(seed), gaussian = () => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
+  return { north: APIRS_ACCEL_SIGMA_MS2 * gaussian(), east: APIRS_ACCEL_SIGMA_MS2 * gaussian() };
+};
 const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...NAV_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
 
 export type WaypointResolution = { ident: string } | { select: string } | "invalid" | "not-in-database";
@@ -234,6 +242,18 @@ export class ScriptedFms implements CduBackend {
   private readonly sensorPort: SensorInputPort | null;
   private sensorSequence = 0;
   private sensorFrame: SensorFrame | null = null;
+  /** Plan F11: when the FMS was last powered (KALMAN is available a minute later), the APIRS and DVS health (bench
+   * stimuli), the crew's water current for the DVS (M300 12-23), and the simulated surface drift the DVS sees. */
+  private poweredAt = 0;
+  private poweredOffAt: number | null = null;
+  private sensorHealth: Record<"APIRS" | "DVS", "NORMAL" | "FAIL"> = { APIRS: "NORMAL", DVS: "NORMAL" };
+  /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/s². */
+  private apirsBias = nominalApirsBias(1);
+  private apirsFaultBias = { north: 0, east: 0 };
+  private powerCycles = 1;
+  private waterCurrent: { northKt: number; eastKt: number } | null = null;
+  private surfaceDrift = { northKt: 0, eastKt: 0 };
+  private truthVelocity: { north: number; east: number; at: number } | null = null;
   readonly predictiveRaim = { ident: null as string | null, eta: null as number | null, requestedAt: null as number | null };
   private readonly raimExcluded = new Set<number>();
   private automaticRaimFor: string | null = null;
@@ -609,7 +629,10 @@ export class ScriptedFms implements CduBackend {
     this.autoSelection = new AutoSelection(options.preferredGps ?? 0);
     this.aircraftProfile = options.profile ?? ACTIVE_PROFILE;
     this.reference = this.aircraftProfile.defaultAngleReference;
-    this.navigation = new CivilNavigation(START_POSITION, this.aircraftProfile.parameters);
+    const equipped = (key: string) => (this.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined)?.[key]?.configured === true;
+    this.navigation = new CivilNavigation(START_POSITION, this.aircraftProfile.parameters, { kalman: equipped("kalman"), dvs: equipped("doppler") });
+    // Warm start: powered a minute before the session, so the KALMAN mode is past its first minute (M300 12-24).
+    this.poweredAt = this.now.getTime() - 60_000;
     this.radioReceiver = new BenchRadioReceiver(this.aircraftProfile.parameters);
     this.userStore = options.userDatabase?.store ?? this.userStore;
     this.userScope = options.userDatabase?.scope ?? { userId: "local", profileId: this.aircraftProfile.id };
@@ -693,11 +716,15 @@ export class ScriptedFms implements CduBackend {
     this.utcOffsetMs = value.getTime() - this.now.getTime(); this.emit(); return true;
   }
   powerOff() {
+    this.poweredOffAt = this.now.getTime();
     this.powered = false; this.bootUntil = null; this.crossTalk?.healthChanged(); this.emit();
   }
   /** Laboratory startup ground context, separate from v1's airborne state. A restart never moves the plant or resets receivers. */
   powerOn(kind: "COLD" | "WARM", onGround: boolean) {
     this.powered = true;
+    // An interruption over 50 ms (in simulation time since powerOff) re-initializes KALMAN (M300 12-24, plan C2).
+    this.powerInterrupt(this.poweredOffAt === null ? Infinity : this.now.getTime() - this.poweredOffAt);
+    this.poweredOffAt = null;
     this.bootUntil = this.now.getTime() + this.aircraftProfile.parameters.fmsPowerTestTime.value * 1000;
     this.groundStartup = onGround;
     this.modified = null; this.directPending = false; this.directBypassed = []; this.pendingHoverPoints = null; this.pendingJoin = null;
@@ -815,7 +842,7 @@ export class ScriptedFms implements CduBackend {
         if (id === "gpsLost") for (const receiver of this.receivers) receiver.injectFault("RF_INPUT", on);
         // GPS integrity is applied every step while on (applyGpsIntegrityCondition); off clears what it set.
         if (id === "gpsIntegrity" && !on) this.clearGpsIntegrityCondition();
-        if (id === "gpsLost" || id === "gpsIntegrity" || id === "dmeOutage") this.updateNavigation(0);
+        if (["gpsLost", "gpsIntegrity", "dmeOutage", "apirsFail", "dvsFail"].includes(id)) this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
         // The FMS restarts on its IDENT page when it comes back.
         // An alert still unacknowledged when it fails is shown again, so MSG keeps its acknowledgement path (R13).
@@ -1016,7 +1043,63 @@ export class ScriptedFms implements CduBackend {
     return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude, indicationQnhHpa: this.baroSystem.declaredQnhHpa } },
       attitude: { at: now, sequence, status: "NORMAL", value: { bank: this.aircraft.bank, pitch: this.aircraft.pitch } },
       radioHeight: { at: now, sequence, status: ra.status, value: ra.value },
-      gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage")) };
+      gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage")),
+      ...this.inertialAndDoppler(now, sequence) };
+  }
+
+  /**
+   * The APIRS and DVS sensors (plan F11), from the plant: the APIRS reports the acceleration of the true ground velocity
+   * plus a laboratory accelerometer bias; the DVS reports the ground velocity relative to the (drifting) surface in
+   * body axes. A failed sensor reports FAIL. Only these words reach the estimator.
+   */
+  private inertialAndDoppler(now: number, sequence: number): Pick<SensorFrame, "apirs" | "dvs"> {
+    const track = (this.aircraft.track ?? 0) * Math.PI / 180, speed = this.aircraft.groundSpeed ?? 0;
+    const north = speed * Math.cos(track), east = speed * Math.sin(track);
+    const previous = this.truthVelocity;
+    this.truthVelocity = { north, east, at: now };
+    const dt = previous ? (now - previous.at) / 1000 : 0;
+    const accel = (value: number, before: number | undefined, bias: number) => (dt > 0 && before !== undefined ? (value - before) * 0.514444 / dt : 0) + bias;
+    const bias = { north: this.apirsBias.north + this.apirsFaultBias.north, east: this.apirsBias.east + this.apirsFaultBias.east };
+    const apirs = { northMs2: accel(north, previous?.north, bias.north), eastMs2: accel(east, previous?.east, bias.east) };
+    const heading = (this.aircraft.heading ?? this.heading) * Math.PI / 180;
+    const overSurfaceNorth = north - this.surfaceDrift.northKt, overSurfaceEast = east - this.surfaceDrift.eastKt;
+    const dvs = { alongKt: overSurfaceNorth * Math.cos(heading) + overSurfaceEast * Math.sin(heading),
+      acrossKt: -overSurfaceNorth * Math.sin(heading) + overSurfaceEast * Math.cos(heading) };
+    const word = <T>(value: T, failed: boolean) => ({ at: now, sequence, status: failed ? "FAIL" as const : "NORMAL" as const, value: failed ? null : value });
+    return { apirs: word(apirs, this.sensorHealth.APIRS === "FAIL" || this.injected.has("apirsFail")),
+      dvs: word(dvs, this.sensorHealth.DVS === "FAIL" || this.injected.has("dvsFail")) };
+  }
+  /**
+   * A power interruption of the stated duration in simulation time (plan C2), independent of the flight tick: over
+   * 50 ms the KALMAN mode starts again unaided and is unavailable for a minute (M300 12-24); 50 ms or less changes nothing.
+   * Only the KALMAN rule is modelled here; a full restart is powerOff and powerOn.
+   */
+  powerInterrupt(ms: number) {
+    if (!(ms > KALMAN_INTERRUPT_MS)) return;
+    this.poweredAt = this.now.getTime();
+    this.navigation.resetKalman();
+    this.apirsBias = nominalApirsBias(++this.powerCycles);
+  }
+  /** Bench fault stimulus (plan C2, F14): a deliberate APIRS accelerometer bias outside the nominal model, m/s². */
+  setApirsFaultBias(northMs2: number, eastMs2: number) { this.apirsFaultBias = { north: northMs2, east: eastMs2 }; }
+  setSensorHealth(sensor: "APIRS" | "DVS", health: "NORMAL" | "FAIL") { this.sensorHealth[sensor] = health; }
+  /** DVS STATUS 2/2 WATER CURRENT (M300 12-23): the surface's drift the crew enters, direction toward and speed. */
+  setWaterCurrent(toward: number | null, speedKt = 0) {
+    this.waterCurrent = toward === null ? null
+      : { northKt: speedKt * Math.cos(toward * Math.PI / 180), eastKt: speedKt * Math.sin(toward * Math.PI / 180) };
+  }
+  /** Bench: the true surface drift (a sea current) the Doppler measures against. */
+  setSurfaceDrift(toward: number, speedKt: number) {
+    this.surfaceDrift = { northKt: speedKt * Math.cos(toward * Math.PI / 180), eastKt: speedKt * Math.sin(toward * Math.PI / 180) };
+  }
+
+  /** The Doppler velocity in earth axes, rotated with the FMS's own heading (null without a valid word). */
+  private dopplerEarth(now: number) {
+    const body = sampled(this.sensorFrame?.dvs, now, this.sensorMaxAge);
+    const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
+    if (!body || !air || !Number.isFinite(air.headingTrue)) return null;
+    const heading = air.headingTrue * Math.PI / 180;
+    return { northKt: body.alongKt * Math.cos(heading) - body.acrossKt * Math.sin(heading), eastKt: body.alongKt * Math.sin(heading) + body.acrossKt * Math.cos(heading) };
   }
 
   /** Last input as published, for replay/adapter diagnostics. This is separate from the computed position. */
@@ -1104,7 +1187,12 @@ export class ScriptedFms implements CduBackend {
     const predicted = this.navigation.current.position;
     const selection = this.navigation.update({ dt, air, gps: gps.chosen === null ? null : measurement(gps.chosen),
       uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio,
-      radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp });
+      radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp,
+      apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: this.dopplerEarth(now), waterCurrent: this.waterCurrent,
+      kalmanReady: now - this.poweredAt >= 60_000 });
+    // Leaving the KALMAN or DVS mode for a lower one: its NAV LOST alert (M300 Appendix E, E-6 and E-12).
+    if (previous === "KALMAN" && ["DVS", "DR"].includes(selection.mode)) this.alert(alert("KALMAN NAV LOST"));
+    if (previous === "DVS" && selection.mode === "DR") this.alert(alert("DVS NAV LOST"));
     if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
     this.localSolution = structuredClone(selection);
     this.here = selection.position;

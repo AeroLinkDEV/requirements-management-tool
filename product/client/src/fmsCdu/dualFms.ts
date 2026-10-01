@@ -184,7 +184,7 @@ export class DualFmsSystem {
         .filter(({ solution, side }) => !this.unit(side).hasCondition("fmsFail") && solution.mode !== "DR" && !solution.uncertain
           && this.computers.every(unit => solution.mode !== "GPS" || unit.gpsNavSelected));
       let selected = usable.find(candidate => candidate.side === this.navSide) ?? usable[0];
-      const rank = { GPS: 0, "DME/DME": 1, "VOR/DME": 2, DR: 3 };
+      const rank = { GPS: 0, "DME/DME": 1, "VOR/DME": 2, KALMAN: 3, DVS: 4, DR: 5 };
       for (const candidate of usable) if (selected && (rank[candidate.solution.mode] < rank[selected.solution.mode]
         || candidate.solution.mode === selected.solution.mode && candidate.solution.anp !== null
           && (selected.solution.anp === null || (selected.solution.anp - candidate.solution.anp) * 1852 >= parameters.dualSensorHysteresis.value))) selected = candidate;

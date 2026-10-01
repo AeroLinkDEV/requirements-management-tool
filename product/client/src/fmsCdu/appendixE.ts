@@ -32,6 +32,7 @@ export const APPENDIX_E: Readonly<Record<string, AppendixESource>> = {
   "DATABASE OUT OF DATE": { page: "E-4" },
   "DIRECT TO FIX": { page: "E-5", also: "E-32" },
   "DME/DME NAV LOST": { page: "E-6" },
+  "DVS NAV LOST": { page: "E-6" },
   "END OF ROUTE": { page: "E-6" },
   "ENTER POS/DATE/TIME": { page: "E-6" },
   "FMS DEGRADED": { page: "E-7" },

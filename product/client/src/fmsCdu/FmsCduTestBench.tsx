@@ -144,7 +144,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   }, [session, userName]); // eslint-disable-line react-hooks/exhaustive-deps
   const backend = system.computers[cduSide - 1];
   const peerBackend = system.computers[2 - cduSide];
-  const sharedSensorCondition = (id: ConditionId) => ["gpsLost", "gpsIntegrity", "dmeOutage", "raFail"].includes(id);
+  const sharedSensorCondition = (id: ConditionId) => ["gpsLost", "gpsIntegrity", "dmeOutage", "apirsFail", "dvsFail", "raFail"].includes(id);
   const conditionBackend = (id: ConditionId) => sharedSensorCondition(id) ? system.computers[0] : backend;
   const sim = system.simulator, guidanceBackend = system.computers[system.guidanceSide - 1];
   const [recording, setRecording] = useState(false);

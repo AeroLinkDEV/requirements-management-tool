@@ -38,18 +38,31 @@ export type SensorSolution = {
   eligibility: PhaseEligibility;
 };
 
+/** 2.448 = sqrt(-2 ln 0.05): the 95% radius of a circular bivariate normal error with per-axis sigma 1. */
+export const CIRCULAR_95 = Math.sqrt(-2 * Math.log(0.05));
+/**
+ * The 95% radius of a zero-mean, independent, isotropic Gaussian horizontal error with per-axis sigma (plan C1, DF-05):
+ * 2.448 sigma, exact under that stated assumption only. It is not a bound for correlated or unequal axes, and the
+ * laboratory KALMAN model is built to keep the assumption.
+ */
+export const accuracy95Isotropic = (sigma: number) => CIRCULAR_95 * sigma;
+
 /** "Less than the active error limit" (M300 1-3): strictly. A bound equal to the limit is not within it. */
 export const withinLimit = (value: number | null, limit: number) =>
   value !== null && Number.isFinite(value) && Number.isFinite(limit) && value < limit;
 
 const ALL: PhaseEligibility = { "EN ROUTE": true, TERMINAL: true, APPROACH: true };
 const NOT_APPROACH: PhaseEligibility = { "EN ROUTE": true, TERMINAL: true, APPROACH: false };
+/** Not applicable to RNP operations in any phase: KALMAN (M300 15-4) and the civil DVS solution (12-20). */
+const NONE: PhaseEligibility = { "EN ROUTE": false, TERMINAL: false, APPROACH: false };
 
 /** Phase eligibility by mode. DME/DME and VOR/DME are not available for approach (M300 15-3); DR never is. */
 export const ELIGIBILITY: Readonly<Record<NavMode, PhaseEligibility>> = {
   GPS: ALL,
   "DME/DME": NOT_APPROACH,
   "VOR/DME": NOT_APPROACH,
+  KALMAN: NONE,
+  DVS: NONE,
   DR: NOT_APPROACH,
 };
 

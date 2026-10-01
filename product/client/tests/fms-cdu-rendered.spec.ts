@@ -178,8 +178,11 @@ test('every physical key on the rendered panel can be clicked and reaches the si
 test('conditions from the bench light the panel annunciators, and FMS failure blanks the display', async ({ page }) => {
   await open(page)
   const lamp = (code: string) => page.locator(`.fmsCduLamp[data-lamp="${code}"]`)
-  // With GPS lost the FMS updates from radio; only with the DMEs lost as well does it dead reckon and light POS.
+  // With GPS lost the FMS updates from radio; only with the DMEs lost as well does it dead reckon and light POS
+  // (the APIRS and Doppler failed first, since KALMAN and DVS would otherwise carry navigation, DEC-150).
   await tab(page, 'Conditions')
+  await page.getByRole('checkbox', { name: /^APIRS failed/ }).check()
+  await page.getByRole('checkbox', { name: /^Doppler \(DVS\) failed/ }).check()
   await page.getByRole('checkbox', { name: /^GPS lost sensor/ }).check()
   await expectLine(page, 13, /^GPS NAV LOST/)
   await expect(lamp('POS')).not.toHaveClass(/\blit\b/)
