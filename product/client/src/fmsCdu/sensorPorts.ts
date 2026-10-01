@@ -14,7 +14,13 @@ export type AirData = { headingTrue: number; tasKt: number; altitudeFt: number;
   /** Adapter-provided validity flags; omitted means the legacy corrected, mutually consistent air-data contract. */
   baroCorrected?: boolean; pressureAltitudeFt?: number; altitudeRateValid?: boolean; altitudesAgree?: boolean };
 export type Attitude = { bank: number; pitch: number };
-export type RadioObservation = { station: Navaid; slantRangeNm: Sample<number>; bearingTrue: Sample<number>; reportedDmeIdent?: Sample<string> };
+/** Range identity is supplied by the receiver adapter, never inferred for an external word. */
+export type RangeIdentity = { receiver: "dme1" | "dme2"; channel: 1 | 2 | 3; frequency: string; commandSequence: number };
+export function validRangeIdentity(identity: RangeIdentity | undefined, frequency: string): identity is RangeIdentity {
+  return !!identity && ["dme1", "dme2"].includes(identity.receiver) && [1, 2, 3].includes(identity.channel)
+    && identity.frequency === frequency && Number.isSafeInteger(identity.commandSequence) && identity.commandSequence >= 0;
+}
+export type RadioObservation = { rangeIdentity?: RangeIdentity; station: Navaid; slantRangeNm: Sample<number>; bearingTrue: Sample<number>; reportedDmeIdent?: Sample<string> };
 export type SensorFrame = {
   air: Sample<AirData>;
   attitude: Sample<Attitude>;

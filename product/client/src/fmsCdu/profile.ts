@@ -66,7 +66,7 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 9,
+  version: 10,
   defaultAngleReference: "MAG",
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
@@ -94,6 +94,11 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     fmsPowerTestTime: p(5, "s", "lab", "FMS power-up and maintenance self-test display duration; OEM timing unpublished", true),
     sensorMaxAge: p(2, "s", "lab", "maximum sensor age for the internal simulator port", true),
     radioAcquisition: p(3, "s", "lab", "AUTO facility acquisition after tuning or signal return", true),
+    dmeScanDwell: p(2, "s", "lab", "plan C3: how long a DME scan channel dwells on one roster station", true),
+    dmeScanAcquisition: p(0.5, "s", "lab", "plan C3: a scan channel's range acquisition after it moves to a station", true),
+    dmeRangeCacheAge: p(6, "s", "lab", "plan C3: cached range navigation age; covers the six-second full roster cycle on one surviving DME", true),
+    naimRangeMaxAge: p(4, "s", "lab", "plan C3: the oldest range a NAIM backup fix may contain (at most the cache age)", true),
+    rangeMotionWindAllowance: p(50, "kt", "lab", "plan C3: residual velocity allowance after measured motion compensation; with no motion, added to TAS for navigation-only stale geometry", true),
     radioRangeBias: p(0.02, "NM", "lab", "deterministic radio slant-range bias", true),
     radioBearingBias: p(0.25, "deg", "lab", "deterministic VOR bearing bias", true),
     radioCrossAngle: p(30, "deg", "lab", "minimum DME crossing angle; maximum is its supplement", true),
@@ -177,7 +182,7 @@ export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
 export const LATER_SBAS_PROFILE: AircraftProfile = {
   ...HELICOPTER_PROFILE,
   id: "cma9000-later-sbas-heli",
-  version: 5,
+  version: 6,
   title: "Later CMA software + CMA-5024 SBAS helicopter (representative simulation)",
   operationalProgram: "later SBAS-capable CMA family; exact OEM software baseline unqualified",
   approachPolicy: "SBAS_COUPLED",

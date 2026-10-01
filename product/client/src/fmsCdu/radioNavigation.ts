@@ -1,7 +1,7 @@
 import { bearingDeg, distanceNm, longitudeDelta, offset, type LatLon } from "./fmsModel";
 import type { Navaid } from "./navData";
 import { radioRange } from "./navigation";
-import { sampled, validPosition, type RadioObservation, type Sample } from "./sensorPorts";
+import { sampled, validPosition, validRangeIdentity, type RadioObservation, type Sample } from "./sensorPorts";
 import { HELICOPTER_PROFILE, type AircraftProfile } from "./profile";
 import { NORMAL_STATION, type StationFaults } from "./radioManagement";
 
@@ -35,20 +35,23 @@ export const dmeAt = (station: Navaid) => station.dmePosition ?? station.positio
 const hasVor = (station: Navaid) => ["VOR", "VORDME", "VORTAC"].includes(station.type);
 
 export class BenchRadioReceiver {
-  private tuning = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean }>();
+  private tuning = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean; acquisitionS: number }>();
   /** Which tuned stations give a range (a DME the radios report) and which a bearing (a NAV the radios report); by
    * default both, for callers without radio management. */
   private use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null;
   private sequence = 0;
   private readonly parameters: AircraftProfile["parameters"];
   constructor(parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) { this.parameters = parameters; }
-  tune(stations: readonly Navaid[], now: number, use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null) {
+  /** `acquisitionS`: a per-station acquisition time (a DME scan channel's, plan C3); otherwise the AUTO facility one. */
+  tune(stations: readonly Navaid[], now: number, use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null,
+    acquisitionS: ReadonlyMap<string, number> = new Map()) {
     this.use = use;
-    const next = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean }>();
+    const next = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean; acquisitionS: number }>();
     for (const station of stations) {
       const old = this.tuning.get(station.ident);
+      const acquisition = acquisitionS.get(station.ident) ?? this.parameters.radioAcquisition.value;
       next.set(station.ident, old && old.station.frequency === station.frequency
-        && distanceNm(old.station.position, station.position) < 1e-8 ? old : { station, since: now, acquired: false, inRange: true });
+        && distanceNm(old.station.position, station.position) < 1e-8 ? { ...old, acquisitionS: acquisition } : { station, since: now, acquired: false, inRange: true, acquisitionS: acquisition });
     }
     this.tuning = next;
   }
@@ -62,7 +65,7 @@ export class BenchRadioReceiver {
       const inRange = !failed && !faults.offAir && distance <= radioRange(altitudeFt);
       if (!inRange) { entry.since = now; entry.acquired = false; }
       else if (!entry.inRange) { entry.since = now; entry.acquired = false; }
-      else if (now - entry.since >= this.parameters.radioAcquisition.value * 1000) entry.acquired = true;
+      else if (now - entry.since >= entry.acquisitionS * 1000) entry.acquired = true;
       entry.inRange = inRange;
       const normal = inRange && entry.acquired;
       const word = (value: number | null): Sample<number> => ({ at: now, sequence: this.sequence,
@@ -90,13 +93,20 @@ export class BenchRadioReceiver {
  * prior estimate chose between them. The fix then inherits the prior's dependencies (a GPS-derived prior makes it
  * GPS-dependent); otherwise the measurements alone determine it.
  */
-export type RadioFix = { position: LatLon; at: number; anp: number; mode: "DME/DME" | "VOR/DME"; dmes: string[]; vor: string | null; assumedElevation: string[]; terrainElevation: string[]; rejected: { ident: string; reason: string }[]; accuracyBasis: "laboratory"; priorResolved: boolean };
+export type RadioFix = { position: LatLon; at: number; anp: number; mode: "DME/DME" | "VOR/DME"; dmes: string[]; vor: string | null; assumedElevation: string[]; terrainElevation: string[]; rejected: { ident: string; reason: string }[]; accuracyBasis: "laboratory"; priorResolved: boolean;
+  /** Plan C3: the oldest contributing range's measurement time. A newer fix epoch never renews it. */
+  oldestAt: number;
+  observations?: readonly RadioObservation[];
+  motion?: RadioMotion | null;
+  naimEligible?: boolean };
+/** Measured compensation velocity; sample age and dependency are separate from range age. */
+export type RadioMotion = { source: "RADIO" | "DVS" | "AIR_WIND"; at: number; northKt: number; eastKt: number; gpsDependent: boolean };
 /** The ranges a solution may use, and those refused with the reason. */
 export function rangeObservations(observations: readonly RadioObservation[], altitudeFt: number, now: number,
-  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) {
+  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters, maxAgeS = parameters.sensorMaxAge.value) {
   const rejected: { ident: string; reason: string }[] = [];
   const usable = observations.flatMap(observation => {
-    const slant = sampled(observation.slantRangeNm, now, parameters.sensorMaxAge.value * 1000);
+    const slant = sampled(observation.slantRangeNm, now, maxAgeS * 1000);
     const station = observation.station, at = dmeAt(station);
     if (!validPosition(at) || !hasDme(station) || slant === null) return [];
     if (observation.reportedDmeIdent && sampled(observation.reportedDmeIdent, now, parameters.sensorMaxAge.value * 1000) !== station.ident) {
@@ -106,7 +116,7 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
       : station.elevation.source === "terrain" ? parameters.terrainNavaidElevationUncertainty.value : 0;
     const result = horizontalRange(slant, (altitudeFt - station.elevation.feet) / 6076.12, allowanceFt / 6076.12);
     if (!result.ok) { rejected.push({ ident: station.ident, reason: result.reason }); return []; }
-    return [{ observation, at, range: result.rangeNm, elevationError: result.allowanceNm }];
+    return [{ observation, at, range: result.rangeNm, elevationError: result.allowanceNm, measuredAt: observation.slantRangeNm.at }];
   });
   return { usable, rejected };
 }
@@ -114,10 +124,26 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
 /** Horizontal position from measured slant ranges (air-data altitude correction), never a fixed offset from truth.
  * Range-circle intersections use a local tangent plane. The prior estimate chooses the two-circle ambiguity;
  * additional ranges check residuals. This solver is a bench approximation, not CMA's Kalman implementation. */
+/**
+ * C3: translate each range circle to the fix epoch using measured motion. Original observations stay immutable.
+ * The declared residual allowance covers velocity uncertainty; absent motion, old geometry remains usable for
+ * navigation with a conservative allowance, but cannot qualify as a NAIM backup.
+ */
+export type RangeOptions = { rangeMaxAgeS?: number; motion?: RadioMotion | null; unalignedMotionKt?: number };
 export function radioFixes(observations: readonly RadioObservation[], prior: LatLon, altitudeFt: number, now: number,
-  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters): RadioFix[] {
+  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters, options: RangeOptions = {}): RadioFix[] {
   if (!validPosition(prior) || !Number.isFinite(altitudeFt)) return [];
-  const { usable: ranges, rejected } = rangeObservations(observations, altitudeFt, now, parameters);
+  const motion = options.motion && sampled({ at: options.motion.at, sequence: 0, status: "NORMAL", value: options.motion }, now,
+    parameters.sensorMaxAge.value * 1000) && [options.motion.northKt, options.motion.eastKt].every(Number.isFinite) ? options.motion : null;
+  const maxAgeS = options.rangeMaxAgeS ?? parameters.sensorMaxAge.value;
+  const { usable, rejected } = rangeObservations(observations, altitudeFt, now, parameters, maxAgeS);
+  const ranges = usable.map(range => ({ ...range, at: motion ? offset(range.at, Math.atan2(motion.eastKt, motion.northKt) * 180 / Math.PI,
+    Math.hypot(motion.northKt, motion.eastKt) * (now - range.measuredAt) / 3_600_000) : range.at }));
+  const oldestAt = (used: typeof ranges) => Math.min(...used.map(r => r.measuredAt));
+  const motionNm = (used: typeof ranges) => Math.max(0, now - oldestAt(used)) / 3_600_000
+    * (motion ? parameters.rangeMotionWindAllowance.value : options.unalignedMotionKt ?? parameters.rangeMotionWindAllowance.value);
+  const provenance = (used: typeof ranges) => ({ observations: used.map(r => structuredClone(r.observation)), motion: now === oldestAt(used) ? null : motion,
+    naimEligible: used.every(r => validRangeIdentity(r.observation.rangeIdentity, r.observation.station.frequency)) && (now === oldestAt(used) || motion !== null && !motion.gpsDependent) });
   const sourced = (used: typeof ranges, source: "assumed" | "terrain") => used.filter(r => r.observation.station.elevation.source === source).map(r => r.observation.station.ident);
   let best: (RadioFix & { score: number }) | null = null;
   const accepted: LatLon[] = [];
@@ -132,6 +158,9 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
     const heightSquared = a.range ** 2 - along ** 2;
     if (heightSquared < 0) continue;
     const across = Math.sqrt(heightSquared);
+    // The pair's two mirror points: the prior estimate only chooses between them (C1, R3-01); pairs are ranked by their
+    // own accuracy, never by closeness to the prior, so a GPS-derived prior cannot pick among consistent pairs.
+    let pairBest: (RadioFix & { score: number }) | null = null;
     for (const sign of [-1, 1]) {
       const east = along * x / d - sign * across * y / d;
       const north = along * y / d + sign * across * x / d;
@@ -141,11 +170,12 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
       const residual = Math.max(...ranges.map(r => Math.abs(distanceNm(position, r.at) - r.range)));
       if (residual > parameters.radioResidualLimit.value) continue;
       accepted.push(position);
-      const score = distanceNm(position, prior) + residual;
-      if (!best || score < best.score) best = { position, at: Math.min(a.observation.slantRangeNm.at, b.observation.slantRangeNm.at), mode: "DME/DME",
-        anp: 0.1 + 0.15 / Math.sin(rad(angle)) + residual + Math.hypot(a.elevationError, b.elevationError) / Math.sin(rad(angle)),
-        dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, score };
+      const score = distanceNm(position, prior);
+      if (!pairBest || score < pairBest.score) pairBest = { position, at: now, mode: "DME/DME",
+        anp: 0.1 + 0.15 / Math.sin(rad(angle)) + residual + Math.hypot(a.elevationError, b.elevationError) / Math.sin(rad(angle)) + motionNm(ranges),
+        dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, oldestAt: oldestAt(ranges), ...provenance(ranges), score };
     }
+    if (pairBest && (!best || pairBest.anp < best.anp)) best = pairBest;
   }
   const fixes: RadioFix[] = [];
   if (best) {
@@ -160,10 +190,12 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
   for (const entry of ranges) {
     const { observation, range } = entry;
     const bearing = sampled(observation.bearingTrue, now, parameters.sensorMaxAge.value * 1000);
-    if (bearing === null || !Number.isFinite(bearing) || !hasVor(observation.station)) continue;
+    if (bearing === null || !Number.isFinite(bearing) || observation.bearingTrue.at !== entry.measuredAt || !hasVor(observation.station)) continue;
     // The bearing is from the VOR; the range from the DME (co-located, a few metres apart at most).
-    const candidate: RadioFix = { position: offset(observation.station.position, bearing, range), at: Math.min(observation.slantRangeNm.at, observation.bearingTrue.at), mode: "VOR/DME",
-      anp: 0.2 + 0.03 * range + entry.elevationError, dmes: [observation.station.ident], vor: observation.station.ident, assumedElevation: sourced([entry], "assumed"), terrainElevation: sourced([entry], "terrain"), rejected, accuracyBasis: "laboratory", priorResolved: false };
+    const measuredPosition = offset(observation.station.position, bearing, range);
+    const candidate: RadioFix = { position: motion ? offset(measuredPosition, Math.atan2(motion.eastKt, motion.northKt) * 180 / Math.PI,
+      Math.hypot(motion.northKt, motion.eastKt) * (now - entry.measuredAt) / 3_600_000) : measuredPosition, at: now, mode: "VOR/DME",
+      anp: 0.2 + 0.03 * range + entry.elevationError + motionNm([entry]), dmes: [observation.station.ident], vor: observation.station.ident, assumedElevation: sourced([entry], "assumed"), terrainElevation: sourced([entry], "terrain"), rejected, accuracyBasis: "laboratory", priorResolved: false, oldestAt: entry.measuredAt, ...provenance([entry]) };
     if (!vorDme || candidate.anp < vorDme.anp) vorDme = candidate;
   }
   if (vorDme) fixes.push(vorDme);
