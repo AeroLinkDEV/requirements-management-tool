@@ -429,7 +429,8 @@ async function startScene(
   void helicopter.ready.then(outcome => { if (disposed()) return; container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; request("model"); });
   // The FAA obstacles near the bench areas (otwObstacles.ts, Brief C), coloured as the terrain colouring colours their
   // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed").
-  const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, requestRender: () => request("obstacles") });
+  const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, postRender: scene.postRender,
+    renderError: scene.renderError, requestRender: () => request("obstacles") });
   void obstacles.ready.then(outcome => { if (disposed()) return; container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; request("obstacles"); });
   const orientation = new Cesium.HeadingPitchRoll();
   // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.
