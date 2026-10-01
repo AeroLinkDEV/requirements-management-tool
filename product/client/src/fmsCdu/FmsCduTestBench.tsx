@@ -34,6 +34,7 @@ import { browserUserDatabaseStore } from "./userDatabase";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
 import "./FmsCduTestBench.css";
+import "./FmsCockpitLayout.css";
 
 const VARIANT_KEY = "aerolink.fmsCdu.variant";
 
@@ -49,6 +50,7 @@ const clockText = (seconds: number) => {
 
 /** The bench's tools under the cockpit, one tab each; the chosen one is remembered. */
 const TABS = [
+  { id: "flight", label: "Flight and setup" },
   { id: "scenarios", label: "Scenarios" }, { id: "conditions", label: "Conditions" }, { id: "gps", label: "GPS sensors" },
   { id: "dual", label: "Dual FMS and radios" }, { id: "navdata", label: "Nav data" }, { id: "lighting", label: "Lighting and keys" },
 ] as const;
@@ -110,6 +112,27 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const [session, setSession] = useState(0);
   const [cduSide, setCduSide] = useState<FmsSide>(1);
   const [showPeer, setShowPeer] = useState(false);
+  // First increment is opt-in; the established engineering view remains the demo fallback.
+  const viewKey = userName ? `aerolink.fmsCdu.cockpit.${encodeURIComponent(userName)}` : null;
+  const [cockpitView, setCockpitView] = useState(() => {
+    try { return viewKey !== null && window.localStorage.getItem(viewKey) === "on"; } catch { return false; }
+  });
+  const [focused, setFocused] = useState(false);
+  const [iosOpen, setIosOpen] = useState(false);
+  const [iosExpanded, setIosExpanded] = useState(false);
+  const iosButton = useRef<HTMLButtonElement>(null);
+  const iosPanel = useRef<HTMLDivElement>(null);
+  const closeIos = () => { setIosOpen(false); iosButton.current?.focus(); };
+  const chooseCockpitView = (on: boolean) => {
+    setCockpitView(on);
+    setIosOpen(false);
+    setFocused(false);
+    if (!on && tab === "flight") chooseTab("scenarios");
+    try { if (viewKey) window.localStorage.setItem(viewKey, on ? "on" : "off"); } catch { /* optional preference */ }
+  };
+  useEffect(() => {
+    if (cockpitView && iosOpen) iosPanel.current?.focus();
+  }, [cockpitView, iosOpen]);
   // The aircraft profile the next session flies (profile.ts); a scenario that names one flies that one.
   const profileChoice = useRef(ACTIVE_PROFILE.id);
   const secondaryProfileChoice = useRef("");
@@ -183,7 +206,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const crewConditions = pinsDeclaration.context === pinsContext ? pinsDeclaration : { context: pinsContext, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
   const [gsInput, setGsInput] = useState("");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabId>(storedTab);
+  const [tab, setTab] = useState<TabId>(() => { const saved = storedTab(); return saved === "flight" && !cockpitView ? "scenarios" : saved; });
+  const visibleTabs = TABS.filter(item => cockpitView || item.id !== "flight");
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
   const tiles = useMemo(() => new TerrainTiles(terrain ?? relayTerrain), [terrain]);
   const photos = useMemo(() => groundImagery(imagery ?? relayImagery), [imagery]);
@@ -299,9 +323,37 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     lamp === undefined ? "sensor" : lamp === "MENU" ? "MENU light" : variant.annunciators.some(code => code === lamp) ? `${lamp} lamp` : "no lamp on this variation";
   const meaning = ALERTS.find(entry => entry.text === libraryAlert)?.meaning;
 
+  const setupControls = (<>
+        <label className="fmsBenchVariant">
+          <span>Aircraft profile</span>
+          <select value={backend.aircraftProfile.id} onChange={event => chooseProfile(event.target.value)}>
+            {PROFILES.map(option => <option key={option.id} value={option.id}>{option.title}</option>)}
+          </select>
+        </label>
+        <label className="fmsBenchVariant">
+          <span>Hardware variation</span>
+          <select value={variant.id} onChange={event => chooseVariant(event.target.value)}>
+            {CDU_VARIANTS.map(option => <option key={option.id} value={option.id}>{option.id} — {option.label}</option>)}
+          </select>
+        </label>
+  </>);
+
   return (
     // A <main>, as every workspace page is: the shell frames and densifies pages by that element.
-    <main className="fmsBench" aria-label="FMS Test Bench">
+    <main className={`fmsBench${cockpitView ? " fmsBenchCockpitView" : ""}${focused ? " fmsBenchFocused" : ""}`} aria-label="FMS Test Bench" onKeyDown={event => {
+      if (cockpitView && iosOpen && event.key === "Escape") { event.preventDefault(); closeIos(); }
+    }}>
+      <div className="fmsBenchViewBar fmsBenchActions">
+        <button type="button" aria-pressed={cockpitView} onClick={() => chooseCockpitView(!cockpitView)}>
+          {cockpitView ? "Engineering view" : "Cockpit view"}
+        </button>
+        {cockpitView ? <>
+          <button type="button" ref={iosButton} aria-expanded={iosOpen} aria-controls="fms-instructor" onClick={() => iosOpen ? closeIos() : setIosOpen(true)}>Instructor station</button>
+          <button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? "Show navigation" : "Focus bench"}</button>
+          <span className="fmsBenchHint">Scripted simulation · EFIS / AFCS: FMS {system.guidanceSide} · Inspected: CDU {cduSide}</span>
+          {recording ? <strong className="fmsBenchHint" role="status">Recording CDU 1 only; CDU 2 input is not recorded.</strong> : null}
+        </> : null}
+      </div>
       <header className="fmsBenchHeader">
         <div>
           <span className="fmsBenchEyebrow">TEST BENCH</span>
@@ -317,20 +369,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             Declared as data; parameters not yet flown by the simulation are marked for later stages.
           </p>
         </div>
-        <label className="fmsBenchVariant">
-          <span>Aircraft profile</span>
-          <select value={backend.aircraftProfile.id} onChange={event => chooseProfile(event.target.value)}>
-            {PROFILES.map(option => <option key={option.id} value={option.id}>{option.title}</option>)}
-          </select>
-        </label>
-        <label className="fmsBenchVariant">
-          <span>Hardware variation</span>
-          <select value={variant.id} onChange={event => chooseVariant(event.target.value)}>
-            {CDU_VARIANTS.map(option => <option key={option.id} value={option.id}>{option.id} — {option.label}</option>)}
-          </select>
-        </label>
+        {!cockpitView ? setupControls : null}
       </header>
 
+      <div className={`fmsBenchUpper${cockpitView && iosOpen && iosExpanded ? " fmsBenchIosExpanded" : ""}`}>
       <section className="fmsBenchCard fmsBenchWindow" aria-label="Out-the-window view">
         <div className="fmsBenchMapHead">
           <h2>Out the window</h2>
@@ -382,8 +424,19 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             ground={outside.ground} colouring={outside.colouring} imagery={photos} />
           : <p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p>}
       </section>
-
       <div className="fmsBenchCockpit">
+        {cockpitView ? (<>
+          {([1, 2] as const).map(side => <div key={side} className={`fmsBenchCduStation mode-${lighting.mode}`} data-side={side}
+            data-active={cduSide === side} onFocusCapture={() => { if (!recording && (!runner || runner.finished)) setCduSide(side); }}>
+            <div className="fmsBenchCduLabel"><strong>FMS {side} / CDU {side}</strong><span>{cduSide === side ? "Inspected" : ""}</span></div>
+            {layout ? <FmsCduPanel backend={system.computers[side - 1]} variant={variant} layout={layout} lighting={lighting}
+              onKey={event => {
+                const title = screenText(system.computers[side - 1].screen())[0].trim();
+                setLog(entries => [{ ...event, title: `CDU ${side}: ${title}` }, ...entries].slice(0, 200));
+                if (side === 1) recordTo?.key(event.fn);
+              }} /> : <p role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
+          </div>)}
+        </>) : (
         <div className={`fmsBenchPanel mode-${lighting.mode}`}>
           <div className="fmsBenchActions">
             <label>CDU inspected <select aria-label="CDU inspected" value={cduSide} disabled={recording || !!runner && !runner.finished}
@@ -403,6 +456,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <FmsCduPanel backend={peerBackend} variant={variant} layout={layout} lighting={lighting} />
           </div> : null}
         </div>
+        )}
 
         <section className={`fmsBenchCard fmsBenchDisplays mode-${lighting.mode}`} aria-label="EFIS">
           <div className="fmsBenchMapHead">
@@ -463,6 +517,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                 {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}×</option>)}
               </select>
             </label>
+            {!cockpitView ? (<>
             <button type="button" disabled={guidanceBackend.hasCondition("fmsFail")}
               onClick={() => setJumpNote(guidanceBackend.sequence() === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null)}>
               Jump to next waypoint
@@ -471,6 +526,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               ? <button type="button" onClick={() => { guidanceBackend.overrideDiscontinuity(); setJumpNote("Discontinuity overridden (engineering action, logged)."); }}>Override discontinuity</button>
               : null}
             <button type="button" onClick={reset}>Restart the simulation</button>
+            </>) : null}
           </div>
           {/* The flight mode annunciator: engaged modes in green, armed ones in white, as on the PFD. */}
           {jumpNote ? <p className="fmsBenchHint" role="status">{jumpNote}</p> : null}
@@ -564,21 +620,52 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         </section>
       </div>
 
-      <div className="fmsBenchTools">
+      <div className="fmsBenchTools" id="fms-instructor" ref={iosPanel} tabIndex={-1}
+        role={cockpitView ? "region" : undefined} aria-label={cockpitView ? "Instructor station" : undefined}
+        hidden={cockpitView && !iosOpen} onKeyDown={event => {
+          if (cockpitView && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeIos(); }
+        }}>
+        {cockpitView ? <div className="fmsBenchIosHead"><strong>Instructor station · CDU {cduSide}</strong>
+          <button type="button" aria-pressed={iosExpanded} onClick={() => setIosExpanded(value => !value)}>{iosExpanded ? "Compact instructor" : "More instructor room"}</button>
+          <button type="button" onClick={closeIos}>Close instructor station</button></div> : null}
         <div className="fmsBenchTabs" role="tablist" aria-label="Bench tools">
-          {TABS.map(item => (
+          {visibleTabs.map(item => (
             <button key={item.id} type="button" role="tab" id={`fms-bench-tabbutton-${item.id}`} aria-controls={`fms-bench-tab-${item.id}`}
               aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} onClick={() => chooseTab(item.id)}
               onKeyDown={event => {
-                const at = TABS.findIndex(entry => entry.id === tab);
+                const at = visibleTabs.findIndex(entry => entry.id === tab);
                 const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-                if (step) { event.preventDefault(); chooseTab(TABS[(at + step + TABS.length) % TABS.length].id); }
+                if (step) { event.preventDefault(); chooseTab(visibleTabs[(at + step + visibleTabs.length) % visibleTabs.length].id); }
               }}>
               {item.label}
             </button>
           ))}
         </div>
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios"} render={() => (
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-flight" aria-labelledby="fms-bench-tabbutton-flight" shown={tab === "flight" && (!cockpitView || iosOpen)} render={() => (<>
+          <section className="fmsBenchCard" aria-label="Flight and setup">
+            <h2>Flight and setup</h2>
+            <p className="fmsBenchHint">Scripted simulation, not a navigation computer. Restart and jump are engineering actions.</p>
+            <p className="fmsBenchProfile">Aircraft profile: <strong>{backend.aircraftProfile.title}</strong> ({backend.aircraftProfile.id} v{backend.aircraftProfile.version}, {profileFingerprint(backend.aircraftProfile)}).</p>
+            {cockpitView ? <div className="fmsBenchActions">
+            <button type="button" disabled={guidanceBackend.hasCondition("fmsFail")}
+              onClick={() => setJumpNote(guidanceBackend.sequence() === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null)}>
+              Jump to next waypoint
+            </button>
+            {next?.kind === "disco" && !guidanceBackend.hasCondition("fmsFail")
+              ? <button type="button" onClick={() => { guidanceBackend.overrideDiscontinuity(); setJumpNote("Discontinuity overridden (engineering action, logged)."); }}>Override discontinuity</button>
+              : null}
+            <button type="button" onClick={reset}>Restart the simulation</button>
+            </div> : <p className="fmsBenchHint">The flight controls are beside the displays.</p>}
+            {jumpNote ? <p role="status">{jumpNote}</p> : null}
+            {cockpitView ? setupControls : null}
+            {cockpitView ? <label>CDU inspected <select aria-label="CDU inspected" value={cduSide} disabled={recording || !!runner && !runner.finished}
+              onChange={event => setCduSide(Number(event.target.value) as FmsSide)}>
+              <option value={1}>FMS 1 / CDU 1</option><option value={2}>FMS 2 / CDU 2</option>
+            </select></label> : null}
+            <p className="fmsBenchHint">Scenario playback and recording target CDU 1. CDU 2 input is not recorded. EFIS and AFCS follow the separately selected guidance source.</p>
+          </section>
+        </>)} />
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios" && (!cockpitView || iosOpen)} render={() => (
           <FmsScenarioCard
             runner={runner}
             recording={recording}
@@ -590,7 +677,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
           />
         )} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" shown={tab === "conditions"} render={() => (<>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" shown={tab === "conditions" && (!cockpitView || iosOpen)} render={() => (<>
           <section className="fmsBenchCard">
             <h2>Conditions</h2>
             <ul className="fmsBenchConditions">
@@ -634,10 +721,9 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </form>
           </section>
         </>)} />
-        <div className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps" hidden={tab !== "gps"}>
-          {tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} /> : null}
-        </div>
-        <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" shown={tab === "dual"} render={() => (
+        <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps"
+          shown={tab === "gps" && (!cockpitView || iosOpen)} render={() => tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} /> : null} />
+        <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" shown={tab === "dual" && (!cockpitView || iosOpen)} render={() => (
           <section className="fmsBenchCard" aria-label="Dual computers and radio devices">
             <h2>Dual FMS and civil RMS</h2>
             <label>FMS 2 software profile (restarts the bench) <select aria-label="FMS 2 software profile" value={secondaryProfileChoice.current}
@@ -655,7 +741,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <ul aria-label="RMS tuning feedback">{system.rms.requests.slice(0, 6).map(request => <li key={request.id}>FMS {request.side}: {request.device.toUpperCase()} {request.value} — {request.status}</li>)}</ul>
           </section>
         )} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" shown={tab === "navdata"} render={() => (<>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" shown={tab === "navdata" && (!cockpitView || iosOpen)} render={() => (<>
           <section className="fmsBenchCard" aria-label="FMS initialization and preflight">
             <h2>FMS initialization and preflight</h2>
             <p className="fmsBenchReadout">FMS power: {backend.powerState}. Receiver power is controlled on GPS sensors.</p>
@@ -830,7 +916,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             {userDbStatus ? <p className="fmsBenchHint" role="status">{userDbStatus}</p> : null}
           </section>
         </>)} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-lighting" aria-labelledby="fms-bench-tabbutton-lighting" shown={tab === "lighting"} render={() => (<>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-lighting" aria-labelledby="fms-bench-tabbutton-lighting" shown={tab === "lighting" && (!cockpitView || iosOpen)} render={() => (<>
           <section className="fmsBenchCard">
             <h2>Cockpit lighting</h2>
             <div className="fmsBenchModes" role="radiogroup" aria-label="Cockpit lighting">
@@ -881,6 +967,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               )}
           </section>
         </>)} />
+      </div>
       </div>
     </main>
   );
