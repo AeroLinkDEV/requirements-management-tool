@@ -33,7 +33,7 @@ const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCH
 function Rmi({ bus, air }: { bus: FmsOutputs; air: AircraftData }) {
   const cx = 68, cy = 279, radius = 43;
   const heading = air.heading - variation(bus);
-  return <g data-testid="nd-rmi" fontSize="10" textAnchor="middle">
+  return <g data-testid="nd-rmi" fontSize="12" textAnchor="middle">
     <rect x="10" y="218" width="116" height="177" rx="6" fill="#05070a" stroke="#6a7384" />
     <text x={cx} y="231" fill={WHITE}>RMI (BENCH)</text>
     <circle cx={cx} cy={cy} r={radius} fill="none" stroke={WHITE} />

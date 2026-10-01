@@ -450,6 +450,10 @@ test('every workspace chunk arrives and keeps the design contract in both densit
       if (report.tiny.length) failures.push(`${where}: ${report.tiny.length} element(s) under 12px — ${report.tiny.slice(0, 4).join('; ')}`)
       if (report.unstyled.length) failures.push(`${where}: ${report.unstyled.length} unstyled button(s) — ${report.unstyled.slice(0, 3).join('; ')}`)
       if (report.overflow) failures.push(`${where}: the document scrolls horizontally at 1440px`)
+      if (route.endsWith('/fms-test-bench')) {
+        await page.getByTestId('nd-rmi').screenshot({ path: test.info().outputPath(`rmi-production-${density}.png`) })
+        await page.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-rmi-production-${density}.png`) })
+      }
     }
   }
 
