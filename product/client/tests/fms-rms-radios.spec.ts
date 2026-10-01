@@ -375,7 +375,7 @@ function boundRanges(unit: ScriptedFms, observations: RadioObservation[]): Radio
   })
 }
 
-function measuredCache() {
+function measuredCache(surface?: 'LAND' | 'SEA') {
   let now = T0
   const seed = new ScriptedFms(() => new Date(now))
   seed.setAircraft({ position: { lat: 45.5, lon: -74.9 }, altitude: 6000 })
@@ -389,7 +389,7 @@ function measuredCache() {
   const missingGps = frame.gps.map(word => ({ ...word, status: 'NCD' as const, value: null }))
   frame.gps = [missingGps[0], missingGps[1]]
   frame.air.value = { headingTrue: 90, tasKt: 600, altitudeFt: frame.air.value!.altitudeFt }
-  frame.dvs = { at: now, sequence: 1, status: 'NORMAL', value: { alongKt: 600, acrossKt: 0 } }
+  frame.dvs = { at: now, sequence: 1, status: 'NORMAL', value: { alongKt: 600, acrossKt: 0, ...(surface ? { surface } : {}) } }
   const arrivals = frame.radios
   frame.radios = []
   const unit = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
@@ -413,7 +413,7 @@ function measuredCache() {
 }
 
 test('C3: RMS station cache keeps ranges after the channels move on, uses independent DVS plus crew current, and expires without renewed ranges', () => {
-  const { unit, step } = measuredCache()
+  const { unit, step } = measuredCache('SEA') // The measured reflecting surface qualifies the entered water current.
   expect(unit.navState.mode).toBe('DME/DME')
   const start = unit.position
   unit.setWaterCurrent(90, 60)
