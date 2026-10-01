@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { BUS_RADIOS, fmsOutputs, type Word } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
@@ -22,6 +23,35 @@ const consistent = (label: string, word: Word<unknown>) => {
   expect(['NORMAL', 'NCD', 'FAIL'], label).toContain(word.status)
   expect(word.value === null, label).toBe(word.status !== 'NORMAL')
 }
+
+// The bus owner proves real receiver-to-word mapping; the rendered owner separately proves needle/flag wiring.
+// Independent CIFP2609 oracle: SCANDB HBT N55185640 W160310622, 390.0 kHz. Due south on the same meridian,
+// the true bearing is north; with heading east (90), relative bearing is 270. No production bearing helper.
+test('F16 ADF bus carries HBT raw bearing, NCD off air and FAIL for each receiver or measurement-bus failure', () => {
+  const { unit, step, bus } = bench()
+  expect(unit.loadArinc424(readFileSync('tests/fixtures/cifp/pasd-2609.pc', 'latin1'), 'pasd-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
+  unit.swapCycles()
+  unit.setAircraft({ position: { lat: 55 + 18 / 60 + 56.4 / 3600 - 0.02, lon: -(160 + 31 / 60 + 6.22 / 3600) }, heading: 90, track: 180 })
+  unit.setRadio('adf', '0390'); unit.setRadio('adf2', '0390'); step(2)
+  for (const device of ['adf', 'adf2'] as const) {
+    expect(bus().radioMeasurements[device].adfBearing.status).toBe('NORMAL')
+    expect(bus().radioMeasurements[device].adfBearing.value).toBeCloseTo(270, 7)
+  }
+  unit.setNdbOffAir('HBT', true); step(1)
+  for (const device of ['adf', 'adf2'] as const) expect(bus().radioMeasurements[device].adfBearing).toEqual({ value: null, status: 'NCD' })
+  expect(unit.lastAdvisories.filter(text => /ADF/.test(text))).toEqual([])
+  unit.setNdbOffAir('HBT', false); step(1)
+  for (const device of ['adf', 'adf2'] as const) {
+    for (const fault of [{ receiver: 'FAILED' as const }, { measurementBus: 'LOST' as const }]) {
+      unit.setRadioFaults(device, fault); step(1)
+      expect(bus().radioMeasurements[device].adfBearing).toEqual({ value: null, status: 'FAIL' })
+      const other = device === 'adf' ? 'adf2' : 'adf'
+      expect(bus().radioMeasurements[other].adfBearing).toEqual({ value: 270, status: 'NORMAL' })
+      unit.setRadioFaults(device, { receiver: 'NORMAL', measurementBus: 'NORMAL' }); step(1)
+      expect(bus().radioMeasurements[device].adfBearing).toEqual({ value: 270, status: 'NORMAL' })
+    }
+  }
+})
 
 test('every radio and source word is on the exhaustive bus with provenance, and each is a word with its own validity', () => {
   for (const key of ['radios', 'radioMeasurements'] as const) expect(FMS_OUTPUT_TAGS[key], key).toMatchObject({ kind: 'data', validity: 'word per field' })

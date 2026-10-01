@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
-import { expect, renderedTest as test, type Page } from './isolated-client-test'
+import { expect, renderedTest as test } from './isolated-client-test'
+import type { Page } from '@playwright/test'
 
 // The FMS test bench is self-contained: the scripted CMA-9000 runs in the page, so this needs no backend.
 // Engine rules are proved in fms-cdu-engine.spec.ts; this proves the rendered panel wires them to real
@@ -15,6 +16,42 @@ const key = (page: Page, id: string) => page.locator(`.fmsCduKey[data-key="${id}
 const screenLines = async (page: Page) => ((await page.locator('.fmsCduScreen').getAttribute('aria-label')) ?? '').split('\n')
 const expectLine = async (page: Page, line: number, pattern: RegExp) =>
   expect.poll(async () => (await screenLines(page))[line] ?? '').toMatch(pattern)
+
+// F16 primary rendered owner: C4 requires bus-only RMI raw bearings and flags (M300 13-23/24, plan C3/F16).
+// Receiver/bus tests cannot catch a missing needle, track-relative rotation or stale needle after invalidity.
+// This uses the real Nd with detached words, without a production seam or a live ScriptedFms side channel.
+test('F16 RMI draws both relative bus bearings and replaces an invalid bearing with its NCD or FAIL flag', async ({ page }) => {
+  await page.goto('/tests/fixtures/fms-rmi.html')
+  const rmi = page.getByTestId('nd-rmi')
+  await expect(rmi).toBeVisible()
+  await expect(rmi.getByTestId('rmi-heading')).toHaveText('120T')
+  const second = rmi.getByTestId('rmi-adf2-needle')
+  const rotation = (needle: import('@playwright/test').Locator) => needle.evaluate(element => {
+    const matrix = (element as SVGGElement).transform.baseVal.consolidate()!.matrix
+    return { cosine: matrix.a, sine: matrix.b }
+  })
+  await expect(rmi.getByTestId('rmi-adf-needle')).toBeVisible()
+  const firstRotation = await rotation(rmi.getByTestId('rmi-adf-needle'))
+  expect(firstRotation.cosine).toBeCloseTo(0, 7); expect(firstRotation.sine).toBeCloseTo(1, 7)
+  const secondRotation = await rotation(second)
+  expect(secondRotation.cosine).toBeCloseTo(Math.SQRT1_2, 7); expect(secondRotation.sine).toBeCloseTo(-Math.SQRT1_2, 7)
+  await expect(rmi.getByTestId('rmi-adf-value')).toHaveText('ADF1 090 REL')
+  await rmi.screenshot({ path: test.info().outputPath('rmi-normal.png') })
+  await page.locator('.efisNd').screenshot({ path: test.info().outputPath('nd-rmi-normal.png') })
+  for (const [action, status] of [['NDB off air', 'NCD'], ['Receiver failed', 'FAIL'], ['Measurement bus lost', 'FAIL']] as const) {
+    await page.getByRole('button', { name: action, exact: true }).click()
+    await expect(rmi.getByTestId('rmi-adf-needle')).toHaveCount(0)
+    await expect(rmi.getByTestId('rmi-adf-value')).toHaveText(`ADF1 ${status}`)
+    expect(await rmi.getByTestId('rmi-adf-value').evaluate(element => getComputedStyle(element).fill)).toBe('rgb(255, 176, 32)')
+    await expect(second).toBeVisible()
+    expect(await rotation(second)).toEqual(secondRotation)
+    await rmi.screenshot({ path: test.info().outputPath(`rmi-${action.replaceAll(' ', '-')}.png`) })
+    await page.getByRole('button', { name: 'Valid bearing', exact: true }).click()
+    await expect(rmi.getByTestId('rmi-adf-needle')).toBeVisible()
+    expect(await rotation(rmi.getByTestId('rmi-adf-needle'))).toEqual(firstRotation)
+    await expect(rmi.getByTestId('rmi-adf-value')).toHaveText('ADF1 090 REL')
+  }
+})
 
 // Pointer owner: real ACT RTE 5L opens airborne MOD LEGS; ERASE leaves guidance alone and only EXEC activates it.
 test('BACKTRACK on the actual CDU reviews airborne history before EXEC', async ({ page }) => {
