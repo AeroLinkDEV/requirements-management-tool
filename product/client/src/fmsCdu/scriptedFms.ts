@@ -1147,7 +1147,7 @@ export class ScriptedFms implements CduBackend {
     if (frequency === null || this.rms!.adf(device).mode !== "ADF") return null;
     // An NDB off the air (a bench stimulus) gives nothing to receive: no bearing, the RMI flag, and no fault row (plan C3).
     const ndb = this.db.nearby(this.truth, ADF_RANGE_NM).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type === "NDB"
-      && Number(entry.frequency) === Number(frequency) && !this.ndbOffAir.has(entry.ident))
+      && Number(entry.frequency) === Number(frequency) && this.rms!.ndbTransmitting(entry))
       .sort((a, b) => distanceNm(this.truth, a.position) - distanceNm(this.truth, b.position))[0];
     return ndb ? normalizeAngle(bearingDeg(this.truth, ndb.position) - (this.aircraft.heading ?? this.heading)) : null;
   }
@@ -1162,9 +1162,14 @@ export class ScriptedFms implements CduBackend {
     return mode === "TRUE" ? trueBearing : variation === undefined ? null : normalizeAngle(trueBearing - variation);
   }
   get radioPort() { return this.rms; }
-  /** Bench stimulus (Stage F16): an NDB off the air, by ident. The station transmits nothing; the ADF stays healthy. */
-  setNdbOffAir(ident: string, off: boolean) { if (off) this.ndbOffAir.add(ident); else this.ndbOffAir.delete(ident); this.emit(); }
-  private readonly ndbOffAir = new Set<string>();
+  /** F16 scenario world stimulus: resolve exactly one active-database NDB, never its same-ident DME or a first match.
+   * Shared RMS keeps the physical station outage visible to both computers, including independent operation. */
+  setNdbOffAir(ident: string, off: boolean): boolean {
+    const stations = this.db.find(ident).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type === "NDB");
+    if (stations.length !== 1 || !this.rms) return false;
+    this.rms.setNdbOffAir(stations[0], off);
+    return true;
+  }
 
   // The radios, for the bench and tests.
   radioReceiving(device: RadioDevice) { return this.rms?.receiving(device) ?? null; }

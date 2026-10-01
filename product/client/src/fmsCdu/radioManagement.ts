@@ -1,4 +1,5 @@
 import type { FmsSide, RadioManagementPort } from "./crossTalk";
+import type { Navaid } from "./navData";
 
 export type RadioState = { com1: string; com1Stby: string; com2: string; com2Stby: string; nav1: string; nav2: string; adf: string; adfStby: string; adf2: string; adf2Stby: string; tpdr: string; tpdr2: string; tacan: string };
 export type RadioKey = keyof RadioState;
@@ -94,6 +95,10 @@ export class RadioManagementSystem {
   /** DME HOLD (M300 13-22): the frequency a held DME stays on, whatever its NAV is retuned to. */
   private held: Record<DmeDevice, string | null> = { dme1: null, dme2: null };
   private adfSettings: Record<"adf" | "adf2", AdfSettings> = { adf: { mode: "ADF", bfo: false, bearing: "REL" }, adf2: { mode: "ADF", bfo: false, bearing: "REL" } };
+  private readonly silentNdbs = new Set<string>();
+  private ndbIdentity(station: Pick<Navaid, "ident" | "frequency" | "position">) {
+    return JSON.stringify([station.ident, Number(station.frequency), station.position.lat, station.position.lon]);
+  }
   private tests = new Map<TestableDevice, { state: RadioTestState; startedAt: number | null }>();
   private swaps = new Map<number, { side: FmsSide; key: StandbyKey; previous: string }>();
   private readonly clock: () => number;
@@ -182,6 +187,12 @@ export class RadioManagementSystem {
         system.tune(side, key, value);
       },
       receiving(device) { return system.receiving(device); },
+      ndbTransmitting(station) { return !system.silentNdbs.has(system.ndbIdentity(station)); },
+      setNdbOffAir(station, off) {
+        const identity = system.ndbIdentity(station);
+        if (off) system.silentNdbs.add(identity); else system.silentNdbs.delete(identity);
+        system.notify();
+      },
       dmeReceiving(device) { return system.dmeReceiving(device); },
       navMode(device) { return system.navModes[device]; },
       setNavMode(device, mode) { system.navModes[device] = mode; system.notify(); },
