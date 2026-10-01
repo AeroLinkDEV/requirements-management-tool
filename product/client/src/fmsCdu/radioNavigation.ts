@@ -87,20 +87,22 @@ export class BenchRadioReceiver {
  * prior estimate chose between them. The fix then inherits the prior's dependencies (a GPS-derived prior makes it
  * GPS-dependent); otherwise the measurements alone determine it.
  */
-export type RadioFix = { position: LatLon; at: number; anp: number; mode: "DME/DME" | "VOR/DME"; dmes: string[]; vor: string | null; assumedElevation: string[]; terrainElevation: string[]; rejected: { ident: string; reason: string }[]; accuracyBasis: "laboratory"; priorResolved: boolean };
+export type RadioFix = { position: LatLon; at: number; anp: number; mode: "DME/DME" | "VOR/DME"; dmes: string[]; vor: string | null; assumedElevation: string[]; terrainElevation: string[]; rejected: { ident: string; reason: string }[]; accuracyBasis: "laboratory"; priorResolved: boolean;
+  /** Plan C3: the oldest contributing range's measurement time. A newer fix epoch never renews it. */
+  oldestAt: number };
 /** The ranges a solution may use, and those refused with the reason. */
 export function rangeObservations(observations: readonly RadioObservation[], altitudeFt: number, now: number,
-  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) {
+  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters, maxAgeS = parameters.sensorMaxAge.value) {
   const rejected: { ident: string; reason: string }[] = [];
   const usable = observations.flatMap(observation => {
-    const slant = sampled(observation.slantRangeNm, now, parameters.sensorMaxAge.value * 1000);
+    const slant = sampled(observation.slantRangeNm, now, maxAgeS * 1000);
     const station = observation.station, at = dmeAt(station);
     if (!validPosition(at) || !hasDme(station) || slant === null) return [];
     const allowanceFt = station.elevation.source === "assumed" ? parameters.assumedNavaidElevationUncertainty.value
       : station.elevation.source === "terrain" ? parameters.terrainNavaidElevationUncertainty.value : 0;
     const result = horizontalRange(slant, (altitudeFt - station.elevation.feet) / 6076.12, allowanceFt / 6076.12);
     if (!result.ok) { rejected.push({ ident: station.ident, reason: result.reason }); return []; }
-    return [{ observation, at, range: result.rangeNm, elevationError: result.allowanceNm }];
+    return [{ observation, at, range: result.rangeNm, elevationError: result.allowanceNm, measuredAt: observation.slantRangeNm.at }];
   });
   return { usable, rejected };
 }
@@ -108,10 +110,21 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
 /** Horizontal position from measured slant ranges (air-data altitude correction), never a fixed offset from truth.
  * Range-circle intersections use a local tangent plane. The prior estimate chooses the two-circle ambiguity;
  * additional ranges check residuals. This solver is a bench approximation, not CMA's Kalman implementation. */
+/**
+ * Plan C3's cached ranges: `rangeMaxAgeS` admits station-owned ranges up to the cache age (default: the sensor age), and
+ * `motionKt` bounds how far the aircraft can have moved over a range's age. The ranges are not repropagated: each keeps
+ * its measurement time, and the fix's accuracy adds the motion over its oldest range's age (laboratory). The motion bound
+ * comes from air data, never GPS, so the fix stays GPS-independent; without it only fresh ranges are used.
+ */
+export type RangeOptions = { rangeMaxAgeS?: number; motionKt?: number | null };
 export function radioFixes(observations: readonly RadioObservation[], prior: LatLon, altitudeFt: number, now: number,
-  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters): RadioFix[] {
+  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters, options: RangeOptions = {}): RadioFix[] {
   if (!validPosition(prior) || !Number.isFinite(altitudeFt)) return [];
-  const { usable: ranges, rejected } = rangeObservations(observations, altitudeFt, now, parameters);
+  const motionKt = options.motionKt ?? null;
+  const maxAgeS = motionKt === null ? parameters.sensorMaxAge.value : options.rangeMaxAgeS ?? parameters.sensorMaxAge.value;
+  const { usable: ranges, rejected } = rangeObservations(observations, altitudeFt, now, parameters, maxAgeS);
+  const oldestAt = (used: typeof ranges) => Math.min(...used.map(r => r.measuredAt));
+  const motionNm = (used: typeof ranges) => motionKt === null ? 0 : Math.max(0, now - oldestAt(used)) / 1000 / 3600 * motionKt;
   const sourced = (used: typeof ranges, source: "assumed" | "terrain") => used.filter(r => r.observation.station.elevation.source === source).map(r => r.observation.station.ident);
   let best: (RadioFix & { score: number }) | null = null;
   const accepted: LatLon[] = [];
@@ -126,6 +139,9 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
     const heightSquared = a.range ** 2 - along ** 2;
     if (heightSquared < 0) continue;
     const across = Math.sqrt(heightSquared);
+    // The pair's two mirror points: the prior estimate only chooses between them (C1, R3-01); pairs are ranked by their
+    // own accuracy, never by closeness to the prior, so a GPS-derived prior cannot pick among consistent pairs.
+    let pairBest: (RadioFix & { score: number }) | null = null;
     for (const sign of [-1, 1]) {
       const east = along * x / d - sign * across * y / d;
       const north = along * y / d + sign * across * x / d;
@@ -135,11 +151,12 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
       const residual = Math.max(...ranges.map(r => Math.abs(distanceNm(position, r.at) - r.range)));
       if (residual > parameters.radioResidualLimit.value) continue;
       accepted.push(position);
-      const score = distanceNm(position, prior) + residual;
-      if (!best || score < best.score) best = { position, at: Math.min(a.observation.slantRangeNm.at, b.observation.slantRangeNm.at), mode: "DME/DME",
-        anp: 0.1 + 0.15 / Math.sin(rad(angle)) + residual + Math.hypot(a.elevationError, b.elevationError) / Math.sin(rad(angle)),
-        dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, score };
+      const score = distanceNm(position, prior);
+      if (!pairBest || score < pairBest.score) pairBest = { position, at: Math.min(a.observation.slantRangeNm.at, b.observation.slantRangeNm.at), mode: "DME/DME",
+        anp: 0.1 + 0.15 / Math.sin(rad(angle)) + residual + Math.hypot(a.elevationError, b.elevationError) / Math.sin(rad(angle)) + motionNm(ranges),
+        dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, oldestAt: oldestAt(ranges), score };
     }
+    if (pairBest && (!best || pairBest.anp < best.anp)) best = pairBest;
   }
   const fixes: RadioFix[] = [];
   if (best) {
@@ -157,7 +174,7 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
     if (bearing === null || !Number.isFinite(bearing) || !hasVor(observation.station)) continue;
     // The bearing is from the VOR; the range from the DME (co-located, a few metres apart at most).
     const candidate: RadioFix = { position: offset(observation.station.position, bearing, range), at: Math.min(observation.slantRangeNm.at, observation.bearingTrue.at), mode: "VOR/DME",
-      anp: 0.2 + 0.03 * range + entry.elevationError, dmes: [observation.station.ident], vor: observation.station.ident, assumedElevation: sourced([entry], "assumed"), terrainElevation: sourced([entry], "terrain"), rejected, accuracyBasis: "laboratory", priorResolved: false };
+      anp: 0.2 + 0.03 * range + entry.elevationError + motionNm([entry]), dmes: [observation.station.ident], vor: observation.station.ident, assumedElevation: sourced([entry], "assumed"), terrainElevation: sourced([entry], "terrain"), rejected, accuracyBasis: "laboratory", priorResolved: false, oldestAt: entry.measuredAt };
     if (!vorDme || candidate.anp < vorDme.anp) vorDme = candidate;
   }
   if (vorDme) fixes.push(vorDme);

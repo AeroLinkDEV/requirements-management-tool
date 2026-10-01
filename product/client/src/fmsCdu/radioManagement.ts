@@ -130,7 +130,7 @@ export class RadioManagementSystem {
   rejectNext(device: RadioDevice) { this.rejecting.add(device); }
   /**
    * The scan roster (plan C3): up to six stations the FMS navigation selected (F6), spread over the four scan channels
-   * (roster index i on channel i mod 4). Each channel dwells on its stations in turn for the declared dwell.
+   * that measure. Each channel dwells on its stations in turn for the declared dwell.
    */
   setScanRoster(stations: readonly RosterStation[], dwellS = this.scanDwellS) {
     const seen = new Set<string>();
@@ -140,13 +140,16 @@ export class RadioManagementSystem {
   scanRoster(): RosterStation[] { return this.roster.map(station => ({ ...station })); }
   /** The roster stations on the air now: each scan channel's dwell station, while its DME measures (not failed, not testing). */
   scanning(): (ScanChannel & RosterStation)[] {
+    // The roster is spread over the scan channels whose DME measures now (not failed, not testing): a failed DME's
+    // stations move to the remaining channels, which then dwell on more stations each.
     const step = Math.floor(this.clock() / 1000 / this.scanDwellS);
-    return SCAN_CHANNELS.flatMap((channel, index) => {
-      const stations = this.roster.filter((_, i) => i % SCAN_CHANNELS.length === index);
-      if (!stations.length || !this.measuring(channel.device)) return [];
-      return [{ ...channel, ...stations[step % stations.length] }];
+    const channels = SCAN_CHANNELS.filter(channel => this.measuring(channel.device));
+    return channels.flatMap((channel, index) => {
+      const stations = this.roster.filter((_, i) => i % channels.length === index);
+      return stations.length ? [{ ...channel, ...stations[step % stations.length] }] : [];
     });
   }
+
   /** Whether the radio's words reach the FMS and are usable for navigation: bus and receiver healthy, and not testing. */
   private measuring(device: RadioDevice | DmeDevice) {
     const faults = this.faults(device);

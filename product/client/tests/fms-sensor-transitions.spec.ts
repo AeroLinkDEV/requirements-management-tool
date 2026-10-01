@@ -18,7 +18,7 @@ const gps = (position = HERE): PositionMeasurement =>
   ({ position, receiver: 1, accuracy95Nm: 0.02, hilNm: 0.1, northKt: 0, eastKt: 100 })
 const fix = (mode: RadioFix['mode'], anp: number, position = offset(HERE, mode === 'DME/DME' ? 0 : 180, 0.3)): RadioFix =>
   ({ position, at: 0, anp, mode, dmes: mode === 'DME/DME' ? ['AAA', 'BBB'] : ['VVV'], vor: mode === 'VOR/DME' ? 'VVV' : null,
-    assumedElevation: [], terrainElevation: [], rejected: [], accuracyBasis: 'laboratory', priorResolved: false })
+    assumedElevation: [], terrainElevation: [], rejected: [], accuracyBasis: 'laboratory', oldestAt: 0, priorResolved: false })
 const equipped = () => new CivilNavigation(HERE, undefined, { kalman: true, dvs: true })
 type Update = Parameters<CivilNavigation['update']>[0]
 const input = (overrides: Partial<Update> = {}): Update =>

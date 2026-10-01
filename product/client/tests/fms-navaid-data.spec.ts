@@ -153,9 +153,10 @@ test('F1: a range corrected with an assumed elevation is named in the solution, 
   const altitude = 9000
   const exact = solveRadio(observed(known, AT, altitude, 1000), AT, altitude, 1000)!
   const unsure = solveRadio(observed(assumed, AT, altitude, 1000), AT, altitude, 1000)!
-  // The same position (the assumed 0 ft happens to be right here) from the same pair, but not the same claim about it.
-  expect(distanceNm(unsure.position, exact.position)).toBeLessThan(1e-6)
-  expect(unsure.dmes).toEqual(exact.dmes)
+  // The same place (the assumed 0 ft happens to be right here), but not the same claim about it. Pairs are ranked by their
+  // accuracy, the elevation allowance included (plan C3), so the allowance may favour another pair: both are within the
+  // range bias of each other.
+  expect(distanceNm(unsure.position, exact.position)).toBeLessThan(0.05)
   expect(exact.assumedElevation).toEqual([])
   expect(unsure.assumedElevation).toEqual(unsure.dmes)
   // Each range is uncertain by |height| / range × the profile's assumed-elevation uncertainty: the ANP grows by at least one.

@@ -120,6 +120,8 @@ export class CivilNavigation {
     radio: RadioFix | null; radioApproved: boolean; rnp: number;
     /** Every radio mode's fix this update (plan F3); the resolver's step 3 chooses among them. Without it, `radio` is the only one. */
     radios?: readonly RadioFix[];
+    /** Plan C3: the time now and the oldest range a NAIM backup may contain; without them every fix counts as fresh. */
+    now?: number; naimMaxAgeS?: number;
     /** The emulated INS accelerations (null when the APIRS is unavailable), the Doppler ground velocity relative to
      * the surface, the crew's water current, and whether the KALMAN mode is past its first minute (M300 12-24). */
     apirs?: InertialInput | null; dvs?: DopplerInput | null; waterCurrent?: DopplerInput | null; kalmanReady?: boolean }): CivilSolution {
@@ -156,10 +158,11 @@ export class CivilNavigation {
       // source is approved, judge GPS against its independent position and accuracy before retaining it.
       // The laboratory NAIM comparison (plan F5): |GPS - backup| + the backup's 95% accuracy. No formula is sourced. The
       // backup qualifies only as an approved radio fix with integrity that does not depend on GPS (plan C1).
-      // Step 2 evaluates an independent backup separately from step 3's radio winner. A more accurate GPS-dependent
-      // fix must not hide another mode that qualifies as a GPS-independent integrity backup.
+      // Step 2 evaluates each fresh independent backup separately from step 3's radio winner.
+      const fresh = (fix: RadioFix) => input.now === undefined || input.naimMaxAgeS === undefined
+        || (input.now >= fix.oldestAt && input.now - fix.oldestAt <= input.naimMaxAgeS * 1000);
       const backup = input.radioApproved
-        ? chooseRadio(fixes.filter(fix => withinLimit(fix.anp, input.rnp) && !fixGpsDependent(fix)), "GPS", input.rnp)
+        ? chooseRadio(fixes.filter(fix => fresh(fix) && withinLimit(fix.anp, input.rnp) && !fixGpsDependent(fix)), "GPS", input.rnp)
         : null;
       const comparison = backup ? distanceNm(input.uncertainGps.position, backup.position) + backup.anp : null;
       naim = comparison;

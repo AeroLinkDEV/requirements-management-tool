@@ -27,9 +27,9 @@ import { coldTemperatureCorrection, computeProfile, formatConstraint, parseConst
 import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
 import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from "./civilNavigation";
 import type { SensorSolution } from "./sensorState";
-import { BenchRadioReceiver, radioFixes } from "./radioNavigation";
+import { BenchRadioReceiver, radioFixes, type RadioFix } from "./radioNavigation";
 import { transitionAlert } from "./sensorTransitions";
-import { sampled, type SensorFrame, type SensorInputPort } from "./sensorPorts";
+import { sampled, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
 import { RADIO_PAGES } from "./radioPages";
 import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
@@ -1079,14 +1079,23 @@ export class ScriptedFms implements CduBackend {
    * VOR/DME when the NAV was tuned manually, or in AUTO under autoVorNavigation (DEC-150; M300 12-19's default is
    * manual only).
    */
-  private radioTuning(): { stations: Navaid[]; use: { range: Set<string>; bearing: Set<string> } } {
-    const stations = new Map<string, Navaid>(), range = new Set<string>(), bearing = new Set<string>();
+  private radioTuning(): { stations: Navaid[]; use: { range: Set<string>; bearing: Set<string> }; acquisition: Map<string, number> } {
+    const stations = new Map<string, Navaid>(), range = new Set<string>(), bearing = new Set<string>(), acquisition = new Map<string, number>();
     const rms = this.rms;
     if (!rms) return { stations: this.autoRadioStations(), use: { range: new Set(this.autoRadioStations().map(station => station.ident)),
-      bearing: new Set(this.autoRadioStations().map(station => station.ident)) } };
-    const dmeCapable = (station: Navaid) => ["DME", "VORDME", "VORTAC"].includes(station.type);
-    if ((["dme1", "dme2"] as const).some(device => rms.dmeReceiving(device))) {
-      for (const station of this.autoRadioStations()) if (dmeCapable(station)) { stations.set(station.ident, station); range.add(station.ident); }
+      bearing: new Set(this.autoRadioStations().map(station => station.ident)) }, acquisition };
+    const dmeCapable = (station: Navaid) => ["DME", "VORDME", "VORTAC", "TACAN"].includes(station.type);
+    // Plan C3: the scan roster (up to six DME-capable stations, F6's selection) goes to the DMEs' scan channels; only the
+    // stations a scan channel is on now are tuned, with the scan channel's acquisition time.
+    const parameters = this.aircraftProfile.parameters;
+    const roster = this.autoRadioStations().filter(dmeCapable);
+    rms.setScanRoster(roster.map(station => ({ ident: station.ident, frequency: station.frequency })), parameters.dmeScanDwell.value);
+    for (const on of rms.scanning()) {
+      const station = roster.find(entry => entry.ident === on.ident);
+      if (!station) continue;
+      stations.set(station.ident, station); range.add(station.ident);
+      acquisition.set(station.ident, parameters.dmeScanAcquisition.value);
+      this.rangeOwner.set(station.ident, on.device);
     }
     const options = this.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined;
     const autoEligible = options?.autoVorNavigation?.configured === true;
@@ -1097,9 +1106,52 @@ export class ScriptedFms implements CduBackend {
         if (rms.navMode(device) === "MAN" || autoEligible) bearing.add(station.ident);
       }
       const ranging = this.dmeStation(dme);
-      if (ranging && rms.dmeReceiving(dme)) { stations.set(ranging.ident, ranging); range.add(ranging.ident); }
+      if (ranging && rms.dmeReceiving(dme)) { stations.set(ranging.ident, ranging); range.add(ranging.ident); this.rangeOwner.set(ranging.ident, dme); }
     });
-    return { stations: [...stations.values()], use: { range, bearing } };
+    return { stations: [...stations.values()], use: { range, bearing }, acquisition };
+  }
+
+  /** Plan C3: which DME measured each station's range last, and the station-owned range cache. */
+  private rangeOwner = new Map<string, DmeDevice>();
+  private rangeCache = new Map<string, RadioObservation>();
+  private radioFixesLast: RadioFix[] = [];
+  /** The radio fixes of the last navigation update (plan C3), for the bench and tests. */
+  get lastRadioFixes(): readonly RadioFix[] { return this.radioFixesLast; }
+  /** The cached range of each station (plan C3), for the bench and tests. */
+  get cachedRanges(): ReadonlyMap<string, RadioObservation> { return this.rangeCache; }
+  /**
+   * The range cache (plan C3, R3-01): each roster station's newest NORMAL range is kept after its scan channel moves on,
+   * with its original measurement time. A range is dropped when its station leaves the roster (and is no channel-1
+   * station), when the DME that measured it stops measuring (bus or receiver failure, TEST), or when it is older than the
+   * cache age. Routine scan retuning keeps it.
+   */
+  private updateRangeCache(observations: readonly RadioObservation[], now: number) {
+    const rms = this.rms;
+    if (!rms) { this.rangeCache.clear(); return; }
+    for (const observation of observations) if (observation.slantRangeNm.status === "NORMAL") this.rangeCache.set(observation.station.ident, observation);
+    const roster = new Set(rms.scanRoster().map(station => station.ident));
+    const channelOne = new Set((["dme1", "dme2"] as const).flatMap(device => this.dmeStation(device)?.ident ?? []));
+    const maxAge = this.aircraftProfile.parameters.dmeRangeCacheAge.value * 1000;
+    for (const [ident, observation] of this.rangeCache) {
+      const owner = this.rangeOwner.get(ident);
+      if (!roster.has(ident) && !channelOne.has(ident) || (owner && !rms.dmeReceiving(owner)) || now - observation.slantRangeNm.at > maxAge) this.rangeCache.delete(ident);
+    }
+  }
+  /** The observations the radio fix uses: this frame's, with each station's cached range where this frame has none. */
+  private rangeObservationsForFix(): RadioObservation[] {
+    const frame = this.sensorFrame?.radios ?? [];
+    const merged = new Map(frame.map(observation => [observation.station.ident, observation]));
+    for (const [ident, cached] of this.rangeCache) {
+      const current = merged.get(ident);
+      if (!current) merged.set(ident, { ...cached, bearingTrue: { ...cached.bearingTrue, status: "NCD", value: null } });
+      else if (current.slantRangeNm.status !== "NORMAL") merged.set(ident, { ...current, slantRangeNm: cached.slantRangeNm });
+    }
+    return [...merged.values()];
+  }
+  /** Plan C3: the most the aircraft can have moved per hour over a cached range's age, from air data only (never GPS). */
+  private rangeMotionKt(now: number): number | null {
+    const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
+    return air && Number.isFinite(air.tasKt) ? air.tasKt + this.aircraftProfile.parameters.rangeMotionWindAllowance.value : null;
   }
 
   /** The station a NAV receiver reports it is tuned to: the nearest VOR on its frequency (none while it reports nothing). */
@@ -1188,7 +1240,7 @@ export class ScriptedFms implements CduBackend {
     this.receivers.forEach((receiver, i) => receiver.step(this.gpsBaro[i] ? input : { ...input, baroAltitude: null }));
     this.autoTuneNavs();
     const tuning = this.radioTuning();
-    this.radioReceiver.tune(tuning.stations, now, tuning.use);
+    this.radioReceiver.tune(tuning.stations, now, tuning.use, tuning.acquisition);
     const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
     const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
     const ra = radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
@@ -1325,7 +1377,9 @@ export class ScriptedFms implements CduBackend {
     const previous = this.nav.mode, previousSource = this.nav.gpsSource;
     const now = this.now.getTime();
     const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
-    const radios = air ? radioFixes((this.sensorFrame?.radios ?? []).filter(observation => !this.inhibited.includes(observation.station.ident)), this.here, air.altitudeFt, now, this.aircraftProfile.parameters) : [];
+    this.updateRangeCache(this.sensorFrame?.radios ?? [], now);
+    const radios = air ? radioFixes(this.rangeObservationsForFix().filter(observation => !this.inhibited.includes(observation.station.ident)), this.here, air.altitudeFt, now,
+      this.aircraftProfile.parameters, { rangeMaxAgeS: this.aircraftProfile.parameters.dmeRangeCacheAge.value, motionKt: this.rangeMotionKt(now) }) : [];
     const measurement = (index: number): PositionMeasurement | null => {
       const assessed = gps.assessed[index], bus = gps.buses[index];
       if (!assessed?.fix || !bus) return null;
@@ -1343,7 +1397,8 @@ export class ScriptedFms implements CduBackend {
       uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio: null, radios,
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp,
       apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: this.dopplerEarth(now), waterCurrent: this.waterCurrent,
-      kalmanReady: now - this.poweredAt >= 60_000 });
+      kalmanReady: now - this.poweredAt >= 60_000, now, naimMaxAgeS: this.aircraftProfile.parameters.naimRangeMaxAge.value });
+    this.radioFixesLast = radios;
     // Entering dead reckoning from another mode: FMS NAV IN DR, a status advisory (M300 Appendix E, E-33), white in the
     // scratchpad and below any alert raised with it. Each mode's NAV LOST is raised by the transition table below.
     if (previous !== "DR" && selection.mode === "DR") this.advisory("FMS NAV IN DR");

@@ -81,7 +81,8 @@
     "fms-kalman-dvs.spec.ts",
     "fms-rms-radios.spec.ts",
     "fms-nav-radio.spec.ts",
-    "fms-sensor-transitions.spec.ts"
+    "fms-sensor-transitions.spec.ts",
+    "fms-dme-scan.spec.ts"
   ],
   "rendered": [
     "layout-settled.spec.ts",
