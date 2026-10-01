@@ -34,20 +34,23 @@ export const dmeAt = (station: Navaid) => station.dmePosition ?? station.positio
 const hasVor = (station: Navaid) => ["VOR", "VORDME", "VORTAC"].includes(station.type);
 
 export class BenchRadioReceiver {
-  private tuning = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean }>();
+  private tuning = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean; acquisitionS: number }>();
   /** Which tuned stations give a range (a DME the radios report) and which a bearing (a NAV the radios report); by
    * default both, for callers without radio management. */
   private use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null;
   private sequence = 0;
   private readonly parameters: AircraftProfile["parameters"];
   constructor(parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) { this.parameters = parameters; }
-  tune(stations: readonly Navaid[], now: number, use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null) {
+  /** `acquisitionS`: a per-station acquisition time (a DME scan channel's, plan C3); otherwise the AUTO facility one. */
+  tune(stations: readonly Navaid[], now: number, use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null,
+    acquisitionS: ReadonlyMap<string, number> = new Map()) {
     this.use = use;
-    const next = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean }>();
+    const next = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean; acquisitionS: number }>();
     for (const station of stations) {
       const old = this.tuning.get(station.ident);
+      const acquisition = acquisitionS.get(station.ident) ?? this.parameters.radioAcquisition.value;
       next.set(station.ident, old && old.station.frequency === station.frequency
-        && distanceNm(old.station.position, station.position) < 1e-8 ? old : { station, since: now, acquired: false, inRange: true });
+        && distanceNm(old.station.position, station.position) < 1e-8 ? { ...old, acquisitionS: acquisition } : { station, since: now, acquired: false, inRange: true, acquisitionS: acquisition });
     }
     this.tuning = next;
   }
@@ -59,7 +62,7 @@ export class BenchRadioReceiver {
       const inRange = !failed && distance <= radioRange(altitudeFt);
       if (!inRange) { entry.since = now; entry.acquired = false; }
       else if (!entry.inRange) { entry.since = now; entry.acquired = false; }
-      else if (now - entry.since >= this.parameters.radioAcquisition.value * 1000) entry.acquired = true;
+      else if (now - entry.since >= entry.acquisitionS * 1000) entry.acquired = true;
       entry.inRange = inRange;
       const normal = inRange && entry.acquired;
       const word = (value: number | null): Sample<number> => ({ at: now, sequence: this.sequence,

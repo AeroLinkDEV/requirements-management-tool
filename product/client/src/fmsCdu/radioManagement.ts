@@ -20,6 +20,15 @@ export const NO_FAULTS: RadioFaults = { controlPath: "NORMAL", measurementBus: "
 /** The DME transceivers: they scan for DME/DME and pair with their NAV for VOR/DME (M300 12-16, 13-21). */
 export type DmeDevice = "dme1" | "dme2";
 export type NavMode = "AUTO" | "MAN";
+/** A DME scan channel (plan C3, a declared laboratory model of a three-channel scanning transceiver): channel 1 is the
+ * paired NAV or HOLD channel; channels 2 and 3 of each DME are the FMS navigation scan. */
+export type ScanChannel = { device: DmeDevice; channel: 2 | 3 };
+export const SCAN_CHANNELS: readonly ScanChannel[] = [
+  { device: "dme1", channel: 2 }, { device: "dme2", channel: 2 }, { device: "dme1", channel: 3 }, { device: "dme2", channel: 3 },
+];
+export type RosterStation = { ident: string; frequency: string };
+/** M300 12-16: up to six stations are scanned. */
+export const SCAN_ROSTER_MAX = 6;
 /** A message one computer raises, with the inhibit its row declares (evaluated by the computer, which knows its state). */
 export type RadioEvent = { kind: "alert" | "advisory"; text: string; row: string; inhibit?: "polarOrRoll"; configuredBy?: string };
 /** M300 13-23, 13-25: a radio self-test from the NAV and ADF pages. */
@@ -86,6 +95,8 @@ export class RadioManagementSystem {
   private adfSettings: Record<"adf" | "adf2", AdfSettings> = { adf: { mode: "ADF", bfo: false, bearing: "REL" }, adf2: { mode: "ADF", bfo: false, bearing: "REL" } };
   private tests = new Map<TestableDevice, { state: RadioTestState; startedAt: number | null }>();
   private swaps = new Map<number, { side: FmsSide; key: "com1Stby" | "com2Stby"; previous: string }>();
+  private roster: RosterStation[] = [];
+  private scanDwellS = 2;
   private readonly clock: () => number;
   private readonly linked: () => boolean;
   private readonly notify: () => void;
@@ -117,6 +128,25 @@ export class RadioManagementSystem {
     this.notify();
   }
   rejectNext(device: RadioDevice) { this.rejecting.add(device); }
+  /**
+   * The scan roster (plan C3): up to six stations the FMS navigation selected (F6), spread over the four scan channels
+   * (roster index i on channel i mod 4). Each channel dwells on its stations in turn for the declared dwell.
+   */
+  setScanRoster(stations: readonly RosterStation[], dwellS = this.scanDwellS) {
+    const seen = new Set<string>();
+    this.roster = stations.filter(station => !seen.has(station.ident) && seen.add(station.ident)).slice(0, SCAN_ROSTER_MAX);
+    this.scanDwellS = dwellS;
+  }
+  scanRoster(): RosterStation[] { return this.roster.map(station => ({ ...station })); }
+  /** The roster stations on the air now: each scan channel's dwell station, while its DME measures (not failed, not testing). */
+  scanning(): (ScanChannel & RosterStation)[] {
+    const step = Math.floor(this.clock() / 1000 / this.scanDwellS);
+    return SCAN_CHANNELS.flatMap((channel, index) => {
+      const stations = this.roster.filter((_, i) => i % SCAN_CHANNELS.length === index);
+      if (!stations.length || !this.measuring(channel.device)) return [];
+      return [{ ...channel, ...stations[step % stations.length] }];
+    });
+  }
   /** Whether the radio's words reach the FMS and are usable for navigation: bus and receiver healthy, and not testing. */
   private measuring(device: RadioDevice | DmeDevice) {
     const faults = this.faults(device);
@@ -188,6 +218,9 @@ export class RadioManagementSystem {
       setAdf(device, settings) { system.setAdf(device, settings); },
       testState(device) { return system.testState(device); },
       pressTest(device) { system.pressTest(device); },
+      setScanRoster(stations, dwellS) { system.setScanRoster(stations, dwellS); },
+      scanRoster() { return system.scanRoster(); },
+      scanning() { return system.scanning(); },
       swap(key) {
         const standby = `${key}Stby` as "com1Stby" | "com2Stby";
         const id = system.tune(side, key, system.standby[side - 1][standby]);

@@ -1,5 +1,5 @@
 import type { Route } from "./fmsModel";
-import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, TestableDevice } from "./radioManagement";
+import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, RosterStation, ScanChannel, TestableDevice } from "./radioManagement";
 
 export type FmsSide = 1 | 2;
 export type DualMode = "SYNC" | "INDEPENDENT";
@@ -47,4 +47,8 @@ export interface RadioManagementPort {
   setAdf(device: "adf" | "adf2", settings: Partial<AdfSettings>): void;
   testState(device: TestableDevice): RadioTestState;
   pressTest(device: TestableDevice): void;
+  /** Plan C3: the DME scan roster the navigation sets, and the roster stations each scan channel is on now. */
+  setScanRoster(stations: readonly RosterStation[], dwellS?: number): void;
+  scanRoster(): RosterStation[];
+  scanning(): (ScanChannel & RosterStation)[];
 }
