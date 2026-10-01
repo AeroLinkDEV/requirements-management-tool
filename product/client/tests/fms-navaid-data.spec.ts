@@ -7,7 +7,7 @@ import { BenchRadioReceiver, horizontalRange, solveRadio } from '../src/fmsCdu/r
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
 
-// Stage F1 (FMS_STAGE_F_PLAN.md): the navaid data the radio sensors need. DME-only stations are read at their DME's
+// Stage F1 of the Stage F plan: the navaid data the radio sensors need. DME-only stations are read at their DME's
 // position; a station's elevation and a co-located DME's own position come from the data; TACAN stations are read
 // (DEC-150: TACAN on); missing elevation is stated as assumed, never a silent zero, and a range solution carries that
 // uncertainty. The records are FAA CIFP 2609 (public domain), as the bench's fixtures hold them.
