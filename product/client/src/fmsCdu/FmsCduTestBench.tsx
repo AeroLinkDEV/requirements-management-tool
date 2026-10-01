@@ -351,12 +351,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
       if (cockpitView && iosOpen && event.key === "Escape") { event.preventDefault(); closeIos(); }
     }}>
       <div className="fmsBenchViewBar fmsBenchActions">
-        <button type="button" aria-pressed={cockpitView} onClick={() => chooseCockpitView(!cockpitView)}>
+        <button type="button" onClick={() => chooseCockpitView(!cockpitView)}>
           {cockpitView ? "Engineering view" : "Cockpit view"}
         </button>
         {cockpitView ? <>
           <button type="button" ref={iosButton} aria-expanded={iosOpen} aria-controls="fms-instructor" onClick={() => iosOpen ? closeIos() : setIosOpen(true)}>Instructor station</button>
-          <button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? "Show navigation" : "Focus bench"}</button>
+          <button type="button" onClick={() => setFocused(value => !value)}>{focused ? "Show navigation" : "Focus bench"}</button>
           <span className="fmsBenchHint">Scripted simulation · EFIS / AFCS: FMS {system.guidanceSide} · Inspected: CDU {cduSide}</span>
           {recording ? <strong className="fmsBenchHint" role="status">Recording CDU 1 only; CDU 2 input is not recorded.</strong> : null}
         </> : null}
