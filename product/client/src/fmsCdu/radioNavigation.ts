@@ -74,8 +74,11 @@ export class BenchRadioReceiver {
  * `rejected`: the ranges refused, and why (horizontalRange). `accuracyBasis` is always `laboratory` (Stage F plan C1):
  * the radio accuracy model and any elevation allowance are declared models, so the ANP is the simulator's estimate, not
  * a validated 95 percent bound or installation accuracy. F2 carries the basis with accuracy95Nm to the bus (C4).
+ * `priorResolved` (plan C1, transitive provenance): the ranges alone admitted more than one consistent position, and the
+ * prior estimate chose between them. The fix then inherits the prior's dependencies (a GPS-derived prior makes it
+ * GPS-dependent); otherwise the measurements alone determine it.
  */
-export type RadioFix = { position: LatLon; at: number; anp: number; mode: "DME/DME" | "VOR/DME"; dmes: string[]; vor: string | null; assumedElevation: string[]; terrainElevation: string[]; rejected: { ident: string; reason: string }[]; accuracyBasis: "laboratory" };
+export type RadioFix = { position: LatLon; at: number; anp: number; mode: "DME/DME" | "VOR/DME"; dmes: string[]; vor: string | null; assumedElevation: string[]; terrainElevation: string[]; rejected: { ident: string; reason: string }[]; accuracyBasis: "laboratory"; priorResolved: boolean };
 /** The ranges a solution may use, and those refused with the reason. */
 export function rangeObservations(observations: readonly RadioObservation[], altitudeFt: number, now: number,
   parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) {
@@ -102,6 +105,7 @@ export function solveRadio(observations: readonly RadioObservation[], prior: Lat
   const { usable: ranges, rejected } = rangeObservations(observations, altitudeFt, now, parameters);
   const sourced = (used: typeof ranges, source: "assumed" | "terrain") => used.filter(r => r.observation.station.elevation.source === source).map(r => r.observation.station.ident);
   let best: (RadioFix & { score: number }) | null = null;
+  const accepted: LatLon[] = [];
   // S300 1-8 falls back to collocated VOR/DME when fewer than three DME facilities are available.
   for (let i = 0; ranges.length >= parameters.radioMinFacilities.value && i < ranges.length; i++) for (let j = i + 1; j < ranges.length; j++) {
     const a = ranges[i], b = ranges[j], origin = a.at;
@@ -121,20 +125,26 @@ export function solveRadio(observations: readonly RadioObservation[], prior: Lat
       if (angle < parameters.radioCrossAngle.value || angle > 180 - parameters.radioCrossAngle.value) continue;
       const residual = Math.max(...ranges.map(r => Math.abs(distanceNm(position, r.at) - r.range)));
       if (residual > parameters.radioResidualLimit.value) continue;
+      accepted.push(position);
       const score = distanceNm(position, prior) + residual;
       if (!best || score < best.score) best = { position, at: Math.min(a.observation.slantRangeNm.at, b.observation.slantRangeNm.at), mode: "DME/DME",
         anp: 0.1 + 0.15 / Math.sin(rad(angle)) + residual + Math.hypot(a.elevationError, b.elevationError) / Math.sin(rad(angle)),
-        dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, score };
+        dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, score };
     }
   }
-  if (best) return best;
+  if (best) {
+    // Another position, materially apart, also met every range and the geometry checks: only the prior chose.
+    const apart = 2 * parameters.radioResidualLimit.value;
+    const { score: _score, ...fix } = best; void _score;
+    return { ...fix, priorResolved: accepted.some(position => distanceNm(position, fix.position) > apart) };
+  }
   for (const entry of ranges) {
     const { observation, range } = entry;
     const bearing = sampled(observation.bearingTrue, now, parameters.sensorMaxAge.value * 1000);
     if (bearing === null || !Number.isFinite(bearing) || !hasVor(observation.station)) continue;
     // The bearing is from the VOR; the range from the DME (co-located, a few metres apart at most).
     return { position: offset(observation.station.position, bearing, range), at: Math.min(observation.slantRangeNm.at, observation.bearingTrue.at), mode: "VOR/DME",
-      anp: 0.2 + 0.03 * range + entry.elevationError, dmes: [observation.station.ident], vor: observation.station.ident, assumedElevation: sourced([entry], "assumed"), terrainElevation: sourced([entry], "terrain"), rejected, accuracyBasis: "laboratory" };
+      anp: 0.2 + 0.03 * range + entry.elevationError, dmes: [observation.station.ident], vor: observation.station.ident, assumedElevation: sourced([entry], "assumed"), terrainElevation: sourced([entry], "terrain"), rejected, accuracyBasis: "laboratory", priorResolved: false };
   }
   return null;
 }

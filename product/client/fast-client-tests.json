@@ -70,7 +70,8 @@
     "fms-gps-approach-auto.spec.ts",
     "fms-gps-lnav-only.spec.ts",
     "fms-prediction-endpoints.spec.ts",
-    "fms-stage-f-configuration.spec.ts"
+    "fms-stage-f-configuration.spec.ts",
+    "fms-sensor-state.spec.ts"
   ],
   "rendered": [
     "layout-settled.spec.ts",

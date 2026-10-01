@@ -186,7 +186,8 @@ export class DualFmsSystem {
       let selected = usable.find(candidate => candidate.side === this.navSide) ?? usable[0];
       const rank = { GPS: 0, "DME/DME": 1, "VOR/DME": 2, DR: 3 };
       for (const candidate of usable) if (selected && (rank[candidate.solution.mode] < rank[selected.solution.mode]
-        || candidate.solution.mode === selected.solution.mode && (selected.solution.anp - candidate.solution.anp) * 1852 >= parameters.dualSensorHysteresis.value)) selected = candidate;
+        || candidate.solution.mode === selected.solution.mode && candidate.solution.anp !== null
+          && (selected.solution.anp === null || (selected.solution.anp - candidate.solution.anp) * 1852 >= parameters.dualSensorHysteresis.value))) selected = candidate;
       if (selected) {
         this.navSide = selected.side;
         this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, this.unit(selected.side).navigationWindEstimate));
