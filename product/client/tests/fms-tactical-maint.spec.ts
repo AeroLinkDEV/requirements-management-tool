@@ -1,5 +1,9 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FlightSimulator, legGeometry } from '../src/fmsCdu/flight'
+import { DualFmsSystem } from '../src/fmsCdu/dualFms'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
+import { setUp87nRnav190Final } from '../src/fmsCdu/heliDemo'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { iasFromTas } from '../src/fmsCdu/kinematics'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
@@ -37,6 +41,33 @@ const lines = (unit: ScriptedFms) => screenText(unit.screen())
 const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
+
+// Integration owner: a manual 500-NM travel bound cannot be shortened by assuming the fastest wind-assisted speed.
+test('a reachable moving waypoint inside 500 NM remains achievable against a headwind', () => {
+  const { unit } = setup()
+  Object.assign(unit.wind, { direction: 0, speed: 60 })
+  unit.setAircraft({ tas: 140, groundSpeed: 80, track: 0, heading: 0 })
+  expect(unit.trueAirspeed).toBeCloseTo(140, 6)
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 400), 0, 0)
+  unit.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); unit.press('EXEC')
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous.achievable).toBe(true)
+  expect(rendezvous.distanceNm).toBeCloseTo(400, 5)
+  expect(rendezvous.ttg).toBeCloseTo(400 / 80 * 3600, 1)
+})
+
+// Owner: the closed 500-NM airborne boundary uses measured airspeed and system wind, not entered ground planning.
+test('airborne moving rendezvous uses measured TAS and wind and includes the exact 500 NM boundary', () => {
+  const { unit } = setup()
+  unit.setAircraft({ tas: 100, groundSpeed: 80, track: 0, heading: 0 })
+  unit.planData.cruiseTas = 140; unit.planData.cruiseWind = { direction: 180, speed: 50 }
+  Object.assign(unit.wind, { direction: 0, speed: 20 })
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 500), 0, 0)
+  unit.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); unit.press('EXEC')
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous.achievable).toBe(true)
+  expect(rendezvous.ttg).toBeCloseTo(500 / 80 * 3600, 1)
+})
 
 test('a rendezvous flies the speed that arrives on time, within the speed limits', () => {
   const { unit, fly } = setup(START, LAB_AIRLINE_VNAV_PROFILE)
@@ -197,24 +228,277 @@ test('the maintenance page runs a self test, which fails while a fault is presen
   expect(lines(unit)[8]).toMatch(/^1400Z GPS LOST/)
 })
 
-test('in dual operation the executed route is cross-loaded; independent, the sides differ until they resynchronise', () => {
-  const unit = new ScriptedFms()
-  unit.press('LEGS')
-  typeText(unit, 'TOLGU')
-  press(unit, 'LSK1L', 'EXEC')
-  expect(unit.crossSideInSync).toBe(true)
-  unit.setCondition('independent', true)
-  unit.press('CLR')
-  unit.press('LEGS')
-  typeText(unit, 'CYUL')
-  press(unit, 'LSK1L', 'EXEC')
-  expect(unit.crossSideInSync).toBe(false)
-  press(unit, 'INIT_REF', 'LSK6L')
-  expect(lines(unit)[6]).toMatch(/^INDEPENDENT\s+RTE DIFFER$/)
-  expect(lines(unit)[8]).toMatch(/^\d{4}Z X-SIDE SYNC LOST\s*$/)
-  unit.setCondition('independent', false)
-  expect(unit.crossSideInSync).toBe(true)
-  expect(lines(unit)[6]).toMatch(/^DUAL SYNC\s+RTE MATCH$/)
+// Owner: real computer separation, confirmed mode transition, single-editor lock and receiving MOD/EXEC activation.
+// A copied-route facade cannot detect one CDU editing or failing while the other remains usable.
+const dualSetup = (secondaryProfile?: AircraftProfile) => {
+  let now = START
+  const system = new DualFmsSystem(() => new Date(now), { secondaryProfile })
+  return { system, one: system.computers[0], two: system.computers[1],
+    tick: (seconds = 1) => { for (let i = 0; i < seconds; i++) { now += 1000; system.tick() } },
+    fly: (seconds: number) => { let left = seconds; while (left > 1e-9) { const dt = Math.min(1, left); now += dt * 1000; system.step(dt); left -= dt } } }
+}
+const mode = (unit: ScriptedFms) => { unit.open('SETUP'); unit.press('LSK5L'); unit.press('LSK6R'); unit.press('CLR', { held: true }); unit.press('CLR', { held: true }) }
+test('two computers retain independent CDU and MOD state, synchronize EXEC and require receiving EXEC after crossfill', () => {
+  const { system, one, two } = dualSetup()
+  expect(system.mode).toBe('SYNC')
+  one.open('LEGS'); two.open('PROG'); two.setScratch('KEEP')
+  one.modify(route => { route.legs = [{ kind: 'wpt', ident: 'TOLGU' }] })
+  expect(two.modify(route => { route.dest = 'CYOW' })).toBe(false)
+  expect(two.routeStatus).toBe('ACT')
+  expect(lines(two)[SCRATCHPAD_LINE]).toContain('CDU ENTRY CONFLICT')
+  one.press('EXEC')
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'TOLGU' }])
+  expect(lines(two)[0]).toContain('PROGRESS')
+  one.open('SETUP'); one.press('LSK5L'); one.press('LSK6L')
+  expect(system.mode).toBe('SYNC')
+  mode(one); expect(system.mode).toBe('INDEPENDENT')
+  one.modify(route => { route.legs = [{ kind: 'wpt', ident: 'CYUL' }] }); one.press('EXEC')
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'TOLGU' }])
+  expect(one.dualOperation!.crossfill(false)).toBe(true)
+  expect(two.routeStatus).toBe('MOD')
+  expect(two.route.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'TOLGU' }])
+  expect(one.dualOperation!.crossfill(false)).toBe(false)
+  expect(two.route.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  two.press('EXEC'); expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  one.copyActiveToSecondary(); one.modify(route => { route.legs = [{ kind: 'wpt', ident: 'MUN' }] }); one.press('EXEC')
+  one.open('RTE'); one.setScratch('SEC'); one.press('LSK4L')
+  expect(two.route.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  two.eraseModification()
+  mode(two) // The initiating computer is explicitly authoritative.
+  expect(system.mode).toBe('SYNC')
+  expect(one.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  expect(one.activeRoute).not.toBe(two.activeRoute)
+  one.raiseAlert('CHECK ANP'); expect(two.recallList[0].text).toBe('CHECK ANP')
+  two.press('CLR'); expect(one.lamps().has('MSG')).toBe(false)
+  one.setCondition('fmsFail', true)
+  expect(two.hasCondition('fmsFail')).toBe(false)
+  expect(new ScriptedFms().otherFms).toBeNull()
+})
+
+// Owner: committed helicopter procedure geometry crosses the link; preview/ERASE cannot change receiver guidance.
+test('SAR and hover committed data follow synchronized EXEC and receiving crossfill EXEC', () => {
+  const { system, one, two, tick, fly } = dualSetup()
+  one.sar.trackSpacing = 1.3; one.sar.sarBearing = 130
+  one.activateSar('SECTOR')
+  expect(two.sar.active).toBeNull()
+  one.press('EXEC')
+  expect(two.sar.active).toBe('SECTOR')
+  expect(two.sar.status).toBe('ARMED')
+  expect(two.sar.sarBearing).toBe(130)
+  expect(two.sar).not.toBe(one.sar)
+  system.selectGuidance(2); fly(1)
+  expect(system.simulator.guidance.mode).toBe('SAR')
+  expect(system.flights[0].sarPath).toEqual(system.flights[1].sarPath)
+  system.selectGuidance(1)
+  mode(one); two.interruptSar(); fly(2)
+  mode(one); tick()
+  expect(system.flights[1].guidance.mode).toBe('SAR') // Accepted SYNC resumes the current flown pattern, not its origin.
+  mode(one)
+  one.sar.diameter = 6; one.activateSar('SQUARE'); one.press('EXEC')
+  expect(one.dualOperation!.crossfill(false)).toBe(true)
+  expect(two.sar.active).toBe('SECTOR')
+  two.eraseModification(); expect(two.sar.active).toBe('SECTOR')
+  expect(one.dualOperation!.crossfill(false)).toBe(true)
+  two.press('EXEC'); expect(two.sar.active).toBe('SQUARE')
+  expect(two.sar.diameter).toBe(6)
+  mode(one)
+  one.declareSurface('offshore-87n')
+  one.placeAircraft({ position: { lat: 40.7, lon: -72.45 }, track: 230, altitude: 500 }, 'test: common offshore aircraft')
+  fly(1) // AFCS must publish the real airspeed used by the hover activation gate.
+  expect(one.designateHoverMarkOnTop()).toBe(true)
+  expect(one.activateHover()).toBeNull()
+  expect(two.hover.active).toBeNull()
+  one.press('EXEC')
+  expect(two.hover.status).toBe('ACT')
+  expect(two.hoverJoin).toEqual(one.hoverJoin)
+  expect(two.hover.active).not.toBe(one.hover.active)
+  expect(two.sar.active).toBeNull()
+  mode(one)
+  expect(one.designateHoverMark({ ident: 'OTHER', position: offset(one.position, 90, 2), label: null })).toBe(true)
+  expect(one.activateHover()).toBeNull(); one.press('EXEC')
+  const oldMark = structuredClone(two.hover.active!.mark)
+  expect(one.dualOperation!.crossfill(false)).toBe(true)
+  expect(two.hover.active!.mark).toEqual(oldMark)
+  two.eraseModification(); expect(two.hover.active!.mark).toEqual(oldMark)
+  expect(one.dualOperation!.crossfill(false)).toBe(true)
+  one.setCondition('raFail', true); tick(); two.press('EXEC')
+  expect(two.routeStatus).toBe('MOD'); expect(two.hover.active!.mark).toEqual(oldMark)
+  one.setCondition('raFail', false); tick(); two.press('EXEC'); expect(two.hover.active!.mark.ident).toBe('OTHER')
+  expect(two.hoverJoin).toEqual(one.hoverJoin)
+  system.selectGuidance(2); tick()
+  expect(system.simulator.guidance.desiredTrack).not.toBeNull()
+})
+
+// Owner: settings actually cross the link; mode refusals preserve two plans rather than reporting a false match.
+test('SETUP transfers configured settings and sync refuses link, software, data, user, MOD and active-hold mismatches', () => {
+  const { system, one, two, tick } = dualSetup()
+  one.open('SETUP'); one.press('LSK1L'); one.press('LSK2L'); one.setScratch('+5.5'); one.press('LSK2R')
+  expect(two.angleReference).toBe('TRUE')
+  expect(two.setup).toEqual({ localTime: true, localOffsetHours: 5.5 })
+  one.createUserWaypoint('OWN01', { lat: 42, lon: -72 }); tick()
+  expect(two.userWaypoints).toContainEqual({ ident: 'OWN01', type: 'FIXED', position: { lat: 42, lon: -72 } })
+  system.setLinkAvailable(false)
+  const plans = [structuredClone(one.activeRoute), structuredClone(two.activeRoute)]
+  mode(one); expect(system.mode).toBe('INDEPENDENT')
+  expect(lines(one)[SCRATCHPAD_LINE]).not.toContain('UNABLE') // CLR acknowledges the refusal, recall retains it.
+  expect(one.recallList.some(message => message.text.includes('UNABLE FMS-FMS SYNC'))).toBe(true)
+  system.setLinkAvailable(true); expect(system.mode).toBe('INDEPENDENT')
+  two.modify(route => { route.legs = [{ kind: 'wpt', ident: 'CYUL' }] })
+  mode(one); expect(system.mode).toBe('INDEPENDENT'); two.eraseModification()
+  one.modify(route => { route.hold = { fix: 'MUN', inbound: 90, turn: 'RIGHT', legTime: 1, legDistance: null, exit: 'MANUAL', speed: 90, altitude: '3000', status: 'IN PROGRESS' } }); one.press('EXEC')
+  mode(one); expect(system.mode).toBe('INDEPENDENT')
+  one.modify(route => { route.hold = undefined }); one.press('EXEC')
+  two.createUserWaypoint('OWN02', { lat: 43, lon: -72 }); mode(one)
+  expect(system.mode).toBe('INDEPENDENT')
+  expect(one.faultLog[0].text).toContain('USER DATA DIFFER')
+  expect(two.activeRoute).toEqual(plans[1])
+  const different = dualSetup(LATER_SBAS_PROFILE)
+  expect(different.system.mode).toBe('INDEPENDENT'); mode(different.one)
+  expect(different.one.faultLog[0].text).toContain('OP PROGRAM DIFFER')
+  const cycles = dualSetup(); mode(cycles.one); cycles.two.swapCycles(); mode(cycles.one)
+  expect(cycles.system.mode).toBe('INDEPENDENT'); expect(cycles.one.faultLog[0].text).toContain('NAV DATA DIFFER')
+  const approaches = dualSetup(); mode(approaches.one)
+  expect(setUp87nRnav190Final(approaches.one, approaches.system.flights[0])).toEqual({ ready: true })
+  expect(setUp87nRnav190Final(approaches.two, approaches.system.flights[1])).toEqual({ ready: true })
+  mode(approaches.one); expect(approaches.system.mode).toBe('INDEPENDENT')
+  expect(approaches.one.faultLog[0].text).toContain('GPS APPROACH')
+  approaches.one.armApproach(false); expect(approaches.two.goAround()).toBe(true)
+  mode(approaches.one); expect(approaches.system.mode).toBe('INDEPENDENT')
+  expect(approaches.one.faultLog[0].text).toContain('MISSED APPROACH')
+  const missed = dualSetup()
+  expect(setUp87nRnav190Final(missed.one, missed.system.flights[0])).toEqual({ ready: true })
+  missed.tick()
+  expect(missed.one.requestMissedApproach()).toBe(true)
+  expect(missed.two.missedApproachActive).toBe(true)
+  expect(missed.one.goArounds).toBe(0); expect(missed.two.goArounds).toBe(0) // The synchronized FMS request is not TOGA.
+  expect(missed.one.goAround()).toBe(true)
+  expect(missed.two.missedApproachActive).toBe(true)
+  expect(missed.one.goArounds).toBe(1); expect(missed.two.goArounds).toBe(0)
+  const winds = dualSetup()
+  winds.one.setCondition('gpsLost', true); winds.one.setCondition('dmeOutage', true); winds.tick(10)
+  expect(winds.one.windComputed).toBe(false); expect(winds.two.windComputed).toBe(false)
+  winds.one.open('PROG'); winds.one.press('CLR', { held: true }); winds.one.press('CLR', { held: true })
+  winds.one.setScratch('090/30'); winds.one.press('LSK3L')
+  expect(winds.two.systemWind).toEqual({ direction: 90, speed: 30 })
+  expect(winds.two.manualWindEntered).toBe(true)
+  expect(winds.one.navigationWindEstimate.east).toBeCloseTo(-30, 6)
+  expect(winds.two.navigationWindEstimate.east).toBeCloseTo(-30, 6)
+})
+
+// Owner: measured same-type source selection, 100 m civil hysteresis, independent computed-position disagreement.
+test('synchronized navigation retains its sensor until the peer is 100 metres better and independent estimates can disagree', () => {
+  const { system, one, two, tick } = dualSetup()
+  const stimulus = stimulusFor(one)
+  stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.2 })
+  stimulus.apply(1, { op: 'override', label: '247', kind: 'FORCE', amount: 0.15 }); tick()
+  expect(one.localNavigationSolution.anp).toBeCloseTo(0.2, 6)
+  expect(two.localNavigationSolution.anp).toBeCloseTo(0.15, 6)
+  expect(system.navigationSide).toBe(1) // 92.6 m improvement is insufficient.
+  stimulus.apply(1, { op: 'override', label: '247', kind: 'FORCE', amount: 0.14 }); tick()
+  expect(system.navigationSide).toBe(2) // 111.12 m improvement.
+  expect(one.navState.gpsSource).toBe(2); expect(two.navState.gpsSource).toBe(2)
+  stimulus.apply(1, { op: 'spoof', northM: 1852, driftEastMps: 0 }); tick()
+  // Geometry has its own owner; this protects delivery of the selected estimate into both controllers.
+  expect(system.flights[0].guidance.distanceToGo).toBeCloseTo(legGeometry(one.activeLegStart, one.coordinates('MUN')!, one.position).toGo, 6)
+  expect(system.flights[1].guidance.distanceToGo).toBeCloseTo(legGeometry(two.activeLegStart, two.coordinates('MUN')!, two.position).toGo, 6)
+  stimulus.apply(1, { op: 'clearSpoof' }); tick()
+  stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.10 }); tick()
+  expect(system.navigationSide).toBe(2)
+  stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.08 }); tick()
+  expect(system.navigationSide).toBe(1)
+  mode(one)
+  stimulus.apply(1, { op: 'spoof', northM: 1852, driftEastMps: 0 }); tick()
+  expect(distanceNm(one.localNavigationSolution.position, two.localNavigationSolution.position)).toBeGreaterThan(0.9)
+  expect(one.recallList.some(message => message.text === 'GPS-GPS POS DISAGREE')).toBe(true)
+  expect(two.recallList.some(message => message.text === 'GPS-GPS POS DISAGREE')).toBe(true)
+  expect(one.truePosition).toEqual(two.truePosition)
+  const phases = dualSetup(), phaseStimulus = stimulusFor(phases.one)
+  for (const index of [0, 1]) {
+    phaseStimulus.apply(index, { op: 'override', label: '110', kind: 'FORCE', amount: index === 0 ? 45.31 : 46.0 })
+    phaseStimulus.apply(index, { op: 'override', label: '111', kind: 'FORCE', amount: -75.6817 })
+    phaseStimulus.apply(index, { op: 'override', label: '120', kind: 'FORCE', amount: 0 })
+    phaseStimulus.apply(index, { op: 'override', label: '121', kind: 'FORCE', amount: 0 })
+  }
+  phases.tick()
+  const departure = phases.one.navdb.airport('CYOW')!.position
+  expect(distanceNm(phases.one.localNavigationSolution.position, departure)).toBeLessThan(33)
+  expect(distanceNm(phases.two.localNavigationSolution.position, departure)).toBeGreaterThan(33)
+  phases.tick(20)
+  phases.one.setCondition('rnpExceeded', true) // A healthy-computer condition notification must not reset local phase history.
+  phases.tick(10)
+  expect(phases.system.mode).toBe('SYNC') // Exactly 30 seconds is not "more than 30".
+  phases.tick()
+  expect(phases.system.mode).toBe('INDEPENDENT')
+  expect(phases.one.faultLog.some(fault => fault.text.includes('PHASE DISAGREEMENT'))).toBe(true)
+})
+
+// Owner: physical RMS acknowledgement is independent of FMS mode/link; standby swap commits only on acknowledgement.
+test('both FMSs tune shared civil devices through feedback and a cross-talk fault only isolates standby entries', () => {
+  const { system, one, two, tick } = dualSetup()
+  one.setRadio('com1Stby', '123.450')
+  expect(two.radioState.com1Stby).toBe('123.450')
+  one.swapRadio('com1')
+  expect(one.radioState.com1).toBe('121.500'); expect(one.radioState.com1Stby).toBe('123.450')
+  tick(); expect(two.radioState.com1).toBe('123.450'); expect(two.radioState.com1Stby).toBe('121.500')
+  mode(two); system.setLinkAvailable(false)
+  two.setRadio('com1Stby', '128.700')
+  expect(one.radioState.com1Stby).toBe('121.500')
+  two.setRadio('nav1', '114.50'); expect(one.radioState.nav1).toBe('113.90')
+  tick(); expect(one.radioState.nav1).toBe('114.50'); expect(two.radioState.nav1).toBe('114.50')
+  two.open('RADIO', 1); two.setScratch('0420'); two.press('LSK1R'); two.setScratch('4321'); two.press('LSK2R'); tick()
+  expect(one.radioState.adf2).toBe('0420'); expect(one.radioState.tpdr2).toBe('4321')
+  system.rms.injectFailure('com1', true); two.swapRadio('com1'); tick()
+  expect(two.radioRequests[0].status).toBe('PENDING'); tick()
+  expect(two.radioRequests[0].status).toBe('FAILED')
+  expect(one.radioState.com1).toBe('123.450'); expect(two.radioState.com1Stby).toBe('128.700')
+  system.rms.injectFailure('com1', false); two.setRadio('com1', '129.100'); tick()
+  expect(one.radioState.com1).toBe('129.100'); expect(two.radioState.com1).toBe('129.100')
+  expect(system.linked).toBe(false); expect(system.mode).toBe('INDEPENDENT')
+})
+
+// Owner: the common plant advances once, and selecting the other computer preserves its motion/independent guidance.
+test('selecting FMS 2 guidance never creates or resets another aircraft and FMS 1 failure leaves FMS 2 output usable', () => {
+  const { system, one, two, fly } = dualSetup()
+  mode(one)
+  two.modify(route => { route.legs = [{ kind: 'wpt', ident: 'CYUL' }] }); two.press('EXEC')
+  const start = { ...one.truePosition }
+  fly(5)
+  expect(one.truePosition).toEqual(two.truePosition)
+  const travelled = distanceNm(start, one.truePosition)
+  expect(travelled).toBeGreaterThan(0.14); expect(travelled).toBeLessThan(0.20) // 120 kt × 5 seconds, single integration.
+  const before = { ...one.truePosition }
+  system.simulator.selectSpeed(80); system.simulator.selectAltitude(4000); system.simulator.engageVerticalSpeed(500)
+  system.selectGuidance(2); expect(two.truePosition).toEqual(before)
+  expect(system.simulator.selectedSpeed).toBe(80); expect(system.simulator.selectedAltitude).toBe(4000)
+  expect(system.simulator.verticalSpeedTarget).toBe(500)
+  one.setCondition('fmsFail', true); fly(5)
+  expect(two.hasCondition('fmsFail')).toBe(false)
+  expect(system.flights[1].guidance.desiredTrack).not.toBeNull()
+  expect(system.flights[0].guidance.desiredTrack).toBeNull()
+  expect(one.truePosition).toEqual(two.truePosition)
+  expect(distanceNm(before, two.truePosition)).toBeGreaterThan(0.1)
+  // The observer must use the one AFCS's recovered HDG selection, not keep an independently engaged LNAV.
+  const recovered = dualSetup()
+  recovered.one.powerOff(); recovered.fly(1)
+  recovered.one.powerOn('COLD', true); recovered.fly(6)
+  expect(recovered.system.mode).toBe('INDEPENDENT')
+  mode(recovered.one); expect(recovered.system.mode).toBe('SYNC')
+  expect(recovered.system.simulator.guidance.mode).toBe('HDG')
+  recovered.fly(600)
+  expect(recovered.two.activeRoute).toEqual(recovered.one.activeRoute)
+  // #1370: source selection must continue the same fuselage estimator, not restart its pitch from zero.
+  // A settled heading/IAS leaves physical pitch unchanged over the next quarter-second; continuity is the contract.
+  const settled = dualSetup()
+  settled.system.simulator.selectHeading(settled.one.heading)
+  settled.system.simulator.selectSpeed(120); settled.fly(30)
+  const pitchBefore = settled.one.attitude.pitch
+  expect(pitchBefore).toBeLessThan(-4) // Positive control: this is a nonzero established rotorcraft attitude.
+  expect(settled.one.attitude.bank).toBeCloseTo(0, 8)
+  settled.system.selectGuidance(2); settled.fly(0.25)
+  expect(settled.two.attitude.pitch).toBeCloseTo(pitchBefore, 8)
+  expect(settled.two.attitude.bank).toBeCloseTo(0, 8)
 })
 
 // Stage B2 of the helicopter-first plan: the radio altimeter measures the aircraft's physical height above a declared

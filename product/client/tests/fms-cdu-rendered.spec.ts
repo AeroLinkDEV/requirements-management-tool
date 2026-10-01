@@ -16,6 +16,34 @@ const screenLines = async (page: Page) => ((await page.locator('.fmsCduScreen').
 const expectLine = async (page: Page, line: number, pattern: RegExp) =>
   expect.poll(async () => (await screenLines(page))[line] ?? '').toMatch(pattern)
 
+// Pointer owner: real ACT RTE 5L opens airborne MOD LEGS; ERASE leaves guidance alone and only EXEC activates it.
+test('BACKTRACK on the actual CDU reviews airborne history before EXEC', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  const flight = page.getByRole('region', { name: 'Flight', exact: true })
+  // Jump changes the route immediately; the paused quarter-second tick refreshes its guidance sample.
+  // MUN to RDG is 21.6 NM in this demonstration. Capture the post-jump state before testing MOD isolation.
+  await expect(flight.locator('.fmsBenchReadout').first()).toHaveText('Active waypoint RDG, 21.6 NM')
+  const activeBefore = await flight.locator('.fmsBenchReadout').first().innerText()
+  await key(page, 'RTE').click()
+  await expectLine(page, 10, /^<BACKTRACK/)
+  await key(page, 'LSK5L').click()
+  await expectLine(page, 0, /^MOD RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /BT001/)
+  await expect(flight.locator('.fmsBenchReadout').first()).toHaveText(activeBefore)
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /^ACT RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
+  await expect(page.getByLabel('On ground (live bench input)', { exact: true })).toHaveCount(0) // DEC-148.
+  await key(page, 'RTE').click(); await key(page, 'LSK5L').click()
+  await expectLine(page, 0, /^MOD RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /BT001/)
+  await page.locator('.fmsCdu').screenshot({ path: 'C:/Sean Project/fms-research/Astra-backtrack-CDU.png' })
+  await key(page, 'EXEC').click()
+  await expectLine(page, 0, /^ACT RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
+})
+
 test('keys on the rendered panel enter data, make a modification and execute it', async ({ page }) => {
   await open(page)
   await expectLine(page, 0, /^IDENT/)
@@ -219,7 +247,7 @@ test('Fly moves the aircraft along the route on the map at the chosen rate, and 
   // waypoint is proved in the logic tier).
   await expect.poll(toGo).toBeLessThan(start - 2)
   await expect(map).toHaveAttribute('aria-label', /LNAV mode, active waypoint MUN/)
-  await expect(page.getByLabel('Guidance')).toContainText('LNAV')
+  await expect(page.getByLabel('Guidance', { exact: true })).toContainText('LNAV')
   await page.getByRole('button', { name: 'Pause' }).click()
   const paused = await readout.innerText()
   // Unpaused, a second at 64 times would move the aircraft about two miles.
@@ -272,6 +300,10 @@ test('IDENT and preflight wire the consumed MAGVAR loader, reference displays, F
   await page.getByRole('button', { name: 'Fly', exact: true }).click()
   await expectLine(page, 0, /^IDENT/)
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await key(page, 'INIT_REF').click(); await key(page, 'LSK5L').click()
+  await expectLine(page, 10, /^>INDEPENDENT$/)
+  await key(page, 'LSK5L').click(); await key(page, 'LSK6R').click()
+  await key(page, 'CLR').click()
   await key(page, 'INIT_REF').click()
   await key(page, 'LSK6L').click()
   await expectLine(page, 0, /^MAINTENANCE/)
@@ -287,6 +319,100 @@ test('IDENT and preflight wire the consumed MAGVAR loader, reference displays, F
   await page.getByLabel('Independent operation').check()
   await expectLine(page, 6, /^INDEPENDENT\s+RTE MATCH$/)
   await expectLine(page, 8, /^\d{4}Z X-SIDE SYNC LOST/)
+})
+
+// Owner: pointer input addresses the inspected computer, peer renders its own state, and RMS feedback survives link loss.
+// Engine owners cannot see a selector accidentally wired to CDU 1 or an active-frequency display wired to the request.
+test('the two CDU panels target separate computers and shared radio feedback remains available without cross-talk', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Show peer CDU' }).click()
+  const inspected = page.getByTestId('fms-cdu-inspected'), peer = page.getByTestId('fms-cdu-peer')
+  const click = (panel: ReturnType<Page['getByTestId']>, id: string) => panel.locator(`.fmsCduKey[data-key="${id}"]`).click()
+  const screen = (panel: ReturnType<Page['getByTestId']>) => panel.locator('.fmsCduScreen')
+  await click(inspected, 'RTE'); await click(peer, 'PROG')
+  await expect(screen(inspected)).toHaveAttribute('aria-label', /^ACT RTE 1/)
+  await expect(screen(peer)).toHaveAttribute('aria-label', /^ACT PROGRESS/)
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await expect(screen(inspected)).toHaveAttribute('aria-label', /^ACT PROGRESS/)
+  await expect(screen(peer)).toHaveAttribute('aria-label', /^ACT RTE 1/)
+  await click(inspected, 'INIT_REF'); await click(inspected, 'LSK5L')
+  await click(inspected, 'LSK5L'); await click(inspected, 'LSK6R')
+  await click(inspected, 'RTE')
+  for (const letter of 'CYYZ') await click(inspected, letter)
+  await click(inspected, 'LSK1R')
+  await expect(screen(inspected)).toHaveAttribute('aria-label', /^MOD RTE 1/)
+  await expect(screen(peer)).toHaveAttribute('aria-label', /^ACT RTE 1/)
+  await click(inspected, 'EXEC'); await click(inspected, 'LSK4L')
+  await expect(screen(peer)).toHaveAttribute('aria-label', /^MOD RTE 1/)
+  await click(peer, 'EXEC'); await expect(screen(peer)).toHaveAttribute('aria-label', /^ACT RTE 1/)
+  await tab(page, 'Dual FMS and radios')
+  const devices = page.getByRole('region', { name: 'Dual computers and radio devices' })
+  await devices.getByRole('button', { name: 'Fail cross-talk link' }).click()
+  await click(inspected, 'F2_1'); await click(peer, 'F2_1') // The physical first row-two key is RADIO on this variation.
+  for (const letter of '123.450') await click(inspected, letter === '.' ? 'DOT' : letter)
+  await click(inspected, 'LSK1L')
+  await page.getByLabel('Simulation rate').selectOption('16')
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await expect(devices.getByRole('list', { name: 'RMS tuning feedback' })).toContainText('FMS 2: COM1 123.450 — ACK')
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await expect(screen(peer)).toHaveAttribute('aria-label', /123\.450/)
+  await devices.getByLabel('COM1 device feedback').selectOption('failed')
+  for (const letter of '124.000') await click(inspected, letter === '.' ? 'DOT' : letter)
+  await click(inspected, 'LSK1L')
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await expect(devices.getByRole('list', { name: 'RMS tuning feedback' })).toContainText('FMS 2: COM1 124.000 — FAILED')
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await expect(screen(inspected)).toHaveAttribute('aria-label', /123\.450/)
+  await expect(screen(peer)).toHaveAttribute('aria-label', /123\.450/)
+  await page.screenshot({ path: 'C:/Sean Project/fms-research/Astra-dual-CDUs-RMS.png', fullPage: true })
+})
+
+// Owner: common sensor-fault controls must address the physical generator even when CDU 2 is inspected.
+test('shared sensor faults from CDU 2 affect both computers actual observations', async ({ page }) => {
+  await open(page)
+  await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'shared-sensors', title: 'Shared offshore inputs', objective: 'Two computers observe the same radio altimeter',
+    maxSeconds: 1, start: '87n-offshore-sar', steps: [{ when: { kind: 'start' }, action: { kind: 'expectAircraft', minAltitude: 490, maxAltitude: 510 } }] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'shared-sensors.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await key(page, 'F2_2').click(); await key(page, 'LSK1R').click() // TACT on the selected 050 hardware.
+  const radAlt = async () => { const lines = await screenLines(page); return lines[lines.findIndex(line => /RAD ALT/.test(line)) + 1] }
+  await expect.poll(radAlt).toMatch(/^\s*500FT/)
+  await tab(page, 'Conditions')
+  await page.getByRole('checkbox', { name: /^Radio altimeter failed/ }).check()
+  await expect.poll(radAlt).toMatch(/^\s*----FT/)
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  await expect(page.getByRole('checkbox', { name: /^Radio altimeter failed/ })).toBeChecked()
+  await page.getByRole('checkbox', { name: /^Radio altimeter failed/ }).uncheck()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await expect.poll(radAlt).toMatch(/^\s*500FT/)
+  await page.getByRole('checkbox', { name: /^GPS integrity lost/ }).check()
+  await tab(page, 'GPS sensors')
+  const faults = page.getByRole('region', { name: 'GPS 1 faults' })
+  await expect(faults.getByRole('note')).toContainText('GPS integrity lost condition holds')
+  await expect(faults.getByRole('button', { name: /^Mask low satellites/ })).toBeDisabled()
+  await tab(page, 'Conditions')
+  await page.getByRole('checkbox', { name: /^GPS integrity lost/ }).uncheck()
+  await tab(page, 'GPS sensors')
+  await page.getByLabel('GPS 1 Baro lost').check()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  await expect(page.getByLabel('GPS 1 Baro lost')).toBeChecked()
+  await page.getByLabel('GPS 1 Baro lost').uncheck()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await expect(page.getByLabel('GPS 1 Baro lost')).not.toBeChecked()
+  await tab(page, 'Conditions')
+  await page.getByLabel('Baro error (ft)').fill('1000')
+  await page.getByRole('button', { name: 'Inject the error' }).click()
+  await expect(page.getByTestId('baro-readout')).toContainText('barometric 1500 ft')
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  await expect(page.getByTestId('baro-readout')).toContainText('baro error +1000 ft')
+  await page.getByLabel('Baro error (ft)').fill('0')
+  await page.getByRole('button', { name: 'Inject the error' }).click()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await expect(page.getByTestId('baro-readout')).toContainText('barometric 500 ft')
 })
 
 test('a built-in scenario runs on the bench with its steps checked live, and gives a report and procedure text', async ({ page }) => {
@@ -456,7 +582,7 @@ test('the bench tools are tabs under the cockpit, keyboard-navigable, and the ch
   await page.goto('/tests/fixtures/fms-cdu.html')
   await expect(page.locator('.fmsCdu')).toBeVisible()
   const tabs = page.getByRole('tablist', { name: 'Bench tools' }).getByRole('tab')
-  await expect(tabs).toHaveText(['Scenarios', 'Conditions', 'GPS sensors', 'Nav data', 'Lighting and keys'])
+  await expect(tabs).toHaveText(['Scenarios', 'Conditions', 'GPS sensors', 'Dual FMS and radios', 'Nav data', 'Lighting and keys'])
   await expect(page.getByRole('tab', { name: 'Scenarios' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'Scenarios' })).toBeVisible()
   await tab(page, 'GPS sensors')
@@ -468,6 +594,8 @@ test('the bench tools are tabs under the cockpit, keyboard-navigable, and the ch
   await expect(page.getByRole('tab', { name: 'GPS sensors' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'Sensor routing' })).toBeVisible()
   await page.getByRole('tab', { name: 'GPS sensors' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Dual FMS and radios' })).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('ArrowRight')
   await expect(page.getByRole('tab', { name: 'Nav data' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByLabel('ARINC 424 navigation data file')).toBeVisible()
@@ -552,6 +680,11 @@ test('AUTO keeps GPS 2 after GPS 1 recovers: the strip says so, GPS 1 shows as a
 
 test('the FMS GPS selection is set from the routing strip, and the integrity condition holds the satellite masking', async ({ page }) => {
   await open(page)
+  // This owner tests local receiver AUTO selection. Synchronized best-source selection has its own dual-FMS owner.
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK5L').click() // SETUP
+  await key(page, 'LSK5L').click() // Request INDEPENDENT
+  await key(page, 'LSK6R').click() // Confirm without interrupting the shared receiver environment.
   await tab(page, 'GPS sensors')
   const routing = page.getByRole('img', { name: /^Sensor routing/ })
   // In use and standby are the FMS's own judgement of each receiver: GPS 2 usable, so an eligible standby.
@@ -689,7 +822,7 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   await expectLine(page, 2, /^STAEV\b/)
   for (const id of ['INIT_REF', 'NEXT', 'LSK1R']) await key(page, id).click()
   await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
-  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v6')
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v7')
   await page.screenshot({ path: 'test-results/s300-kbtv-advisory.png', fullPage: true })
   // The library scenario flies it from the same start state, on a restarted simulation.
   await tab(page, 'Scenarios')
@@ -697,7 +830,7 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   await page.getByLabel('Simulation rate').selectOption('64')
   await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
   await card.getByRole('button', { name: 'Run the scenario' }).click()
-  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v2')
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v3')
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })
@@ -740,8 +873,8 @@ test('the PinS crew continuation requires MAP passage and the actual chart condi
   await expect(continueButton).toBeEnabled()
   await continueButton.locator('..').screenshot({ path: test.info().outputPath('pins-crew-conditions.png') })
   await continueButton.click()
-  await expect(page.getByLabel('Guidance')).toContainText('crew flying the visual segment')
-  await expect(page.getByLabel('Guidance')).toContainText('HDG')
+  await expect(page.getByLabel('Guidance', { exact: true })).toContainText('crew flying the visual segment')
+  await expect(page.getByLabel('Guidance', { exact: true })).toContainText('HDG')
   await page.locator('.fmsBench').screenshot({ path: test.info().outputPath('pins-crew-continuation.png') })
 })
 
@@ -846,6 +979,41 @@ test('C.10: the executed 87N approach shows its chart notes on the Nav data tab,
   await expect(items.nth(8)).toHaveText('LNAV MDA 560-1.')
 })
 
+test('D-R: the Nav data tab shows each moving waypoint\'s age as a bench aid; it never expires', async ({ page }) => {
+  await open(page)
+  // This owner checks age and the simulation clock; enter the trajectory explicitly in TRUE.
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK5L').click()
+  await key(page, 'LSK1L').click()
+  await expectLine(page, 2, /^>TRUE$/)
+  await key(page, 'INIT_REF').click()
+  await key(page, 'NEXT').click()
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /^MOVING WPT/)
+  await page.locator('.fmsCdu').focus()
+  for (const [text, lsk] of [['SHIP1', 'LSK1L'], ['RDG180/5', 'LSK2L'], ['270/20', 'LSK1R']]) {
+    await page.keyboard.type(text)
+    await key(page, lsk).click()
+  }
+  await key(page, 'LSK6R').click()
+  await tab(page, 'Nav data')
+  const card = page.getByRole('region', { name: 'Moving waypoints' })
+  await expect(card).toContainText('Bench aid')
+  const item = card.getByTestId('fms-moving-waypoints').getByRole('listitem')
+  await expect(item).toHaveText(/^SHIP1 270T\/20 kt, age 0:00:\d\d$/)
+  // Flying on, it ages on the simulation clock (64 times real time): minutes, not seconds.
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await expect(item).toHaveText(/age 0:0[1-9]:\d\d|age 0:[1-5]\d:\d\d/, { timeout: 15_000 })
+  await page.getByRole('button', { name: 'Pause' }).click()
+  // The same stored 270 TRUE trajectory is 283 MAG at the fixture's declared WMM2025 position (~12.5 W).
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK5L').click()
+  await key(page, 'LSK1L').click()
+  await expectLine(page, 2, /^>MAG$/)
+  await expect(item).toHaveText(/^SHIP1 283°\/20 kt, age 0:\d\d:\d\d$/)
+})
+
 test('B1.1: the PFD writes the altimeter setting beside the altitude; setting STD or injecting an error changes the reading, never the radio or physical height', async ({ page }) => {
   await open(page)
   const efis = page.getByRole('region', { name: 'EFIS' })
@@ -885,31 +1053,6 @@ test('B1.1: the PFD writes the altimeter setting beside the altitude; setting ST
   await card.getByLabel('Baro error (ft)').fill('3000')
   await expect(card.getByRole('button', { name: 'Inject the error' })).toBeDisabled()
 })
-
-test('D-R: the Nav data tab shows each moving waypoint\'s age as a bench aid; it never expires', async ({ page }) => {
-  await open(page)
-  await key(page, 'INIT_REF').click()
-  await key(page, 'NEXT').click()
-  await key(page, 'LSK6L').click()
-  await expectLine(page, 0, /^MOVING WPT/)
-  await page.locator('.fmsCdu').focus()
-  for (const [text, lsk] of [['SHIP1', 'LSK1L'], ['RDG180/5', 'LSK2L'], ['270/20', 'LSK1R']]) {
-    await page.keyboard.type(text)
-    await key(page, lsk).click()
-  }
-  await key(page, 'LSK6R').click()
-  await tab(page, 'Nav data')
-  const card = page.getByRole('region', { name: 'Moving waypoints' })
-  await expect(card).toContainText('Bench aid')
-  const item = card.getByTestId('fms-moving-waypoints').getByRole('listitem')
-  await expect(item).toHaveText(/^SHIP1 270°\/20 kt, age 0:00:\d\d$/)
-  // Flying on, it ages on the simulation clock (64 times real time): minutes, not seconds.
-  await page.getByLabel('Simulation rate').selectOption('64')
-  await page.getByRole('button', { name: 'Fly' }).click()
-  await expect(item).toHaveText(/age 0:0[1-9]:\d\d|age 0:[1-5]\d:\d\d/, { timeout: 15_000 })
-  await page.getByRole('button', { name: 'Pause' }).click()
-})
-
 test('B1.7: a paused run stops its clock: the predictions and the fuel on FUEL and PROGRESS read the same after a wait', async ({ page }) => {
   await open(page)
   const readout = page.locator('.fmsBench').getByText(/^Active waypoint/)

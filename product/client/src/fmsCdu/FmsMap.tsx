@@ -30,7 +30,7 @@ export default function FmsMap({ fms, sim, range }: Props) {
     for (const leg of legs) {
       // A gap, or a conditional leg with no fixed end, breaks the drawn line.
       if (leg.kind !== "wpt") { if (current.length > 1) lines.push(current); current = []; continue; }
-      const at = fms.coordinates(leg.ident, route);
+      const at = leg.position ?? fms.coordinates(leg.ident, route);
       if (!at) continue;
       // An RF leg is drawn as its arc, not as the chord.
       const previous = current.at(-1);
@@ -49,7 +49,7 @@ export default function FmsMap({ fms, sim, range }: Props) {
   const [first, ...later] = routeLines(fms.activeLegStart, active);
   const waypoints = active.legs.flatMap((leg, i) => {
     if (leg.kind !== "wpt") return [];
-    const at = fms.coordinates(leg.ident);
+    const at = leg.position ?? fms.coordinates(leg.ident);
     return at ? [{ ident: leg.ident, at, active: i === 0 }] : [];
   });
   const modified = fms.routeStatus === "MOD" ? routeLines(fms.position, fms.route) : [];

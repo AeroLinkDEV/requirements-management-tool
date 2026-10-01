@@ -68,11 +68,14 @@ export const REQUIRED_JOBS = [
 ]
 
 // Sharded groups. Shard counts are deliberately tuned over time, so the verifier requires a complete,
-// self-consistent i/N set at the configured size rather than fixed names; the test suite pins these
-// numbers against ci.yml so drift on either side is caught before it can matter.
+// self-consistent i/N set at an accepted size rather than fixed names. `expectedShards` is the size ci.yml
+// configures, which the test suite pins against the workflow so drift on either side is caught before it can
+// matter. `acceptedShards` are the sizes a run may have. They differ only while a group changes size: the
+// binder runs main's verifier, so it must accept the new size before the workflow moves to it (#1358: browser
+// journeys, 4 then 6 shards, in two maintenance steps).
 export const SHARDED_JOB_GROUPS = [
-  { name: 'API test suite', pattern: /^API test suite \((\d+)\/(\d+)\)$/, expectedShards: 3 },
-  { name: 'Browser journeys', pattern: /^Browser journeys \((\d+)\/(\d+)\)$/, expectedShards: 4 },
+  { name: 'API test suite', pattern: /^API test suite \((\d+)\/(\d+)\)$/, expectedShards: 3, acceptedShards: [3] },
+  { name: 'Browser journeys', pattern: /^Browser journeys \((\d+)\/(\d+)\)$/, expectedShards: 6, acceptedShards: [6] },
 ]
 
 const JOB_CONCLUSION_SUCCESS = 'success'
@@ -191,8 +194,8 @@ function collectShardReasons(jobs, reasons, groups = SHARDED_JOB_GROUPS) {
     if (!complete) {
       reasons.push(`shard-set-incomplete: ${group.name} ran ${shards.length} of ${total} shards (${shards.join(', ')})`)
     }
-    if (total !== group.expectedShards) {
-      reasons.push(`shard-count-drift: ${group.name} ran ${total} shards but the verifier expects ${group.expectedShards}; update SHARDED_JOB_GROUPS with the workflow change`)
+    if (!group.acceptedShards.includes(total)) {
+      reasons.push(`shard-count-drift: ${group.name} ran ${total} shards but the verifier accepts ${group.acceptedShards.join(' or ')}; update SHARDED_JOB_GROUPS with the workflow change`)
     }
     for (const { job, shard } of parsed) {
       if (job.conclusion !== JOB_CONCLUSION_SUCCESS) {

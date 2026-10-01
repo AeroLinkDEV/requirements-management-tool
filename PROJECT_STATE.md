@@ -396,6 +396,8 @@ See [FMS Live Showcase Dataset](docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md) and 
 
 ## FMS Test Bench (CMA-9000 CDU)
 
+ACT RTE BACKTRACK records and reverses flown waypoint history, with reviewable MOD/ERASE/EXEC, immutable coordinates and attributes, special-procedure exclusions, retained SAR/hold origins and the manual default airborne option. Ground operations remain deferred under [DEC-148](DECISIONS_AND_OPEN_QUESTIONS.md#dec-148---helicopter-bench-ground-operations-follow-v1). The synchronized activation clears both computers' prior history; this remains session-level simulator behavior, with [applicability boundaries](product/docs/FMS_APPLICABILITY.md#flown-history-backtrack).
+
 The helicopter bench consumes NOAA WMM2025 for MAG/TRUE angular entry and display, with model/epoch/checksum identity, a real simulator package loader, CRC-failed navigation withdrawal and a distinct age advisory. FMS cold/warm power and the preflight page flow are available separately from receiver power. GPS navigation refuses manual position/time replacement; pressure-altitude QNH is entered on POS INIT or VNAV. Aircraft geometry and wind remain true. The generic displays and simulator package are not installed CMA interfaces; height fallback, extrapolation and startup assumptions are documented in [FMS_APPLICABILITY.md](product/docs/FMS_APPLICABILITY.md#magnetic-reference-and-initialization).
 
 Every project has an **FMS Test Bench** (`…/fms-test-bench`): a photorealistic, touchable CMA-9000 FMS control
@@ -482,9 +484,12 @@ display unit for engineers.
   - **Database cycles, maintenance and dual operation**: IDENT shows the active and inactive navigation database
     cycles with their effective dates and swaps them; past the active cycle's end the FMS raises DATABASE OUT OF
     DATE; REF NAV DATA defines idents in a temporary database; a loaded ARINC 424 file becomes the active cycle.
-    The MAINT page runs a self test that fails while a fault is present and keeps a fault log. In dual operation
-    the executed route is cross-loaded to the other FMS; in independent operation the sides can differ, and they
-    resynchronise when it ends.
+    The MAINT page runs a self test that fails while a fault is present and keeps a fault log. Two actual simulator
+    computers/CDUs share one physical aircraft through modeled cross-talk. SYNC has one MOD editor and transfers
+    EXEC; independent crossfill arrives as receiving MOD/EXEC. SETUP mode confirmation, sourced refusals,
+    measured 100 m source hysteresis and more-than-30-second phase disagreement are modeled. Link/power recovery
+    requires crew synchronization. Shared civil RMS tuning uses device feedback independently of cross-talk;
+    installed radio, RF and discrete interfaces remain partial. See the two-computer section in FMS_APPLICABILITY.md.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
@@ -609,7 +614,10 @@ HOME production's instance badge also reports main currency and check age. The e
 records its remote observation beside the dedicated-source marker; the API reads that observation passively
 and binds it to its running source identity. A failed, missing, mismatched, or more-than-30-minute-old
 observation is Unverified. Browser status refreshes cannot fetch Git or trigger deployment; the production
-reconciler retains its 30-minute schedule and explicit remote-demo Start reconciles before READY.
+reconciler retains its 30-minute schedule and explicit remote-demo Start reconciles before READY, except that
+Monday to Friday 08:00-18:00 Eastern both hold the revision on disk and only a manual redeploy request
+(`REDEPLOY_AEROLINK_PRODUCTION.bat`) advances it ([DEC-149](DECISIONS_AND_OPEN_QUESTIONS.md#dec-149---production-redeploys-only-on-request-during-work-hours)).
+Merging and `main` are unaffected.
 
 HOME production transitions preserve the prior protected-tunnel ON/OFF state under the initiating policy.
 Exact runtime reuse skips rebuild and PostgreSQL startup. A transition is carried by **one outer authority** -

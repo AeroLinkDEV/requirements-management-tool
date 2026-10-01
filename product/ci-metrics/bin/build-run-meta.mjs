@@ -13,6 +13,8 @@
 
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { SHARDED_JOB_GROUPS } from '../lib/merge-authority.mjs'
 
 const value = (name) => process.env[name] ?? null
 const enabled = (name) => process.env[name] === 'true'
@@ -54,6 +56,35 @@ if (!tree || !/^[0-9a-f]{40}$/.test(tree)) {
   console.error('[ci-metrics] METRICS_TREE_SHA is missing or malformed; run metadata will not be authoritative.')
   process.exit(1)
 }
+
+// The browser-pr shard count, read from the workflow this checkout runs (#1358): its instances follow the matrix, so
+// changing the number of shards is a change to ci.yml alone. The list must be exactly 1..N for a size the verifier
+// accepts (SHARDED_JOB_GROUPS); anything else, or a workflow that cannot be read, fails closed.
+function browserPrShards() {
+  const path = value('METRICS_WORKFLOW_PATH') ?? fileURLToPath(new URL('../../../.github/workflows/ci.yml', import.meta.url))
+  const fail = (why) => {
+    console.error(`[ci-metrics] browser-pr matrix: ${why}; expected topology cannot be derived.`)
+    process.exit(1)
+  }
+  let lines = []
+  try {
+    lines = readFileSync(path, 'utf8').split(/\r?\n/)
+  } catch {
+    fail(`cannot read ${path}`)
+  }
+  const start = lines.indexOf('  browser-pr:')
+  if (start < 0) fail('no browser-pr job in the workflow')
+  const next = lines.findIndex((line, index) => index > start && /^  [a-z0-9-]+:$/.test(line))
+  const lists = lines.slice(start, next < 0 ? lines.length : next).map((line) => /^        shard: \[([0-9, ]+)\]$/.exec(line)).filter(Boolean)
+  if (lists.length !== 1) fail(`expected one shard list in the browser-pr job, found ${lists.length}`)
+  const shards = lists[0][1].split(',').map((entry) => Number(entry.trim()))
+  const accepted = SHARDED_JOB_GROUPS.find((group) => group.name === 'Browser journeys').acceptedShards
+  if (!accepted.includes(shards.length) || shards.some((shard, index) => shard !== index + 1)) {
+    fail(`shard: [${shards.join(', ')}] is not 1..N for a size the verifier accepts (${accepted.join(' or ')})`)
+  }
+  return shards.length
+}
+const browserPrInstances = Array.from({ length: browserPrShards() }, (_, index) => `browser-pr-${index + 1}`)
 
 const event = value('GITHUB_EVENT_NAME') ?? ''
 const ref = value('GITHUB_REF') ?? ''
@@ -123,10 +154,10 @@ if (!docsOnly) {
 }
 
 if (isPullRequestEvent && browser) {
-  for (let shard = 1; shard <= 4; shard += 1) addSelected('browser-pr', `browser-pr-${shard}`, ['changes'])
+  for (const instance of browserPrInstances) addSelected('browser-pr', instance, ['changes'])
 } else {
   const reason = !browser ? 'browser classification is false' : `event ${event} does not run browser-pr`
-  skipJob('browser-pr', ['browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4'], reason)
+  skipJob('browser-pr', browserPrInstances, reason)
 }
 
 if (!isPushEvent && browser) {

@@ -31,6 +31,7 @@ inbound firewall or router port.
 | `AEROLINK_REMOTE_DEMO_STATUS.bat` | Read-only component status with a final `AEROLINK REMOTE DEMO READY` / `AEROLINK REMOTE DEMO NOT READY` verdict. |
 | `STOP_AEROLINK_REMOTE_DEMO.bat` | Stops only the AeroLink-owned ngrok tunnel, then stops the local AeroLink stack and repository-owned PostgreSQL. Never deletes configuration, evidence, database content, or credentials. |
 | `CONFIGURE_AEROLINK_REMOTE_DEMO.bat` | Scheduled-recovery management: `Preview`, `Install`, `Status`, or `Remove`. No argument defaults to `Preview`. |
+| `REDEPLOY_AEROLINK_PRODUCTION.bat` | Requests a redeploy to current `origin/main` during the work-hours hold (below) and starts the installed reconciliation task to carry it out. |
 
 The underlying implementation is `product\scripts\AeroLinkRemoteDemo.ps1`
 (operator CLI) and `product\scripts\AeroLinkRemoteDemo.psm1` (tested core). It
@@ -148,6 +149,24 @@ after a reboot with nobody logged in, which is the exact 2026-09-03 failure. The
 `origin/main` has moved; when it has, the production source is fast-forwarded and
 production is restarted into it through the ordinary start path, which re-proves the
 protected endpoint.
+
+### Work-hours hold (DEC-149)
+
+A redeploy takes AeroLink and the protected tunnel down for six to eight minutes. Monday to Friday, 08:00 to
+18:00 US Eastern (wall-clock, so it follows daylight saving), production therefore moves only when asked:
+
+- a timed pass that finds `origin/main` moved logs `... Not redeploying: it is work hours ...` in
+  `remote-demo.log` and stops nothing. It still inspects, so the instance badge keeps showing how far
+  production is behind;
+- `START_AEROLINK_REMOTE_DEMO.bat` and the boot/logon recovery task run the revision already on disk
+  instead of advancing, so restarting a dropped tunnel is never also a redeploy;
+- `REDEPLOY_AEROLINK_PRODUCTION.bat` records a request in `state\redeploy-request.json` and starts the
+  installed reconciliation task, which redeploys under its own attested launch context. The next pass takes
+  the request whatever it decides, and a request older than two hours is not honoured, so an old request can
+  never take the tunnel down later in the day.
+
+Outside the window the timed pass redeploys exactly as before, so production catches up at the first pass
+after 18:00. Merging and the merge queue are not affected.
 
 `Status` inspects both tasks; `Remove` deletes both; `Preview` prints the exact recovery
 XML that would be installed, and the source it resolved, without creating anything.

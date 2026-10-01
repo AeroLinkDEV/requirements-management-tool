@@ -203,9 +203,14 @@ test('T8: with a hover procedure in the route PROGRESS shows TDN and MRK, each w
   const lines = progress(unit)
   // The joining point is active; the page still lists the procedure's TDN then MRK.
   expect(unit.activeRoute.legs[0]).toMatchObject({ kind: 'wpt', ident: 'JN' })
-  // Outbound on the join the aircraft is not closing, so no ETA yet (the page's usual dashes).
-  expect(lines[2]).toMatch(/^TDN\s+\d+\.\dNM ----\.-$/)
-  expect(lines[4]).toMatch(/^MRK\s+\d+\.\dNM ----\.-$/)
+  // Outbound on the join the aircraft is not closing, but it is at flying speed on the plan, so both ETAs come from the
+  // planned path (rev3 B1.7 (general)), MRK's the later.
+  expect(unit.closureSpeed).toBeLessThan(0)
+  expect(unit.heldOffPlan).toBe(false)
+  expect(lines[2]).toMatch(/^TDN\s+\d+\.\dNM \d{4}\.\dZ$/)
+  expect(lines[4]).toMatch(/^MRK\s+\d+\.\dNM \d{4}\.\dZ$/)
+  const minutes = (line: string) => { const [, h, m] = /(\d\d)(\d\d\.\d)Z$/.exec(line)!; return Number(h) * 60 + Number(m) }
+  expect(minutes(lines[4])).toBeGreaterThan(minutes(lines[2]))
   expect(lines.join('\n')).not.toMatch(/^JN\b/m)
   // Neither is the active waypoint yet: green, not inverse.
   expect(unit.screen()[2][0]).toMatchObject({ ch: 'T', color: 'green', inverse: false })
@@ -216,12 +221,11 @@ test('T8: with a hover procedure in the route PROGRESS shows TDN and MRK, each w
   expect(dtg(lines[4])).toBeCloseTo(along(2), 1)
   // TDN is the planned transition distance before MRK.
   expect(dtg(lines[4]) - dtg(lines[2])).toBeCloseTo(unit.hover.dtra!, 0)
-  // Turned back toward TDN: the ETAs appear, MRK's the later.
+  // Turned back toward TDN: still timed, MRK's the later.
   expect(fly(600, () => unit.closureSpeed > 30)).toBe(true)
   const closing = progress(unit)
   expect(closing[2]).toMatch(/^TDN\s+\d+\.\dNM \d{4}\.\dZ$/)
   expect(closing[4]).toMatch(/^MRK\s+\d+\.\dNM \d{4}\.\dZ$/)
-  const minutes = (line: string) => { const [, h, m] = /(\d\d)(\d\d\.\d)Z$/.exec(line)!; return Number(h) * 60 + Number(m) }
   expect(minutes(closing[4])).toBeGreaterThan(minutes(closing[2]))
   // JN sequenced: TDN is the active waypoint, magenta and inverse.
   expect(fly(900, () => (unit.activeRoute.legs[0] as { ident?: string }).ident === 'TDN')).toBe(true)

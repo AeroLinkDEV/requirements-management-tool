@@ -374,6 +374,8 @@ type Guidance = { at: number; lateralFt: number; verticalFt: number; scale: Devi
 type Snapshot = { at: LatLon; words: (number | null)[] };
 
 export class AutoSelection {
+  private readonly initialPreference: 0 | 1;
+  constructor(initialPreference: 0 | 1 = 0) { this.initialPreference = initialPreference; }
   private current: number | null = null;
   private eligibleSince: (number | null)[] = [null, null];
   private snapshots: (Snapshot | null)[] = [null, null];
@@ -403,7 +405,7 @@ export class AutoSelection {
   }
 
   private auto(input: SelectionInput, words: GpsApproachWords[], eligible: boolean[]): SelectionResult {
-    const usable = [0, 1].filter(i => input.assessed[i].usable);
+    const usable = [this.initialPreference, 1 - this.initialPreference].filter(i => input.assessed[i].usable);
     const current = this.current !== null && usable.includes(this.current) ? this.current : null;
     const keep = (chosen: number | null, refused = ""): SelectionResult => ({ chosen, transferred: false, qualified: true, refused });
     // No approach being flown (none, not armed, or lost, which disarms it): the current receiver while usable (no

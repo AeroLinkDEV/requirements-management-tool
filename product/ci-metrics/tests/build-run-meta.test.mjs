@@ -64,7 +64,7 @@ test('full pull-request topology has every product instance, exact gate needs, a
       'changes', 'metrics-tooling',
       'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core-domain', 'backend-core-infrastructure',
       'client', 'script-contracts',
-      'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4',
+      'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4', 'browser-pr-5', 'browser-pr-6',
       'browser-production', 'postgresql-smoke', 'gate',
     ])
     const gate = meta.expectedJobs.find((job) => job.instance === 'gate')
@@ -289,4 +289,68 @@ test('expectedRun carries PR, base/head SHA, ref, and workflow identity from the
   } finally {
     rmSync(eventDirectory, { recursive: true, force: true })
   }
+})
+
+// #1358: the browser-pr instances come from the workflow's own matrix, so the move from 4 to 6 shards is one change.
+const realWorkflow = readFileSync(fileURLToPath(new URL('../../../.github/workflows/ci.yml', import.meta.url)), 'utf8')
+
+function withBrowserMatrix(shards) {
+  const directory = mkdtempSync(join(tmpdir(), 'ci-workflow-'))
+  const lines = realWorkflow.split(/\r?\n/)
+  const start = lines.indexOf('  browser-pr:')
+  const offset = lines.slice(start).findIndex((line) => /^        shard: \[/.test(line))
+  assert.ok(start >= 0 && offset > 0, 'ci.yml defines the browser-pr matrix')
+  lines[start + offset] = `        shard: [${shards.join(', ')}]`
+  const path = join(directory, 'ci.yml')
+  writeFileSync(path, lines.join('\n'))
+  return { directory, path }
+}
+
+test('the browser-pr instances follow the workflow matrix: 6 since #1358, selected and skipped alike', () => {
+  for (const total of [6]) {
+    const workflow = withBrowserMatrix(Array.from({ length: total }, (_, index) => index + 1))
+    const names = Array.from({ length: total }, (_, index) => `browser-pr-${index + 1}`)
+    try {
+      const selected = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: workflow.path })
+      assert.equal(selected.result.status, 0, selected.result.stderr)
+      assert.deepEqual(instances(selected.meta).filter((name) => name.startsWith('browser-pr-')), names)
+      rmSync(selected.directory, { recursive: true, force: true })
+      const skipped = build({ ...ALL_TRUE, CLASS_BROWSER: 'false', METRICS_WORKFLOW_PATH: workflow.path })
+      assert.equal(skipped.result.status, 0, skipped.result.stderr)
+      assert.deepEqual(skipped.meta.skippedJobs.map((job) => job.instance).filter((name) => name.startsWith('browser-pr-')), names)
+      rmSync(skipped.directory, { recursive: true, force: true })
+    } finally {
+      rmSync(workflow.directory, { recursive: true, force: true })
+    }
+  }
+})
+
+test('a browser-pr matrix the verifier does not accept, or cannot be read, fails closed', () => {
+  for (const shards of [[1, 2, 3, 4], [1, 2, 3, 4, 5], [1, 2, 4, 5, 6, 7], [2, 3, 4, 5]]) {
+    const workflow = withBrowserMatrix(shards)
+    try {
+      const { directory, result } = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: workflow.path })
+      assert.notEqual(result.status, 0, `[${shards}] must fail`)
+      assert.match(result.stderr, /browser-pr matrix/)
+      rmSync(directory, { recursive: true, force: true })
+    } finally {
+      rmSync(workflow.directory, { recursive: true, force: true })
+    }
+  }
+  // Two shard lists in the job (a second axis or a stray edit): which one GitHub expands is not the script's to guess.
+  const doubled = withBrowserMatrix([1, 2, 3, 4, 5, 6])
+  try {
+    const text = readFileSync(doubled.path, 'utf8').replace('        shard: [1, 2, 3, 4, 5, 6]', '        shard: [1, 2, 3, 4, 5, 6]\n        shard: [1, 2, 3, 4]')
+    writeFileSync(doubled.path, text)
+    const { directory, result } = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: doubled.path })
+    assert.notEqual(result.status, 0, 'two shard lists must fail')
+    assert.match(result.stderr, /browser-pr matrix: expected one shard list/)
+    rmSync(directory, { recursive: true, force: true })
+  } finally {
+    rmSync(doubled.directory, { recursive: true, force: true })
+  }
+  const missing = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: join(tmpdir(), 'no-such-workflow.yml') })
+  assert.notEqual(missing.result.status, 0)
+  assert.match(missing.result.stderr, /browser-pr matrix/)
+  rmSync(missing.directory, { recursive: true, force: true })
 })

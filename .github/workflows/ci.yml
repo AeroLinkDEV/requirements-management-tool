@@ -1133,12 +1133,14 @@ jobs:
     # balanced, and the whole suite has grown until each needs about three and a half minutes of setup and
     # 26-27 minutes of journeys: #1352's shard 1 passed every step and was cancelled at 30m15s during upload,
     # #1326's candidates were cancelled at 30m25s and 30m27s. More shards are the lasting fix, but the merge
-    # verifier pins the shard count (SHARDED_JOB_GROUPS), so that change takes two maintenance runs.
-    timeout-minutes: 40
+    # verifier pins the shard count (SHARDED_JOB_GROUPS), so that change took two maintenance runs (#1358): the verifier
+    # first accepted 4 or 6 (#1368), then the matrix moved to six. Six shards carry the same journeys in about 17.5 to
+    # 19.3 minutes each (the #1368 estimate from five full-suite queue runs), so thirty is again a hang ceiling with room.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       METRICS_JOB_ID: browser-pr
       METRICS_JOB_NAME: Browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})

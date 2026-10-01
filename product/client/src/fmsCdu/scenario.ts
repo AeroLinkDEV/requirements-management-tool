@@ -671,7 +671,7 @@ export class ScenarioRunner {
  * Advances a simulation by whole ticks: each moves the clock, integrates the flight and then lets the runner observe.
  * The bench and runHeadless both use it, so a scenario sees the same timeline at any rate.
  */
-export function advanceTicks(ticks: number, moveClock: (ms: number) => void, sim: FlightSimulator, runner: ScenarioRunner | null) {
+export function advanceTicks(ticks: number, moveClock: (ms: number) => void, sim: Pick<FlightSimulator, "step">, runner: ScenarioRunner | null) {
   const running = runner !== null && !runner.finished;
   for (let i = 0; i < ticks; i += 1) {
     moveClock(TICK_SECONDS * 1000);
