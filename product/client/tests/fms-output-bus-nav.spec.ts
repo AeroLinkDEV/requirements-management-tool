@@ -8,7 +8,7 @@ import { FMS_OUTPUT_TAGS } from '../src/fmsCdu/outputTags'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { NAV_OUTPUT_VOCABULARY } from '../src/fmsCdu/sensorState'
 
-// Stage F F13 part 1 (FMS_STAGE_F_PLAN.md F13, C4; Astra SF-07): the C1 values F2 computes reach the exhaustive output
+// Stage F F13 part 1 (F13 and C4 of the Stage F plan; Astra SF-07): the C1 values F2 computes reach the exhaustive output
 // bus, each as its own word with provenance and validity: FAIL from a failed FMS, NCD for a value the selected solution
 // does not have. Radio health, tuned stations, TACAN and DVS follow in part 2, after F8 and F11.
 
