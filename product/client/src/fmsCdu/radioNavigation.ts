@@ -160,8 +160,3 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
   if (vorDme) fixes.push(vorDme);
   return fixes;
 }
-
-/** The pre-F3 single fix: DME/DME when it solves, otherwise the most accurate VOR/DME. */
-export function solveRadio(...args: Parameters<typeof radioFixes>): RadioFix | null {
-  return radioFixes(...args)[0] ?? null;
-}

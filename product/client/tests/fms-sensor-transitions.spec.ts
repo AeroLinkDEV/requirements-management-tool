@@ -47,6 +47,19 @@ test('F3 regression: a GPS-dependent best radio fix does not hide an independent
   expect(result.sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeCloseTo(2.3, 6)
 })
 
+// Authoring gate: candidate provenance must reflect the input prior even when an independent mode wins selection.
+// A closure over mutable selection loses that dependency; existing NAIM tests only checked the winning radio.
+// The public estimator's candidate list is the owner boundary and needs no added seam.
+test('F3: a losing candidate keeps its GPS-derived prior dependency after an independent radio wins', () => {
+  const nav = equipped()
+  nav.update(input({ gps: gps() }))
+  const result = nav.update(input({ radios: [{ ...fix('DME/DME', 0.6), priorResolved: true }, fix('VOR/DME', 0.3)] }))
+  expect(result.mode).toBe('VOR/DME')
+  expect(result.gpsDependent).toBe(false)
+  expect(result.sensors.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+  expect(result.sensors.find(sensor => sensor.mode === 'VOR/DME')!.gpsDependent).toBe(false)
+})
+
 test('F3 step 2: uncertain GPS stays ahead of KALMAN and DVS without a qualifying radio backup', () => {
   const nav = equipped()
   nav.update(input({ gps: gps(), kalmanReady: true }))
@@ -244,6 +257,16 @@ test('F3 (E-17): VOR/DME NAV LOST needs every VOR or DME receiver failed; a crew
   step(deselected, 1)
   expect(deselected.navState.mode).toBe('DR')
   expect(deselected.recallList.map(m => m.text)).not.toContain('VOR/DME NAV LOST')
+  // TEST removes valid words temporarily, but no receiver/bus failure occurred (E-17).
+  const testing = setup()
+  step(testing, 3)
+  expect(testing.navState.mode).toBe('VOR/DME')
+  for (const device of ['nav1', 'nav2'] as const) { testing.radioPort!.pressTest(device); testing.radioPort!.pressTest(device) }
+  step(testing, 1)
+  expect(testing.navState.mode).toBe('DR')
+  expect(testing.recallList.map(m => m.text)).not.toContain('VOR/DME NAV LOST')
+  step(testing, 4)
+  expect(testing.navState.mode).toBe('VOR/DME')
   const failed = setup()
   step(failed, 3)
   expect(failed.navState.mode).toBe('VOR/DME')

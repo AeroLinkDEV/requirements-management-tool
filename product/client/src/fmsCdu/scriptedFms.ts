@@ -1370,8 +1370,12 @@ export class ScriptedFms implements CduBackend {
     // Leaving a mode for a lower one because it can no longer be navigated on: its NAV LOST (plan F3; M300 Appendix E).
     // E-17's cause: every VOR receiver, or every DME transceiver, has failed (onside and offside: the radios are shared).
     const rms = this.rms;
-    const vorDmeReceiversFailed = rms !== null && (rms.receiving("nav1") === null && rms.receiving("nav2") === null
-      || !rms.dmeReceiving("dme1") && !rms.dmeReceiving("dme2"));
+    const receiverFailed = (device: "nav1" | "nav2" | "dme1" | "dme2") => {
+      const faults = rms?.faults(device);
+      return faults?.receiver === "FAILED" || faults?.measurementBus === "LOST";
+    };
+    const vorDmeReceiversFailed = rms !== null && (receiverFailed("nav1") && receiverFailed("nav2")
+      || receiverFailed("dme1") && receiverFailed("dme2"));
     const lost = transitionAlert(previous, selection.mode, selection.sensors, { vorDmeReceiversFailed });
     if (lost) this.alert(alert(lost));
     // The GPS integrity annunciator (plan F3's annunciation contract; M300 1-4): lit while GPS is navigated without
