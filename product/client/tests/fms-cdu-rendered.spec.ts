@@ -1480,6 +1480,7 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   // 40px button minimum is present; otherwise a faceplate regression can pass only in the fixture.
   await page.addStyleTag({ url: '/src/Density.css' })
   await centredKeys()
+  await page.screenshot({ path: testInfo.outputPath('centred-engineering-keys.png'), fullPage: true })
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
   const boxes = async () => {
     const cdu = await page.locator('.fmsBenchCduStation .fmsCdu').first().boundingBox()
