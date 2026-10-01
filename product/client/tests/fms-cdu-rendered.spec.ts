@@ -75,7 +75,7 @@ test('BACKTRACK on the actual CDU reviews airborne history before EXEC', async (
   await key(page, 'RTE').click(); await key(page, 'LSK5L').click()
   await expectLine(page, 0, /^MOD RTE 1 LEGS/)
   await expect(page.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /BT001/)
-  await page.locator('.fmsCdu').screenshot({ path: 'C:/Sean Project/fms-research/Astra-backtrack-CDU.png' })
+  await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('backtrack-CDU.png') })
   await key(page, 'EXEC').click()
   await expectLine(page, 0, /^ACT RTE 1 LEGS/)
   await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
@@ -321,7 +321,7 @@ test('IDENT and preflight wire the consumed MAGVAR loader, reference displays, F
   await expect(page.locator('.efisPfd').getByText(magneticHeading, { exact: true })).toBeVisible()
   await tab(page, 'Nav data')
   const preflight = page.getByRole('region', { name: 'FMS initialization and preflight' })
-  await page.screenshot({ path: 'C:/Sean Project/fms-research/Astra-MAG-preflight-MAG.png', fullPage: true })
+  await page.screenshot({ path: test.info().outputPath('preflight-MAG.png'), fullPage: true })
   const [packageDownload] = await Promise.all([page.waitForEvent('download'), preflight.getByRole('button', { name: 'Export MAGVAR package' }).click()])
   const packageData = JSON.parse(await readFile((await packageDownload.path())!, 'utf8'))
   packageData.coefficients += ' ' // CRC remains unchanged; this is the actual loader boundary.
@@ -406,7 +406,7 @@ test('the two CDU panels target separate computers and shared radio feedback rem
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(screen(inspected)).toHaveAttribute('aria-label', /123\.450/)
   await expect(screen(peer)).toHaveAttribute('aria-label', /123\.450/)
-  await page.screenshot({ path: 'C:/Sean Project/fms-research/Astra-dual-CDUs-RMS.png', fullPage: true })
+  await page.screenshot({ path: test.info().outputPath('dual-CDUs-RMS.png'), fullPage: true })
 })
 
 // Owner: common sensor-fault controls must address the physical generator even when CDU 2 is inspected.
@@ -865,7 +865,7 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   for (const id of ['INIT_REF', 'NEXT', 'LSK1R']) await key(page, id).click()
   await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
   await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v9')
-  await page.screenshot({ path: 'test-results/s300-kbtv-advisory.png', fullPage: true })
+  await page.screenshot({ path: test.info().outputPath('s300-kbtv-advisory.png'), fullPage: true })
   // The library scenario flies it from the same start state, on a restarted simulation.
   await tab(page, 'Scenarios')
   const card = page.getByRole('region', { name: 'Scenarios' })
