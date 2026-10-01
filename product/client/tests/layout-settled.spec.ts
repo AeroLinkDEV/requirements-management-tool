@@ -17,7 +17,18 @@ test('a document that keeps growing fails with the settling deadline and recent 
     }
     requestAnimationFrame(grow)
   })
-  await expect(layoutSettled(page, 600)).rejects.toThrow(/Layout did not settle within 600 ms \(last heights: \d+, \d+, \d+\)/)
+  const evaluate = page.evaluate.bind(page)
+  for (const delayFirstReply of [false, true]) {
+    let probes = 0
+    // Keep real DOM measurements; a delayed reply can exhaust the deadline with only one sample.
+    page.evaluate = (async (...args: Parameters<typeof page.evaluate>) => {
+      const result = await evaluate(...args)
+      if (++probes === 1 && delayFirstReply) await new Promise(resolve => setTimeout(resolve, 650))
+      return result
+    }) as typeof page.evaluate
+    await expect(layoutSettled(page, 600)).rejects.toThrow(/Layout did not settle within 600 ms \(last heights: \d+(?:, \d+){0,2}\)/)
+    if (delayFirstReply) expect(probes).toBe(1)
+  }
 })
 
 test('an equal height returned after the deadline does not authorize a measurement', async ({ page }) => {
