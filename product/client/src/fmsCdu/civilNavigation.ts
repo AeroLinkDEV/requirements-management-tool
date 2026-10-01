@@ -152,7 +152,7 @@ export class CivilNavigation {
     const fixGpsDependent = (fix: RadioFix) => fix.motion?.gpsDependent === true || fix.priorResolved && priorGpsDependent;
     // Transitive provenance (plan C1): a fix the prior estimate had to disambiguate inherits the prior's GPS dependency.
     const radioGpsDependent = radio !== null && fixGpsDependent(radio);
-    const airValid = air !== null && [air.headingTrue, air.tasKt, air.altitudeFt].every(Number.isFinite)
+    const airValid = air !== null && air.headingValid !== false && air.tasValid !== false && [air.headingTrue, air.tasKt, air.altitudeFt].every(Number.isFinite)
       && air.tasKt >= 0 && air.tasKt <= 600;
     const lowSpeed = airValid && indicatedAirspeedKt(air!.tasKt, air!.altitudeFt) < this.parameters.drLowSpeedIas.value;
     let gps = input.gps;

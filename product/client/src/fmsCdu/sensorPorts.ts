@@ -7,6 +7,8 @@ import { HELICOPTER_PROFILE } from "./profile";
 export type SensorStatus = "NORMAL" | "NCD" | "FAIL";
 export type Sample<T> = { at: number; sequence: number; status: SensorStatus; value: T | null };
 export type AirData = { headingTrue: number; tasKt: number; altitudeFt: number;
+  /** Per-input navigation validity; omitted means valid for legacy adapters. Physical flight truth is separate. */
+  headingValid?: boolean; tasValid?: boolean;
   /** Laboratory atmosphere reference for the indicated-altitude display; not an OEM air-data word. */
   indicationQnhHpa?: number;
   /** Adapter-provided validity flags; omitted means the legacy corrected, mutually consistent air-data contract. */
@@ -18,7 +20,7 @@ export function validRangeIdentity(identity: RangeIdentity | undefined, frequenc
   return !!identity && ["dme1", "dme2"].includes(identity.receiver) && [1, 2, 3].includes(identity.channel)
     && identity.frequency === frequency && Number.isSafeInteger(identity.commandSequence) && identity.commandSequence >= 0;
 }
-export type RadioObservation = { rangeIdentity?: RangeIdentity; station: Navaid; slantRangeNm: Sample<number>; bearingTrue: Sample<number> };
+export type RadioObservation = { rangeIdentity?: RangeIdentity; station: Navaid; slantRangeNm: Sample<number>; bearingTrue: Sample<number>; reportedDmeIdent?: Sample<string> };
 export type SensorFrame = {
   air: Sample<AirData>;
   attitude: Sample<Attitude>;
@@ -40,14 +42,15 @@ const monotonic = (sample: Sample<unknown>, previous?: Sample<unknown>) => !prev
 export class BufferedSensorPort implements SensorInputPort {
   private frame: SensorFrame | null = null;
   publish(frame: SensorFrame): boolean {
-    const samples = [frame.air, frame.attitude, frame.radioHeight, ...frame.gps, ...frame.radios.flatMap(radio => [radio.slantRangeNm, radio.bearingTrue])];
+    const samples = [frame.air, frame.attitude, frame.radioHeight, ...frame.gps, ...frame.radios.flatMap(radio => [radio.slantRangeNm, radio.bearingTrue, ...(radio.reportedDmeIdent ? [radio.reportedDmeIdent] : [])])];
     if (!samples.every(validStamp) || frame.radios.some(radio => !validPosition(radio.station.position))) return false;
     if (this.frame && (frame.air.at < this.frame.air.at || frame.air.sequence <= this.frame.air.sequence)) return false;
     if (!monotonic(frame.attitude, this.frame?.attitude) || !monotonic(frame.radioHeight, this.frame?.radioHeight)) return false;
     if (frame.gps.some((sample, index) => !monotonic(sample, this.frame?.gps[index]))) return false;
     if (frame.radios.some(radio => {
       const previous = this.frame?.radios.find(old => old.station.ident === radio.station.ident && old.station.frequency === radio.station.frequency);
-      return !monotonic(radio.slantRangeNm, previous?.slantRangeNm) || !monotonic(radio.bearingTrue, previous?.bearingTrue);
+      return !monotonic(radio.slantRangeNm, previous?.slantRangeNm) || !monotonic(radio.bearingTrue, previous?.bearingTrue)
+        || !!radio.reportedDmeIdent && !monotonic(radio.reportedDmeIdent, previous?.reportedDmeIdent);
     })) return false;
     this.frame = structuredClone(frame);
     return true;

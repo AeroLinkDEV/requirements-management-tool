@@ -498,6 +498,17 @@ backend-only token URLs, disabled Esri request logging and redirects, attributio
     measured 100 m source hysteresis and more-than-30-second phase disagreement are modeled. Link/power recovery
     requires crew synchronization. Shared civil RMS tuning uses device feedback independently of cross-talk;
     installed radio, RF and discrete interfaces remain partial. See the two-computer section in FMS_APPLICABILITY.md.
+  - **Sensor fault laboratory**: the Conditions tab applies typed laboratory receiver, ground-station and measured
+    navigation-input stimuli through the same dispatcher as authored scenarios and recorded replay. Physical radio
+    and station faults are shared independently of cross-talk; station components resolve against the active database
+    and unavailable or ambiguous targets fail closed. Navigation TAS/heading validity and heading bias do not change
+    aircraft/AFCS truth. Recorded power targets FMS1 and models the C2 KALMAN interruption rule; GPS pair presets
+    override integrity or position words separately and refuse an independently connected input adapter; the dual
+    bench retains its explicitly shared receiver authority. DME tuning follows its paired NAV receiver, so independent
+    DME control-path stimuli are refused; NAV control timeout, DME receiver and measurement-bus faults remain available.
+    Reports retain applied time, value and laboratory source.
+    The default profile refuses external radio-head stimuli (DEC-150). These are simulator controls, not installed
+    RF, AFCS sensor-loss or hardware acceptance evidence.
   - **ADF and RMI**: ADF1/2 relative bearings pass through the typed output bus to the bench RMI. NORMAL words
     draw bearing needles; NCD and FAIL words withdraw the needles and show the corresponding flags. A replayed
     NDB outage resolves one unambiguous active-database NDB and affects both independent FMS receivers through

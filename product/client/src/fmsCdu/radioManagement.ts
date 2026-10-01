@@ -1,6 +1,6 @@
 import type { FmsSide, RadioManagementPort } from "./crossTalk";
-import type { RangeIdentity } from "./sensorPorts";
 import type { Navaid } from "./navData";
+import type { RangeIdentity } from "./sensorPorts";
 
 export type RadioState = { com1: string; com1Stby: string; com2: string; com2Stby: string; nav1: string; nav2: string; adf: string; adfStby: string; adf2: string; adf2Stby: string; tpdr: string; tpdr2: string; tacan: string };
 export type RadioKey = keyof RadioState;
@@ -27,7 +27,10 @@ export type RadioRequest = { id: number; side: FmsSide; device: RadioDevice; val
  * radio's words to the FMS; the receiver is the radio's own failure report. Station reception is per measurement. These
  * are internal facts: each Appendix E message is raised from its own row's predicate over them (RADIO_MESSAGE_ROWS).
  */
-export type RadioFaults = { controlPath: "NORMAL" | "LOST"; measurementBus: "NORMAL" | "LOST"; receiver: "NORMAL" | "FAILED" };
+export type RadioFaults = { controlPath: "NORMAL" | "LOST"; measurementBus: "NORMAL" | "LOST"; receiver: "NORMAL" | "FAILED" | "SILENT" };
+/** Physical ground-station stimuli, shared independently of computer cross-talk. Component faults stay separate. */
+export type StationFaults = { offAir: boolean; dmeReply: boolean; dmeIdent: string | null; vorBiasDeg: number };
+export const NORMAL_STATION: StationFaults = { offAir: false, dmeReply: true, dmeIdent: null, vorBiasDeg: 0 };
 export const NO_FAULTS: RadioFaults = { controlPath: "NORMAL", measurementBus: "NORMAL", receiver: "NORMAL" };
 /** The DME transceivers: they scan for DME/DME and pair with their NAV for VOR/DME (M300 12-16, 13-21). */
 export type DmeDevice = "dme1" | "dme2";
@@ -106,6 +109,7 @@ export class RadioManagementSystem {
   private held: Record<DmeDevice, string | null> = { dme1: null, dme2: null };
   private adfSettings: Record<"adf" | "adf2", AdfSettings> = { adf: { mode: "ADF", bfo: false, bearing: "REL" }, adf2: { mode: "ADF", bfo: false, bearing: "REL" } };
   private readonly silentNdbs = new Set<string>();
+  private readonly groundFaults = new Map<string, StationFaults>();
   private ndbIdentity(station: Pick<Navaid, "ident" | "frequency" | "position">) {
     return JSON.stringify([station.ident, Number(station.frequency), station.position.lat, station.position.lon]);
   }
@@ -246,6 +250,14 @@ export class RadioManagementSystem {
         if (off) system.silentNdbs.add(identity); else system.silentNdbs.delete(identity);
         system.notify();
       },
+      stationFaults(station) { return { ...(system.groundFaults.get(`${station.type}:${system.ndbIdentity(station)}`) ?? NORMAL_STATION) }; },
+      setStationFaults(station, change) {
+        const identity = `${station.type}:${system.ndbIdentity(station)}`;
+        const next = { ...(system.groundFaults.get(identity) ?? NORMAL_STATION), ...change };
+        if (JSON.stringify(next) === JSON.stringify(NORMAL_STATION)) system.groundFaults.delete(identity);
+        else system.groundFaults.set(identity, next);
+        system.notify();
+      },
       dmeReceiving(device) { return system.dmeReceiving(device); },
       dmeTuning(device, channel) { return system.dmeTuning(device, channel); },
       navMode(device) { return system.navModes[device]; },
@@ -257,6 +269,7 @@ export class RadioManagementSystem {
       },
       drainEvents() { return system.events[side - 1].splice(0); },
       faults(device) { return system.faults(device); },
+      setFaults(device, change) { system.setFaults(device, change); },
       dmeHold(device) { return system.dmeHold(device); },
       setDmeHold(device, on) { system.setDmeHold(device, on); },
       adf(device) { return system.adf(device); },
@@ -279,7 +292,7 @@ export class RadioManagementSystem {
       if (test.state !== "STARTED" || test.startedAt === null || (this.clock() - test.startedAt) / 1000 < RADIO_TEST_S) continue;
       // The result is the radio's: a failed receiver reports FAIL; a lost bus never answers (TIMEOUT).
       const faults = this.faults(device);
-      test.state = faults.measurementBus === "LOST" ? "TIMEOUT" : faults.receiver === "FAILED" ? "FAIL" : "PASS";
+      test.state = faults.measurementBus === "LOST" || faults.receiver === "SILENT" ? "TIMEOUT" : faults.receiver === "FAILED" ? "FAIL" : "PASS";
       changed = true;
     }
     for (const request of this.history) {
@@ -290,7 +303,7 @@ export class RadioManagementSystem {
         request.status = "REJECTED"; this.swaps.delete(request.id); changed = true; continue;
       }
       // A command needs the control path and, for its feedback, the measurement bus.
-      if (this.faults(request.device).controlPath === "LOST" || this.faults(request.device).measurementBus === "LOST") {
+      if (this.faults(request.device).controlPath === "LOST" || this.faults(request.device).measurementBus === "LOST" || this.faults(request.device).receiver === "SILENT") {
         if (elapsed < this.timeout) continue;
         request.status = "TIMEOUT"; this.swaps.delete(request.id); changed = true;
         // The requesting computer cannot control the radio (its row: E-13 for NAV, E-2 for the ADF).

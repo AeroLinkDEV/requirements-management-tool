@@ -257,6 +257,7 @@ export class ScriptedFms implements CduBackend {
   /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/s². */
   private apirsBias = nominalApirsBias(1);
   private apirsFaultBias = { north: 0, east: 0 };
+  private airInputFaults = { tasValid: true, headingValid: true, headingBiasDeg: 0 };
   private powerCycles = 1;
   private waterCurrent: { northKt: number; eastKt: number } | null = null;
   private surfaceDrift = { northKt: 0, eastKt: 0 };
@@ -1145,15 +1146,23 @@ export class ScriptedFms implements CduBackend {
       const feedback = rms.dmeTuning(identity.receiver, identity.channel);
       if (!feedback || feedback.receiver !== identity.receiver || feedback.channel !== identity.channel
         || feedback.frequency !== identity.frequency || feedback.commandSequence !== identity.commandSequence) continue;
-      if (sampled(observation.slantRangeNm, now, this.sensorMaxAge) === null
-        || !rms.dmeReceiving(identity.receiver) || identity.frequency !== observation.station.frequency
+      if (!rms.dmeReceiving(identity.receiver) || identity.frequency !== observation.station.frequency
         || (identity.channel === 1 ? this.dmeStation(identity.receiver)?.ident !== observation.station.ident
           : roster.get(observation.station.ident) !== identity.frequency)) continue;
+      // A fresh received ident contradicts the cached facility even when no fresh range arrives.
+      const reportedIdent = sampled(observation.reportedDmeIdent, now, this.sensorMaxAge);
+      if (reportedIdent !== null && reportedIdent !== observation.station.ident) {
+        this.rangeCache.delete(observation.station.ident); continue;
+      }
       const previous = this.rangeCache.get(observation.station.ident);
-      if (previous && JSON.stringify(previous.rangeIdentity) !== JSON.stringify(identity)) this.rangeCache.delete(observation.station.ident);
-      if (!previous || !this.rangeCache.has(observation.station.ident) || observation.slantRangeNm.at > previous.slantRangeNm.at
-        || observation.slantRangeNm.at === previous.slantRangeNm.at && observation.slantRangeNm.sequence > previous.slantRangeNm.sequence)
-        this.rangeCache.set(observation.station.ident, structuredClone(observation));
+      const newRange = !previous || JSON.stringify(previous.rangeIdentity) !== JSON.stringify(identity)
+        || observation.slantRangeNm.at > previous.slantRangeNm.at
+        || observation.slantRangeNm.at === previous.slantRangeNm.at && observation.slantRangeNm.sequence > previous.slantRangeNm.sequence;
+      // Held qualified words keep their original pair and expiry. A new range needs fresh matching identity;
+      // a merely stale matching word cannot renew it or erase the previously qualified pair.
+      if (!newRange || sampled(observation.slantRangeNm, now, this.sensorMaxAge) === null
+        || observation.reportedDmeIdent && reportedIdent !== observation.station.ident) continue;
+      this.rangeCache.set(observation.station.ident, structuredClone(observation));
     }
   }
   /** The observations the radio fix uses: this frame's, with each station's cached range where this frame has none. */
@@ -1164,6 +1173,7 @@ export class ScriptedFms implements CduBackend {
     // by updateRangeCache can use that lifetime; identity-less legacy words stay on the shorter arrival clock.
     const merged = new Map(frame.map(observation => {
       const legacy = !observation.rangeIdentity && sampled(observation.slantRangeNm, now, this.sensorMaxAge) !== null
+        && (!observation.reportedDmeIdent || sampled(observation.reportedDmeIdent, now, this.sensorMaxAge) === observation.station.ident)
         && this.rms?.dmeReceiving("dme1") && this.rms.dmeReceiving("dme2");
       return [observation.station.ident, legacy ? observation : { ...observation,
         slantRangeNm: { ...observation.slantRangeNm, status: "NCD" as const, value: null } }] as const;
@@ -1192,7 +1202,7 @@ export class ScriptedFms implements CduBackend {
     if (dvs) return { source: "DVS", at: Math.min(this.sensorFrame!.dvs!.at, this.sensorFrame!.air.at),
       northKt: dvs.northKt + (this.waterCurrent?.northKt ?? 0), eastKt: dvs.eastKt + (this.waterCurrent?.eastKt ?? 0), gpsDependent: false };
     const wind = this.navigation.measuredWind;
-    if (!air || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
+    if (!air || air.tasValid === false || air.headingValid === false || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
       || ![air.tasKt, air.headingTrue, wind.north, wind.east].every(Number.isFinite)) return null;
     const heading = air.headingTrue * Math.PI / 180;
     return { source: "AIR_WIND", at: Math.min(this.sensorFrame!.air.at, wind.at),
@@ -1236,8 +1246,16 @@ export class ScriptedFms implements CduBackend {
   dmeSlantRangeNm(device: DmeDevice): number | null {
     if (!this.rms?.dmeReceiving(device)) return null;
     const station = this.dmeStation(device);
-    const word = station ? this.sensorFrame?.radios.find(observation => observation.station.ident === station.ident)?.slantRangeNm : undefined;
-    return word ? sampled(word, this.now.getTime(), this.sensorMaxAge) : null;
+    const observation = station ? this.sensorFrame?.radios.find(observation => observation.station.ident === station.ident) : undefined;
+    if (observation?.reportedDmeIdent && sampled(observation.reportedDmeIdent, this.now.getTime(), this.sensorMaxAge) !== station?.ident) return null;
+    return observation ? sampled(observation.slantRangeNm, this.now.getTime(), this.sensorMaxAge) : null;
+  }
+  /** Receiver-reported identity, separate from the database facility selected for tuning. */
+  dmeReportedIdent(device: DmeDevice): string | null {
+    if (!this.rms?.dmeReceiving(device)) return null;
+    const station = this.dmeStation(device);
+    const observation = station ? this.sensorFrame?.radios.find(entry => entry.station.ident === station.ident) : undefined;
+    return observation?.reportedDmeIdent ? sampled(observation.reportedDmeIdent, this.now.getTime(), this.sensorMaxAge) : station?.ident ?? null;
   }
   /**
    * The ADF receiver (sensor side, from the plant): the relative bearing to the NDB it reports tuned, while healthy, in
@@ -1276,8 +1294,34 @@ export class ScriptedFms implements CduBackend {
   radioReceiving(device: RadioDevice) { return this.rms?.receiving(device) ?? null; }
   navRadioMode(device: "nav1" | "nav2") { return this.rms?.navMode(device) ?? "MAN"; }
   setNavRadioMode(device: "nav1" | "nav2", mode: "AUTO" | "MAN") { this.rms?.setNavMode(device, mode); }
-  /** Bench stimulus for this computer's own radios; two computers inject on DualFms.rms. */
-  setRadioFaults(device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) { this.ownRms?.setFaults(device, faults); }
+  /**
+   * Bench/scenario stimulus through the physical RMS port, shared in dual operation independently of cross-talk.
+   * False when there is nothing to apply it to.
+   */
+  setRadioFaults(device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) {
+    if (!this.rms) return false;
+    this.rms.setFaults(device, faults); return true;
+  }
+  /**
+   * Bench stimulus (F14): a VOR, DME or TACAN station off the air transmits nothing, so it is received as out of range.
+   * Shared physical-station state makes both computers observe the outage independently of cross-talk.
+   */
+  setStationOffAir(ident: string, off: boolean) { return this.setStationFault(ident, "station", { offAir: off }); }
+  setStationFault(ident: string, component: "station" | "DME" | "VOR", change: Partial<import("./radioManagement").StationFaults>): boolean {
+    const types = component === "DME" ? ["DME", "VORDME", "VORTAC", "TACAN"] : component === "VOR" ? ["VOR", "VORDME", "VORTAC"] : null;
+    const stations = this.db.find(ident).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type !== "NDB" && (!types || types.includes(entry.type)));
+    if (stations.length !== 1 || !this.rms) return false;
+    this.rms.setStationFaults(stations[0], change); return true;
+  }
+  /** A measured navigation input fault; the aircraft and AFCS still receive their physical plant state. */
+  setAirInputFaults(change: Partial<typeof this.airInputFaults>): boolean {
+    if (this.sensorPort) return false; // An external adapter owns its input words.
+    this.airInputFaults = { ...this.airInputFaults, ...change }; this.emit(); return true;
+  }
+  /** Requested stimulus state for the bench controls; navigationInputs remains the sampled word readback. */
+  get airInputStimulus() { return { ...this.airInputFaults }; }
+  /** Bench-owned or explicitly shared receivers supply GPS words; an independent input adapter cannot be overridden here. */
+  get gpsStimulusAvailable() { return this.benchRaim; }
   radioObservations() { return [...(this.sensorFrame?.radios ?? [])]; }
 
   private autoRadioStations() {
@@ -1298,10 +1342,11 @@ export class ScriptedFms implements CduBackend {
     const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
     const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
     const ra = radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
-    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude, indicationQnhHpa: this.baroSystem.declaredQnhHpa } },
+    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: normalizeAngle(this.heading + this.airInputFaults.headingBiasDeg), headingValid: this.airInputFaults.headingValid,
+      tasKt: this.aircraft.tas, tasValid: this.airInputFaults.tasValid, altitudeFt: this.altitude, indicationQnhHpa: this.baroSystem.declaredQnhHpa } },
       attitude: { at: now, sequence, status: "NORMAL", value: { bank: this.aircraft.bank, pitch: this.aircraft.pitch } },
       radioHeight: { at: now, sequence, status: ra.status, value: ra.value },
-      gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage"))
+      gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage"), station => this.rms!.stationFaults(station))
         .map(observation => ({ ...observation, rangeIdentity: this.rangeOwner.get(observation.station.ident) })),
       ...this.inertialAndDoppler(now, sequence) };
   }
@@ -1356,7 +1401,7 @@ export class ScriptedFms implements CduBackend {
   private dopplerEarth(now: number) {
     const body = sampled(this.sensorFrame?.dvs, now, this.sensorMaxAge);
     const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
-    if (!body || !air || !Number.isFinite(air.headingTrue)) return null;
+    if (!body || !air || air.headingValid === false || !Number.isFinite(air.headingTrue)) return null;
     const heading = air.headingTrue * Math.PI / 180;
     return { northKt: body.alongKt * Math.cos(heading) - body.acrossKt * Math.sin(heading), eastKt: body.alongKt * Math.sin(heading) + body.acrossKt * Math.cos(heading) };
   }

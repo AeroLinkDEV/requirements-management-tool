@@ -1,7 +1,7 @@
 import type { RangeIdentity } from "./sensorPorts";
 import type { Route } from "./fmsModel";
 import type { Navaid } from "./navData";
-import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, RosterStation, ScanChannel, TestableDevice } from "./radioManagement";
+import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, RosterStation, ScanChannel, TestableDevice, StationFaults } from "./radioManagement";
 
 export type FmsSide = 1 | 2;
 export type DualMode = "SYNC" | "INDEPENDENT";
@@ -36,6 +36,8 @@ export interface RadioManagementPort {
   /** F16 world stimulus: one physical NDB's availability, shared by both computers, separate from radio health. */
   ndbTransmitting(station: Pick<Navaid, "ident" | "frequency" | "position">): boolean;
   setNdbOffAir(station: Pick<Navaid, "ident" | "frequency" | "position">, off: boolean): void;
+  stationFaults(station: Navaid): StationFaults;
+  setStationFaults(station: Navaid, change: Partial<StationFaults>): void;
   dmeReceiving(device: DmeDevice): boolean;
   /** Acknowledged physical tuning identity for a range arrival, independent of pending commands. */
   dmeTuning(device: DmeDevice, channel: 1 | 2 | 3): RangeIdentity | null;
@@ -48,6 +50,7 @@ export interface RadioManagementPort {
   /** Plan F8b: the page controls of the NAV and ADF pages (M300 13-21 to 13-25). */
   /** Plan C3: the radio's separate internal states (control path, measurement bus, receiver). */
   faults(device: RadioDevice | DmeDevice): RadioFaults;
+  setFaults(device: RadioDevice | DmeDevice, change: Partial<RadioFaults>): void;
   dmeHold(device: DmeDevice): string | null;
   setDmeHold(device: DmeDevice, on: boolean): void;
   adf(device: "adf" | "adf2"): AdfSettings;

@@ -302,6 +302,7 @@ function rangesAt(at: number): RadioObservation[] {
     const station: Navaid = { kind: 'navaid', type: 'DME', ident: `C${index}`, name: 'Range fixture', frequency: `11${index}.00`,
       position: offset(CACHE_AT, course, 10), elevation: { feet: 0, source: 'data', provenance: 'fixture survey' } }
     return { station, rangeIdentity: { receiver: 'dme1', channel: index === 0 ? 2 : 3, frequency: station.frequency, commandSequence: 7 },
+      reportedDmeIdent: { at, sequence: 9, status: 'NORMAL', value: station.ident },
       slantRangeNm: { at, sequence: 9, status: 'NORMAL', value: 10 }, bearingTrue: { at, sequence: 9, status: 'NCD', value: null } }
   })
 }
@@ -322,7 +323,11 @@ test('C3: compensation aligns ranges to the new epoch without renewing observati
   expect(fix.naimEligible).toBe(true)
   const atExpiry = cachedFix(observations, T0 + 4000, { ...motion, at: T0 + 4000 })!
   expect(atExpiry.oldestAt).toBe(T0)
+  expect(atExpiry.observations).toEqual(original)
   expect(cachedFix(observations, T0 + 4001, { ...motion, at: T0 + 4001 })).toBeUndefined()
+  const mismatched = observations.map(observation => ({ ...observation,
+    reportedDmeIdent: { ...observation.reportedDmeIdent!, value: 'BAD' } }))
+  expect(cachedFix(mismatched, T0 + 1000, motion)).toBeUndefined()
   // Source time is its own clock; a fresh fix epoch must not refresh it.
   const staleMotion = cachedFix(observations, T0 + 3001, { ...motion, at: T0 })!
   expect(staleMotion.motion).toBeNull()
@@ -471,6 +476,55 @@ test('C3: successive independent radio observations take priority over a conflic
 })
 
 test('C3: GPS-derived last wind tags cached radio motion dependent, so GPS-only changes never establish an independent NAIM backup', () => {
+  // F14 composition: a fresh last measured wind cannot qualify AIR_WIND with an explicitly invalid TAS or heading.
+  // Real connected adapter words exercise rangeMotion; no private getter or independent wind container is needed.
+  for (const invalid of ['tasValid', 'headingValid'] as const) {
+    const cache = measuredCache()
+    const originalPosition = cache.unit.position
+    cache.frame.radios = []
+    cache.frame.dvs = { ...cache.frame.dvs!, status: 'FAIL', value: null }
+    cache.frame.gps = cache.healthyGps
+    cache.unit.updateNavigation(0)
+    cache.frame.gps = cache.frame.gps.map(sample => ({ ...sample, status: 'NCD', value: null })) as unknown as SensorFrame['gps']
+    cache.step(500, false)
+    expect(cache.unit.navState.mode).toBe('DME/DME')
+    expect(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+    cache.frame.air.value![invalid] = false
+    if (invalid === 'tasValid') cache.frame.air.value!.tasKt = 500
+    else cache.frame.air.value!.headingTrue = 270
+    cache.step(500, false)
+    expect(cache.unit.navState.airValid).toBe(false)
+    expect.soft(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent, invalid).toBe(false)
+    expect.soft(distanceNm(originalPosition, cache.unit.position), invalid).toBeLessThan(1e-6)
+    cache.frame.air.value![invalid] = true
+    cache.frame.air.value!.tasKt = 600
+    cache.frame.air.value!.headingTrue = 90
+    cache.unit.updateNavigation(0)
+    cache.unit.updateNavigation(0)
+    expect(cache.unit.navState.airValid).toBe(true)
+    expect(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+  }
+  for (const milliseconds of [2000, 2001]) for (const invalid of ['tasValid', 'headingValid'] as const) {
+    const cache = measuredCache()
+    const originalPosition = cache.unit.position
+    cache.frame.radios = []
+    cache.frame.dvs = { ...cache.frame.dvs!, status: 'FAIL', value: null }
+    cache.frame.gps = cache.healthyGps
+    cache.unit.updateNavigation(0)
+    cache.frame.gps = cache.frame.gps.map(sample => ({ ...sample, status: 'NCD', value: null })) as unknown as SensorFrame['gps']
+    cache.step(milliseconds, false)
+    expect(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(milliseconds === 2000)
+    if (milliseconds === 2000) expect(distanceNm(originalPosition, cache.unit.position)).toBeGreaterThan(0.001)
+    cache.frame.air.value![invalid] = false
+    for (const value of invalid === 'tasValid' ? [100, 500] : [90, 270]) {
+      if (invalid === 'tasValid') cache.frame.air.value!.tasKt = value
+      else cache.frame.air.value!.headingTrue = value
+      cache.unit.updateNavigation(0)
+      expect(cache.unit.navState.mode).toBe('DME/DME')
+      expect.soft(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent, `${milliseconds}ms ${invalid} ${value}`).toBe(false)
+      expect.soft(distanceNm(originalPosition, cache.unit.position), `${milliseconds}ms ${invalid} ${value}`).toBeLessThan(1e-6)
+    }
+  }
   const { unit, frame, healthyGps, step } = measuredCache()
   frame.radios = []
   frame.dvs = { ...frame.dvs!, status: 'FAIL', value: null }
@@ -497,7 +551,7 @@ test('C3: GPS-derived last wind tags cached radio motion dependent, so GPS-only 
 
 // Raw frame words must pass the same arrival/receiver admission as cached ranges. Keeping those words present
 // catches the bypass that cache-only invalidation tests cannot see.
-for (const rejected of ['stale arrival', 'receiver bus loss'] as const) test(`C3: raw admission rejects ${rejected}, with a fresh healthy positive control`, () => {
+for (const rejected of ['stale arrival', 'stale reported ident', 'receiver bus loss'] as const) test(`C3: raw admission rejects ${rejected}, with a fresh healthy positive control`, () => {
   const { frame } = measuredCache()
   frame.dvs = { ...frame.dvs!, status: 'FAIL', value: null }
   const healthy = new ScriptedFms(() => new Date(frame.air.at), { sensors: { read: () => frame } })
@@ -509,6 +563,76 @@ for (const rejected of ['stale arrival', 'receiver bus loss'] as const) test(`C3
       bearingTrue: { ...observation.bearingTrue, at: observation.bearingTrue.at - 2001 } }))
     const stale = new ScriptedFms(() => new Date(older.air.at), { sensors: { read: () => older } })
     expect(stale.navState.mode).toBe('DR')
+  } else if (rejected === 'stale reported ident') {
+    // Supplying a physical receiver identity does not earn the longer cache lifetime for a new stale ident.
+    for (const bound of [true, false]) for (const age of [0, 2000, 2001, 5999, 6001]) {
+      const arrival = structuredClone(frame)
+      arrival.radios = arrival.radios.map(observation => ({ ...observation,
+        rangeIdentity: bound ? observation.rangeIdentity : undefined,
+        reportedDmeIdent: { at: arrival.air.at - age, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+      const candidate = new ScriptedFms(() => new Date(arrival.air.at), { sensors: { read: () => arrival } })
+      expect.soft(candidate.navState.mode, `${bound ? 'bound' : 'legacy'} new ident age ${age}ms`).toBe(age <= 2000 ? 'DME/DME' : 'DR')
+    }
+    // Held raw words must keep their previously qualified pair just as an omitted frame does, without renewal.
+    for (const identAge of [0, 2000]) for (const delivery of ['held', 'omitted', 'range NCD'] as const) {
+      const held = structuredClone(frame), start = held.air.at
+      held.radios = held.radios.map(observation => ({ ...observation,
+        reportedDmeIdent: { at: start - identAge, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+      const candidate = new ScriptedFms(() => new Date(held.air.at), { sensors: { read: () => held } })
+      expect(candidate.navState.mode).toBe('DME/DME')
+      if (delivery === 'omitted') held.radios = []
+      if (delivery === 'range NCD') held.radios = held.radios.map(observation => ({ ...observation,
+        slantRangeNm: { ...observation.slantRangeNm, status: 'NCD', value: null } }))
+      held.air.at = start + (identAge === 2000 ? 1 : 2001)
+      candidate.updateNavigation((held.air.at - start) / 1000)
+      expect.soft(candidate.navState.mode, `${delivery} pair crosses 2s ident admission`).toBe('DME/DME')
+      held.air.at = start + 6000 - identAge
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${delivery} original pair at 6s expiry`).toBe('DME/DME')
+      held.air.at++
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${delivery} original pair after 6s expiry`).toBe('DR')
+    }
+    for (const next of ['new range with stale matching ident', 'fresh BAD with held range'] as const) {
+      const held = structuredClone(frame), start = held.air.at
+      held.radios = held.radios.map(observation => ({ ...observation,
+        reportedDmeIdent: { at: start, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+      const candidate = new ScriptedFms(() => new Date(held.air.at), { sensors: { read: () => held } })
+      expect(candidate.navState.mode).toBe('DME/DME')
+      held.air.at = start + 2001
+      held.radios = held.radios.map(observation => ({ ...observation,
+        ...(next === 'new range with stale matching ident'
+          ? { slantRangeNm: { ...observation.slantRangeNm, at: held.air.at, sequence: observation.slantRangeNm.sequence + 1 } }
+          : { reportedDmeIdent: { at: held.air.at, sequence: 2, status: 'NORMAL' as const, value: 'BAD' } }) }))
+      candidate.updateNavigation(2.001)
+      expect.soft(candidate.navState.mode, next).toBe(next === 'fresh BAD with held range' ? 'DR' : 'DME/DME')
+      held.radios = []
+      held.air.at = start + 6000
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${next} never renews old pair`).toBe(next === 'fresh BAD with held range' ? 'DR' : 'DME/DME')
+      held.air.at++
+      candidate.updateNavigation(0)
+      expect.soft(candidate.navState.mode, `${next} original pair expires`).toBe('DR')
+    }
+    const accepted = structuredClone(frame)
+    accepted.radios = accepted.radios.map(observation => ({ ...observation,
+      reportedDmeIdent: { at: accepted.air.at, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+    const candidate = new ScriptedFms(() => new Date(accepted.air.at), { sensors: { read: () => accepted } })
+    expect(candidate.navState.mode).toBe('DME/DME')
+    accepted.air.at++
+    accepted.radios = accepted.radios.map(observation => ({ ...observation,
+      slantRangeNm: { ...observation.slantRangeNm, at: accepted.air.at, sequence: observation.slantRangeNm.sequence + 1 },
+      reportedDmeIdent: { at: accepted.air.at, sequence: 2, status: 'NORMAL', value: 'BAD' } }))
+    candidate.updateNavigation(0.001)
+    expect.soft(candidate.navState.mode, 'fresh BAD must invalidate earlier good station cache').toBe('DR')
+    accepted.radios = []
+    candidate.updateNavigation(0)
+    expect.soft(candidate.navState.mode, 'bad identity must not leave old cache usable').toBe('DR')
+    accepted.radios = frame.radios.map(observation => ({ ...observation,
+      slantRangeNm: { ...observation.slantRangeNm, at: accepted.air.at, sequence: observation.slantRangeNm.sequence + 2 },
+      reportedDmeIdent: { at: accepted.air.at, sequence: 3, status: 'NORMAL', value: observation.station.ident } }))
+    candidate.updateNavigation(0)
+    expect(candidate.navState.mode, 'new fresh matching identity recovers navigation').toBe('DME/DME')
   } else {
     for (const receiver of ['dme1', 'dme2'] as const) healthy.setRadioFaults(receiver, { measurementBus: 'LOST' })
     healthy.updateNavigation(0)
@@ -584,6 +708,7 @@ test('C3: compensated epochs cannot renew an expired DVS source into independent
   // Real new independent radio evidence can qualify immediately and reject the same uncertain biased GPS.
   frame.radios = boundRanges(unit, observations.map(observation => ({ ...observation,
     slantRangeNm: { ...observation.slantRangeNm, at: now(), sequence: observation.slantRangeNm.sequence + 1 },
+    reportedDmeIdent: { ...observation.reportedDmeIdent!, at: now(), sequence: observation.reportedDmeIdent!.sequence + 1 },
     bearingTrue: { ...observation.bearingTrue, at: now(), sequence: observation.bearingTrue.sequence + 1 } })))
   unit.updateNavigation(0)
   expect(unit.navState.mode).toBe('DME/DME')
@@ -617,6 +742,7 @@ test('C3: range arrivals bind to the acknowledged receiver/channel command, whil
     frame.air.at = now
     frame.radios = [{ ...hwk, rangeIdentity: identity,
       slantRangeNm: { ...hwk.slantRangeNm, at: now, sequence: hwk.slantRangeNm.sequence + 1 },
+      reportedDmeIdent: { ...hwk.reportedDmeIdent!, at: now, sequence: hwk.reportedDmeIdent!.sequence + 1 },
       bearingTrue: { ...hwk.bearingTrue, at: now, sequence: hwk.bearingTrue.sequence + 1 } }]
     unit.updateNavigation(0)
     expect(unit.navState.mode).toBe(accepted ? 'VOR/DME' : 'DR')

@@ -3,6 +3,7 @@ import type { Navaid } from "./navData";
 import { radioRange } from "./navigation";
 import { sampled, validPosition, validRangeIdentity, type RadioObservation, type Sample } from "./sensorPorts";
 import { HELICOPTER_PROFILE, type AircraftProfile } from "./profile";
+import { NORMAL_STATION, type StationFaults } from "./radioManagement";
 
 /** Laboratory radio model: 3 s acquisition, 0.02 NM range bias and 0.25 degree bearing bias. Ranges are measured from
  * the DME antenna (its own position when the data gives one) to the aircraft, over the height between them (the
@@ -55,11 +56,13 @@ export class BenchRadioReceiver {
     this.tuning = next;
   }
   /** Only the sensor simulator receives truth. The navigation solver below has no access to it. */
-  sample(truth: LatLon, altitudeFt: number, now: number, failed = false): RadioObservation[] {
+  sample(truth: LatLon, altitudeFt: number, now: number, failed = false,
+    stationFaults: (station: Navaid) => StationFaults = () => NORMAL_STATION): RadioObservation[] {
     this.sequence += 1;
     return [...this.tuning.values()].map(entry => {
       const distance = distanceNm(truth, dmeAt(entry.station));
-      const inRange = !failed && distance <= radioRange(altitudeFt);
+      const faults = stationFaults(entry.station);
+      const inRange = !failed && !faults.offAir && distance <= radioRange(altitudeFt);
       if (!inRange) { entry.since = now; entry.acquired = false; }
       else if (!entry.inRange) { entry.since = now; entry.acquired = false; }
       else if (now - entry.since >= entry.acquisitionS * 1000) entry.acquired = true;
@@ -68,11 +71,14 @@ export class BenchRadioReceiver {
       const word = (value: number | null): Sample<number> => ({ at: now, sequence: this.sequence,
         status: failed ? "FAIL" : normal && value !== null ? "NORMAL" : "NCD", value: normal ? value : null });
       const sign = entry.station.ident.charCodeAt(0) % 2 ? 1 : -1;
+      const ranging = hasDme(entry.station) && faults.dmeReply && (!this.use || this.use.range.has(entry.station.ident));
       return { station: entry.station,
-        slantRangeNm: word(hasDme(entry.station) && (!this.use || this.use.range.has(entry.station.ident))
+        reportedDmeIdent: { at: now, sequence: this.sequence, status: failed ? "FAIL" : normal && ranging ? "NORMAL" : "NCD",
+          value: normal && ranging ? faults.dmeIdent ?? entry.station.ident : null },
+        slantRangeNm: word(ranging
           ? Math.hypot(distance, (altitudeFt - entry.station.elevation.feet) / 6076.12) + sign * this.parameters.radioRangeBias.value : null),
         bearingTrue: word(hasVor(entry.station) && (!this.use || this.use.bearing.has(entry.station.ident))
-          ? (bearingDeg(entry.station.position, truth) + sign * this.parameters.radioBearingBias.value + 360) % 360 : null) };
+          ? (bearingDeg(entry.station.position, truth) + sign * this.parameters.radioBearingBias.value + faults.vorBiasDeg + 720) % 360 : null) };
     });
   }
 }
@@ -103,6 +109,9 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
     const slant = sampled(observation.slantRangeNm, now, maxAgeS * 1000);
     const station = observation.station, at = dmeAt(station);
     if (!validPosition(at) || !hasDme(station) || slant === null) return [];
+    if (observation.reportedDmeIdent && sampled(observation.reportedDmeIdent, now, maxAgeS * 1000) !== station.ident) {
+      rejected.push({ ident: station.ident, reason: "DME ident missing or mismatched" }); return [];
+    }
     const allowanceFt = station.elevation.source === "assumed" ? parameters.assumedNavaidElevationUncertainty.value
       : station.elevation.source === "terrain" ? parameters.terrainNavaidElevationUncertainty.value : 0;
     const result = horizontalRange(slant, (altitudeFt - station.elevation.feet) / 6076.12, allowanceFt / 6076.12);
