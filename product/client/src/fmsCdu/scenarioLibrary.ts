@@ -72,7 +72,8 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       { when: { kind: "start" }, action: { kind: "expectLine", line: 9, pattern: "MANUAL" } },
       { when: { kind: "start" }, action: { kind: "expectLine", line: 10, pattern: "^0\\.01/" } },
       { when: { kind: "start" }, action: { kind: "expectLamp", lamp: "RNP", lit: true } },
-      { when: { kind: "time", seconds: 30 }, action: { kind: "expectLine", line: 13, pattern: "^\\s*$" } },
+      // The terminal time to alert is 30 s (M300 15-2): at 25 s the scratchpad is still clear.
+      { when: { kind: "time", seconds: 25 }, action: { kind: "expectLine", line: 13, pattern: "^\\s*$" } },
       { when: { kind: "start" }, action: { kind: "expectAlert", text: "CHECK ANP" }, within: 120 },
     ],
   },

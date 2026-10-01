@@ -12,8 +12,9 @@ export type FlightPhase = "EN ROUTE" | "TERMINAL" | "APPROACH";
 
 /** Default RNP and time to alert by phase of flight (seconds). */
 export const RNP_DEFAULTS: Record<FlightPhase, { rnp: number; alertSeconds: number }> = {
-  "EN ROUTE": { rnp: 2.0, alertSeconds: 80 },
-  TERMINAL: { rnp: 1.0, alertSeconds: 60 },
+  // CHECK ANP's time to alert (M300 15-2): 30 s en route and terminal, 10 s on approach.
+  "EN ROUTE": { rnp: 2.0, alertSeconds: 30 },
+  TERMINAL: { rnp: 1.0, alertSeconds: 30 },
   APPROACH: { rnp: 0.3, alertSeconds: 10 },
 };
 

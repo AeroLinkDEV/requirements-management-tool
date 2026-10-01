@@ -265,6 +265,8 @@ export class ScriptedFms implements CduBackend {
   private pinnedFas: { fas: FasDataBlock; cycle: string; revision: number } | null = null;
   /** The executed approach's final approach fix and runway, pinned with the plan (pinActive); null without an approach. */
   private executedApproach: { ident: string; faf: string | null; runway: string | null; instrumentEnd: string | null } | null = null;
+  /** Whether VERIFY RNP VALUE stands for the RNP entry in use (checkRnpEntry). */
+  private verifyRnpRaised = false;
   private advisoryReference: { approach: Procedure; runway?: Runway } | null = null;
   /** The satellite the GPS integrity condition faults, so a change of PRN clears the old one. */
   private integrityFaultPrn: number | null = null;
@@ -1078,6 +1080,7 @@ export class ScriptedFms implements CduBackend {
   updateNavigation(dt: number) {
     this.sensorFrame = this.sampleSensors();
     if (!this.powered) return;
+    this.checkRnpEntry();
     const connectedAir = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
     if (this.sensorPort && connectedAir && Number.isFinite(connectedAir.altitudeFt)) {
       const qnh = connectedAir.indicationQnhHpa;
@@ -2582,8 +2585,21 @@ export class ScriptedFms implements CduBackend {
   /** A manual RNP (PROGRESS), or null to return to the default for the phase. */
   setRnp(rnp: number | null) {
     this.nav.rnpManual = rnp;
-    if (rnp !== null && rnp > RNP_DEFAULTS[this.flightPhase].rnp) this.alert(alert("VERIFY RNP VALUE"));
+    // A new entry above the default is announced again, even while the last one's alert stands.
+    if (rnp !== null && rnp > RNP_DEFAULTS[this.flightPhase].rnp) this.verifyRnpRaised = false;
+    this.checkRnpEntry();
     this.updateNavigation(0);
+  }
+
+  /**
+   * VERIFY RNP VALUE (M300 5-16, 5-25, 5-32; Appendix E, E-17) is a condition: a crew RNP entry above the default for
+   * the phase of flight is in use. It is raised when that starts, on entry or when the phase changes under the entry,
+   * and goes by itself when it ends (Appendix E, E-1), on reverting to the default or when the phase's default rises.
+   */
+  private checkRnpEntry() {
+    const above = this.nav.rnpManual !== null && this.nav.rnpManual > RNP_DEFAULTS[this.flightPhase].rnp;
+    if (above && !this.verifyRnpRaised) { this.verifyRnpRaised = true; this.alert(alert("VERIFY RNP VALUE")); }
+    else if (!above && this.verifyRnpRaised) { this.verifyRnpRaised = false; this.withdrawAlert("VERIFY RNP VALUE"); }
   }
 
   /** NAV OPTIONS: navaids excluded from position updating, and GPS selected in or out. */

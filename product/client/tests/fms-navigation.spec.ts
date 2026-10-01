@@ -604,10 +604,10 @@ test('ANP above RNP raises CHECK ANP only after the time to alert for the phase'
   expect(lines(unit)[10]).toMatch(/^0\.01\/0\.02NM/)
   expect(lines(unit)[9]).toMatch(/MANUAL/)
   expect(unit.lamps().has('RNP')).toBe(true)
-  // Terminal phase: 60 seconds.
-  fly(50)
+  // Terminal phase: 30 seconds (M300 15-2).
+  fly(25)
   expect(recalled(unit, 'CHECK ANP')).toBe(false)
-  fly(15)
+  fly(10)
   expect(recalled(unit, 'CHECK ANP')).toBe(true)
   press(unit, 'CLR', 'CLR', 'LSK5L')
   expect(unit.requiredRnp).toBe(1)
