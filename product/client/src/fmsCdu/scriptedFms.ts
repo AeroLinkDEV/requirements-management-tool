@@ -29,7 +29,7 @@ import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from
 import type { SensorSolution } from "./sensorState";
 import { BenchRadioReceiver, radioFixes, type DmeStationStatus, type RadioFix, type RadioMotion } from "./radioNavigation";
 import { transitionAlert } from "./sensorTransitions";
-import { sampled, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
+import { MAX_ACCEPTED_TAS_KT, sampled, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
 import { RADIO_PAGES } from "./radioPages";
 import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
@@ -1235,7 +1235,7 @@ export class ScriptedFms implements CduBackend {
     if (dvs) return { source: "DVS", at: Math.min(this.sensorFrame!.dvs!.at, this.sensorFrame!.air.at),
       northKt: dvs.northKt + (this.waterCurrent?.northKt ?? 0), eastKt: dvs.eastKt + (this.waterCurrent?.eastKt ?? 0), gpsDependent: false };
     const wind = this.navigation.measuredWind;
-    if (!air || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
+    if (this.deselected.has("TAS") || this.deselected.has("HDG") || !air || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
       || ![air.tasKt, air.headingTrue, wind.north, wind.east].every(Number.isFinite)) return null;
     const heading = air.headingTrue * Math.PI / 180;
     return { source: "AIR_WIND", at: Math.min(this.sensorFrame!.air.at, wind.at),
@@ -1511,7 +1511,9 @@ export class ScriptedFms implements CduBackend {
     const radioInput = this.deselected.has("DME") ? [] : this.rangeObservationsForFix().filter(observation => !this.inhibited.includes(observation.station.ident));
     const allRadios = air ? radioFixes(radioInput, this.here, air.altitudeFt, now,
       this.aircraftProfile.parameters, { rangeMaxAgeS: this.aircraftProfile.parameters.dmeRangeCacheAge.value, motion: this.rangeMotion(now, radioInput, air.altitudeFt),
-        unalignedMotionKt: air.tasKt + this.aircraftProfile.parameters.rangeMotionWindAllowance.value,
+        // With TAS selected out, widen old geometry against the existing accepted-air ceiling. This is only an age
+        // allowance: no measured translation and no independent NAIM qualification are obtained from it.
+        unalignedMotionKt: (Number.isFinite(air.tasKt) ? air.tasKt : MAX_ACCEPTED_TAS_KT) + this.aircraftProfile.parameters.rangeMotionWindAllowance.value,
         typical95Nm: this.flightPhase === "EN ROUTE" ? 0.5 : 0.4, dmeDeselected: new Set(this.dmeDeselected) }, this.dmeStatusLast = []) : [];
     const radios = allRadios.filter(fix => !(fix.mode === "VOR/DME" && this.deselected.has("VOR/DME/TCN")));
     this.radioFixesLast = radios;

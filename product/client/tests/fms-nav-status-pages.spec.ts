@@ -1,11 +1,8 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
-import { FlightSimulator } from '../src/fmsCdu/flight'
-import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
-import type { Navaid } from '../src/fmsCdu/navData'
-import { radioFixes, type DmeStationStatus } from '../src/fmsCdu/radioNavigation'
-import type { RadioObservation, SensorFrame } from '../src/fmsCdu/sensorPorts'
+import { distanceNm } from '../src/fmsCdu/fmsModel'
+import type { SensorFrame } from '../src/fmsCdu/sensorPorts'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 
 // Stage F plan F9 (M300 5-26, 12-21 to 12-24, 17-2 to 17-3): NAV STATUS INDEX with prompts only for configured
@@ -158,38 +155,6 @@ test('F9: DVS STATUS shows the Doppler velocities and mode; the crew water curre
   expect(lines()[6]).toMatch(/^SEA/)
 })
 
-test('F9: station deselection removes one station and keeps DME/DME (M300 12-18)', () => {
-  let now = Date.UTC(2026, 8, 30, 14)
-  const fms = new ScriptedFms(() => new Date(now))
-  const sim = new FlightSimulator(fms)
-  fms.setCondition('apirsFail', true); fms.setCondition('dvsFail', true)
-  fms.setCondition('gpsLost', true)
-  const dmeDme = () => fms.lastRadioFixes.find(fix => fix.mode === 'DME/DME')
-  const fly = (seconds: number, until?: () => boolean) => { for (let i = 0; i < seconds; i++) { now += 1000; sim.step(1); if (until?.()) return } }
-  fly(3600, () => dmeDme() !== undefined)
-  // The bench route's roster has one usable crossing, so removing a station there ends DME/DME by geometry. What this
-  // proves at the FMS is that a station deselection is not the DME sensor's: the station leaves, the DESELECT line stays.
-  const removed = dmeDme()!.dmes[0]
-  fms.setDmeDeselected([removed])
-  fly(5)
-  expect(fms.lastRadioFixes.every(fix => !fix.dmes.includes(removed))).toBe(true)
-  expect(fms.deselectedInputs.has('DME')).toBe(false)
-  expect(fms.inputState('DME')).not.toBe('DESEL')
-  // With four stations at good crossings, removing one used station keeps DME/DME on the others.
-  const at = { lat: 45, lon: -75 }, t = 10_000
-  const stations: Navaid[] = [0, 90, 180, 270].map((course, i) => ({ kind: 'navaid', ident: `S${i}`, type: 'DME', name: 'Fixture', frequency: '115.00',
-    elevation: { feet: 0, source: 'data', provenance: 'fixture' }, position: offset(at, course, 10) }))
-  const observations: RadioObservation[] = stations.map(station => ({ station,
-    slantRangeNm: { at: t, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(at, station.position), 3000 / 6076.12) },
-    bearingTrue: { at: t, sequence: 1, status: 'NCD', value: null } }))
-  const before = radioFixes(observations, at, 3000, t).find(fix => fix.mode === 'DME/DME')!
-  const statuses: DmeStationStatus[] = []
-  const after = radioFixes(observations, at, 3000, t, undefined, { dmeDeselected: new Set([before.dmes[0]]) }, statuses).find(fix => fix.mode === 'DME/DME')
-  expect(after).toBeDefined()
-  expect(after!.dmes).not.toContain(before.dmes[0])
-  expect(distanceNm(after!.position, at)).toBeLessThan(0.05)
-})
-
 test('F9: the POS INIT 2/2 table lists each equipped mode with its status, distance and accuracy (M300 12-27 layout)', () => {
   const { fms, step, lines } = unit()
   step(90)
@@ -289,4 +254,83 @@ test('F9: GPS DESELECT shows acquisition after actual receiver loss and returns 
   expect(lines()[4]).toMatch(/VALID/)
   fms.press('LSK1R')
   expect(lines()[2]).toMatch(/VALID/)
+})
+
+// F9 selection is also a motion-source predicate: cached radio geometry must not use selected-out air words.
+test('F9: TAS and HDG deselection remove AIR_WIND cache compensation in the same tick and restoration recovers it', () => {
+  for (const selectedOut of ['TAS', 'HDG'] as const) {
+    let now = Date.UTC(2026, 8, 30, 14)
+    const seed = new ScriptedFms(() => new Date(now))
+    seed.setAircraft({ position: { lat: 45.5, lon: -74.9 }, altitude: 6000 })
+    for (let i = 0; i < 5; i++) { now += 1000; seed.updateNavigation(1) }
+    const measuredAt = now, frame: SensorFrame = structuredClone(seed.navigationInputs!)
+    frame.air.value = { headingTrue: 0, tasKt: 100, altitudeFt: 6000 }
+    frame.dvs = { at: now, sequence: 1, status: 'FAIL', value: { alongKt: 100, acrossKt: 0 } }
+    const arrivals = frame.radios.filter(observation => observation.slantRangeNm.status === 'NORMAL')
+    frame.radios = []
+    const fms = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
+    frame.radios = arrivals.flatMap(observation => {
+      const port = fms.radioPort!
+      const paired = (['dme1', 'dme2'] as const).find(receiver => fms.dmeStation(receiver)?.ident === observation.station.ident)
+      const scan = port.scanning().find(on => on.ident === observation.station.ident)
+      const identity = paired ? port.dmeTuning(paired, 1) : scan ? port.dmeTuning(scan.device, scan.channel) : null
+      return identity ? [{ ...observation, rangeIdentity: identity, bearingTrue: { ...observation.bearingTrue, status: 'NCD' as const, value: null } }] : []
+    })
+    expect(frame.radios).toHaveLength(3)
+    const admitted = structuredClone(frame.radios)
+    fms.updateNavigation(0)
+    now += 1000; frame.air.at = now; frame.air.sequence++
+    for (const word of frame.gps) { word.at = now; word.sequence++ }
+    frame.radios = [] // Nothing remeasures the geometry or supplies radio-derived velocity.
+    fms.updateNavigation(1)
+    const fix = () => fms.lastRadioFixes.find(candidate => candidate.mode === 'DME/DME')!
+    expect(fix().motion).toMatchObject({ source: 'AIR_WIND', gpsDependent: true })
+    const alignedAccuracy = fix().anp
+    fms.open('DESELECT'); fms.press(selectedOut === 'TAS' ? 'LSK1L' : 'LSK2L')
+    expect(fms.deselectedInputs.has(selectedOut)).toBe(true)
+    expect(fix().motion).toBeNull()
+    expect(Number.isFinite(fix().anp)).toBe(true)
+    expect(fix().naimEligible).toBe(false)
+    expect(fix().oldestAt).toBe(measuredAt)
+    // The declared LAB allowance adds 600/3600 NM without TAS, or 100/3600 with TAS but no heading; not a physical bound.
+    expect(fix().anp).toBeCloseTo(alignedAccuracy + (selectedOut === 'TAS' ? 600 : 100) / 3600, 2)
+    const heldPosition = { ...fix().position }, heldAccuracy = fix().anp
+    frame.air.value![selectedOut === 'TAS' ? 'tasKt' : 'headingTrue'] = selectedOut === 'TAS' ? 500 : 180
+    frame.air.sequence++; fms.updateNavigation(0)
+    expect(fix().position).toEqual(heldPosition)
+    expect(fix().anp).toBe(heldAccuracy)
+    const originalHil = frame.gps.map(word => structuredClone(word.value!['130']))
+    for (const word of frame.gps) { word.sequence++; word.value!['130'] = { ssm: 'NORMAL', value: 5 } }
+    fms.updateNavigation(0)
+    expect(fms.navState.mode).toBe('GPS')
+    expect(fms.navState.uncertain).toBe(true)
+    expect(fms.sensorSolutions.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeNull()
+    frame.gps.forEach((word, index) => { word.sequence++; word.value!['130'] = originalHil[index] })
+    frame.air.value![selectedOut === 'TAS' ? 'tasKt' : 'headingTrue'] = selectedOut === 'TAS' ? 100 : 0
+    frame.air.sequence++
+    fms.press(selectedOut === 'TAS' ? 'LSK1L' : 'LSK2L')
+    expect(fix().motion).toMatchObject({ source: 'AIR_WIND', gpsDependent: true })
+    expect(fix().oldestAt).toBe(measuredAt)
+    fms.press(selectedOut === 'TAS' ? 'LSK1L' : 'LSK2L')
+    frame.radios = admitted.map(observation => ({ ...observation,
+      slantRangeNm: { ...observation.slantRangeNm, at: now, sequence: observation.slantRangeNm.sequence + 1 },
+      bearingTrue: { ...observation.bearingTrue, status: 'NCD' as const, value: null } }))
+    fms.updateNavigation(0)
+    // Genuinely renewed zero-age radio ranges require no air motion and retain independent eligibility.
+    expect(fix().oldestAt).toBe(now)
+    expect(fix().motion).toBeNull()
+    expect(fix().naimEligible).toBe(true)
+    expect(fix().accuracyBasis).toBe('laboratory')
+    if (selectedOut === 'TAS') {
+      frame.radios = []; now += 1000; frame.air.at = now; frame.air.sequence++
+      frame.dvs = { at: now, sequence: 2, status: 'NORMAL', value: { alongKt: 100, acrossKt: 0 } }
+      fms.updateNavigation(1)
+      expect(fix().motion).toMatchObject({ source: 'RADIO', gpsDependent: false })
+      now += 1001; frame.air.at = now; frame.air.sequence++
+      frame.dvs.at = now; frame.dvs.sequence++
+      fms.updateNavigation(1.001)
+      expect(fix().motion).toMatchObject({ source: 'DVS', gpsDependent: false })
+      expect(fix().naimEligible).toBe(true)
+    }
+  }
 })

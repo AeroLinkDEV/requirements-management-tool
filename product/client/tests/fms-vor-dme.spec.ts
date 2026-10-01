@@ -1,5 +1,4 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import type { Navaid } from '../src/fmsCdu/navData'
 import { radioFixes } from '../src/fmsCdu/radioNavigation'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
@@ -11,12 +10,12 @@ import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
 // Stage F plan F7 (M300 1-5, 12-19 to 12-20, 15-3): VOR/DME/TACAN from acknowledged, eligible tunings; M300 15-3's
 // accuracy steps; reasonableness without the prior (coverage, and agreement between sources); VOR/DME/TCN STATUS.
 
-const AT = { lat: 45, lon: -75 }, ALT = 3000, NOW = 10_000
+const AT = { lat: 0, lon: 0 }, ALT = 3000, NOW = 10_000
 const navaid = (ident: string, type: Navaid['type'], bearing: number, distance: number): Navaid => ({ kind: 'navaid', ident, type, name: 'Fixture',
-  frequency: '115.00', elevation: { feet: 0, source: 'data', provenance: 'fixture' }, position: offset(AT, bearing, distance), ...(type === 'TACAN' ? { channel: '99X' } : {}) })
+  frequency: '115.00', elevation: { feet: 0, source: 'data', provenance: 'fixture' }, position: { lat: Math.cos(bearing * Math.PI / 180) * distance / 60, lon: Math.sin(bearing * Math.PI / 180) * distance / 60 }, ...(type === 'TACAN' ? { channel: '99X' } : {}) })
 const observe = (stations: Navaid[], radialError: Record<string, number> = {}): RadioObservation[] => stations.map(s => ({ station: s,
-  slantRangeNm: { at: NOW, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(AT, s.position), ALT / 6076.12) },
-  bearingTrue: { at: NOW, sequence: 1, status: 'NORMAL', value: (bearingDeg(s.position, AT) + (radialError[s.ident] ?? 0) + 360) % 360 } }))
+  slantRangeNm: { at: NOW, sequence: 1, status: 'NORMAL', value: Math.hypot(s.position.lat * 60, s.position.lon * 60, ALT / 6076.12) },
+  bearingTrue: { at: NOW, sequence: 1, status: 'NORMAL', value: (Math.atan2(-s.position.lon, -s.position.lat) * 180 / Math.PI + (radialError[s.ident] ?? 0) + 360) % 360 } }))
 const vorFix = (observations: RadioObservation[]) => radioFixes(observations, AT, ALT, NOW).find(f => f.mode === 'VOR/DME')
 
 test('F7: measured fixes follow the 95% accuracy model up to 7 NM and step to 1.5 NM beyond it', () => {
@@ -29,12 +28,6 @@ test('F7: measured fixes follow the 95% accuracy model up to 7 NM and step to 1.
     expect(fix).toBeDefined()
     expect(fix!.anp).toBeCloseTo(expected, 9)
   }
-})
-
-test('F7: a TACAN bearing and distance give a VOR/DME/TCN fix', () => {
-  const fix = vorFix(observe([navaid('UHU', 'TACAN', 200, 6)]))!
-  expect(fix.vor).toBe('UHU')
-  expect(distanceNm(fix.position, AT)).toBeLessThan(0.05)
 })
 
 test('F7: an unreasonable radial is rejected: two VOR/DMEs that disagree are both left out; one that disagrees with DME/DME is rejected', () => {
@@ -165,7 +158,10 @@ test('F7: native TACAN reception follows acknowledged tuning and preserves a cre
   expect(fms.radioRequests.find(r => r.device === 'tacan')).toMatchObject({ value: '88X', status: 'ACK' })
   expect(fms.radioObservations().find(o => o.station.ident === 'T2')!.bearingTrue.status).toBe('NORMAL')
   expect(lines()[8].trim()).toBe('TCN MAN')
-  expect(fms.lastRadioFixes.find(fix => fix.mode === 'VOR/DME')!.vor).toBe('T2')
+  const nativeFix = fms.lastRadioFixes.find(fix => fix.mode === 'VOR/DME')!
+  expect(nativeFix.vor).toBe('T2')
+  expect(Math.abs(nativeFix.position.lat)).toBeLessThan(0.002)
+  expect(Math.abs(nativeFix.position.lon)).toBeLessThan(0.002)
   fms.setRadioFaults('tacan', { receiver: 'FAILED' }); fms.updateNavigation(0)
   expect(fms.tacanStation()).toBeUndefined()
   expect(fms.tacanBearingAndRange()).toBeNull()

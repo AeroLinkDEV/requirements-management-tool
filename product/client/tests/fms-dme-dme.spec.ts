@@ -1,5 +1,4 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { distanceNm } from '../src/fmsCdu/fmsModel'
 import type { Navaid } from '../src/fmsCdu/navData'
 import { radioFixes, type DmeStationStatus } from '../src/fmsCdu/radioNavigation'
 import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
@@ -38,7 +37,8 @@ test('F6: the accuracy reproduces M300 15-3 at a right-angle crossing: 0.5 NM en
 test('F6: three consistent ranges are all used; three inconsistent ones leave DME/DME unavailable and name no culprit', () => {
   const three = [station('A', 0), station('B', 120), station('C', 240)]
   const good = solve(observe(three))
-  expect(distanceNm(good.fix!.position, AT)).toBeLessThan(0.05)
+  expect(good.fix!.position.lat).toBeCloseTo(0, 3)
+  expect(good.fix!.position.lon).toBeCloseTo(0, 3)
   expect(good.statuses.map(s => s.status)).toEqual(['USED', 'USED', 'USED'])
   const bad = solve(observe(three, { B: 1.5 }))
   expect(bad.fix).toBeNull()
@@ -50,7 +50,8 @@ test('F6: four ranges with one biased station isolate it on a unique hypothesis;
   const four = [station('A', 0, 9), station('B', 90, 12), station('C', 180, 9), station('D', 270, 12)]
   const one = solve(observe(four, { C: 3 }))
   expect(one.fix).not.toBeNull()
-  expect(distanceNm(one.fix!.position, AT)).toBeLessThan(0.05)
+  expect(one.fix!.position.lat).toBeCloseTo(0, 3)
+  expect(one.fix!.position.lon).toBeCloseTo(0, 3)
   expect(status(one.statuses, 'C')).toEqual({ ident: 'C', status: 'REJ', reason: 'range inconsistent with the others (isolated)' })
   for (const ident of ['A', 'B', 'D']) expect(status(one.statuses, ident)!.status).toBe('USED')
   const two = solve(observe(four, { B: 3, C: 3 }))
@@ -78,6 +79,8 @@ test('F6: a deselected station is never used for DME/DME', () => {
   const four = [station('A', 0), station('B', 90), station('C', 180, 12), station('D', 270, 8)]
   const result = solve(observe(four), { dmeDeselected: new Set(['B']) })
   expect(result.fix!.dmes).not.toContain('B')
+  expect(result.fix!.position.lat).toBeCloseTo(0, 3)
+  expect(result.fix!.position.lon).toBeCloseTo(0, 3)
   expect(result.statuses.map(s => s.ident)).not.toContain('B')
 })
 
@@ -130,6 +133,8 @@ test('F6: DME DESELECT takes up to 25 stations, five a page, and CLR removes one
   fms.press('CLR')
   fms.setScratch(scanned); fms.press('LSK1L')
   expect(fms.dmeDeselectedStations).toEqual([scanned])
+  expect(fms.deselectedInputs.has('DME')).toBe(false)
+  expect(fms.inputState('DME')).not.toBe('DESEL')
   expect(lines()[2]).toMatch(new RegExp(`^${scanned}\\s+\\d+\\.\\d+ MHZ\\s*$`))
   step(2)
   expect(fms.radioPort!.scanRoster().map(s => s.ident)).not.toContain(scanned)

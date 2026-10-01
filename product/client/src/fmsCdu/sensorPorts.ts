@@ -6,6 +6,8 @@ import { HELICOPTER_PROFILE } from "./profile";
 /** Internal bench contracts, not physical ARINC framing or an interface to an actual CMA unit. */
 export type SensorStatus = "NORMAL" | "NCD" | "FAIL";
 export type Sample<T> = { at: number; sequence: number; status: SensorStatus; value: T | null };
+/** Existing laboratory air-data acceptance ceiling, shared with navigation's validity and no-TAS age allowance. */
+export const MAX_ACCEPTED_TAS_KT = 600;
 export type AirData = { headingTrue: number; tasKt: number; altitudeFt: number;
   /** Laboratory atmosphere reference for the indicated-altitude display; not an OEM air-data word. */
   indicationQnhHpa?: number;

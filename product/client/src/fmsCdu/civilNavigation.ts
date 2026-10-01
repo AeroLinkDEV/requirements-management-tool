@@ -1,7 +1,7 @@
 import { distanceNm, longitudeDelta, offset, type LatLon } from "./fmsModel";
 import type { NavMode } from "./navigation";
 import type { RadioFix } from "./radioNavigation";
-import type { AirData } from "./sensorPorts";
+import { MAX_ACCEPTED_TAS_KT, type AirData } from "./sensorPorts";
 import { accuracy95Isotropic, CIRCULAR_95, ELIGIBILITY, withinLimit, type SensorSolution } from "./sensorState";
 import { chooseRadio } from "./sensorTransitions";
 import { HELICOPTER_PROFILE, type AircraftProfile } from "./profile";
@@ -155,7 +155,7 @@ export class CivilNavigation {
     // Transitive provenance (plan C1): a fix the prior estimate had to disambiguate inherits the prior's GPS dependency.
     const radioGpsDependent = radio !== null && fixGpsDependent(radio);
     const airValid = air !== null && [air.headingTrue, air.tasKt, air.altitudeFt].every(Number.isFinite)
-      && air.tasKt >= 0 && air.tasKt <= 600;
+      && air.tasKt >= 0 && air.tasKt <= MAX_ACCEPTED_TAS_KT;
     const lowSpeed = airValid && indicatedAirspeedKt(air!.tasKt, air!.altitudeFt) < this.parameters.drLowSpeedIas.value;
     let gps = input.gps;
     let uncertain = false;
