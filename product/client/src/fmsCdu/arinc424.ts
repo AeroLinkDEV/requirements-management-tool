@@ -453,7 +453,20 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
   if (pointInSpace && !place(map.fix)) return `point-in-space approach whose missed approach point ${map.fix} is not in the data`;
   const transitions: Record<string, ProcedureLeg[]> = {};
   for (const name of new Set(records.filter(r => r.routeType === "A").map(r => r.transition))) {
-    const built = legs(records.filter(r => r.routeType === "A" && r.transition === name).sort((a, b) => a.sequence - b.sequence));
+    const coded = records.filter(r => r.routeType === "A" && r.transition === name).sort((a, b) => a.sequence - b.sequence);
+    // A transition that ends in a PI (#1389): the FAA codes the PI's inbound CF in the final, which begins IF, then a
+    // CF to the PI fix (PACD S15: IF DEADS, CF CDB). That CF is the PI's, and the transition is decoded through it;
+    // joinTransition then continues the final after it, so the final's IF (the straight-in entry) is not flown after
+    // the reversal. Any other coding is refused with what the final lacks, never joined by guesswork.
+    const end = coded.at(-1);
+    if (end?.path === "PI") {
+      const [entry, inbound] = final;
+      if (entry?.path !== "IF" || inbound?.path !== "CF" || inbound.fix !== end.fix) {
+        return `transition ${name}: PI at ${end.fix} ends the transition, and the final does not begin IF, then a CF to ${end.fix}`;
+      }
+      coded.push(inbound);
+    }
+    const built = legs(coded);
     if (typeof built === "string") return `transition ${name}: ${built}`;
     transitions[name] = built;
   }

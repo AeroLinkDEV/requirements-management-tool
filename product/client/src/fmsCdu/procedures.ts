@@ -29,6 +29,11 @@ const toLegs = (legs: ProcedureLeg[], source: LegSource, via: string): Leg[] =>
  */
 export function joinTransition(transition: ProcedureLeg[], final: ProcedureLeg[], approachConstraints = true): ProcedureLeg[] {
   const last = transition.at(-1), first = final[0];
+  // A transition that ends in a course reversal has already flown the final's CF to the reversal fix (#1389), decoded
+  // from that same final record: the final continues after it, and its IF, the straight-in entry, is not flown.
+  const second = final[1];
+  if (last && "ident" in last && last.procedureTurn?.role === "INBOUND" && first && "ident" in first && first.path === undefined
+    && second && "ident" in second && second.ident === last.ident && second.path === "CF") return [...transition, ...final.slice(2)];
   if (!last || !first || !("ident" in last) || !("ident" in first) || last.ident !== first.ident || first.path !== undefined) return [...transition, ...final];
   const joined: ProcedureLeg = {
     ...first, ...last,

@@ -1,0 +1,13 @@
+HDR01FAACIFP18      001P013203968112609  12-AUG-202618:29:21  U.S.A. DOT FAA                                                FBB95AD8
+SUSAD        JVL   K5011430VDLW N42332883W089061893    N42332883W089061893E0030009321     NARJANESVILLE                    254552201
+SUSAP 44C K5A44C     0     033YHN42295200W088580340W003000817         1800018000C    MNAR    BELOIT                        922211511
+SUSAP 44C K5CMADMY K50    R     N42295658W088581384                       W0032     NAR           MADMY                    922222508
+SUSAP 44C K5FVOR-A AJVL   010JVL  K5D 0V       IF                                 - 06000     18000                 0 NC   922232508
+SUSAP 44C K5FVOR-A AJVL   020JVL  K5D 0VE AR   PI JVL K5      0000000025260100D   + 02700                           0 NC   922242508
+SUSAP 44C K5FVOR-A S      020JVL  K5D 0V  F    IF JVL K5      00000000        D   + 02700                 JVL   K5D 0 NC   922252508
+SUSAP 44C K5FVOR-A S      030MADMYK5PC0EY M    CF JVL K5      1176007011760070D     00817              000          0 NC   922262508
+SUSAP 44C K5FVOR-A S      040         0  M     CA                     1176        + 02700                           0 NC   922272508
+SUSAP 44C K5FVOR-A S      050JVL  K5D 0VY  R   DF                                 + 02700                           0 NC   922282103
+SUSAP 44C K5FVOR-A S      060JVL  K5D 0VE  R   HM                     1176T010    + 02700                           0 NC   922292508
+SUSAP 44C K5GRW07    0033000670 N42294489W088582322         +0210800802000050050D                                          922301812
+SUSAP 44C K5SJVL  K5D                 0   18018003125                                                                  M   922310804
