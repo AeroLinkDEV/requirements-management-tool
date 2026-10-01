@@ -265,10 +265,27 @@ async function startScene(
   // #1298: who asked for each frame, on the scene element, so a paused view that goes on drawing says whether this code
   // asked (and which part of it) or Cesium itself did, with Cesium's tile-load queue (it draws as tiles arrive).
   const requested: Record<string, number> = {};
+  let asked = false;
   const request = (why: string) => {
     requested[why] = (requested[why] ?? 0) + 1;
     container.dataset.requests = Object.entries(requested).map(([source, count]) => `${source} ${count}`).join(", ");
+    asked = true;
     scene.requestRender();
+  };
+  // #1298: why each frame was drawn, by the first that applies: this code asked, the camera had moved, the globe was
+  // still loading tiles, or Cesium's own after-render work since the last frame: a web worker's task or a network
+  // request completing (each asks for a frame), the texture atlas still filling, an event, or other. Counted per drawn
+  // frame on the scene element, so a paused view that keeps drawing says which. Diagnostic only: it changes no frame.
+  const internal = new Set<string>();
+  const afterRender = (scene as unknown as { frameState: { afterRender: (() => unknown)[] } }).frameState.afterRender;
+  const pushAfterRender = afterRender.push.bind(afterRender);
+  afterRender.push = (...work: (() => unknown)[]) => {
+    for (const task of work) {
+      const text = String(task);
+      internal.add(/textureAtlas/.test(text) ? "atlas" : /requestRender/.test(text) ? (/\bWorker\./.test(new Error().stack ?? "") ? "worker" : "request")
+        : /raiseEvent/.test(text) ? "event" : "other");
+    }
+    return pushAfterRender(...work);
   };
   const stopQueueWatch = scene.globe.tileLoadProgressEvent.addEventListener((queued: number) => { container.dataset.tileQueue = String(queued); });
   scene.globe.depthTestAgainstTerrain = true;
@@ -443,7 +460,21 @@ async function startScene(
   // The frames drawn, on the scene element: the scene draws only on change, and this is how that can be seen (and tested),
   let frames = 0;
   // With whether the globe has every tile it needs: until then Cesium keeps drawing as tiles arrive.
-  const counted = () => { container.dataset.frames = String(++frames); container.dataset.tilesLoaded = String(scene.globe.tilesLoaded); };
+  const causes: Record<string, number> = {};
+  const lastView = new Cesium.Matrix4();
+  let tilesWereLoading = true;
+  const counted = () => {
+    container.dataset.frames = String(++frames);
+    container.dataset.tilesLoaded = String(scene.globe.tilesLoaded);
+    const cause = asked ? "asked" : !Cesium.Matrix4.equals(camera.viewMatrix, lastView) ? "camera" : tilesWereLoading ? "tiles"
+      : internal.size ? [...internal].sort().join("+") : "unattributed";
+    causes[cause] = (causes[cause] ?? 0) + 1;
+    container.dataset.frameCauses = Object.entries(causes).map(([why, count]) => `${why} ${count}`).join(", ");
+    asked = false;
+    internal.clear();
+    Cesium.Matrix4.clone(camera.viewMatrix, lastView);
+    tilesWereLoading = !scene.globe.tilesLoaded;
+  };
   scene.postRender.addEventListener(counted);
 
   return {
