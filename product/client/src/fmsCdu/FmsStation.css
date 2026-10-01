@@ -1,0 +1,47 @@
+/* Station controls add no open panel to the single-screen cockpit until explicitly requested. */
+.fmsBenchCockpitView .fmsBenchViewBar { position: relative; }
+.fmsStationDock > summary { min-height: 32px; padding: 6px 8px; border: 1px solid #c9d3de; border-radius: 8px; background: white; cursor: pointer; font-size: 12px; font-weight: 600; }
+.fmsStationDockPanel { position: absolute; z-index: 8; top: calc(100% + 6px); right: 0; width: min(620px, 100%); max-height: min(75vh, 700px); overflow: auto; display: grid; gap: 10px; padding: 12px; border: 1px solid #9fb0c2; border-radius: 10px; background: #f5f8fb; box-shadow: 0 8px 24px #0003; font-size: 12px; }
+.fmsStationDockPanel > label { display: flex; align-items: center; gap: 8px; }
+.fmsStationDockPanel select { min-width: 0; min-height: 32px; font-size: 12px; }
+.fmsStationDockPanel input[type="checkbox"] { min-height: 24px; }
+.fmsStationDockList { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.fmsStationDockList li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid #dfe4eb; }
+.fmsStationDockList li > strong { min-width: 120px; }
+.fmsStationDockList li > p { flex-basis: 100%; margin: 0; }
+.fmsStationOwnerNotice { margin: 0; font-weight: 700; }
+.fmsStationPlaceholder { min-height: 48px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid #9fb0c2; border-radius: 10px; background: #f5f8fb; font-size: 12px; }
+.fmsStationPlaceholder-outside { grid-area: outside; }
+.fmsStationPlaceholder-cockpit { grid-area: cockpit; }
+.fmsStationPlaceholder-instructor { grid-area: instructor; }
+.fmsBenchCockpitView .fmsStationPlaceholder button { min-height: 32px; padding: 4px 8px; font-size: 12px; }
+
+/* With the outside view detached, the drawer deliberately covers part of the owner cockpit. */
+.fmsBenchCockpitView .fmsBenchOutsideAway:not(.fmsBenchCockpitAway) .fmsBenchTools { grid-area: cockpit; height: min(480px, 65vh); max-height: 100%; }
+.fmsBenchCockpitView .fmsBenchOutsideAway.fmsBenchIosExpanded:not(.fmsBenchCockpitAway) .fmsBenchTools { height: min(650px, 80vh); }
+/* In three-screen operation the owner is the dock and instructor console. */
+.fmsBenchCockpitView .fmsBenchCockpitAway { grid-template-areas: "outside" "cockpit" "instructor"; }
+.fmsBenchCockpitView .fmsBenchCockpitAway .fmsBenchTools { position: static; grid-area: instructor; width: 100%; max-height: none; box-shadow: none; }
+.fmsBenchCockpitView .fmsBenchCockpitAway .fmsBenchTools[hidden] { display: none; }
+.fmsBenchCockpitView .fmsBenchUpper:has(> .fmsStationPlaceholder-instructor) { grid-template-areas: "outside" "cockpit" "instructor"; }
+
+/* Child documents receive the same CSS, with a real container-query context around their moved surface. */
+/* Docked display:contents wrappers must leave queries anchored to the original bench's measurable box. */
+[data-fms-station-surface][data-location="docked"] { container: none; }
+body[data-fms-station-child] { min-width: 0; }
+.fmsStationWindowHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; background: #f5f8fb; border-bottom: 1px solid #dfe4eb; font-size: 12px; }
+.fmsStationWindowHeader button { min-height: 32px; padding: 4px 8px; font-size: 12px; }
+.fmsStationWindowOutlet { overflow: auto; }
+.fmsStationSurfaceOutside[data-location="child"],
+.fmsStationSurfaceCockpit[data-location="child"],
+.fmsStationSurfaceInstructor[data-location="child"] { display: block; box-sizing: border-box; padding: 8px; min-width: 0; container: fms-bench / inline-size; }
+.fmsStationSurfaceOutside[data-location="child"] { display: flex; flex-direction: column; height: 100%; }
+.fmsStationSurfaceOutside[data-location="child"] .fmsBenchWindow { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.fmsStationSurfaceOutside[data-location="child"] .fmsBenchMapHead { flex-shrink: 0; }
+.fmsStationSurfaceOutside[data-location="child"] .fmsOtw { height: auto; min-height: 170px; flex: 1; }
+.fmsStationSurfaceInstructor[data-location="child"] .fmsBenchTools { position: static; width: 100%; max-height: none; box-shadow: none; }
+.fmsStationSurfaceInstructor[data-location="child"] .fmsBenchTools[hidden] { display: none; }
+@media (max-width: 600px) {
+  .fmsStationDockPanel > label { flex-wrap: wrap; }
+  .fmsStationDockList li > strong { min-width: 0; }
+}

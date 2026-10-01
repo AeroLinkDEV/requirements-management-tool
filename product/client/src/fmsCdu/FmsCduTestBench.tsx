@@ -33,13 +33,24 @@ import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, formatSetting } from "./baro";
 import { browserUserDatabaseStore } from "./userDatabase";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
+import { useFmsStationWindows, type StationSurfaceId } from "./useFmsStationWindows";
+import { FmsStationSurface } from "./FmsStationSurface";
+import { FmsStationDock, FmsStationPlaceholder, type StationArrangement } from "./FmsStationDock";
 import "./FmsCduTestBench.css";
 import "./FmsCockpitLayout.css";
+import "./FmsStation.css";
 
 const VARIANT_KEY = "aerolink.fmsCdu.variant";
 
 const storedVariant = () => {
   try { return window.localStorage.getItem(VARIANT_KEY) ?? DEFAULT_VARIANT_ID; } catch { return DEFAULT_VARIANT_ID; }
+};
+
+const storedStationArrangement = (key: string | null): StationArrangement => {
+  try {
+    const value = key ? JSON.parse(window.localStorage.getItem(key) ?? "null") as Partial<StationArrangement> | null : null;
+    return { preset: value?.preset === "two" || value?.preset === "three" ? value.preset : "single", instructorApart: value?.instructorApart === true };
+  } catch { return { preset: "single", instructorApart: false }; }
 };
 
 /** A duration in seconds as h:mm:ss. */
@@ -120,10 +131,18 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const [focused, setFocused] = useState(false);
   const [iosOpen, setIosOpen] = useState(false);
   const [iosExpanded, setIosExpanded] = useState(false);
+  const stationKey = userName ? `aerolink.fmsCdu.station.${encodeURIComponent(userName)}` : null;
+  const [arrangement, setArrangement] = useState(() => storedStationArrangement(stationKey));
+  const station = useFmsStationWindows({ scopeKey: stationKey ?? "anonymous" });
+  const outsideAway = Boolean(station.windows.outside);
+  const cockpitAway = Boolean(station.windows.cockpit);
+  const instructorAway = Boolean(station.windows.instructor);
+  const iosVisible = !cockpitView || iosOpen || cockpitAway || instructorAway;
   const iosButton = useRef<HTMLButtonElement>(null);
   const iosPanel = useRef<HTMLDivElement>(null);
-  const closeIos = () => { setIosOpen(false); iosButton.current?.focus(); };
+  const closeIos = () => { station.returnSurface("instructor"); setIosOpen(false); iosButton.current?.focus(); };
   const chooseCockpitView = (on: boolean) => {
+    if (!on) station.returnAll();
     setCockpitView(on);
     setIosOpen(false);
     setFocused(false);
@@ -132,7 +151,17 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   };
   useEffect(() => {
     if (cockpitView && iosOpen) iosPanel.current?.focus();
-  }, [cockpitView, iosOpen]);
+  }, [cockpitView, iosOpen, station.windows.instructor]);
+  const chooseArrangement = (value: StationArrangement) => {
+    if (value.preset !== arrangement.preset) station.returnAll();
+    else if (!value.instructorApart) station.returnSurface("instructor");
+    setArrangement(value);
+    try { if (stationKey) window.localStorage.setItem(stationKey, JSON.stringify(value)); } catch { /* optional preference */ }
+  };
+  const openStationSurface = (id: StationSurfaceId) => {
+    if (id === "instructor") setIosOpen(true);
+    if (station.openSurface(id) && id === "outside") chooseWindow({ shown: true });
+  };
   // The aircraft profile the next session flies (profile.ts); a scenario that names one flies that one.
   const profileChoice = useRef(ACTIVE_PROFILE.id);
   const secondaryProfileChoice = useRef("");
@@ -348,15 +377,19 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   return (
     // A <main>, as every workspace page is: the shell frames and densifies pages by that element.
     <main className={`fmsBench${cockpitView ? " fmsBenchCockpitView" : ""}${focused ? " fmsBenchFocused" : ""}`} aria-label="FMS Test Bench" onKeyDown={event => {
-      if (cockpitView && iosOpen && event.key === "Escape") { event.preventDefault(); closeIos(); }
+      if (cockpitView && iosOpen && !cockpitAway && !instructorAway && event.key === "Escape"
+        && (event.target as HTMLElement).ownerDocument === event.currentTarget.ownerDocument) { event.preventDefault(); closeIos(); }
     }}>
       <div className="fmsBenchViewBar fmsBenchActions">
         <button type="button" onClick={() => chooseCockpitView(!cockpitView)}>
           {cockpitView ? "Engineering view" : "Cockpit view"}
         </button>
         {cockpitView ? <>
-          <button type="button" ref={iosButton} aria-expanded={iosOpen} aria-controls="fms-instructor" onClick={() => iosOpen ? closeIos() : setIosOpen(true)}>Instructor station</button>
+          <button type="button" ref={iosButton} aria-expanded={iosVisible} aria-controls={instructorAway ? undefined : "fms-instructor"}
+            onClick={() => instructorAway ? station.openSurface("instructor") : cockpitAway ? iosPanel.current?.focus() : iosOpen ? closeIos() : setIosOpen(true)}>Instructor station</button>
           <button type="button" onClick={() => setFocused(value => !value)}>{focused ? "Show navigation" : "Focus bench"}</button>
+          <FmsStationDock arrangement={arrangement} onArrangement={chooseArrangement} windows={station.windows} opening={station.opening}
+            errors={station.errors} onOpen={openStationSurface} onReturn={station.returnSurface} onReturnAll={station.returnAll} />
           <span className="fmsBenchHint">Scripted simulation · EFIS / AFCS: FMS {system.guidanceSide} · Inspected: CDU {cduSide}</span>
           {recording ? <strong className="fmsBenchHint" role="status">Recording CDU 1 only; CDU 2 input is not recorded.</strong> : null}
         </> : null}
@@ -379,7 +412,9 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         {!cockpitView ? setupControls : null}
       </header>
 
-      <div className={`fmsBenchUpper${cockpitView && iosOpen && iosExpanded ? " fmsBenchIosExpanded" : ""}`}>
+      <div className={`fmsBenchUpper${cockpitView && iosOpen && iosExpanded ? " fmsBenchIosExpanded" : ""}${outsideAway ? " fmsBenchOutsideAway" : ""}${cockpitAway ? " fmsBenchCockpitAway" : ""}`}>
+      {outsideAway ? <FmsStationPlaceholder id="outside" onReturn={() => station.returnSurface("outside")} /> : null}
+      <FmsStationSurface targetWindow={station.windows.outside} className={`${cockpitView ? "fmsBenchCockpitView " : ""}fmsStationSurfaceOutside`}>
       <section className="fmsBenchCard fmsBenchWindow" aria-label="Out-the-window view">
         <div className="fmsBenchMapHead">
           <h2>Out the window</h2>
@@ -431,6 +466,9 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             ground={outside.ground} colouring={outside.colouring} imagery={photos} />
           : <p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p>}
       </section>
+      </FmsStationSurface>
+      {cockpitAway ? <FmsStationPlaceholder id="cockpit" onReturn={() => station.returnSurface("cockpit")} /> : null}
+      <FmsStationSurface targetWindow={station.windows.cockpit} className={`${cockpitView ? "fmsBenchCockpitView " : ""}fmsStationSurfaceCockpit`}>
       <div className="fmsBenchCockpit">
         {cockpitView ? (<>
           {([1, 2] as const).map(side => <div key={side} className={`fmsBenchCduStation mode-${lighting.mode}`} data-side={side}
@@ -623,14 +661,18 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         </section>
       </div>
 
+      </FmsStationSurface>
+      {instructorAway ? <FmsStationPlaceholder id="instructor" onReturn={() => station.returnSurface("instructor")} /> : null}
+      <FmsStationSurface targetWindow={station.windows.instructor} className={`${cockpitView ? "fmsBenchCockpitView " : ""}fmsStationSurfaceInstructor`}>
       <div className="fmsBenchTools" id="fms-instructor" ref={iosPanel} tabIndex={-1}
         role={cockpitView ? "region" : undefined} aria-label={cockpitView ? "Instructor station" : undefined}
-        hidden={cockpitView && !iosOpen} onKeyDown={event => {
-          if (cockpitView && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeIos(); }
+        hidden={cockpitView && !iosVisible} onKeyDown={event => {
+          if (cockpitView && (!cockpitAway || instructorAway) && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeIos(); }
         }}>
         {cockpitView ? <div className="fmsBenchIosHead"><strong>Instructor station · CDU {cduSide}</strong>
-          <button type="button" aria-pressed={iosExpanded} onClick={() => setIosExpanded(value => !value)}>{iosExpanded ? "Compact instructor" : "More instructor room"}</button>
-          <button type="button" onClick={closeIos}>Close instructor station</button></div> : null}
+          {!cockpitAway && !instructorAway ? <button type="button" aria-pressed={iosExpanded} onClick={() => setIosExpanded(value => !value)}>{iosExpanded ? "Compact instructor" : "More instructor room"}</button> : null}
+          {!cockpitAway || instructorAway ? <button type="button" onClick={closeIos}>Close instructor station</button> : null}
+          {outsideAway && !cockpitAway && !instructorAway ? <span className="fmsBenchHint">The instructor drawer covers part of the cockpit while open.</span> : null}</div> : null}
         <div className="fmsBenchTabs" role="tablist" aria-label="Bench tools">
           {visibleTabs.map(item => (
             <button key={item.id} type="button" role="tab" id={`fms-bench-tabbutton-${item.id}`} aria-controls={`fms-bench-tab-${item.id}`}
@@ -644,7 +686,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </button>
           ))}
         </div>
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-flight" aria-labelledby="fms-bench-tabbutton-flight" shown={tab === "flight" && (!cockpitView || iosOpen)} render={() => (<>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-flight" aria-labelledby="fms-bench-tabbutton-flight" shown={tab === "flight" && iosVisible} render={() => (<>
           <section className="fmsBenchCard" aria-label="Flight and setup">
             <h2>Flight and setup</h2>
             <p className="fmsBenchHint">Scripted simulation, not a navigation computer. Restart and jump are engineering actions.</p>
@@ -668,7 +710,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <p className="fmsBenchHint">Scenario playback and recording target CDU 1. CDU 2 input is not recorded. EFIS and AFCS follow the separately selected guidance source.</p>
           </section>
         </>)} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios" && (!cockpitView || iosOpen)} render={() => (
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios" && iosVisible} render={() => (
           <FmsScenarioCard
             runner={runner}
             recording={recording}
@@ -680,7 +722,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
           />
         )} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" shown={tab === "conditions" && (!cockpitView || iosOpen)} render={() => (<>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" shown={tab === "conditions" && iosVisible} render={() => (<>
           <section className="fmsBenchCard">
             <h2>Conditions</h2>
             <ul className="fmsBenchConditions">
@@ -725,8 +767,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </section>
         </>)} />
         <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps"
-          shown={tab === "gps" && (!cockpitView || iosOpen)} render={() => tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} /> : null} />
-        <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" shown={tab === "dual" && (!cockpitView || iosOpen)} render={() => (
+          shown={tab === "gps" && iosVisible} render={() => tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} /> : null} />
+        <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" shown={tab === "dual" && iosVisible} render={() => (
           <section className="fmsBenchCard" aria-label="Dual computers and radio devices">
             <h2>Dual FMS and civil RMS</h2>
             <label>FMS 2 software profile (restarts the bench) <select aria-label="FMS 2 software profile" value={secondaryProfileChoice.current}
@@ -744,7 +786,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <ul aria-label="RMS tuning feedback">{system.rms.requests.slice(0, 6).map(request => <li key={request.id}>FMS {request.side}: {request.device.toUpperCase()} {request.value} — {request.status}</li>)}</ul>
           </section>
         )} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" shown={tab === "navdata" && (!cockpitView || iosOpen)} render={() => (<>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" shown={tab === "navdata" && iosVisible} render={() => (<>
           <section className="fmsBenchCard" aria-label="FMS initialization and preflight">
             <h2>FMS initialization and preflight</h2>
             <p className="fmsBenchReadout">FMS power: {backend.powerState}. Receiver power is controlled on GPS sensors.</p>
@@ -919,7 +961,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             {userDbStatus ? <p className="fmsBenchHint" role="status">{userDbStatus}</p> : null}
           </section>
         </>)} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-lighting" aria-labelledby="fms-bench-tabbutton-lighting" shown={tab === "lighting" && (!cockpitView || iosOpen)} render={() => (<>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-lighting" aria-labelledby="fms-bench-tabbutton-lighting" shown={tab === "lighting" && iosVisible} render={() => (<>
           <section className="fmsBenchCard">
             <h2>Cockpit lighting</h2>
             <div className="fmsBenchModes" role="radiogroup" aria-label="Cockpit lighting">
@@ -971,6 +1013,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </section>
         </>)} />
       </div>
+      </FmsStationSurface>
       </div>
     </main>
   );

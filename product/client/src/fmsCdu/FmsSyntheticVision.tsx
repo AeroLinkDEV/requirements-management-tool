@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AircraftData } from "./efis";
 import { SVS_ZOOM, renderSyntheticVision, type SvsView } from "./syntheticVision";
 import type { TerrainTiles } from "./terrainTiles";
+import { useFmsStationDocument } from "./FmsStationSurface";
 
 const FT = 0.3048;
 /** Side of the square drawn, in PFD units: it covers the attitude window at any bank. */
@@ -13,16 +14,18 @@ const SIDE = 352;
  * pitch scale, which fixes the focal length so the terrain is conformal with the pitch ladder.
  */
 export function SyntheticVisionLayer({ air, tiles, cx, cy, pitchPx }: { air: AircraftData; tiles: TerrainTiles; cx: number; cy: number; pitchPx: number }) {
+  const destinationDocument = useFmsStationDocument();
+  const destinationWindow = destinationDocument.defaultView ?? window;
   const canvas = useRef<HTMLCanvasElement>(null);
   // Redrawn when a tile arrives as well as when the aircraft moves; arrivals within a frame are drawn once.
   const [arrivals, setArrivals] = useState(0);
   useEffect(() => {
     let frame = 0;
     const unsubscribe = tiles.subscribe(() => {
-      if (!frame) frame = requestAnimationFrame(() => { frame = 0; setArrivals(count => count + 1); });
+      if (!frame) frame = destinationWindow.requestAnimationFrame(() => { frame = 0; setArrivals(count => count + 1); });
     });
-    return () => { unsubscribe(); cancelAnimationFrame(frame); };
-  }, [tiles]);
+    return () => { unsubscribe(); destinationWindow.cancelAnimationFrame(frame); };
+  }, [tiles, destinationWindow]);
 
   const { lat, lon } = air.position;
   useEffect(() => {
@@ -33,7 +36,7 @@ export function SyntheticVisionLayer({ air, tiles, cx, cy, pitchPx }: { air: Air
     renderSyntheticVision(image.data, view, { lat, lon, altitude: air.physicalAltitude * FT, heading: air.heading, pitch: air.pitch },
       (pointLat, pointLon) => tiles.heightAt(pointLat, pointLon, SVS_ZOOM));
     pen.putImageData(image, 0, 0);
-  }, [lat, lon, air.physicalAltitude, air.heading, air.pitch, tiles, pitchPx, arrivals]);
+  }, [lat, lon, air.physicalAltitude, air.heading, air.pitch, tiles, pitchPx, arrivals, destinationWindow]);
 
   return (
     <foreignObject x={cx - SIDE / 2} y={cy - SIDE / 2} width={SIDE} height={SIDE} data-testid="pfd-svs">

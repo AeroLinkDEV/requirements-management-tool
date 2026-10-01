@@ -535,6 +535,13 @@ backend-only token URLs, disabled Esri request logging and redirects, attributio
   hides application navigation until explicitly restored. Switching views preserves the simulation and
   unfinished instructor forms. The initial default remains engineering view; a cockpit preference is remembered
   per signed-in user in this browser. Recording and scenario playback still target CDU 1; CDU 2 input is not recorded.
+  Fixed station presets can move the outside view to a child window, then the complete two-CDU cockpit to
+  another; the instructor station can also be separate. Each explicit restore step opens one window. The live
+  dock reports actual destinations, with Return and automatic docking on child close. The same component trees,
+  forms and simulation remain owned by the bench tab; display rendering and input effects follow their destination
+  document. Browser placement/full-screen controls remain manual, with per-user arrangement and requested window
+  geometry remembered. Keep the owner tab open and visible: browser throttling can slow updates when it is hidden,
+  and closing or leaving the bench closes its station windows. Engineering view returns every panel.
 - An **EFIS** beside the CDU draws a generic primary flight display and navigation display from an explicit FMS output bus
   (`efis.ts`: desired track, cross-track, vertical deviation, roll command, distance to go, targets and modes, each
   with a normal, no-data or failure status) plus the aircraft's attitude and air data. It uses airline colour

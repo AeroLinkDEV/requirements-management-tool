@@ -10,6 +10,7 @@ import { MAIN_ROTOR_RAD_S, createAircraftModel } from "./otwAircraftModel";
 import { createObstacleLayer } from "./otwObstacles";
 import { workerReliefShader } from "./reliefShader";
 import { aircraftCamera } from "./otwCamera";
+import { useFmsStationDocument } from "./FmsStationSurface";
 import {
   ABSOLUTE_BANDS_FT, ABSOLUTE_RGB, CAUTION_RGB, DANGER_RGB, RELATIVE_CAUTION_FT, RELATIVE_DANGER_FT, type TerrainColouring,
 } from "./terrainAwareness";
@@ -56,10 +57,12 @@ type SceneHandle = {
  * loaded only when this is first shown.
  */
 export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles, ground, colouring, imagery }: Props) {
+  const renderingDocument = useFmsStationDocument();
   const host = useRef<HTMLDivElement>(null);
   const credits = useRef<HTMLDivElement>(null);
   const pathMarker = useRef<HTMLDivElement>(null);
   const scene = useRef<SceneHandle | null>(null);
+  const [sceneEpoch, setSceneEpoch] = useState(0);
   const [status, setStatus] = useState<Status>("loading");
   const [failure, setFailure] = useState("");
   const terrain = useSyncExternalStore(listener => tiles.subscribe(listener), () => tiles.status);
@@ -88,27 +91,35 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   useEffect(() => {
     let disposed = false;
     let handle: SceneHandle | null = null;
-    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles, imagery)
+    // The host survives docking, but its diagnostics must describe this scene generation, including startup.
+    for (const name of ["frames", "frameCauses", "requests", "tileQueue", "tilesLoaded", "model", "obstacles"]) delete host.current!.dataset[name];
+    setStatus("loading");
+    setFailure("");
+    const failed = (error: unknown) => {
+      if (disposed) return;
+      setFailure(error instanceof Error ? error.message : String(error));
+      setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
+    };
+    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed)
       .then(created => {
         if (disposed) { created.destroy(); return; }
         handle = created;
         scene.current = created;
+        // A cached engine import can coalesce loading/ready renders during document transfer. Each new
+        // handle must receive the current ground/colouring/route even when those props never changed.
+        setSceneEpoch(value => value + 1);
         setStatus("ready");
-      }, (error: unknown) => {
-        if (disposed) return;
-        setFailure(error instanceof Error ? error.message : String(error));
-        setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
-      });
+      }, failed);
     return () => { disposed = true; handle?.destroy(); scene.current = null; };
-  }, [tiles, imagery]);
+  }, [tiles, imagery, renderingDocument]);
 
-  useEffect(() => { scene.current?.setGround(ground); }, [ground, status]);
-  useEffect(() => { scene.current?.setColouring(colouring); }, [colouring, status]);
+  useEffect(() => { scene.current?.setGround(ground); }, [ground, sceneEpoch]);
+  useEffect(() => { scene.current?.setColouring(colouring); }, [colouring, sceneEpoch]);
 
   const routeKey = route.map(point => `${point.ident}:${point.position.lat},${point.position.lon}:${point.constraint ?? ""}:${point.active}`).join("|");
   useEffect(() => {
     scene.current?.setRoute(route, air.physicalAltitude);
-  }, [routeKey, status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [routeKey, sceneEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hud = layout === "hud" && view === "cockpit";
   const note = status === "no-webgl" ? "This browser cannot draw 3D graphics (WebGL is unavailable), so the view is off."
@@ -181,15 +192,20 @@ function Hud({ air, modes }: { air: AircraftData; modes: HudModes }) {
 }
 
 /** A 256-pixel canvas; the ground imagery, the terrain decode and the ownship symbol all draw on one. */
-const canvas = (size = TILE_PIXELS) => Object.assign(document.createElement("canvas"), { width: size, height: size });
+const canvas = (owner: Document, size = TILE_PIXELS) => Object.assign(owner.createElement("canvas"), { width: size, height: size });
 
 async function startScene(
   container: HTMLElement, creditContainer: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
   tiles: TerrainTiles, imagery: GroundImagery<ImageBitmap>,
+  renderingDocument: Document, disposed: () => boolean, onFailure: (error: unknown) => void,
 ): Promise<SceneHandle> {
   (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = CESIUM_BASE;
   // The engine alone: the `cesium` package's widgets evaluate a string as script, which the policy refuses.
   const Cesium = await import("@cesium/engine");
+  // An import can complete after Return/close. Never create an old destination's widget in the adopted host.
+  if (disposed() || container.ownerDocument !== renderingDocument) throw new Error("The 3D view destination changed before startup completed.");
+  const renderingWindow = renderingDocument.defaultView;
+  if (!renderingWindow || renderingWindow.closed) throw new Error("The 3D view's window is closed.");
 
   // Each height tile is fetched once (terrainTiles.ts), however many mesh and imagery tiles are cut from it.
   const heights = (z: number, x: number, y: number) => tiles.load(z, x, y);
@@ -212,13 +228,13 @@ async function startScene(
   // Imagery goes deeper than relief (16 against 14); past the relief's depth, a tile with no imagery is refused, and
   // Cesium draws its parent's relief there instead.
   const shader = workerReliefShader();
-  const flat = canvas();
+  const flat = canvas(renderingDocument);
   flat.getContext("2d")!.putImageData(new ImageData(shadeTile(new Float32Array(TILE_PIXELS * TILE_PIXELS), 30), TILE_PIXELS, TILE_PIXELS), 0, 0);
   const reliefImage = async (x: number, y: number, level: number) => {
     const tile = await heights(level, x, y);
     if (!tile) return flat;
     const rgba = await shader.shade(tile, pixelMetres(level, tileLatitude(level, y)));
-    const image = canvas();
+    const image = canvas(renderingDocument);
     image.getContext("2d")!.putImageData(new ImageData(rgba, TILE_PIXELS, TILE_PIXELS), 0, 0);
     return image;
   };
@@ -228,7 +244,7 @@ async function startScene(
   const underRelief = async (photo: ImageBitmap, x: number, y: number, level: number) => {
     const source = ancestorOf(level, x, y, RELIEF_MAX_ZOOM);
     const relief = await reliefImage(source.x, source.y, source.z);
-    const image = canvas();
+    const image = canvas(renderingDocument);
     const context = image.getContext("2d")!;
     const side = source.span * TILE_PIXELS;
     context.drawImage(relief, source.offsetX * TILE_PIXELS, source.offsetY * TILE_PIXELS, side, side, 0, 0, TILE_PIXELS, TILE_PIXELS);
@@ -258,13 +274,16 @@ async function startScene(
   };
 
   // Throws when the browser has no WebGL; the component says so rather than failing the page.
-  const widget = new Cesium.CesiumWidget(container, {
+  let widget: InstanceType<typeof Cesium.CesiumWidget>;
+  try { widget = new Cesium.CesiumWidget(container, {
     baseLayer: false, terrainProvider: tiles.status === "off" ? flatTerrainProvider : terrainProvider, creditContainer,
     skyBox: false, showRenderLoopErrors: false, targetFrameRate: 30, useBrowserRecommendedResolution: true, msaaSamples: 4,
+    // Cesium's default loop closes over the importing owner's global RAF. A portal does not change that realm.
+    useDefaultRenderLoop: false,
     // Draw only when something changes: a paused bench, or a view waiting for the next tick, costs nothing. Cesium
     // itself asks for frames while tiles load and when the window is resized.
     requestRenderMode: true, maximumRenderTimeChange: Number.POSITIVE_INFINITY,
-  });
+  }); } catch (error) { shader.dispose(); throw error; }
   const { scene, camera } = widget;
   // #1298: who asked for each frame, on the scene element, so a paused view that goes on drawing says whether this code
   // asked (and which part of it) or Cesium itself did, with Cesium's tile-load queue (it draws as tiles arrive).
@@ -397,14 +416,14 @@ async function startScene(
   // The glTF helicopter (otwAircraftModel.ts), with turning rotors; the boxes and ellipsoids stay the fallback until it
   // has loaded, or if it cannot. The scene draws only on change, so it asks for a frame once the model is there.
   const helicopter = createAircraftModel(Cesium, { primitives: scene.primitives, requestRender: () => request("model") });
-  void helicopter.ready.then(outcome => { container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; request("model"); });
+  void helicopter.ready.then(outcome => { if (disposed()) return; container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; request("model"); });
   // The FAA obstacles near the bench areas (otwObstacles.ts, Brief C), coloured as the terrain colouring colours their
   // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed").
   const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, requestRender: () => request("obstacles") });
-  void obstacles.ready.then(outcome => { container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; request("obstacles"); });
+  void obstacles.ready.then(outcome => { if (disposed()) return; container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; request("obstacles"); });
   const orientation = new Cesium.HeadingPitchRoll();
   // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.
-  const symbol = canvas(48);
+  const symbol = canvas(renderingDocument, 48);
   const pen = symbol.getContext("2d")!;
   pen.translate(24, 22);
   pen.fillStyle = "#3ddc84"; pen.strokeStyle = "#05080b"; pen.lineWidth = 1.5;
@@ -492,6 +511,37 @@ async function startScene(
   };
   scene.postRender.addEventListener(counted);
 
+  // Only rendering follows the visible document. Aircraft interpolation above keeps the owner's performance
+  // clock; a child's RAF timestamp is used solely to cap this loop, never as simulation/interpolation time.
+  let renderFrame = 0, lastFrame = 0, stopped = false, destroyed = false, pageHidden = false, renderFailed = false;
+  const stopLoop = () => { stopped = true; renderingWindow.cancelAnimationFrame(renderFrame); renderFrame = 0; };
+  const draw = (at: number) => {
+    renderFrame = 0;
+    if (stopped || disposed() || renderingWindow.closed || widget.isDestroyed()) return;
+    try {
+      const elapsed = at - lastFrame, interval = 1000 / 30;
+      if (elapsed >= interval) {
+        widget.resize();
+        widget.render();
+        lastFrame = at - elapsed % interval;
+      }
+      if (!stopped) renderFrame = renderingWindow.requestAnimationFrame(draw);
+    } catch (error) { renderFailed = true; stopLoop(); onFailure(error); }
+  };
+  const removeRenderError = scene.renderError.addEventListener((_scene: unknown, error: unknown) => { renderFailed = true; stopLoop(); onFailure(error); });
+  const hidePage = () => { pageHidden = true; stopLoop(); };
+  const showPage = () => {
+    // An inline owner can return from the browser's back/forward cache without a React remount.
+    if (!pageHidden || renderFailed || destroyed || disposed() || renderingWindow.closed) return;
+    pageHidden = false;
+    stopped = false;
+    lastFrame = 0;
+    if (!renderFrame) renderFrame = renderingWindow.requestAnimationFrame(draw);
+  };
+  renderingWindow.addEventListener("pagehide", hidePage);
+  renderingWindow.addEventListener("pageshow", showPage);
+  renderFrame = renderingWindow.requestAnimationFrame(draw);
+
   return {
     requestRender: () => request("tick"),
     setGround,
@@ -517,7 +567,13 @@ async function startScene(
       });
     },
     destroy: () => {
+      if (destroyed) return;
+      destroyed = true;
       stopTerrainWatch();
+      stopLoop();
+      renderingWindow.removeEventListener("pagehide", hidePage);
+      renderingWindow.removeEventListener("pageshow", showPage);
+      removeRenderError();
       helicopter.destroy();
       obstacles.destroy();
       scene.preUpdate.removeEventListener(updateCamera);
