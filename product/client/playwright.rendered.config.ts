@@ -4,10 +4,11 @@ import tiers from './fast-client-tests.json' with { type: 'json' }
 const port = process.env.AEROLINK_FAST_CLIENT_PORT ?? '5188'
 const baseURL = `http://127.0.0.1:${port}`
 
-// The advisory Fast lane runs the rendered tier in two parallel parts (#1313): the software-WebGL out-the-window spec
-// alone ("3d"), which takes about as long as all the others together, and the rest ("standard"). Unset, every
+// The advisory Fast lane runs the rendered tier in two parallel parts (#1313): the software-WebGL out-the-window specs
+// ("3d"), which take about as long as all the others together, and the rest ("standard"). The view's tests are in three
+// files so the Full browser shards can spread them (#1298, #1232); here they stay one part on one worker. Unset, every
 // rendered spec runs, as it does locally.
-export const RENDERED_3D = ['fms-out-the-window-rendered.spec.ts']
+export const RENDERED_3D = ['fms-out-the-window-rendered.spec.ts', 'fms-out-the-window-imagery-rendered.spec.ts', 'fms-out-the-window-models-rendered.spec.ts']
 const part = process.env.AEROLINK_FAST_RENDERED_PART || undefined
 if (part !== undefined && part !== 'standard' && part !== '3d') throw new Error(`Unknown AEROLINK_FAST_RENDERED_PART: ${part}`)
 const testMatch = part === '3d' ? tiers.rendered.filter((file) => RENDERED_3D.includes(file))
