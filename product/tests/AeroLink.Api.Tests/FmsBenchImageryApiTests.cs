@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace AeroLink.Api.Tests;
 
@@ -139,11 +141,11 @@ public sealed class FmsBenchImageryApiTests
     }
 
     [Fact]
-    public async Task Outside_the_usgs_coverage_a_stored_key_fetches_esri_imagery_with_the_key_in_a_header_never_the_url()
+    public async Task Outside_the_usgs_coverage_the_key_is_encoded_only_in_the_fixed_esri_request_and_its_logging_is_disabled()
     {
         using var usgs = new FmsBenchTerrainApiTests.Upstream(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
         var esri = new EsriUpstream(_ => Image(Jpeg, "image/jpeg"));
-        using var harness = new Harness(usgs, esri: esri, esriKey: "test-esri-key");
+        using var harness = new Harness(usgs, esri: esri, esriKey: "test-esri-key/&?");
         await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(harness.Client);
 
         using var response = await harness.Client.GetAsync("/api/fms-bench/imagery/12/1210/1465");
@@ -152,9 +154,10 @@ public sealed class FmsBenchImageryApiTests
         Assert.Equal(Jpeg, await response.Content.ReadAsByteArrayAsync());
         Assert.Equal("esri", Assert.Single(response.Headers.GetValues(FmsBenchImageryEndpoints.SourceHeader)));
         var (uri, authorization) = Assert.Single(esri.Requested);
-        Assert.Equal("https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/12/1465/1210", uri.ToString());
-        Assert.Equal("Bearer test-esri-key", authorization);
-        Assert.DoesNotContain("test-esri-key", uri.ToString());
+        Assert.Equal("https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/12/1465/1210?token=test-esri-key%2F%26%3F", uri.AbsoluteUri);
+        Assert.Null(authorization);
+        Assert.DoesNotContain("test-esri-key", string.Join("\n", response.Headers.Select(header => header.ToString())));
+        Assert.Empty(harness.EsriLogs.Messages);
     }
 
     [Fact]
@@ -178,7 +181,8 @@ public sealed class FmsBenchImageryApiTests
         using var usgs = new FmsBenchTerrainApiTests.Upstream(request =>
             request.RequestUri!.AbsolutePath.Contains("/USGSImageryOnly/MapServer/tile/12/")
                 ? new HttpResponseMessage(HttpStatusCode.NotFound) : Image(Jpeg, "image/jpeg"));
-        var esri = new EsriUpstream(_ => Image("""{"error":{"code":498,"message":"Invalid token."}}"""u8.ToArray(), "application/json"));
+        var esri = new EsriUpstream(request => request.RequestUri!.Query == "?token=expired-key"
+            ? Image("""{"error":{"code":498,"message":"Invalid token."}}"""u8.ToArray(), "application/json") : Image(Jpeg, "image/jpeg"));
         using var harness = new Harness(usgs, esri: esri, esriKey: "expired-key");
         await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(harness.Client);
 
@@ -186,12 +190,35 @@ public sealed class FmsBenchImageryApiTests
         Assert.Equal(HttpStatusCode.NotFound, (await harness.Client.GetAsync("/api/fms-bench/imagery/12/1211/1465")).StatusCode);
         Assert.Single(esri.Requested);
         Assert.Equal(HttpStatusCode.OK, (await harness.Client.GetAsync("/api/fms-bench/imagery/15/9725/11855")).StatusCode);
+
+        // Rotation is used on the next tile, even while the previous credential is still in its refusal backoff.
+        harness.Configuration[FmsBenchEsriImageryKey.DirectKeySetting] = "repaired-key";
+        using var repaired = await harness.Client.GetAsync("/api/fms-bench/imagery/12/1212/1465");
+        Assert.Equal(HttpStatusCode.OK, repaired.StatusCode);
+        Assert.Equal(Jpeg, await repaired.Content.ReadAsByteArrayAsync());
+        Assert.Equal(2, esri.Requested.Count);
     }
 
     [Fact]
+    public async Task A_decoded_blank_usgs_tile_can_request_esri_directly_without_repeating_usgs()
+    {
+        using var usgs = new FmsBenchTerrainApiTests.Upstream(_ => Image(Jpeg, "image/jpeg"));
+        var esri = new EsriUpstream(_ => Image(Png, "image/png"));
+        using var harness = new Harness(usgs, esri: esri, esriKey: "test-esri-key");
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(harness.Client);
+
+        using var response = await harness.Client.GetAsync("/api/fms-bench/imagery/12/1210/1465?fallback=true");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(Png, await response.Content.ReadAsByteArrayAsync());
+        Assert.Equal("esri", Assert.Single(response.Headers.GetValues(FmsBenchImageryEndpoints.SourceHeader)));
+        Assert.Empty(usgs.Requested);
+        Assert.Single(esri.Requested);
+    }
+
+    [WindowsFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public void The_stored_key_is_read_from_its_protected_file_and_ignored_when_the_file_is_not_locked_down()
     {
-        if (!OperatingSystem.IsWindows()) return;   // DPAPI and NTFS ACLs; the backend jobs run on Windows
         var directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"esri-key-{Guid.NewGuid():N}"));
         try
         {
@@ -225,13 +252,68 @@ public sealed class FmsBenchImageryApiTests
             }
             directory.SetAccessControl(directorySecurity);
             new FileInfo(path).SetAccessControl(fileSecurity);
-            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(5));   // a changed file is read again
+            var filePolicy = fileSecurity.GetSecurityDescriptorSddlForm(System.Security.AccessControl.AccessControlSections.Access);
+            var directoryPolicy = directorySecurity.GetSecurityDescriptorSddlForm(System.Security.AccessControl.AccessControlSections.Access);
+            Assert.Equal("stored-esri-key", reader.Current());
+
+            // ACL changes leave content timestamps alone. Cached plaintext must stop being used immediately.
+            var exposed = new FileInfo(path).GetAccessControl();
+            exposed.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                new System.Security.Principal.SecurityIdentifier("S-1-5-11"),
+                System.Security.AccessControl.FileSystemRights.Read, System.Security.AccessControl.AccessControlType.Allow));
+            new FileInfo(path).SetAccessControl(exposed);
+            Assert.Null(reader.Current());
+            var restoredFile = new System.Security.AccessControl.FileSecurity();
+            restoredFile.SetSecurityDescriptorSddlForm(filePolicy, System.Security.AccessControl.AccessControlSections.Access);
+            new FileInfo(path).SetAccessControl(restoredFile);
+            Assert.Equal("stored-esri-key", reader.Current());
+
+            var directoryExposed = directory.GetAccessControl();
+            directoryExposed.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                new System.Security.Principal.SecurityIdentifier("S-1-5-11"),
+                System.Security.AccessControl.FileSystemRights.Read, System.Security.AccessControl.AccessControlType.Allow));
+            directory.SetAccessControl(directoryExposed);
+            Assert.Null(reader.Current());
+            var restoredDirectory = new System.Security.AccessControl.DirectorySecurity();
+            restoredDirectory.SetSecurityDescriptorSddlForm(directoryPolicy, System.Security.AccessControl.AccessControlSections.Access);
+            directory.SetAccessControl(restoredDirectory);
             Assert.Equal("stored-esri-key", reader.Current());
         }
         finally { directory.Delete(recursive: true); }
     }
 
-    /// <summary>The Esri upstream: records each request's address and its X-Esri-Authorization header.</summary>
+    private sealed class WindowsFactAttribute : FactAttribute
+    {
+        public WindowsFactAttribute()
+        {
+            if (!OperatingSystem.IsWindows()) Skip = "Requires Windows DPAPI and NTFS ACLs.";
+        }
+    }
+
+    [Fact]
+    public void The_esri_client_blocks_redirects_and_cookie_credentials()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddFmsBenchImageryClient();
+        using var provider = services.BuildServiceProvider();
+        var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(FmsBenchImageryEndpoints.EsriClientName);
+        while (handler is DelegatingHandler delegating) handler = delegating.InnerHandler!;
+        // Inspect the actual transport built by the registration, without substituting the test upstream.
+        if (handler is SocketsHttpHandler sockets)
+        {
+            Assert.False(sockets.AllowAutoRedirect);
+            Assert.False(sockets.UseCookies);
+        }
+        else
+        {
+            var client = Assert.IsType<HttpClientHandler>(handler);
+            Assert.False(client.AllowAutoRedirect);
+            Assert.False(client.UseCookies);
+        }
+    }
+
+    /// <summary>The synthetic Esri upstream: records request addresses and any legacy bearer header.</summary>
     internal sealed class EsriUpstream(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         public List<(Uri Uri, string? Authorization)> Requested { get; } = [];
@@ -258,12 +340,17 @@ public sealed class FmsBenchImageryApiTests
         private readonly AeroLinkApiFactory factory = new();
         private readonly Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> host;
         public HttpClient Client { get; }
+        public Microsoft.Extensions.Configuration.IConfiguration Configuration => host.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+        public EsriLogRecorder EsriLogs { get; } = new();
 
         public Harness(FmsBenchTerrainApiTests.Upstream upstream, bool? imagery = true, bool? terrain = null,
             EsriUpstream? esri = null, string? esriKey = null)
         {
             host = factory.WithWebHostBuilder(builder =>
             {
+                builder.ConfigureLogging(logging => logging
+                    .AddFilter($"System.Net.Http.HttpClient.{FmsBenchImageryEndpoints.EsriClientName}", Microsoft.Extensions.Logging.LogLevel.Trace)
+                    .AddProvider(EsriLogs));
                 if (imagery is { } on) builder.UseSetting(FmsBenchImageryEndpoints.EnabledKey, on.ToString());
                 if (terrain is { } terrainOn) builder.UseSetting(FmsBenchTerrainEndpoints.EnabledKey, terrainOn.ToString());
                 // Never the machine's real key: on HOME one is stored, and a test must not spend it or reach Esri.
@@ -280,6 +367,25 @@ public sealed class FmsBenchImageryApiTests
         }
 
         public void Dispose() { Client.Dispose(); host.Dispose(); factory.Dispose(); }
+    }
+
+    private sealed class EsriLogRecorder : Microsoft.Extensions.Logging.ILoggerProvider
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<string> Messages { get; } = new();
+        public Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) => new Recorder(this,
+            categoryName.StartsWith($"System.Net.Http.HttpClient.{FmsBenchImageryEndpoints.EsriClientName}.", StringComparison.Ordinal));
+        public void Dispose() { }
+
+        private sealed class Recorder(EsriLogRecorder owner, bool record) : Microsoft.Extensions.Logging.ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel level) => record;
+            public void Log<TState>(Microsoft.Extensions.Logging.LogLevel level, Microsoft.Extensions.Logging.EventId eventId,
+                TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (record) owner.Messages.Enqueue(formatter(state, exception));
+            }
+        }
     }
 
     private static async Task<Harness> SignedInAsync(FmsBenchTerrainApiTests.Upstream upstream)

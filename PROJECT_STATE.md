@@ -403,6 +403,12 @@ The helicopter bench consumes NOAA WMM2025 for MAG/TRUE angular entry and displa
 Every project has an **FMS Test Bench** (`…/fms-test-bench`): a photorealistic, touchable CMA-9000 FMS control
 display unit for engineers.
 
+The out-the-window view uses USGS imagery where available and optional Esri World Imagery elsewhere,
+including blank USGS filler tiles, with relief when neither supplies imagery. The operator stores the Esri key
+through the stable Windows configuration launcher. [DEC-151](DECISIONS_AND_OPEN_QUESTIONS.md#dec-151---esri-world-imagery-outside-the-usgs-coverage)
+and [DEC-152](DECISIONS_AND_OPEN_QUESTIONS.md#dec-152---backend-only-esri-imagery-token-url) bound credential storage,
+backend-only token URLs, disabled Esri request logging and redirects, attribution and the free-tier budget.
+
 - **Target aircraft ([DEC-146](DECISIONS_AND_OPEN_QUESTIONS.md#dec-146---the-fms-test-bench-targets-the-helicopter-cma-9000-first), [DEC-147](DECISIONS_AND_OPEN_QUESTIONS.md#dec-147---the-helicopter-bench-targets-a-full-civil-sar-configuration)).**
   The bench simulates a rotorcraft CMA-9000, with the helicopter operational program S/W 169-614876-300 as its
   behavioural baseline. The aircraft profile is versioned data (`product/client/src/fmsCdu/profile.ts`, named with a
