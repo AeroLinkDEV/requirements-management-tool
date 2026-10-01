@@ -5,7 +5,7 @@ import tiers from './fast-client-tests.json' with { type: 'json' }
 export default defineConfig({
   testDir: './tests',
   testMatch: tiers.logic,
-  workers: 1,
+  workers: 3,
   fullyParallel: false,
   retries: 0,
   outputDir: 'test-results/fast/logic',
