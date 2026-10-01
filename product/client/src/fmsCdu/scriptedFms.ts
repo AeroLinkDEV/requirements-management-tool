@@ -1170,14 +1170,20 @@ export class ScriptedFms implements CduBackend {
   /** The observations the radio fix uses: this frame's, with each station's cached range where this frame has none. */
   private rangeObservationsForFix(): RadioObservation[] {
     const frame = this.sensorFrame?.radios ?? [];
-    const merged = new Map(frame.map(observation => [observation.station.ident, observation]));
+    const now = this.now.getTime();
+    // A raw range has not earned cache TTL just because its adapter supplied an identity. Only ranges admitted
+    // by updateRangeCache can use that lifetime; identity-less legacy words stay on the shorter arrival clock.
+    const merged = new Map(frame.map(observation => {
+      const legacy = !observation.rangeIdentity && sampled(observation.slantRangeNm, now, this.sensorMaxAge) !== null
+        && this.rms?.dmeReceiving("dme1") && this.rms.dmeReceiving("dme2");
+      return [observation.station.ident, legacy ? observation : { ...observation,
+        slantRangeNm: { ...observation.slantRangeNm, status: "NCD" as const, value: null } }] as const;
+    }));
     for (const [ident, cached] of this.rangeCache) {
-      const current = merged.get(ident);
-      if (!current) merged.set(ident, { ...cached, bearingTrue: { ...cached.bearingTrue, status: "NCD", value: null } });
-      else if (current.slantRangeNm.status !== "NORMAL") merged.set(ident, { ...current, slantRangeNm: cached.slantRangeNm, rangeIdentity: cached.rangeIdentity });
+      const current = frame.find(observation => observation.station.ident === ident);
+      merged.set(ident, { ...cached, bearingTrue: current?.bearingTrue ?? { ...cached.bearingTrue, status: "NCD", value: null } });
     }
-    return [...merged.values()].filter(observation => observation.rangeIdentity
-      || sampled(observation.slantRangeNm, this.now.getTime(), this.sensorMaxAge) !== null);
+    return [...merged.values()];
   }
   /** R3-01 source order: successive independent, simultaneous radio fixes; DVS/current; air/last measured wind. */
   private rangeMotion(now: number, observations: readonly RadioObservation[], altitudeFt: number): RadioMotion | null {

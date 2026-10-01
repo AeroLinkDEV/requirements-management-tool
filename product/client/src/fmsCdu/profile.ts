@@ -96,7 +96,7 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     radioAcquisition: p(3, "s", "lab", "AUTO facility acquisition after tuning or signal return", true),
     dmeScanDwell: p(2, "s", "lab", "plan C3: how long a DME scan channel dwells on one roster station", true),
     dmeScanAcquisition: p(0.5, "s", "lab", "plan C3: a scan channel's range acquisition after it moves to a station", true),
-    dmeRangeCacheAge: p(4, "s", "lab", "plan C3: how long a station's cached range stays usable for navigation (at least one full dwell cycle)", true),
+    dmeRangeCacheAge: p(6, "s", "lab", "plan C3: cached range navigation age; covers the six-second full roster cycle on one surviving DME", true),
     naimRangeMaxAge: p(4, "s", "lab", "plan C3: the oldest range a NAIM backup fix may contain (at most the cache age)", true),
     rangeMotionWindAllowance: p(50, "kt", "lab", "plan C3: residual velocity allowance after measured motion compensation; with no motion, added to TAS for navigation-only stale geometry", true),
     radioRangeBias: p(0.02, "NM", "lab", "deterministic radio slant-range bias", true),

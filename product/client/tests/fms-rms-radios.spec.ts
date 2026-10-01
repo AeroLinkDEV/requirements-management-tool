@@ -385,7 +385,7 @@ test('C3: RMS station cache keeps ranges after the channels move on, uses indepe
   expect(unit.navState.mode).toBe('DME/DME')
   expect(distanceNm(start, unit.position)).toBeCloseTo(11 / 60, 2) // (600 + 60) kt for 1 second.
   expect(unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(false)
-  step(3000)
+  step(5000)
   expect(unit.navState.mode).toBe('DME/DME')
   step(1)
   expect(unit.navState.mode).not.toBe('DME/DME')
@@ -461,4 +461,68 @@ test('C3: GPS-derived last wind tags cached radio motion dependent, so GPS-only 
   expect(unit.navState.uncertain).toBe(true)
   expect(unit.sensorSolutions.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeNull()
   expect(unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+})
+
+
+// Raw frame words must pass the same arrival/receiver admission as cached ranges. Keeping those words present
+// catches the bypass that cache-only invalidation tests cannot see.
+for (const rejected of ['stale arrival', 'receiver bus loss'] as const) test(`C3: raw admission rejects ${rejected}, with a fresh healthy positive control`, () => {
+  const { frame } = measuredCache()
+  frame.dvs = { ...frame.dvs!, status: 'FAIL', value: null }
+  const healthy = new ScriptedFms(() => new Date(frame.air.at), { sensors: { read: () => frame } })
+  expect(healthy.navState.mode).toBe('DME/DME')
+  if (rejected === 'stale arrival') {
+    const older = structuredClone(frame)
+    older.radios = older.radios.map(observation => ({ ...observation,
+      slantRangeNm: { ...observation.slantRangeNm, at: observation.slantRangeNm.at - 2001 },
+      bearingTrue: { ...observation.bearingTrue, at: observation.bearingTrue.at - 2001 } }))
+    const stale = new ScriptedFms(() => new Date(older.air.at), { sensors: { read: () => older } })
+    expect(stale.navState.mode).toBe('DR')
+  } else {
+    for (const receiver of ['dme1', 'dme2'] as const) healthy.setRadioFaults(receiver, { measurementBus: 'LOST' })
+    healthy.updateNavigation(0)
+    expect(healthy.navState.mode).toBe('DR')
+    expect(healthy.sensorSolutions.some(sensor => sensor.mode === 'DME/DME')).toBe(false)
+    for (const receiver of ['dme1', 'dme2'] as const) healthy.setRadioFaults(receiver, { measurementBus: 'NORMAL' })
+    healthy.updateNavigation(0)
+    expect(healthy.navState.mode).toBe('DME/DME')
+  }
+})
+
+
+function radioWind() {
+  const nav = new CivilNavigation(CACHE_AT)
+  const radioInput = { dt: 1, air: { headingTrue: 90, tasKt: 100, altitudeFt: 0 }, gps: null, uncertainGps: null,
+    radioApproved: true, rnp: 2 }
+  nav.update({ ...radioInput, now: T0, radio: cachedFix(rangesAt(T0), T0, null)! })
+  const at = T0 + 1000, position = offset(CACHE_AT, 90, 0.1)
+  const next = rangesAt(at).map(observation => ({ ...observation,
+    slantRangeNm: { ...observation.slantRangeNm, value: distanceNm(position, observation.station.position) } }))
+  nav.update({ ...radioInput, now: at, radio: cachedFix(next, at, null)! })
+  expect(nav.current.windComputed).toBe(true)
+  expect(nav.measuredWind).toMatchObject({ at, gpsDependent: false })
+  return nav
+}
+
+for (const adopted of ['peer GPS', 'manual'] as const) test(`C3: ${adopted} operational wind adoption clears the earlier radio wind qualification`, () => {
+  const nav = radioWind()
+  const original = nav.measuredWind!
+  const solution = { ...nav.current, gpsDependent: adopted === 'peer GPS' }
+  // accept is the common production boundary for receiveSystemNavigation and applyEnteredWind.
+  nav.accept(solution, { north: 250, east: 0 })
+  expect(nav.windEstimate).toEqual({ north: 250, east: 0 })
+  expect(nav.measuredWind).toBeNull()
+  expect(original).toMatchObject({ at: T0 + 1000, gpsDependent: false })
+})
+
+test('C3: recomputing an uncompensated cached epoch cannot manufacture fresh independent wind', () => {
+  const nav = new CivilNavigation(CACHE_AT), observations = rangesAt(T0)
+  const input = { dt: 1, air: { headingTrue: 90, tasKt: 100, altitudeFt: 0 }, gps: null, uncertainGps: null,
+    radioApproved: true, rnp: 2 }
+  nav.update({ ...input, now: T0, radio: cachedFix(observations, T0, null)! })
+  const result = nav.update({ ...input, now: T0 + 1000, radio: cachedFix(observations, T0 + 1000, null)! })
+  expect(result.mode).toBe('DME/DME')
+  expect(result.windComputed).toBe(false)
+  expect(nav.measuredWind).toBeNull()
+  radioWind() // Fresh independent fixes still compute a source-qualified wind.
 })

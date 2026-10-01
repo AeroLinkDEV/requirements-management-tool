@@ -72,10 +72,10 @@ export class CivilNavigation {
   private readonly equipment: { kalman: boolean; dvs: boolean };
   private solution: CivilSolution;
   private wind = { north: 0, east: 0 };
-  private previousRadio: { position: LatLon; at: number; gpsDependent: boolean } | null = null;
+  private previousRadio: { position: LatLon; at: number; gpsDependent: boolean; qualifiedVelocity: boolean } | null = null;
   /** Whether the wind DR carries was computed from GPS velocity, or from radio fixes that were themselves GPS-dependent. */
   private windGpsDependent = false;
-  private windAt: number | null = null;
+  private measuredWindSample: { north: number; east: number; at: number; gpsDependent: boolean } | null = null;
   private readonly parameters: AircraftProfile["parameters"];
   constructor(initial: LatLon, parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters,
     equipment: { kalman: boolean; dvs: boolean } = { kalman: false, dvs: false }) {
@@ -87,10 +87,13 @@ export class CivilNavigation {
   }
   get current(): CivilSolution { return structuredClone(this.solution); }
   get windEstimate() { return { ...this.wind }; }
-  get measuredWind() { return this.windAt === null ? null : { ...this.wind, at: this.windAt, gpsDependent: this.windGpsDependent }; }
+  get measuredWind() { return this.measuredWindSample ? { ...this.measuredWindSample } : null; }
   accept(solution: CivilSolution, wind: { north: number; east: number }) {
     this.solution = structuredClone(solution);
     this.wind = { ...wind };
+    // Peer/manual operational wind has no transferred measured stamp/dependency. It cannot borrow an earlier
+    // computed wind's qualification. A later local sensor computation establishes its own sample.
+    this.measuredWindSample = null;
   }
   /** KALMAN is available while aided, past its first minute and within its coast (M300 1-5, 12-24; DEC-150). */
   private kalmanAvailable(ready: boolean) { return this.equipment.kalman && ready && this.kalman !== null && this.kalman.coast <= KALMAN_COAST_S; }
@@ -183,7 +186,7 @@ export class CivilNavigation {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: gps.northKt - air!.tasKt * Math.cos(heading), east: gps.eastKt - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = true;
-        this.windAt = input.now ?? null;
+        this.measuredWindSample = input.now === undefined ? null : { ...this.wind, at: input.now, gpsDependent: true };
         this.solution.windComputed = true;
       }
       // Aiding (plan C2): only a GPS with integrity, valid velocity words and a 95% accuracy; it restarts the coast clock.
@@ -192,18 +195,19 @@ export class CivilNavigation {
       }
     } else if (radio && input.radioApproved) {
       const previous = this.previousRadio;
+      const qualifiedVelocity = radio.naimEligible !== false || radio.motion?.gpsDependent === true;
       const elapsed = previous ? (radio.at - previous.at) / 1000 : 0;
-      if (airValid && !lowSpeed && previous && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value) {
+      if (airValid && !lowSpeed && qualifiedVelocity && previous?.qualifiedVelocity && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value) {
         const north = (radio.position.lat - previous.position.lat) * 60 * 3600 / elapsed;
         const east = longitudeDelta(previous.position.lon, radio.position.lon) * 60
           * Math.cos((radio.position.lat + previous.position.lat) * Math.PI / 360) * 3600 / elapsed;
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: north - air!.tasKt * Math.cos(heading), east: east - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = radioGpsDependent || previous.gpsDependent;
-        this.windAt = input.now ?? radio.at;
+        this.measuredWindSample = { ...this.wind, at: input.now ?? radio.at, gpsDependent: this.windGpsDependent };
       }
-      const windComputed = airValid && !lowSpeed && previous !== null && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
-      if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at, gpsDependent: radioGpsDependent };
+      const windComputed = airValid && !lowSpeed && qualifiedVelocity && previous?.qualifiedVelocity === true && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
+      if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at, gpsDependent: radioGpsDependent, qualifiedVelocity };
       const fix = { position: radio.position, mode: radio.mode, anp: radio.anp, dmes: radio.dmes, vor: radio.vor };
       this.solution = { ...fix, gpsSource: null, gpsDependent: radioGpsDependent, uncertain: false, airValid, windComputed, ...pending };
     } else if (this.kalmanAvailable(input.kalmanReady === true)) {
