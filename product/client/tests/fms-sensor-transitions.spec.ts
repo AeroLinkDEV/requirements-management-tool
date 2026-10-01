@@ -105,6 +105,12 @@ const LOSS_DESTINATIONS: Record<NavMode, NavMode[]> = {
   'VOR/DME': ['DME/DME', 'KALMAN', 'DVS', 'DR'],
   KALMAN: ['DVS', 'DR'], DVS: ['DR'], DR: [],
 }
+// Independent position/accuracy policy from the approved plan, not from the exported table under test.
+const EXPECTED_CONTINUITY: Record<NavMode, 'measured' | 'emulated INS' | 'continued'> = {
+  GPS: 'measured', 'DME/DME': 'measured', 'VOR/DME': 'measured',
+  KALMAN: 'emulated INS', DVS: 'continued', DR: 'continued',
+}
+const EXPECTED_HYSTERESIS: Record<string, number> = { 'DME/DME>VOR/DME': 100, 'VOR/DME>DME/DME': 0 }
 
 test('F3: the transition table covers every ordered pair of equipped modes', () => {
   expect(MODE_TRANSITIONS).toHaveLength(NAV_MODES.length * (NAV_MODES.length - 1))
@@ -122,12 +128,16 @@ for (const row of MODE_TRANSITIONS) {
     expect(after.mode).toBe(row.to)
     // Driven with each row's condition met (E-17's receiver failure for VOR/DME); without it the conditional message is absent.
     const expectedAlert = LOSS_DESTINATIONS[row.from].includes(row.to) ? `${row.from} NAV LOST` : null
+    const expectedContinuity = EXPECTED_CONTINUITY[row.to]
+    const expectedHysteresis = EXPECTED_HYSTERESIS[`${row.from}>${row.to}`] ?? 0
     expect(row.message).toBe(expectedAlert)
+    expect(row.continuity).toBe(expectedContinuity)
+    expect(row.hysteresisM).toBe(expectedHysteresis)
     expect(transitionAlert(row.from, row.to, after.sensors, { vorDmeReceiversFailed: true })).toBe(expectedAlert)
     if (row.messageCondition) expect(transitionAlert(row.from, row.to, after.sensors)).toBeNull()
     const step = distanceNm(before.position, after.position)
-    if (row.continuity === 'measured') expect(distanceNm(after.position, SOURCE[row.to].gps?.position ?? SOURCE[row.to].radios![0].position)).toBeLessThan(1e-9)
-    else if (row.continuity === 'continued') expect(Math.abs(step - 100 / 3600)).toBeLessThan(1e-4)
+    if (expectedContinuity === 'measured') expect(distanceNm(after.position, SOURCE[row.to].gps?.position ?? SOURCE[row.to].radios![0].position)).toBeLessThan(1e-9)
+    else if (expectedContinuity === 'continued') expect(Math.abs(step - 100 / 3600)).toBeLessThan(1e-4)
     else {
       // The emulated INS: calibrated at the first update's GPS (HERE, 100 kt east), then propagated.
       const elapsed = row.from === 'GPS' ? 1 : 2
@@ -138,8 +148,8 @@ for (const row of MODE_TRANSITIONS) {
       const both = (better: number) => input({ radios: [fix(row.from as RadioFix['mode'], 0.5), fix(row.to as RadioFix['mode'], 0.5 - metres(better))] })
       const accuracy = equipped()
       expect(accuracy.update(input({ radios: [fix(row.from as RadioFix['mode'], 0.5)] })).mode).toBe(row.from)
-      expect(accuracy.update(both(row.hysteresisM - 10)).mode).toBe(row.from)
-      const switched = accuracy.update(both(row.hysteresisM + 10))
+      expect(accuracy.update(both(expectedHysteresis - 10)).mode).toBe(row.from)
+      const switched = accuracy.update(both(expectedHysteresis + 10))
       expect(switched.mode).toBe(row.to)
       expect(transitionAlert(row.from, row.to, switched.sensors)).toBeNull()
     }
