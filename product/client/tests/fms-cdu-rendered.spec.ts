@@ -1269,6 +1269,34 @@ test('B1.7: a paused run stops its clock: the predictions and the fuel on FUEL a
 })
 
 // F9 rendered owner: real keys/status colours and the physical 24-column table. Solver/source rules stay in logic owners.
+test('F9 Conditions applies and records measured Doppler surface on FMS1 while CDU2 shows the shared word', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  await open(page)
+  await page.getByLabel('CDU inspected').selectOption('2')
+  const scenarios = page.getByRole('region', { name: 'Scenarios' })
+  await scenarios.getByRole('button', { name: 'Record', exact: true }).click()
+  await tab(page, 'Conditions')
+  const card = page.getByRole('region', { name: 'Sensor fault laboratory' })
+  await card.getByLabel('Measured Doppler surface').selectOption('SEA')
+  await card.getByRole('button', { name: 'Apply Doppler surface' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('set the measured Doppler surface to SEA (laboratory)')
+  await expect(card.getByTestId('sensor-dvs-readout')).toContainText(/Doppler SEA; VX .*sample 2026-09-27T14:00:00\.000Z; status NORMAL; source native laboratory/)
+  await card.screenshot({ path: test.info().outputPath('f9-measured-dvs-conditions.png') })
+  await key(page, 'INIT_REF').click(); await key(page, 'NEXT').click(); await key(page, 'LSK5R').click(); await key(page, 'LSK3L').click()
+  await expectLine(page, 0, /^DVS STATUS\s+1\/2/)
+  await expectLine(page, 6, /^SEA/)
+  await key(page, 'NEXT').click()
+  for (const digit of '090/10') await key(page, digit === '/' ? 'SLASH' : digit).click()
+  await key(page, 'LSK2L').click()
+  await expectLine(page, 4, /^090°\/10\.0 KTS/)
+  await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('f9-dvs-water-current-cdu2.png') })
+  await tab(page, 'Scenarios'); await scenarios.getByRole('button', { name: 'Stop recording' }).click()
+  const [saved] = await Promise.all([page.waitForEvent('download'), scenarios.getByRole('button', { name: 'Save as JSON' }).click()])
+  const recorded = JSON.parse(await readFile(await saved.path(), 'utf8')) as { steps: { action: { kind: string; surface?: string } }[] }
+  expect(recorded.steps.filter(entry => entry.action.kind === 'dvsInput').map(entry => entry.action)).toEqual([{ kind: 'dvsInput', surface: 'SEA' }])
+  await saved.saveAs(test.info().outputPath('f9-measured-dvs-recorded.json'))
+})
+
 test('F679 navigation status keys show actual GPS loss, crew deselection and the bearing table', async ({ page }) => {
   await open(page)
   const row = (index: number) => page.locator('.fmsCduScreen .cduLine').nth(index)

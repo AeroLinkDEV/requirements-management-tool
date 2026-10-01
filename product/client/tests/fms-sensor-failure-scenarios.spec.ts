@@ -31,6 +31,8 @@ test('the radio and station steps are validated on admission, with the reason, a
     [{ kind: 'radioFault', device: 'dme1', receiver: 'LOST' }, /receiver is NORMAL, FAILED or SILENT/],
     [{ kind: 'stationOffAir', ident: 'yow', off: true }, /station ident/],
     [{ kind: 'stationOffAir', ident: 'YOW' }, /off true or false/],
+    [{ kind: 'dvsInput', surface: 'UNKNOWN' }, /surface is LAND or SEA/],
+    [{ kind: 'dvsInput', surface: 'SEA', alongKt: 100 }, /unsupported fields/],
     [{ kind: 'expectNav' }, /at least one of mode, accuracyBasis and uncertain/],
     [{ kind: 'expectNav', mode: 'INS' }, /mode is one of/],
     [{ kind: 'expectNav', accuracyBasis: 'oem' }, /receiver or laboratory/],
@@ -303,6 +305,24 @@ test('F14 measured air replay biases heading without moving truth, and heading i
   expect(lab.fms.navigationInputs!.air.value!.altitudeFt).toBeGreaterThan(0)
   lab.replay([{ kind: 'airInput', headingValid: true, tasValid: true, headingBiasDeg: 0 }], 'DVS')
   expect(lab.fms.navState.airValid).toBe(true)
+})
+
+test('F9 measured Doppler surface replays through the central producer, refusing external input ownership', () => {
+  const lab = frozen(), physical = lab.fms.truePosition
+  for (const surface of ['SEA', 'LAND'] as const) {
+    const action = { kind: 'dvsInput', surface } as const
+    const runner = lab.replay([action])
+    expect(lab.fms.navigationInputs!.dvs).toMatchObject({ at: lab.clock(), status: 'NORMAL', value: { surface } })
+    expect(lab.fms.dvsStatus).toMatchObject({ mode: surface, source: 'native laboratory', at: lab.clock() })
+    expect(lab.fms.truePosition).toEqual(physical)
+    expect(reportMarkdown(runner)).toContain(`set the measured Doppler surface to ${surface} (laboratory)`)
+  }
+  const input = lab.fms.navigationInputs!
+  const adapter = new ScriptedFms(() => new Date(lab.clock()), { sensors: { read: () => structuredClone(input) } })
+  const runner = new ScenarioRunner(scenario([step({ kind: 'start' }, { kind: 'dvsInput', surface: 'SEA' })]), adapter)
+  expect(runner.outcome).toBe('error')
+  expect(runner.results[0].actual).toContain("external input adapter owns this FMS's Doppler word")
+  expect(adapter.navigationInputs!.dvs).toEqual(input.dvs)
 })
 
 test('F14 power duration replay obeys the independent C2 50ms boundary and records exact duration', () => {

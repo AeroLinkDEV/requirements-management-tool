@@ -421,7 +421,12 @@ display unit for engineers.
   and its PRN exclusions use visibly simulated sky geometry; real almanac prediction and physical avionics adapters
   remain unavailable. Scanning DME ranges retain receiver/channel/command identity and original expiry in a bounded
   station cache. Measured radio velocity, Doppler/current or air-data/last-wind compensation aligns them to the fix
-  epoch; GPS-dependent compensation and unqualified motion cannot supply the independent NAIM backup. The applicability matrix records radio, uncertainty and freshness assumptions.
+  epoch; GPS-dependent compensation and unqualified motion cannot supply the independent NAIM backup. Doppler
+  velocity and LAND/SEA surface mode share one measured word and expiry; only SEA applies the crew's water current
+  in navigation and cached-range motion. Conditions and recorded scenarios use the native laboratory producer,
+  while an external adapter owns its Doppler words. Crew TAS/heading selection and raw validity also govern motion
+  compensation; unaligned cached navigation retains a declared laboratory allowance without independent NAIM credit.
+  The applicability matrix records radio, uncertainty and freshness assumptions.
 
 - **Helicopter IFR procedures.** The subset reader imports HD/PD departures and PI, RF and AF geometry. The reviewed
   HUDSN ONE chart separates its VFR site-to-IDF segment from instrument guidance at the coded crossing altitude.

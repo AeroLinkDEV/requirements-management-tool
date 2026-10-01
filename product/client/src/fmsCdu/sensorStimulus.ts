@@ -10,10 +10,11 @@ export type SensorStimulus =
   | { kind: "stationFault"; ident: string; component: "VOR"; biasDeg: number }
   | { kind: "ndb"; ident: string; offAir: boolean }
   | { kind: "airInput"; tasValid?: boolean; headingValid?: boolean; headingBiasDeg?: number }
+  | { kind: "dvsInput"; surface: "LAND" | "SEA" }
   | { kind: "powerInterrupt"; durationMs: number }
   | { kind: "gpsPair"; mode: "NORMAL" | "INTEGRITY_ONLY" | "POSITION_GONE" };
 
-const KINDS = new Set(["radioFault", "stationOffAir", "stationFault", "ndb", "airInput", "powerInterrupt", "gpsPair"]);
+const KINDS = new Set(["radioFault", "stationOffAir", "stationFault", "ndb", "airInput", "dvsInput", "powerInterrupt", "gpsPair"]);
 export function isSensorStimulus(value: { kind: string }): value is SensorStimulus { return KINDS.has(value.kind); }
 const ident = (value: unknown) => typeof value === "string" && /^[A-Z0-9]{1,4}$/.test(value);
 const finite = (value: unknown, min: number, max: number) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
@@ -23,7 +24,7 @@ export function sensorStimulusProblem(value: unknown): string | null {
   const fields: Record<string, string[]> = {
     radioFault: ["device", "controlPath", "measurementBus", "receiver"], stationOffAir: ["ident", "off"], ndb: ["ident", "offAir"],
     stationFault: a.component === "DME" ? ["ident", "component", "reply", "reportedIdent"] : ["ident", "component", "biasDeg"],
-    airInput: ["tasValid", "headingValid", "headingBiasDeg"], powerInterrupt: ["durationMs"], gpsPair: ["mode"],
+    airInput: ["tasValid", "headingValid", "headingBiasDeg"], dvsInput: ["surface"], powerInterrupt: ["durationMs"], gpsPair: ["mode"],
   };
   const allowed = typeof a.kind === "string" && Object.hasOwn(fields, a.kind) ? fields[a.kind] : null;
   if (allowed && Object.keys(a).some(key => key !== "kind" && !allowed.includes(key))) return `${String(a.kind)} contains unsupported fields`;
@@ -49,6 +50,7 @@ export function sensorStimulusProblem(value: unknown): string | null {
       if ([a.tasValid, a.headingValid].some(flag => flag !== undefined && typeof flag !== "boolean")) return "airInput validity is true or false";
       return a.headingBiasDeg === undefined || finite(a.headingBiasDeg, -180, 180) ? null : "airInput headingBiasDeg is within ±180 degrees";
     case "powerInterrupt": return finite(a.durationMs, 0, 3_600_000) ? null : "powerInterrupt needs durationMs from 0 to 3600000 ms";
+    case "dvsInput": return a.surface === "LAND" || a.surface === "SEA" ? null : "dvsInput surface is LAND or SEA";
     case "gpsPair": return typeof a.mode === "string" && ["NORMAL", "INTEGRITY_ONLY", "POSITION_GONE"].includes(a.mode) ? null : "gpsPair mode is NORMAL, INTEGRITY_ONLY or POSITION_GONE";
     default: return `unsupported sensor stimulus ${String(a.kind)}`;
   }
@@ -63,6 +65,7 @@ export function describeSensorStimulus(a: SensorStimulus): string {
       : `set station ${a.ident}'s DME ${[a.reply !== undefined && `reply ${a.reply}`, a.reportedIdent !== undefined && `reported ident ${a.reportedIdent ?? "database ident"}`].filter(Boolean).join(", ")} (laboratory)`;
     case "airInput": return `set measured navigation air inputs: ${[a.tasValid !== undefined && `TAS valid ${a.tasValid}`, a.headingValid !== undefined && `heading valid ${a.headingValid}`, a.headingBiasDeg !== undefined && `heading bias ${a.headingBiasDeg} degrees`].filter(Boolean).join(", ")} (laboratory)`;
     case "powerInterrupt": return `interrupt this FMS's KALMAN power for ${a.durationMs} ms (C2 laboratory rule)`;
+    case "dvsInput": return `set the measured Doppler surface to ${a.surface} (laboratory)`;
     case "gpsPair": return `set both GPS receivers to ${a.mode} (laboratory word overrides: HIL and position)`;
   }
 }
@@ -94,6 +97,9 @@ export function applySensorStimulus(fms: ScriptedFms, a: SensorStimulus): void {
       return;
     }
     case "powerInterrupt": fms.powerInterrupt(a.durationMs); return;
+    case "dvsInput":
+      if (!fms.setDvsInputSurface(a.surface)) throw new Error("an external input adapter owns this FMS's Doppler word");
+      return;
     case "gpsPair": {
       if (!fms.gpsStimulusAvailable) throw new Error("an external input adapter owns this FMS's GPS words");
       const port = stimulusFor(fms);

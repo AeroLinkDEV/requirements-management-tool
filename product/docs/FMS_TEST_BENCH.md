@@ -157,6 +157,15 @@ and disabled in the form. This does not qualify a manual DME control-failure int
 receiver/silence/measurement-bus stimuli remain supported. NDB controls accept the same one-to-seven-character
 ident as replay; active-database ambiguity still errors. Refused controls are not added to a recording.
 
+The measured Doppler surface control uses the same typed dispatcher, scenario admission and recorder. LAND/SEA
+travels with the body velocities in one timestamped Doppler word. The Conditions readout reports that word's
+value, epoch, status and native-laboratory or external-adapter source; DVS STATUS consumes the same admitted word.
+Only a fresh, valid SEA word applies the entered water current, both for DVS navigation and radio-cache motion.
+An external input adapter owns this word and refuses native laboratory changes. Legacy adapters omitting surface
+retain LAND semantics and receive no water-current correction. Malformed velocity/surface metadata and stale,
+future or replayed epochs cannot renew Doppler authority. The native operation changes the producer's reported
+reflecting surface, not the physical aircraft; it provides no installed Doppler or sea-state qualification.
+
 ### Magnetic reference and preflight
 
 The civil helicopter profile defaults to **MAG**. INIT/REF → SETUP selects MAG/TRUE; angular entry and CDU/EFIS/HUD display use the consumed NOAA WMM2025 model, while plant/navigation geometry and wind remain true. Above N73 or below S60 the selection is forced TRUE and cannot be toggled. Leaving the polar region retains TRUE with CHECK TRUE/MAG REF. IDENT 2/2 identifies the model, epoch, release and checksum. The Nav data tab exports/loads the simulator MAGVAR package and restores the bundled table. A consumed CRC failure withdraws FMS navigation; age above five years is a maintenance advisory, with extrapolated accuracy explicitly unqualified. Height without valid GPS HAE is approximated at 0 km above the ellipsoid.

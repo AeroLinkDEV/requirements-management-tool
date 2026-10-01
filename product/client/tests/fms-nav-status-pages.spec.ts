@@ -1,7 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
-import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { applySensorStimulus } from '../src/fmsCdu/sensorStimulus'
 import type { SensorFrame } from '../src/fmsCdu/sensorPorts'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 
@@ -150,7 +150,7 @@ test('F9: DVS STATUS shows the Doppler velocities and mode; the crew water curre
   // The FMS computes the wind with GPS: no manual entry.
   expect(lines()[SCRATCHPAD_LINE].trim()).toMatch(/NOT ALLOWED|INVALID/)
   fms.press('CLR')
-  fms.setDvsSurface('SEA')
+  applySensorStimulus(fms, { kind: 'dvsInput', surface: 'SEA' })
   fms.press('PREV')
   expect(lines()[6]).toMatch(/^SEA/)
 })
@@ -215,26 +215,77 @@ test('F9: the POS INIT 2/2 table lists each equipped mode with its status, dista
   expect(bare.lines().slice(4, 9).map(line => line.slice(0, 8).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'DVS', ''])
 })
 
-test('F9: the crew water current moves the DVS solution in SEA mode only (M300 12-22, 12-23)', () => {
-  const drift = (surface: 'LAND' | 'SEA', current: boolean) => {
-    const { fms, step } = unit()
-    step(90)
-    fms.setCondition('gpsLost', true); fms.setCondition('dmeOutage', true)
-    fms.setDeselected('KALMAN', true)
-    fms.setDvsSurface(surface)
-    if (current) fms.setWaterCurrent(90, 10)
-    step(1)
+test('F9: the admitted Doppler surface word gates crew current for both navigation and cached radio motion', () => {
+  for (const surface of ['LAND', 'SEA', undefined] as const) {
+    let now = Date.UTC(2026, 8, 30, 14)
+    const seed = new ScriptedFms(() => new Date(now))
+    seed.setAircraft({ position: { lat: 45.5, lon: -74.9 }, altitude: 6000 })
+    for (let i = 0; i < 5; i++) { now += 1000; seed.updateNavigation(1) }
+    const frame: SensorFrame = structuredClone(seed.navigationInputs!)
+    frame.air.value = { headingTrue: 0, tasKt: 0, altitudeFt: 6000 }
+    frame.apirs = { at: now, sequence: 1, status: 'FAIL', value: null }
+    frame.gps = [{ ...frame.gps[0], status: 'FAIL', value: null }, { ...frame.gps[1], status: 'FAIL', value: null }]
+    frame.dvs = { at: now, sequence: 1, status: 'NORMAL', value: { alongKt: 0, acrossKt: 0, ...(surface ? { surface } : {}) } }
+    const observations = frame.radios.filter(observation => observation.slantRangeNm.status === 'NORMAL')
+    frame.radios = []
+    const fms = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
+    fms.setWaterCurrent(90, 10)
+    expect(fms.dvsStatus.mode).toBe(surface ?? 'LAND')
     expect(fms.navState.mode).toBe('DVS')
-    step(360)
-    return { ...fms.position }
+    const start = { ...fms.position }
+    const tick = (seconds: number) => {
+      now += seconds * 1000; frame.air.at = now; frame.air.sequence++
+      frame.dvs!.at = now; frame.dvs!.sequence++; fms.updateNavigation(seconds)
+    }
+    for (let i = 0; i < 360; i++) tick(1)
+    // Literal oracle: 10 kt east for six minutes is 1 NM; no production distance/offset helper.
+    const eastNm = (fms.position.lon - start.lon) * Math.PI / 180 * 3440.065 * Math.cos(start.lat * Math.PI / 180)
+    expect(eastNm).toBeCloseTo(surface === 'SEA' ? 1 : 0, 5)
+    expect(fms.position.lat).toBeCloseTo(start.lat, 6)
+    // Bind genuine native arrivals to acknowledged receiver feedback; no private identity shortcut.
+    frame.radios = observations.flatMap(observation => {
+      const paired = (['dme1', 'dme2'] as const).find(receiver => fms.dmeStation(receiver)?.ident === observation.station.ident)
+      const scan = fms.radioPort!.scanning().find(on => on.ident === observation.station.ident)
+      const identity = paired ? fms.radioPort!.dmeTuning(paired, 1) : scan ? fms.radioPort!.dmeTuning(scan.device, scan.channel) : null
+      return identity ? [{ ...observation, rangeIdentity: identity,
+        slantRangeNm: { ...observation.slantRangeNm, at: now, sequence: observation.slantRangeNm.sequence + 1 },
+        bearingTrue: { ...observation.bearingTrue, status: 'NCD' as const, value: null },
+        reportedDmeIdent: observation.reportedDmeIdent ? { ...observation.reportedDmeIdent, at: now, sequence: observation.reportedDmeIdent.sequence + 1 } : undefined }] : []
+    })
+    expect(frame.radios).toHaveLength(3)
+    fms.updateNavigation(0)
+    const measuredAt = now
+    frame.radios = []; tick(1)
+    const fix = fms.lastRadioFixes.find(candidate => candidate.mode === 'DME/DME')!
+    expect(fix.motion).toMatchObject({ source: 'DVS', at: now, eastKt: surface === 'SEA' ? 10 : 0, gpsDependent: false })
+    expect(fix.oldestAt).toBe(measuredAt)
+    expect(fix.naimEligible).toBe(true)
+    const priorAt = frame.dvs!.at
+    now += 2001; frame.air.at = now; frame.air.sequence++; fms.updateNavigation(2.001)
+    expect(fms.dvsStatus.mode).toBe('FAIL')
+    expect(fms.navigationInputs!.dvs!.at).toBe(priorAt)
+    expect(fms.lastRadioFixes.find(candidate => candidate.mode === 'DME/DME')!.motion).toBeNull()
   }
-  const still = drift('LAND', false)
-  const land = drift('LAND', true)
-  const sea = drift('SEA', true)
-  expect(distanceNm(land, still)).toBeLessThan(1e-6)
-  // Six minutes of a 10 kt current toward east is 1 NM.
-  expect(distanceNm(sea, still)).toBeGreaterThan(0.9)
-  expect(distanceNm(sea, still)).toBeLessThan(1.1)
+})
+
+test('F9 direct Doppler adapters cannot grant SEA correction through malformed or future measured words', () => {
+  const now = Date.UTC(2026, 8, 30, 14)
+  const frame = new ScriptedFms(() => new Date(now)).navigationInputs!
+  frame.radios = []; frame.apirs = undefined
+  frame.gps = [{ ...frame.gps[0], status: 'FAIL', value: null }, { ...frame.gps[1], status: 'FAIL', value: null }]
+  for (const dvs of [
+    { at: now, sequence: 1, status: 'NORMAL', value: { alongKt: 0, acrossKt: 0, surface: 'UNKNOWN' } },
+    { at: now, sequence: 1, status: 'NORMAL', value: { alongKt: Infinity, acrossKt: 0, surface: 'SEA' } },
+    { at: now + 1, sequence: 1, status: 'NORMAL', value: { alongKt: 0, acrossKt: 0, surface: 'SEA' } },
+    { at: now, sequence: -1, status: 'NORMAL', value: { alongKt: 0, acrossKt: 0, surface: 'SEA' } },
+  ]) {
+    const invalid = { ...frame, dvs } as SensorFrame
+    const fms = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(invalid) } })
+    fms.setWaterCurrent(90, 10)
+    expect(fms.dvsStatus.mode).toBe('FAIL')
+    expect(fms.sensorSolutions.some(sensor => sensor.mode === 'DVS' && sensor.available)).toBe(false)
+    expect(fms.navState.mode).toBe('DR')
+  }
 })
 
 

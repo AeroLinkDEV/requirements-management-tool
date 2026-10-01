@@ -290,7 +290,7 @@ test('S300 after-FAF integrity-only cancellation waits 300 seconds, while HDOP a
   expect(recalled(immediate.unit, 'NO APPR INTEGRITY')).toBe(true)
 })
 
-test('an external sensor mailbox refuses a receiver replay even when its air-data packet is newer', () => {
+test('an external sensor mailbox refuses receiver and Doppler replay even when its air-data packet is newer', () => {
   const template = new ScriptedFms().navigationInputs!
   const port = new BufferedSensorPort()
   expect(port.publish(template)).toBe(true)
@@ -301,6 +301,22 @@ test('an external sensor mailbox refuses a receiver replay even when its air-dat
   replay.gps[0].at -= 1000
   expect(port.publish(replay)).toBe(false)
   expect(port.read()).toEqual(template)
+  const newer = structuredClone(template)
+  newer.air.at += 1000; newer.air.sequence++
+  for (const dvs of [
+    { ...template.dvs!, at: template.dvs!.at - 1, sequence: template.dvs!.sequence + 1 },
+    { ...template.dvs!, value: { ...template.dvs!.value!, surface: 'SEA' } }, // A different value cannot reuse an epoch/sequence.
+    { ...template.dvs!, sequence: -1 },
+    { ...template.dvs!, value: { alongKt: NaN, acrossKt: 0, surface: 'SEA' } },
+    { ...template.dvs!, value: { alongKt: 0, acrossKt: 0, surface: 'UNKNOWN' } },
+  ]) {
+    expect(port.publish({ ...newer, dvs } as SensorFrame)).toBe(false)
+    expect(port.read()).toEqual(template)
+  }
+  newer.dvs = { ...template.dvs!, at: newer.air.at, sequence: template.dvs!.sequence + 1,
+    value: { alongKt: 0, acrossKt: 10, surface: 'SEA' } }
+  expect(port.publish(newer)).toBe(true)
+  expect(port.read()!.dvs).toEqual(newer.dvs)
 })
 
 test('radio AUTO acquisition restarts at the first sample in range after a loss', () => {

@@ -29,7 +29,7 @@ import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from
 import type { SensorSolution } from "./sensorState";
 import { BenchRadioReceiver, radioFixes, type DmeStationStatus, type RadioFix, type RadioMotion } from "./radioNavigation";
 import { transitionAlert } from "./sensorTransitions";
-import { MAX_ACCEPTED_TAS_KT, sampled, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
+import { MAX_ACCEPTED_TAS_KT, sampled, sampledDoppler, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
 import { RADIO_PAGES } from "./radioPages";
 import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
@@ -1243,7 +1243,8 @@ export class ScriptedFms implements CduBackend {
     if (this.radioMotion && now >= this.radioMotion.at && now - this.radioMotion.at <= this.sensorMaxAge) return this.radioMotion;
     const dvs = this.dopplerEarth(now), air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
     if (dvs) return { source: "DVS", at: Math.min(this.sensorFrame!.dvs!.at, this.sensorFrame!.air.at),
-      northKt: dvs.northKt + (this.waterCurrent?.northKt ?? 0), eastKt: dvs.eastKt + (this.waterCurrent?.eastKt ?? 0), gpsDependent: false };
+      northKt: dvs.northKt + (dvs.surface === "SEA" ? this.waterCurrent?.northKt ?? 0 : 0),
+      eastKt: dvs.eastKt + (dvs.surface === "SEA" ? this.waterCurrent?.eastKt ?? 0 : 0), gpsDependent: false };
     const wind = this.navigation.measuredWind;
     if (this.deselected.has("TAS") || this.deselected.has("HDG") || !air || air.tasValid === false || air.headingValid === false
       || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
@@ -1411,7 +1412,7 @@ export class ScriptedFms implements CduBackend {
     const apirs = { northMs2: accel(north, previous?.north, bias.north), eastMs2: accel(east, previous?.east, bias.east) };
     const heading = (this.aircraft.heading ?? this.heading) * Math.PI / 180;
     const overSurfaceNorth = north - this.surfaceDrift.northKt, overSurfaceEast = east - this.surfaceDrift.eastKt;
-    const dvs = { verticalFtMin: this.aircraft.verticalSpeed ?? 0, alongKt: overSurfaceNorth * Math.cos(heading) + overSurfaceEast * Math.sin(heading),
+    const dvs = { surface: this.dvsInputSurface, verticalFtMin: this.aircraft.verticalSpeed ?? 0, alongKt: overSurfaceNorth * Math.cos(heading) + overSurfaceEast * Math.sin(heading),
       acrossKt: -overSurfaceNorth * Math.sin(heading) + overSurfaceEast * Math.cos(heading) };
     const word = <T>(value: T, failed: boolean) => ({ at: now, sequence, status: failed ? "FAIL" as const : "NORMAL" as const, value: failed ? null : value });
     return { apirs: word(apirs, this.sensorHealth.APIRS === "FAIL" || this.injected.has("apirsFail")),
@@ -1437,19 +1438,26 @@ export class ScriptedFms implements CduBackend {
   get dvsWindMagnetic() { return this.dvsMagnetic && !polarRegion(this.position); }
   setDvsWindMagnetic(on: boolean) { this.dvsMagnetic = on; }
   get inPolarArea() { return polarRegion(this.position); }
-  /** The DVS's surface mode (LAND or SEA), a bench stimulus: the DVS reports it; in SEA the water current applies. */
-  private dvsSurface: "LAND" | "SEA" = "LAND";
-  setDvsSurface(surface: "LAND" | "SEA") { this.dvsSurface = surface; }
+  /** Native laboratory producer setting. Navigation consumes only the resulting measured word. */
+  private dvsInputSurface: "LAND" | "SEA" = "LAND";
+  setDvsInputSurface(surface: "LAND" | "SEA"): boolean {
+    if (this.sensorPort || surface !== "LAND" && surface !== "SEA") return false;
+    this.dvsInputSurface = surface;
+    this.updateNavigation(0);
+    return true;
+  }
   /** The water current the crew entered (direction toward, true, and speed), for DVS STATUS 2/2. */
   get waterCurrentEntry(): { toward: number; speedKt: number } | null {
     const current = this.waterCurrent;
     return current ? { toward: (Math.atan2(current.eastKt, current.northKt) * 180 / Math.PI + 360) % 360, speedKt: Math.hypot(current.northKt, current.eastKt) } : null;
   }
   /** DVS STATUS 1/2 (M300 12-21): the Doppler's body-axis velocities and its mode (FAIL without a valid word). */
-  get dvsStatus(): { vxKt: number | null; vyKt: number | null; vzFtMin: number | null; mode: string } {
-    const word = sampled(this.sensorFrame?.dvs, this.now.getTime(), this.sensorMaxAge);
-    if (!word) return { vxKt: null, vyKt: null, vzFtMin: null, mode: "FAIL" };
-    return { vxKt: word.alongKt, vyKt: word.acrossKt, vzFtMin: word.verticalFtMin ?? null, mode: this.dvsSurface };
+  get dvsStatus() {
+    const word = sampledDoppler(this.sensorFrame?.dvs, this.now.getTime(), this.sensorMaxAge);
+    const source = this.sensorPort ? "external adapter" : "native laboratory";
+    const at = this.sensorFrame?.dvs && Number.isFinite(this.sensorFrame.dvs.at) ? this.sensorFrame.dvs.at : null;
+    if (!word) return { vxKt: null, vyKt: null, vzFtMin: null, mode: "FAIL", at, source };
+    return { vxKt: word.alongKt, vyKt: word.acrossKt, vzFtMin: word.verticalFtMin ?? null, mode: word.surface ?? "LAND", at, source };
   }
   /**
    * KALMAN STATUS 1/1 (M300 12-24): the operating mode (INI until the mode is available, NAV while it is), the emulated INS
@@ -1476,13 +1484,13 @@ export class ScriptedFms implements CduBackend {
 
   /** The Doppler velocity in earth axes, rotated with the FMS's own heading (null without a valid word). */
   private dopplerEarth(now: number) {
-    const body = sampled(this.sensorFrame?.dvs, now, this.sensorMaxAge);
+    const body = sampledDoppler(this.sensorFrame?.dvs, now, this.sensorMaxAge);
     const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
     // A deselected DVS, or a deselected heading (the DVS needs it to resolve its velocities), gives no DVS solution.
     if (this.deselected.has("DVS") || this.deselected.has("HDG")) return null;
     if (!body || !air || air.headingValid === false || !Number.isFinite(air.headingTrue)) return null;
     const heading = air.headingTrue * Math.PI / 180;
-    return { northKt: body.alongKt * Math.cos(heading) - body.acrossKt * Math.sin(heading), eastKt: body.alongKt * Math.sin(heading) + body.acrossKt * Math.cos(heading) };
+    return { northKt: body.alongKt * Math.cos(heading) - body.acrossKt * Math.sin(heading), eastKt: body.alongKt * Math.sin(heading) + body.acrossKt * Math.cos(heading), surface: body.surface ?? "LAND" };
   }
 
   /** Last input as published, for replay/adapter diagnostics. This is separate from the computed position. */
@@ -1585,11 +1593,12 @@ export class ScriptedFms implements CduBackend {
     if (previousSource !== null && uncertainOrder.includes(previousSource - 1)) uncertainOrder.sort(index => index === previousSource - 1 ? -1 : 1);
     const uncertainIndex = uncertainOrder.find(index => gps.assessed[index].reason === "INTEGRITY" && gps.assessed[index].fix !== null);
     const predicted = this.navigation.current.position;
+    const doppler = this.dopplerEarth(now);
     const selection = this.navigation.update({ dt, air, airAt: this.sensorFrame?.air.at, gps: gps.chosen === null ? null : measurement(gps.chosen),
       uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio: null, radios,
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp,
       // The crew's water current corrects the Doppler only in SEA mode (M300 12-22).
-      apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: this.dopplerEarth(now), waterCurrent: this.dvsSurface === "SEA" ? this.waterCurrent : null,
+      apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: doppler, waterCurrent: doppler?.surface === "SEA" ? this.waterCurrent : null,
       kalmanReady: now - this.poweredAt >= 60_000 && !this.deselected.has("KALMAN"), now, naimMaxAgeS: this.aircraftProfile.parameters.naimRangeMaxAge.value });
     // Entering dead reckoning from another mode: FMS NAV IN DR, a status advisory (M300 Appendix E, E-33), white in the
     // scratchpad and below any alert raised with it. Each mode's NAV LOST is raised by the transition table below.
