@@ -1,6 +1,6 @@
 import { alert } from "./alerts";
 import type { CrossTalkPort, RadioManagementPort } from "./crossTalk";
-import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey } from "./radioManagement";
+import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey, type StandbyKey, adfFrequency } from "./radioManagement";
 import type { CivilSolution } from "./civilNavigation";
 import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
 import { WMM2025_DATABASE } from "./wmm2025";
@@ -1149,8 +1149,9 @@ export class ScriptedFms implements CduBackend {
   adfRelativeBearing(device: "adf" | "adf2"): number | null {
     const frequency = this.rms?.receiving(device) ?? null;
     if (frequency === null || this.rms!.adf(device).mode !== "ADF") return null;
+    // An NDB off the air (a bench stimulus) gives nothing to receive: no bearing, the RMI flag, and no fault row (plan C3).
     const ndb = this.db.nearby(this.truth, ADF_RANGE_NM).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type === "NDB"
-      && Number(entry.frequency) === Number(frequency))
+      && Number(entry.frequency) === Number(frequency) && this.rms!.ndbTransmitting(entry))
       .sort((a, b) => distanceNm(this.truth, a.position) - distanceNm(this.truth, b.position))[0];
     return ndb ? normalizeAngle(bearingDeg(this.truth, ndb.position) - (this.aircraft.heading ?? this.heading)) : null;
   }
@@ -1165,6 +1166,14 @@ export class ScriptedFms implements CduBackend {
     return mode === "TRUE" ? trueBearing : variation === undefined ? null : normalizeAngle(trueBearing - variation);
   }
   get radioPort() { return this.rms; }
+  /** F16 scenario world stimulus: resolve exactly one active-database NDB, never its same-ident DME or a first match.
+   * Shared RMS keeps the physical station outage visible to both computers, including independent operation. */
+  setNdbOffAir(ident: string, off: boolean): boolean {
+    const stations = this.db.find(ident).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type === "NDB");
+    if (stations.length !== 1 || !this.rms) return false;
+    this.rms.setNdbOffAir(stations[0], off);
+    return true;
+  }
 
   // The radios, for the bench and tests.
   radioReceiving(device: RadioDevice) { return this.rms?.receiving(device) ?? null; }
@@ -2419,6 +2428,13 @@ export class ScriptedFms implements CduBackend {
       instrumentEnd: approach.endpoint?.instrumentEnd.fix ?? approach.runways[0] ?? null,
     };
     if (!changed) return;
+    // Stage F16 (M300 7-1, 13-23): an NDB approach's recommended NDB is requested on ADF1, in its standby, for the crew
+    // to swap in on the ADF page. Nothing is tuned active: the ADF and its raw data stay the crew's.
+    const ndb = approach.recommendedNavaid;
+    if (ndb?.type === "NDB") {
+      const value = adfFrequency(ndb.frequency);
+      if (value !== null && this.radioState.adf !== value) this.setRadio("adfStby", value);
+    }
     const selectionKey = `${approach.airport}:${approach.ident}`;
     if (this.s300Advisory && this.vnavSelectionKey !== selectionKey) this.approachMdaEntered = false;
     if (this.s300Advisory && this.vnavSelectionKey?.split(":")[0] !== approach.airport) { this.vnav.qnh = null; this.vnav.destTemp = null; }
@@ -3451,9 +3467,9 @@ export class ScriptedFms implements CduBackend {
 
   setScratch(text: string) { this.scratch = text.slice(0, COLUMNS); }
   setRadio(key: RadioKey, value: string) { if (this.rms) this.rms.tune(key, value); else this.radios[key] = value; }
-  swapRadio(key: "com1" | "com2") {
+  swapRadio(key: "com1" | "com2" | "adf" | "adf2") {
     if (this.rms) this.rms.swap(key);
-    else { const standby = `${key}Stby` as "com1Stby" | "com2Stby"; [this.radios[key], this.radios[standby]] = [this.radios[standby], this.radios[key]]; }
+    else { const standby = `${key}Stby` as StandbyKey; [this.radios[key], this.radios[standby]] = [this.radios[standby], this.radios[key]]; }
   }
   setFuel(key: keyof ScriptedFms["fuel"], value: number) { this.fuel[key] = value; }
   /** Enters, changes or (with null) deletes the lateral offset, as a modification to execute. */
