@@ -1,7 +1,8 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
+import { distanceNm } from '../src/fmsCdu/fmsModel'
 import type { Navaid } from '../src/fmsCdu/navData'
 import { radioFixes, type DmeStationStatus } from '../src/fmsCdu/radioNavigation'
+import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
@@ -10,11 +11,11 @@ import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
 // three inconsistent ranges leave the mode unavailable with no culprit; four or more isolate a station only on a unique
 // hypothesis; the accuracy reproduces 15-3's typical figures; a deselected station is never used for DME/DME.
 
-const AT = { lat: 45, lon: -75 }, ALT = 3000, NOW = 10_000
+const AT = { lat: 0, lon: 0 }, ALT = 3000, NOW = 10_000
 const station = (ident: string, bearing: number, distance = 10): Navaid => ({ kind: 'navaid', ident, type: 'DME', name: 'Fixture', frequency: '115.00',
-  elevation: { feet: 0, source: 'data', provenance: 'fixture' }, position: offset(AT, bearing, distance) })
+  elevation: { feet: 0, source: 'data', provenance: 'fixture' }, position: { lat: Math.cos(bearing * Math.PI / 180) * distance / 60, lon: Math.sin(bearing * Math.PI / 180) * distance / 60 } })
 const observe = (stations: Navaid[], bias: Record<string, number> = {}): RadioObservation[] => stations.map(s => ({ station: s,
-  slantRangeNm: { at: NOW, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(AT, s.position), ALT / 6076.12) + (bias[s.ident] ?? 0) },
+  slantRangeNm: { at: NOW, sequence: 1, status: 'NORMAL', value: Math.hypot(s.position.lat * 60, s.position.lon * 60, ALT / 6076.12) + (bias[s.ident] ?? 0) },
   bearingTrue: { at: NOW, sequence: 1, status: 'NCD', value: null } }))
 const solve = (observations: RadioObservation[], options = {}) => {
   const statuses: DmeStationStatus[] = []
@@ -90,12 +91,19 @@ function unit() {
 
 test('F6: DME STATUS lists the scanned stations with status, frequency and range, the scan control and the DME/DME position (M300 12-17)', () => {
   const { fms, step, lines } = unit()
-  step(6)
+  const six = [station('A', 0), station('B', 90), station('C', 180, 12), station('D', 270, 8), station('E', 45), station('F', 225)]
+    .map((entry, i) => ({ ...entry, frequency: `11${i}.00` }))
+  expect(fms.loadNavData({ cycle: { id: 'SIX-LITERAL', from: '2026-09-01', to: '2026-10-28' }, entries: six, airways: [], procedures: [] })).toEqual({ loaded: 'SIX-LITERAL' })
+  fms.swapCycles()
+  fms.setAircraft({ position: AT, altitude: ALT })
+  step(8)
   fms.open('NAV_STATUS')
   fms.press('LSK5R')
   expect(lines()[0]).toMatch(/^DME STATUS\s+1\/1$/)
   const roster = fms.radioPort!.scanRoster()
-  expect(roster.length).toBeGreaterThan(0)
+  expect(roster.map(entry => entry.ident).sort()).toEqual(['A', 'B', 'C', 'D', 'E', 'F'])
+  expect(fms.dmeStatus).toHaveLength(6)
+  expect(fms.dmeStatus.map(entry => entry.status)).toEqual(['', '', '', '', '', ''])
   for (const [i, entry] of roster.entries()) expect(lines()[2 + i]).toMatch(new RegExp(`^${entry.ident}\\s`))
   expect(lines()[8]).toMatch(/SCANNING CTRL ACTIVE/)
   expect(lines()[12]).toMatch(/^<NAV STATUS\s+DME DESEL>$/)
@@ -103,7 +111,11 @@ test('F6: DME STATUS lists the scanned stations with status, frequency and range
   fms.setRadioFaults('dme1', { measurementBus: 'LOST' }); fms.setRadioFaults('dme2', { measurementBus: 'LOST' })
   step(5)
   expect(fms.dmeStatus.every(entry => entry.status === 'N/A')).toBe(true)
+  expect(lines()[8]).toMatch(/SCANNING CTRL ACTIVE/) // Reception loss is not control-path loss.
+  for (const receiver of ['dme1', 'dme2'] as const) fms.setRadioFaults(receiver, { measurementBus: 'NORMAL', controlPath: 'LOST' })
+  fms.updateNavigation(0)
   expect(lines()[8]).toMatch(/SCANNING CTRL LOST/)
+  expect(fms.radioPort!.dmeReceiving('dme1')).toBe(true)
 })
 
 test('F6: DME DESELECT takes up to 25 stations, five a page, and CLR removes one; a deselected station leaves the scan (M300 12-18)', () => {
@@ -129,5 +141,27 @@ test('F6: DME DESELECT takes up to 25 stations, five a page, and CLR removes one
   fms.setDmeDeselected(many)
   expect(fms.dmeDeselectedStations).toHaveLength(25)
   expect(lines()[0]).toMatch(/^DME DESELECT\s+1\/5$/)
-  void bearingDeg
+})
+
+test('F6: all six consistency witnesses retain their original epochs and limit an independent NAIM backup', () => {
+  const six = [station('A', 0), station('B', 90), station('C', 180, 12), station('D', 270, 8), station('E', 45), station('F', 225)]
+  const observations = observe(six).map((observation, index) => ({ ...observation,
+    rangeIdentity: { receiver: 'dme1' as const, channel: 2 as const, frequency: observation.station.frequency, commandSequence: 9 },
+    slantRangeNm: { ...observation.slantRangeNm, at: index === 5 ? NOW - 4000 : NOW } }))
+  const original = structuredClone(observations)
+  const fixes = radioFixes(observations, AT, ALT, NOW, undefined, { rangeMaxAgeS: 6,
+    motion: { source: 'DVS', at: NOW, northKt: 0, eastKt: 0, gpsDependent: false } })
+  const fix = fixes.find(candidate => candidate.mode === 'DME/DME')!
+  expect(fix).toBeDefined()
+  expect(fix.dmes).not.toContain('F') // F checks consistency even though the best pair did not range on it.
+  expect(fix.observations).toEqual(original)
+  expect(fix.oldestAt).toBe(NOW - 4000)
+  expect(fix.priorResolved).toBe(false)
+  const compare = (now: number) => new CivilNavigation(AT).update({ dt: 0, now, naimMaxAgeS: 4, air: null,
+    gps: null, uncertainGps: { position: AT, accuracy95Nm: 0.05, hilNm: 5, receiver: 1, northKt: null, eastKt: null },
+    radios: fixes, radio: null, radioApproved: true, rnp: 1 })
+  expect(compare(NOW).sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeGreaterThan(0.5)
+  expect(compare(NOW).sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeLessThan(0.7)
+  expect(compare(NOW + 1).sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeNull()
+  expect(observations).toEqual(original)
 })

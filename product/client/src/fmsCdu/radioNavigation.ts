@@ -38,7 +38,7 @@ const givesBearing = (station: Navaid) => hasVor(station) || station.type === "T
  * Plan F7 (M300 15-3): the VOR/DME 95% accuracy, a declared model of the manual's typical figures: 0.6 NM at the station
  * rising to 0.8 NM at 7 NM, and 1.5 NM beyond 7 NM (laboratory interpolation).
  */
-export const vorDmeAccuracy = (rangeNm: number) => rangeNm <= 7 ? 0.6 + 0.2 * Math.max(0, rangeNm) / 7 : 1.5;
+const vorDmeAccuracy = (rangeNm: number) => rangeNm <= 7 ? 0.6 + 0.2 * Math.max(0, rangeNm) / 7 : 1.5;
 
 export class BenchRadioReceiver {
   private tuning = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean; acquisitionS: number }>();
@@ -240,9 +240,11 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
   }
   // Reasonableness between sources (plan F7, without the prior): two VOR/DME positions that disagree by more than their
   // accuracies together cannot tell which is wrong, so neither is used; a VOR/DME that disagrees with the DME/DME fix is
-  // rejected. Agreeing candidates offer the most accurate.
+  // rejected when that DME/DME position is independent. A mirror chosen using the prior, or a position moved with
+  // GPS-dependent motion, cannot veto an independent bearing/range candidate. Agreeing candidates offer the most accurate.
   const agree = (a: RadioFix, b: RadioFix) => distanceNm(a.position, b.position) <= a.anp + b.anp;
-  const reasonable = vorCandidates.filter(candidate => (!dmeDme || agree(candidate, dmeDme))
+  const independentDme = dmeDme && !dmeDme.priorResolved && !dmeDme.motion?.gpsDependent ? dmeDme : null;
+  const reasonable = vorCandidates.filter(candidate => (!independentDme || agree(candidate, independentDme))
     && vorCandidates.every(other => other === candidate || agree(candidate, other)));
   for (const candidate of vorCandidates) if (!reasonable.includes(candidate)) rejected.push({ ident: candidate.vor!, reason: "VOR/DME position disagrees with another source" });
   const vorDme = [...reasonable].sort((a, b) => a.anp - b.anp)[0];

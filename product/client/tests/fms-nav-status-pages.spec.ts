@@ -5,7 +5,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import type { Navaid } from '../src/fmsCdu/navData'
 import { radioFixes, type DmeStationStatus } from '../src/fmsCdu/radioNavigation'
-import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
+import type { RadioObservation, SensorFrame } from '../src/fmsCdu/sensorPorts'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 
 // Stage F plan F9 (M300 5-26, 12-21 to 12-24, 17-2 to 17-3): NAV STATUS INDEX with prompts only for configured
@@ -196,23 +196,45 @@ test('F9: the POS INIT 2/2 table lists each equipped mode with its status, dista
   fms.open('POS'); fms.press('NEXT')
   expect(lines()[0]).toMatch(/^POS INIT\s+2\/2$/)
   expect(lines()[1]).toMatch(/^ FMS POS\s+GPS $/)
-  expect(lines()[3]).toBe('MODE    STS    DIS ACCUR')
+  expect(lines()[3]).toBe('MODE   STS DIS BRG ACCUR')
   const table = lines().slice(4, 9)
-  expect(table.map(line => line.slice(0, 8).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'KALMAN', 'DVS'])
+  expect(table.map(line => line.slice(0, 7).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'KALMAN', 'DVS'])
   expect(table.every(line => line.length === 24)).toBe(true)
   const gps = fms.sensorSolutions.find(sensor => sensor.mode === 'GPS')!
-  expect(table[0]).toMatch(/^GPS     NAV {3}0\.00 {2}\d\.\d\d$/)
-  expect(Number(table[0].slice(18))).toBeCloseTo(gps.accuracy95Nm!, 2)
+  expect(table[0]).toMatch(/^GPS    NAV 0\.00---- \d\.\d\d$/)
+  expect(Number(table[0].slice(19))).toBeCloseTo(gps.accuracy95Nm!, 2)
   // The KALMAN position follows the FMS position while GPS aids it; DVS has no position of its own.
-  expect(table[3]).toMatch(/^KALMAN  NAV +\d+\.\d\d +\d+\.\d\d$/)
-  expect(table[4]).toMatch(/^DVS     NAV {3}---- +(\d+\.\d\d|----)$/)
+  expect(table[3]).toMatch(/^KALMAN NAV \d\.\d\d(----|\d{3}[°T]) \d\.\d\d$/)
+  expect(table[4]).toMatch(/^DVS    NAV --------( \d\.\d\d| ----)$/)
   fms.setDeselected('KALMAN', true)
   fms.open('DESELECT'); fms.open('POS'); fms.press('NEXT')
-  expect(lines()[7]).toBe('KALMAN  DSEL  ----  ----')
+  expect(lines()[7]).toBe('KALMAN DSEL-------- ----')
+  // An admitted adapter range is two NM south of a station five NM north of the selected GPS position.
+  // The independent page oracle is therefore 3.00 NM due north, not a value computed with the production geometry.
+  const now = Date.UTC(2026, 8, 30, 14)
+  const seed = new ScriptedFms(() => new Date(now))
+  const frame: SensorFrame = structuredClone(seed.navigationInputs!)
+  for (const word of frame.gps) {
+    word.value!['110'] = { ssm: 'NORMAL', value: 45.5 }; word.value!['120'] = { ssm: 'NORMAL', value: 0 }
+    word.value!['111'] = { ssm: 'NORMAL', value: -74.9 }; word.value!['121'] = { ssm: 'NORMAL', value: 0 }
+  }
+  frame.air.value!.altitudeFt = 6000
+  frame.radios = []
+  const adapter = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
+  const receiver = (['dme1', 'dme2'] as const).find(device => adapter.dmeStation(device)?.ident === 'HWK')
+  expect(receiver).toBeDefined()
+  frame.radios = [{ station: { kind: 'navaid', ident: 'HWK', type: 'VORDME', name: 'Literal north fixture', frequency: '115.20',
+    position: { lat: 45.5 + 5 * 180 / (3440.065 * Math.PI), lon: -74.9 }, elevation: { feet: 6000, source: 'data', provenance: 'fixture survey' } },
+    rangeIdentity: adapter.radioPort!.dmeTuning(receiver!, 1)!,
+    slantRangeNm: { at: now, sequence: 2, status: 'NORMAL', value: 2 }, bearingTrue: { at: now, sequence: 2, status: 'NORMAL', value: 180 } }]
+  adapter.updateNavigation(0)
+  expect(adapter.navState.mode).toBe('GPS')
+  adapter.toggleAngleReference(); adapter.open('POS'); adapter.press('NEXT')
+  expect(screenText(adapter.screen())[6]).toBe('VORDMTCNAV 3.00360T 0.66')
   // Without a KALMAN mode configured there is no KALMAN line.
   const bare = unit(withoutOption('kalman'))
   bare.step(3); bare.fms.open('POS'); bare.fms.press('NEXT')
-  expect(bare.lines().slice(4, 9).map(line => line.slice(0, 8).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'DVS', ''])
+  expect(bare.lines().slice(4, 9).map(line => line.slice(0, 7).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'DVS', ''])
 })
 
 test('F9: the crew water current moves the DVS solution in SEA mode only (M300 12-22, 12-23)', () => {
@@ -235,4 +257,23 @@ test('F9: the crew water current moves the DVS solution in SEA mode only (M300 1
   // Six minutes of a 10 kt current toward east is 1 NM.
   expect(distanceNm(sea, still)).toBeGreaterThan(0.9)
   expect(distanceNm(sea, still)).toBeLessThan(1.1)
+})
+
+
+test('F9: GPS DESELECT shows acquisition after actual receiver loss and returns VALID on recovery', () => {
+  const { fms, step, lines } = unit()
+  step(5)
+  fms.open('GPS_DESELECT')
+  expect(lines()[2]).toMatch(/VALID/)
+  expect(lines()[4]).toMatch(/VALID/)
+  fms.setCondition('gpsLost', true)
+  expect(lines()[2]).toMatch(/ACQ/)
+  expect(lines()[4]).toMatch(/ACQ/)
+  fms.press('LSK1R')
+  expect(lines()[2]).toMatch(/DESEL/)
+  fms.setCondition('gpsLost', false); step(5)
+  expect(lines()[2]).toMatch(/DESEL/)
+  expect(lines()[4]).toMatch(/VALID/)
+  fms.press('LSK1R')
+  expect(lines()[2]).toMatch(/VALID/)
 })

@@ -202,13 +202,14 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
     },
   },
 
-  // Plan F9 (M300 17-3): each GPS receiver VALID or DESEL; deselecting one navigates on the other, both selects GPS out.
+  // Plan F9 (M300 17-3): the receiver assessment supplies ACQ/VALID; crew deselection overrides it with DESEL.
   GPS_DESELECT: {
     pages: () => 1,
     render: fms => {
       const choice = fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF";
       const desel = (index: 0 | 1) => choice === "OFF" || choice === (index === 0 ? "GPS2" : "GPS1");
-      const state = (index: 0 | 1) => desel(index) ? medium("DESEL", "amber") : medium("VALID", "green");
+      const state = (index: 0 | 1) => desel(index) ? medium("DESEL", "amber")
+        : fms.gpsStatus.assessed[index]?.usable ? medium("VALID", "green") : medium("ACQ", "amber");
       return [
         title("GPS DESELECT", "1/1"),
         caption(undefined, "GPS1 "), { right: [state(0), { text: "<", color: "cyan" }] },
@@ -321,7 +322,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         return { left: medium(`${entry.ident.padEnd(5)}${entry.status.padEnd(4)}${entry.frequency.padStart(6)} ${distance.padStart(7)}`, entry.status === "" ? "white" : "amber") };
       };
       const fix = fms.lastRadioFixes.find(entry => entry.mode === "DME/DME");
-      const scanning = (["dme1", "dme2"] as const).some(device => fms.radioPort?.dmeReceiving(device));
+      const scanning = (["dme1", "dme2"] as const).some(device => fms.radioPort?.faults(device).controlPath === "NORMAL");
       return [
         title("DME STATUS", "1/1"),
         caption(" ID   STAT  FREQ    DIS"),
@@ -396,9 +397,9 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         title("VOR/DME/TCN STATUS", "1/1"),
         caption(" SOURCE/ID  FREQ RAD/DME"),
         vor("nav1", "VOR1"), dme("dme1", "DME1"), vor("nav2", "VOR2"), dme("dme2", "DME2"),
-        undefined,
+        { left: small(`NAV1 ${fms.navRadioMode("nav1")}`), right: small(`NAV2 ${fms.navRadioMode("nav2")}`) },
         { left: medium(`TCN  ${(tacan?.ident ?? "").padEnd(4)}${tacan?.channel ?? ""} ${tacanWords ? `${three(tacanWords.bearing)}°/${Math.round(tacanWords.rangeNm)}NM` : ""}`) },
-        undefined,
+        { left: small(`TCN ${fms.navRadioMode("tacan")}`) },
         caption(" POSITION"),
         { left: fix ? medium(formatPosition(fix.position)) : dashes(18) },
         { left: dashes(24) },

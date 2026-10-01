@@ -4,7 +4,7 @@ import { activeFrequency } from "./radioPages";
 import { alert } from "./alerts";
 import { formatConstraint, parseAltitude, parseConstraint } from "./vnav";
 import {
-  WAYPOINT, anpExceeds, anpText, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, ranged, simulated,
+  WAYPOINT, anpExceeds, anpText, bearingDeg, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, ranged, simulated,
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
@@ -213,7 +213,8 @@ const gpsFix = (fms: ScriptedFms) => (fms.gpsStatus.chosen === null ? null : fms
 /**
  * Plan F9 (M300 12-27 layout without the inertial rows): one line per equipped navigation mode with its status (NAV while
  * the mode is available, DSEL when the crew deselected it, ACQ otherwise), its distance from the FMS position (no figure
- * for DVS, which has no position of its own) and its 95% accuracy, NM. Always five lines, blank past the equipped modes.
+ * for DVS, which has no position of its own), bearing in the selected MAG/TRUE reference and its 95% accuracy, NM.
+ * A coincident position has no defined bearing. Always five lines, blank past the equipped modes.
  */
 function sensorTable(fms: ScriptedFms): (Line | undefined)[] {
   const sensors = fms.sensorSolutions, deselected = fms.deselectedInputs;
@@ -230,8 +231,9 @@ function sensorTable(fms: ScriptedFms): (Line | undefined)[] {
     const sensor = sensors.find(candidate => candidate.mode === row.mode);
     const status = row.off ? "DSEL" : sensor?.available ? "NAV" : "ACQ";
     const distance = row.position && status === "NAV" ? distanceNm(fms.position, row.position) : null;
+    const bearing = distance !== null && distance > 0 ? fms.angleText(bearingDeg(fms.position, row.position!)) : "----";
     const accuracy = status === "NAV" ? sensor?.accuracy95Nm ?? null : null;
-    return { left: medium(`${row.label.padEnd(8)}${status.padEnd(4)}${nm(distance).padStart(6)}${nm(accuracy).padStart(6)}`, status === "DSEL" ? "amber" : status === "NAV" ? "green" : "white") };
+    return { left: medium(`${row.label.padEnd(7)}${status.padEnd(4)}${nm(distance).padStart(4)}${bearing}${nm(accuracy).padStart(5)}`, status === "DSEL" ? "amber" : status === "NAV" ? "green" : "white") };
   });
   return [...lines, ...Array<undefined>(5 - lines.length).fill(undefined)];
 }
@@ -350,7 +352,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     render: (fms, index) => index === 1 ? [
       title("POS INIT", "2/2"), caption(" FMS POS", `${fms.navState.mode} `),
       { left: medium(formatPosition(fms.position)) },
-      caption("MODE    STS    DIS ACCUR"),
+      caption("MODE   STS DIS BRG ACCUR"),
       ...sensorTable(fms),
       caption(fms.validBaroAltitude !== null ? " ALT (CORR)" : " ALT (STD)"), { left: (fms.validBaroAltitude ?? fms.pressureAltitude) !== null ? medium(`${Math.round((fms.validBaroAltitude ?? fms.pressureAltitude)!)}FT`) : dashes(6) },
       caption(fms.manualQnhAvailable ? ` QNH SET ${fms.qnhUnits}` : undefined), { left: fms.manualQnhAvailable ? fms.qnhText === null ? boxes(5) : medium(`>${fms.qnhText}`) : undefined },

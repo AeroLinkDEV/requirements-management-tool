@@ -36,9 +36,9 @@ export interface RadioManagementPort {
   /** Acknowledged physical tuning identity for a range arrival, independent of pending commands. */
   dmeTuning(device: DmeDevice, channel: 1 | 2 | 3): RangeIdentity | null;
   /** NAV AUTO/MAN (M300 13-21): the FMS's own tuning (AUTO) never switches a NAV to MAN; a crew entry does. */
-  navMode(device: "nav1" | "nav2"): NavMode;
-  setNavMode(device: "nav1" | "nav2", mode: NavMode): void;
-  autoTune(device: "nav1" | "nav2", value: string): void;
+  navMode(device: "nav1" | "nav2" | "tacan"): NavMode;
+  setNavMode(device: "nav1" | "nav2" | "tacan", mode: NavMode): void;
+  autoTune(device: "nav1" | "nav2" | "tacan", value: string): void;
   /** This side's CONTROL LOST alerts and FAILED advisories since the last call. */
   drainEvents(): RadioEvent[];
   /** Plan F8b: the page controls of the NAV and ADF pages (M300 13-21 to 13-25). */

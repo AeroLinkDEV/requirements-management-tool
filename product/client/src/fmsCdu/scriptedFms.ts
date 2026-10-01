@@ -1060,7 +1060,7 @@ export class ScriptedFms implements CduBackend {
     const channel = tacan?.channel;
     if (channel && this.options()?.tacan?.configured === true) {
       const pending = this.rms.requests.find(request => request.device === "tacan" && request.status === "PENDING");
-      if ((pending?.value ?? this.rms.state.tacan) !== channel) this.rms.tune("tacan", channel);
+      if ((pending?.value ?? this.rms.state.tacan) !== channel) this.rms.autoTune("tacan", channel);
     }
   }
   private options() { return this.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined; }
@@ -1147,7 +1147,7 @@ export class ScriptedFms implements CduBackend {
     const tacan = this.tacanStation();
     if (tacan) {
       stations.set(tacan.ident, tacan); range.add(tacan.ident);
-      if (autoEligible) bearing.add(tacan.ident);
+      if (rms.navMode("tacan") === "MAN" || autoEligible) bearing.add(tacan.ident);
     }
     return { stations: [...stations.values()], use: { range, bearing }, acquisition };
   }
@@ -1308,7 +1308,7 @@ export class ScriptedFms implements CduBackend {
 
   // The radios, for the bench and tests.
   radioReceiving(device: RadioDevice) { return this.rms?.receiving(device) ?? null; }
-  navRadioMode(device: "nav1" | "nav2") { return this.rms?.navMode(device) ?? "MAN"; }
+  navRadioMode(device: "nav1" | "nav2" | "tacan") { return this.rms?.navMode(device) ?? "MAN"; }
   setNavRadioMode(device: "nav1" | "nav2", mode: "AUTO" | "MAN") { this.rms?.setNavMode(device, mode); }
   /** Bench stimulus for this computer's own radios; two computers inject on DualFms.rms. */
   setRadioFaults(device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) { this.ownRms?.setFaults(device, faults); }
