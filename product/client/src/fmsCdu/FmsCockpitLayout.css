@@ -132,6 +132,11 @@
 .shell:has(.fmsBenchFocused) { grid-template-columns: minmax(0, 1fr); }
 .shell:has(.fmsBenchFocused) > .appNavigation { display: none; }
 html .workspaceView > main.fmsBenchFocused { padding: 12px 20px 24px; }
+/* Focus mode spends its height on the instruments and pilot controls rather than page spacing. */
+html .workspaceView > main.fmsBenchCockpitView.fmsBenchFocused { padding-top: 8px; }
+.fmsBenchCockpitView.fmsBenchFocused,
+.fmsBenchCockpitView.fmsBenchFocused .fmsBenchUpper { gap: 6px; }
+.fmsBenchCockpitView.fmsBenchFocused .fmsBenchCockpit { row-gap: 6px; }
 /* The context bar identifies the focused bench. Retain its repeated heading for screen-reader navigation. */
 .fmsBenchCockpitView.fmsBenchFocused > .fmsBenchHeader {
   position: absolute;
