@@ -4,6 +4,8 @@ param(
     [switch]$SkipClientBuild,
     [switch]$Shared,
     [string]$NotificationBaseUrl,
+    # The remote-demo transition already reconciled source. Keep that exact revision through this child.
+    [string]$BoundSourceSha,
     # Run HOME production from THIS checkout even though a dedicated production source is configured
     # elsewhere. Deliberately awkward: the only supported reasons are qualifying the launcher itself and
     # operating a machine where the dedicated source is temporarily unavailable.
@@ -200,6 +202,7 @@ try {
         Stop-AeroLinkProductionTransition -Obligation $obligation -Config $demoConfig
     }.GetNewClosure()
     $bootstrapResult = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical `
+        -BoundSourceSha $BoundSourceSha `
         -RepositoryRoot $repositoryRoot `
         -PreAdvanceAction $stopOwnedProductionRuntime `
         -CurrentScriptPath $PSCommandPath `

@@ -703,6 +703,61 @@ exit 7
         Remove-Item -Path 'Env:AEROLINK_BOOTSTRAP_REENTRY', 'Env:AEROLINK_BOOTSTRAP_EXPECTED_SHA' -ErrorAction SilentlyContinue
     }
 
+    # C20. a deployment already selected its source. A newer remote tip must remain pending through the
+    # nested launch, including when another fetch has already refreshed origin/main.
+    $fixture = New-FixtureRepository
+    $selectedSha = Get-FixtureHead $fixture
+    Push-RemoteCommit -Fixture $fixture -FileName 'docs/later-merge.txt' -Content 'merged during deployment'
+    $null = Invoke-FixtureGit -GitArguments @('fetch', 'origin') -Repository $fixture.WorkPath
+    $result = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot $fixture.WorkPath `
+        -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -BoundSourceSha $selectedSha
+    Assert-True ($result.Action -eq 'BoundSourceValidated') "C20: expected bound source validation, got '$($result.Action)'."
+    Assert-True ((Get-FixtureHead $fixture) -eq $selectedSha) 'C20: the nested launch adopted a later merge.'
+    Assert-True ((Get-FixtureRemoteMain $fixture) -ne $selectedSha) 'C20: the fixture did not advance remote main.'
+    # Execute the real file-redirected helper across its native process boundary. Only the terminal
+    # launcher is a disposable adapter: it performs the real bootstrap, then records the selected SHA.
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
+    $helperRoot = Join-Path $fixture.FixtureRoot 'helper'
+    $helperScripts = Join-Path $helperRoot 'product\scripts'
+    New-Item -ItemType Directory -Path $helperScripts -Force | Out-Null
+    $helperReceipt = Join-Path $helperRoot 'receipt.json'
+    $moduleLiteral = (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1').Replace("'", "''")
+    $workLiteral = $fixture.WorkPath.Replace("'", "''")
+    $receiptLiteral = $helperReceipt.Replace("'", "''")
+    $childSource = @'
+param([switch]$DoNotOpenBrowser, [string]$NotificationBaseUrl, [string]$BoundSourceSha)
+$ErrorActionPreference = 'Stop'
+Import-Module '__MODULE__' -Force
+$result = Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot '__WORK__' -CurrentScriptPath $PSCommandPath -BoundSourceSha $BoundSourceSha
+$result | ConvertTo-Json | Set-Content -LiteralPath '__RECEIPT__' -Encoding UTF8
+'@
+    $childSource = $childSource.Replace('__MODULE__', $moduleLiteral).Replace('__WORK__', $workLiteral).Replace('__RECEIPT__', $receiptLiteral)
+    Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Value $childSource -Encoding UTF8
+    $helperConfig = [pscustomobject]@{ AeroLinkRoot=$helperRoot; LogsPath=(Join-Path $helperRoot 'logs'); PublicUrl='https://example.invalid' }
+    $helper = Start-AeroLinkRemoteDemoProductionHelper -Config $helperConfig -BoundSourceSha $selectedSha
+    if (-not $helper.Process.WaitForExit(15000)) { $helper.Process.Kill(); throw 'C20: disposable production helper exceeded its deadline.' }
+    $helper.Refresh()
+    Assert-True ($helper.ExitCode -eq 0) 'C20: the real production helper failed to launch the bound source.'
+    $receipt = Get-Content -LiteralPath $helperReceipt -Raw | ConvertFrom-Json
+    Assert-True ($receipt.HeadSha -eq $selectedSha -and $receipt.Action -eq 'BoundSourceValidated') 'C20: the native helper lost the selected revision.'
+    Assert-True ((Get-FixtureHead $fixture) -eq $selectedSha) 'C20: the native helper advanced source again.'
+    # A binding is identity, never authority to run dirty source or a different revision.
+    foreach ($expected in @('0000000000000000000000000000000000000000', 'invalid')) {
+        $refused = $false
+        try {
+            Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot $fixture.WorkPath `
+                -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -BoundSourceSha $expected | Out-Null
+        } catch { $refused = $_.Exception.Message -match 'identity|hexadecimal' }
+        Assert-True $refused 'C20: an incorrect or malformed binding was accepted.'
+    }
+    Set-Content -LiteralPath (Join-Path $fixture.WorkPath 'README.md') -Value 'changed after selection' -Encoding ASCII
+    $refused = $false
+    try {
+        Invoke-AeroLinkSourceBootstrap -Mode HomeCanonical -RepositoryRoot $fixture.WorkPath `
+            -CurrentScriptPath (Join-Path $fixture.FixtureRoot 'launcher.ps1') -BoundSourceSha $selectedSha | Out-Null
+    } catch { $refused = $_.Exception.Message -match 'uncommitted modifications' }
+    Assert-True $refused 'C20: a binding accepted dirty source.'
+
     # C18. the re-entry identity covers transitive launcher dependencies: a remote commit that changes ONLY
     #      product\scripts\AeroLinkNativeRunner.psm1 (already loaded in memory before the bootstrap runs,
     #      imported by AeroLinkLaunch.ps1) must still trigger re-entry rather than continue half-old/half-new.
