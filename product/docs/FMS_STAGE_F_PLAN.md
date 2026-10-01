@@ -1,11 +1,15 @@
 # FMS Test Bench Stage F: radio data, sensors and integrity (plan)
 
-- **Status:** draft for review, revision 2. This is a plan, not an implementation.
+- **Status:** draft for review, revision 3 with the R3-01/R3-02 amendment. This is a plan, not an implementation.
 - **Revision 2 (30 Sep, evening):** answers Astra's review of revision 1 (d0e7ef27), items SF-01 to SF-08 (SF-08 drafted by session 4) and the integration list. It also records Sean's clarification of DEC-150 item 2 (KALMAN expiry). The main changes are:
   - §3 now opens with the contracts every item reads (C1 values and consumers, C2 KALMAN and DVS inputs and clocks, C3 radio ownership, C4 the output vocabulary);
   - F3 now carries the transition table itself;
   - F5's worked cases are corrected;
   - F16 names its actual CIFP fixtures.
+- **Revision 3 amendment (30 Sep, night):** answers Astra's review of a545c74a:
+  - R3-01: the DME cache's motion source, its GPS dependency and its age rules (C3);
+  - R3-02: summaries made consistent with C1, C3 and F3;
+  - her implementation notes added to the owners.
 - **Revision 3 (30 Sep, late):** answers Astra's delta review of db5acc48 (DF-01 to DF-05 and her two clarifications). The changes:
   - C1 gains the approach permission states, preserving the existing S300 established-final continuation;
   - F3 gains an ordered resolver and an annunciation contract;
@@ -136,7 +140,7 @@ Every sensor solution carries five distinct values, each with its meaning, units
 
 **The NAIM comparison never manufactures integrity.**
 - It is kept apart from the receiver HIL, and has its own validity:
-  - the backup must be a fresh (within `sensorMaxAge`), GPS-independent **radio** fix (DME/DME or VOR/DME) with integrity;
+  - the backup must be a GPS-independent **radio** fix (DME/DME or VOR/DME) with integrity that meets C3's NAIM freshness predicate. Its motion compensation, if any, must not depend on the GPS under assessment (C3);
   - KALMAN (GPS-aided) and DVS or DR (propagated from GPS positions) never qualify.
 - It decides one thing: whether an uncertain GPS may stay selected when a backup exists (F4, F5).
 - A retained GPS stays **uncertain**: INT lit, GPS POS UNCERTAIN, integrityValid false.
@@ -152,7 +156,7 @@ Every sensor solution carries five distinct values, each with its meaning, units
 | CHECK ANP (F12) | accuracy95Nm of the selected solution against the RNP | Episode semantics in F12 |
 | INT annunciator | Its own raise and clear predicate (F3, the annunciation contract) | Not derived from the selected mode alone |
 | GPS POS UNCERTAIN | GPS navigated without integrityValid | See the boundary table |
-| Mode selection | integrityValid, then accuracy95Nm, then priority (F3) | |
+| Mode selection | F3's ordered resolver: GPS with integrity, then the uncertain-GPS retention exception, then the radio accuracy comparator with hysteresis, then priority among candidates without integrity | The steps are F3's; this table does not restate them |
 | Approach permission | The approach permission states below (admission, established-final continuation, cancellation, crew recovery) | Never from the NAIM comparison |
 | Hover permission | integrityValid, then the existing hover guards | Unchanged |
 
@@ -163,7 +167,7 @@ Every sensor solution carries five distinct values, each with its meaning, units
 | **Admission** | Arming and entering the approach phase need GPS with integrityValid for the approach (the existing `approachIntegrityEligible` and `gpsApproachAuthority`). | #1243 owners |
 | **Established-final continuation** | After the FAF, on the final segment with the approach phase active, an **integrity-only** loss starts a **300 s** continuation. "Integrity-only" means the position is valid, the receiver's reason is INTEGRITY, and HDOP is valid and at most 4. Guidance and NAV continue during it. It is a separate permission flag, not integrity; the NAIM comparison plays no part. | `fms-navigation.spec.ts` "S300 after-FAF integrity-only cancellation waits 300 seconds…"; FMS_APPLICABILITY.md GPS-DEGRADED |
 | **Cancellation** | At once on an invalid position, HDOP over 4 or invalid, a non-integrity rejection or a mode other than GPS; otherwise at 300 s. Effects: NO APPR INTEGRITY, the approach phase ends, `approachSteeringValid` is false, so the AFCS guidance reverts to **HDG** and NAV is withdrawn (flight.ts). | The same owner; the C.3.1 mission test |
-| **Crew recovery** | MISSED APPR (or TOGA) clears the cancellation: terminal phase, RNP 1.0, the missed-approach legs. The crew selects NAV again. Re-arming the approach after disarming it also clears it (the existing arming rule). Nothing restores approach permission automatically. | FMS_APPLICABILITY.md MAP-CREW; C.3.1 |
+| **Crew recovery** | MISSED APPR (or TOGA) clears the cancellation: terminal phase, RNP 1.0. Before the MAP, guidance continues along the approach to the MAP, which then sequences the missed-approach legs; there is no immediate turn onto them (the existing MA-EARLY rule). A GPS recovery inside the 300 s keeps the approach (the existing rule). The crew selects NAV again. Re-arming the approach after disarming it also clears it (the existing arming rule). Nothing restores approach permission automatically. | FMS_APPLICABILITY.md MAP-CREW; C.3.1 |
 
 - **Later-SBAS profile:** keeps its own #1243 rules (no 300 s continuation), unchanged.
 - **Stage F extends these owners** only for the new NDB integration (F16) and the new sensor modes. It adds no duplicate timer tests.
@@ -191,7 +195,7 @@ At equality the solution therefore has no integrity, and no CHECK ANP episode st
 
 **Unavailable and stale values:**
 - **Stale:** a word older than `sensorMaxAge` is unavailable.
-- **No accuracy, valid HIL:** the HIL's validity is unchanged. A GPS with a valid HIL below the limit keeps integrityValid and is still selected on integrity (F3 step 2). Its accuracy is unavailable:
+- **No accuracy, valid HIL:** the HIL's validity is unchanged. A GPS with a valid HIL below the limit keeps integrityValid and is still selected on integrity (F3 step 1). Its accuracy is unavailable:
   - it cannot win an accuracy comparison;
   - ANP shows dashes;
   - a CHECK ANP episode runs as though ANP exceeded the RNP (conservative).
@@ -216,10 +220,13 @@ This is a bench interface, not ARINC 705 or Doppler framing. The laboratory erro
 - **Initial position:** σ₀ = HFOM / 2.448 at aiding. HFOM is a radial 95% figure, and the conversion is the isotropic case.
 - **Initial velocity:** σᵥ (a declared GPS velocity 1 σ), contributing σᵥ t.
 - **Residual accelerometer bias:** σ_b (a declared residual after aiding), contributing ½ σ_b t².
+  - **Temporal law:** it is a **random constant over each coast**, drawn once at aiding and persisting unchanged until the next aiding. That is what gives the t² growth; fresh noise drawn every tick would propagate differently and is not the model.
+  - The three contributors are mutually independent and independent between axes.
 
 So σ(t) = √(σ₀² + (σᵥ t)² + (½ σ_b t²)²), where t is the time since the last aiding; accuracy95Nm is 2.448 σ(t), and the page shows 2 σ(t).
 
-**Fault injection is separate.** The sensor generator's nominal APIRS output is truth plus zero-mean noise drawn from the same declared σ values. A deliberate accelerometer bias (or any other APIRS fault) is a bench **stimulus** (F14). The estimator never knows about it, and its accuracy is then expected to understate the error, which the test asserts. Today's fixed laboratory bias in the generator becomes that stimulus.
+**Fault injection is separate.** The sensor generator's nominal APIRS output is truth plus zero-mean noise drawn from the same declared σ values. A deliberate accelerometer bias (or any other APIRS fault) is a bench **stimulus** (F14). The estimator never knows about it. A test asserting that a fault exceeds the nominal estimate uses an explicit fault magnitude and duration chosen to do so. An arbitrary fault does not guarantee that at every instant.
+- **Regression evidence:** the Monte Carlo constants in C1 are explanatory. Regression tests exercise the implemented propagation itself. Today's fixed laboratory bias in the generator becomes that stimulus.
 
 **Clocks.** All clocks run on simulation time, never wall time or tick counts.
 - **Readiness:** KALMAN is unavailable until one minute after FMS power-up (M300 12-24).
@@ -263,12 +270,29 @@ One `RadioManagementSystem` (#1350) owns every radio. Stage F extends it; it doe
 - **The scan roster** holds up to six stations (F6 selection). Its stations are distributed over the four scan channels (two per DME). Each channel dwells on its roster stations in turn, with a declared dwell (laboratory).
 - **The used-fix set** is a separate thing: the roster stations that currently hold a usable range and pass the F6 checks. DME STATUS shows every roster station's state (used, REJ, N/A, pending), not only the used ones.
 - **Measurement identity:** every range is tagged (receiver, channel, frequency, command sequence, station ident, measurement time).
-- **Freshness, through a bounded per-station cache:**
-  - the newest range of each roster station is kept, keyed by station and epoch, after its channel has moved on to the next roster station;
-  - it is usable until its age exceeds the cache age limit, declared so that a full dwell cycle fits inside it;
-  - the solver time-aligns each cached range to the fix epoch with the FMS's own ground velocity, and the residual motion error is part of the declared range accuracy;
-  - a range whose station leaves the roster, whose frequency is commanded differently, or whose receiver fails or enters TEST is dropped at once;
-  - at most one range per roster station is ever held, and nothing outlives the age limit.
+- **Freshness, through a bounded per-station cache (R3-01):**
+  - **Retention:**
+    - the newest range of each roster station is kept, owned by the station, after its channel has moved on to the next roster station;
+    - at most one range per roster station is held;
+    - **routine scan retuning** (a channel moving between roster stations) **does not invalidate** a cached range.
+  - **Invalidation:** a range is dropped at once when:
+    - its station leaves the roster;
+    - **that station's** frequency or channel is commanded differently (a crew or AUTO change of what the station is tuned on, not the scan's rotation);
+    - its receiver's measurement bus or receiver fails;
+    - its receiver enters TEST.
+  - **Ages, four separate limits:**
+    - **On arrival:** a range word older than `sensorMaxAge` when it arrives is never cached.
+    - **Cache TTL (L_cache, declared, laboratory):** a cached range is usable for navigation while now − its measurement time ≤ L_cache. L_cache is at least one full dwell cycle.
+    - **Solution age:** a fix's age is now − the **oldest contributing observation's** measurement time. It must be ≤ L_cache for navigation.
+    - **NAIM freshness:** the fix's age must be ≤ L_NAIM, where L_NAIM ≤ L_cache (declared, laboratory). It is a separate, stricter-or-equal predicate.
+    - **Motion source age:** a motion-compensation source sample is used only while ≤ `sensorMaxAge` old.
+  - **Repropagation changes the epoch, not the evidence:** time-aligning cached ranges to a new fix epoch gives the fix a new epoch. It does not change any observation's measurement time or expiry. A newly computed fix never rejuvenates old range evidence.
+  - **Motion compensation and its provenance:** a cached radio solution carries the original range measurement times and the source, time and dependency provenance of any motion compensation. The estimator reads measured sensor and estimator outputs, never aircraft truth. The plant's `groundSpeed` and `track` are truth and are never read as measured velocity. The sources, in order:
+    1. the radio solution's own velocity from its successive fixes (**GPS-independent**);
+    2. the DVS velocity with the crew's water current (**GPS-independent**);
+    3. TAS and heading with the last computed wind. This is **GPS-dependent** when that wind was computed from GPS velocity, and the provenance says so.
+  - **NAIM eligibility:** a solution compensated with a GPS-dependent source is **not** eligible as C1's GPS-independent NAIM backup. If no independent compensation can be established, the NAIM comparison is unavailable for that backup (F3 step 2 then treats it as no qualifying backup). The cache remains usable for navigation on its own predicates.
+  - **Accuracy:** the residual motion error of the compensation is part of the declared range accuracy (laboratory). A wider accuracy never removes a dependency.
 - **Without the cache,** only the four scan channels' current observations would survive, at most four when both channel 1s are held. That is why the cache is declared rather than implied.
 - A range on channel 1 counts for navigation when its station is identified.
 
@@ -317,6 +341,11 @@ One `RadioManagementSystem` (#1350) owns every radio. Stage F extends it; it doe
 - TEST suppression;
 - HOLD with scanning;
 - tuning from either CDU with the cross-talk link down.
+
+The same owner also protects the cache (R3-01):
+- a GPS-only motion change cannot silently move a backup still marked independent. The backup either uses independent motion or becomes ineligible for NAIM;
+- repropagation cannot renew observation age or extend expiry;
+- the six-station roster works across the four scan channels, with the declared HOLD and TEST behaviour and sample validity.
 
 ### C4. The output vocabulary (SF-07)
 
@@ -659,15 +688,16 @@ This extends #1350's shared `RadioManagementSystem` to C3's model.
   - tuning is synchronized by burst tuning and radio feedback, not by FMS cross-talk;
   - the standby frequency is cross-talked;
   - tuning works from either side, including with the link down.
-- **Alerts (Appendix E, per C3's states):**
-  - CONTROL LOST (a control-path timeout) for NAV, DME, VOR, ADF, COM and TPDR/XPDR;
-  - the configured FAILED advisories for a receiver failure;
-  - never an alert for an untuned or out-of-coverage healthy radio.
+- **Alerts and advisories (Appendix E):**
+  - each is raised from its own row's predicate in C3's message table, with configuration and inhibits;
+  - one fault may raise both an alert and an advisory;
+  - an untuned or out-of-coverage healthy radio raises neither.
 
 **Exit:**
 - navigation uses **only** measurements C3 marks identified and fresh;
-- a radio whose control path is lost raises its CONTROL LOST, and keeps its usable reception;
-- a failed receiver shows amber, raises its FAILED advisory, and navigation drops its measurements.
+- each C3 internal state produces exactly the messages its Appendix E rows define:
+  - a command-only timeout with a live measurement bus keeps the usable reception;
+  - a measurement-bus or receiver failure shows amber and drops the measurements.
 
 **Owner tests:**
 - `fms-rms-radios.spec.ts`:
@@ -914,12 +944,19 @@ The three fixtures:
   - the FAF and recommended navaid is the NDB BKT;
   - the MELIA and NUTTS transitions have PI course reversals;
   - the missed approach is CA, DF, HM.
-- **PASD Q32**, Sand Point, Alaska (route type Q, the NDB/DME fixture; FAACIFP18 lines 12252–12258 for the final):
+- **PASD Q32**, Sand Point, Alaska (route type Q, the NDB/DME fixture; FAACIFP18 lines 12252–12258 for the final). Astra checked it against its dTPP 2609 chart (06537N32.PDF, SHA-256 BF794EBB14AE80C831EEA203997A13E0418D4C76DF99FFD9CD828B7F8FFAFF3C):
+  - the chart title is **NDB RWY 32**, with **DME required**: the Q coding is the NDB/DME fixture, and the title is not an overlay;
+  - HBT NDB 390 kHz; DME channel 79 (113.2); HBT 0.4 at the MAP;
+  - the missed approach climbs to 1,800, then a climbing right turn to 4,300 direct HBT, and holds.
   - the final runs IF WONBA, CF JOTOK (the FAF), CF OTIPE (the step-down) and CF RW32 (the runway MAP, coded 0.4 NM from HBT);
   - the recommended navaid is **HBT**. It is an NDB (390 kHz) with a separately coded co-located DME, also HBT, paired at 113.20, which F1's DME-only reading supplies;
   - the CUBPA, DUGAC, RAYMD and SAFKO transitions run IF, TF HBT, TF JOTOK, then a **PI** at JOTOK referenced to HBT, then CF WONBA;
   - the missed approach is CA, DF HBT, HM at HBT;
   - every leg type it uses (IF, TF, CF, PI, CA, DF, HM) is one the decoder flies today, so no leg is unsupported. The fixture test still asserts each decoded leg against the records, since sharing a loader branch does not prove support.
+  - **Same-ident resolution:** HBT has separate NDB and DME records with the same ident and different coordinates. The importer's position map is keyed by ident and keeps the first entry. Once F1 adds the DME-only record, the fixture proves that each consumer gets the right component, not whichever was inserted first:
+    - the ADF tunes the NDB;
+    - the DME distance is measured from the DME;
+    - the procedure's fix HBT resolves to the coded fix.
 - **The chart:** before each fixture is frozen, its dTPP 2609 chart title, recommended navaid, DME distances, MAP and missed approach are reconciled with the coded data and recorded in the fixture metadata. The title also settles conventional versus overlay applicability.
 
 **Loader:**
@@ -1042,12 +1079,8 @@ Local, unpushed branches exist for F0, F1 (session 4), F2, F8a (the RMS extensio
 | F1 | Built by session 4 to this section's contract. `Navaid.elevation` becomes required, so every navaid builder in the other pieces supplies it on rebase. |
 | F0 | The external head is declared off with its pages guarded. The KALMAN row carries the clarification. |
 | F2 (done locally, b32a05b8) | The GPS entry's integrity bound stays the receiver HIL. The NAIM comparison moves out of `integrityNm` into its own laboratory field. Every consumer reads per C1's table. The GPS measurement's HFOM-or-HIL fallback for ANP goes. |
-| F8a | Radio health separates CONTROL LOST (timeout, reception kept) from FAIL/SILENT. REJECTED and SUPERSEDED command states are added. DME channels and HOLD and TEST per C3. A TACAN device. No ADF alert when untuned. |
+| F8a | C3's separate internal states (command, control path, measurement bus, receiver, reception), with messages raised from each Appendix E row's predicate. REJECTED and SUPERSEDED command states. DME channels, the roster and the bounded cache, HOLD and TEST per C3. A TACAN device. No message for an untuned healthy ADF. |
 | F8b | TEST removes that receiver's ranges from navigation. DME HOLD becomes C3's channel 1. |
 | F11 (done locally, b32a05b8) | σ per axis, with the 2 σ page value. The coast clock runs from the last integrity-qualified aiding, which also requires the GPS velocity words (already so). `powerInterrupt(ms)` gets the 50 ms boundary. The APIRS and Doppler failure conditions stay. |
-| F3 | Built from §4 F3's ordered resolver. Changes against today's code:
-- a qualifying NAIM backup must have integrity (C1); today any approved radio fix is compared;
-- step 3's comparator;
-- INT gets its own predicate;
-- `transitionAlert` stays the alert rule. |
+| F3 | Built from §4 F3's ordered resolver. Changes against today's code: a qualifying NAIM backup must have integrity and meet C3's NAIM eligibility (today any approved radio fix is compared); step 3's comparator; INT gets its own predicate; `transitionAlert` stays the alert rule. |
 | F11 (DF-05) | The σ model becomes the quadrature sum of C2's three contributors, under the isotropic assumption. The generator's fixed laboratory APIRS bias moves out of the nominal model into a fault stimulus. The 2.448 × max(σx, σy) helper is replaced by the isotropic 2.448 σ. |
