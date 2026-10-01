@@ -2789,3 +2789,27 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Held pass:** the timed pass still inspects `origin/main` (so the main-currency observation and the instance badge stay truthful), logs that it is holding, and stops nothing. A Start - the operator launcher or the boot/logon recovery task - runs the revision already on disk instead of advancing.
 - **Manual redeploy:** `REDEPLOY_AEROLINK_PRODUCTION.bat` records a request and starts the installed reconciliation task, which carries the transition under its attested launch context. One request lets one pass through; the next pass takes it whatever it decides, and a request older than two hours is not honoured. Explicit operator operations that already advance the source on purpose (Configure `Update`, runtime update, first deployment) are unaffected.
 - **Not affected:** merging, the merge queue, CI and development checkouts. `main` moves as fast as ever; HOME production catches up at the first pass after 18:00 Eastern, or earlier on request.
+
+### DEC-150 - Helicopter Bench Stage F Sensor and Radio Configuration
+
+- **Date:** 2026-09-30
+- **Status:** Accepted owner decision.
+- **Authority:** Sean answered the eight functional questions in the Stage F plan (`product/docs/FMS_STAGE_F_PLAN.md`, §6) at about 4:45 PM ET on 30 September 2026. Session 1 relayed the answers.
+- **Decision:** The civil SAR helicopter profile is equipped and configured for Stage F as follows.
+  1. **TACAN on.** DME/DME may use TACAN ranges, and VOR/DME/TCN may use one TACAN. M300 1-4 admits civil TACAN "when proven accurate".
+  2. **AHRS/APIRS KALMAN mode equipped**, with a 2-minute coast after GPS loss and then dead reckoning (M300 1-5, 12-23 to 12-24). It is not RNP-applicable (15-4).
+     - **Clarification (Sean, 30 September 2026, about 7:40 PM ET, answering Astra's plan review item SF-02; relayed by session 1):** at KALMAN expiry, KALMAN becomes ineligible, and selection takes the best remaining usable source, DVS included when healthy. Dead reckoning follows only when nothing else is usable. The wording above is unchanged; this clarifies it.
+  3. **Doppler (DVS) on**, at the lowest priority and without integrity in the civil option (M300 12-20).
+  4. **Error limits on an RNP basis** (M300 1-3's configurable choice).
+  5. **AUTO-tuned VORs are eligible for VOR/DME navigation.** This departs from M300 12-19, which navigates on manually tuned stations only. It is a named profile option (`autoVorNavigation`) carrying this decision as provenance and citing 12-19 as the manual default it overrides.
+  6. **ANP is the 95% figure**, not the "ANP/HIL = 1.0" 99.999% option (M300 15-2).
+  7. **No external radio control head.** The FMS is the only tuning source, and the M300's external-head behaviour and RADIO TUNING DISABLED (13-3, 13-20) are not configured.
+  8. **NDB approaches are in scope.** They are database NDB and NDB/DME approaches flown on FMS guidance, with the ADF bearing as raw data. M300 7-1 lists them as approved with "GPS or NDB", and the M300 has no ADF navigation mode, so no position is derived from the ADF.
+- **Consequences:**
+  - The Stage F plan's F0, F6, F7, F8, F11, F12 and the new F16 carry these choices.
+  - `configuration.ts` changes TACAN, KALMAN and DVS from off to on (and adds `autoVorNavigation`) in F0, with the M300 page for each.
+- **Boundaries:**
+  - Stage F implementation waits for Astra's review of the plan.
+  - No simulator result is OEM conformance or operational qualification.
+  - DEC-146, DEC-147 and DEC-148 remain in force.
+  - This entry is DEC-150 because PR #1329 already claimed DEC-149 (since merged).
