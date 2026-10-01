@@ -1418,7 +1418,7 @@ export class ScriptedFms implements CduBackend {
     if (angleKey && angleKey !== this.angleAlertSession) { this.angleAlertSession = angleKey; this.alert(alert(advisory!.angleAlert!)); }
     // S300 retains valid uncertain GPS guidance for the manual's post-FAF delay; the later SBAS profile has no delay.
     const approach = findProcedure(this.db, this.active, "APPROACH");
-    const rnavApproach = approach?.approachType === "RNAV" && (this.flightPhase === "APPROACH" || this.armedApproach && nearFaf);
+    const rnavApproach = !!approach && this.flownOnFmsGuidance(approach) && (this.flightPhase === "APPROACH" || this.armedApproach && nearFaf);
     // The approach needs the selected receiver's words to permit it (gpsApproachAuthority: a usable receiver, a valid
     // selected approach, a level, 116), and once it has had vertical guidance (LPV or LNAV/VNAV with 117 valid) in the
     // approach phase, losing it is a loss of approach integrity too (3b, the GPS review's GPS-01 and GPS-06).
@@ -1584,7 +1584,7 @@ export class ScriptedFms implements CduBackend {
     const hdop = bus?.["101"], assessment = assessReceiver(bus, 0.3);
     const current = this.nav.mode === "GPS" && assessment.usable && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4;
     const holding = !leavingFafHold && this.holdingAtFaf;
-    if (!approach || approach.approachType !== "RNAV" || !this.armedApproach || holding || distance === null || distance > 2) this.approachPhaseActive = false;
+    if (!approach || !this.flownOnFmsGuidance(approach) || !this.armedApproach || holding || distance === null || distance > 2) this.approachPhaseActive = false;
     if (!approach || distance === null || distance > 6 || !source || this.sensorPort) return;
     const key = `${this.planRevision}:${source}:${this.raimDeselectedSatellites.join(",")}`;
     const now = this.now.getTime();
@@ -1623,6 +1623,16 @@ export class ScriptedFms implements CduBackend {
 
   get s300Advisory() { return this.aircraftProfile.approachPolicy === "S300_ADVISORY"; }
   get approachSteeringValid() { return !this.s300Advisory || !this.approachCancelled; }
+
+  /**
+   * Whether an approach may be flown on FMS guidance with GPS, with the approach phase, its integrity rules and NO APPR
+   * INTEGRITY: any approach but the ILS, as far as the procedure goes. The GPS approach authority then decides: the S300
+   * admits every non-ILS type, NDB and VOR included (Stage F16, DF-01; M300 7-1); the later SBAS profile, RNAV only. A
+   * conventional approach's raw data stays the crew's, independent of it.
+   */
+  private flownOnFmsGuidance(approach: Procedure) {
+    return approach.approachType !== "ILS";
+  }
   get baroCorrectedAvailable() {
     return !this.sensorPort || sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge)?.baroCorrected !== false;
   }
