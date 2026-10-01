@@ -226,14 +226,23 @@ function sensorTable(fms: ScriptedFms): (Line | undefined)[] {
     ...configured(fms, "kalman") ? [{ label: "KALMAN", mode: "KALMAN", off: deselected.has("KALMAN"), position: fms.kalmanStatus.kalmanPosition }] : [],
     ...configured(fms, "doppler") ? [{ label: "DVS", mode: "DVS", off: deselected.has("DVS"), position: null }] : [],
   ];
-  const nm = (value: number | null) => value === null ? "----" : value < 10 ? value.toFixed(2) : value < 100 ? value.toFixed(1) : String(Math.round(value));
+  // Four cells per number: reduce decimal precision after rounding crosses a width boundary, never truncate digits.
+  // Missing/invalid words use dashes; finite field overflow uses M300 2-18's existing asterisk contract.
+  const nm = (value: number | null) => {
+    if (value === null || !Number.isFinite(value) || value < 0) return "----";
+    for (const decimals of [2, 1, 0]) {
+      const text = value.toFixed(decimals);
+      if (text.length <= 4) return text;
+    }
+    return ranged(Math.round(value), 9999, String);
+  };
   const lines = rows.map((row): Line => {
     const sensor = sensors.find(candidate => candidate.mode === row.mode);
     const status = row.off ? "DSEL" : sensor?.available ? "NAV" : "ACQ";
     const distance = row.position && status === "NAV" ? distanceNm(fms.position, row.position) : null;
     const bearing = distance !== null && distance > 0 ? fms.angleText(bearingDeg(fms.position, row.position!)) : "----";
     const accuracy = status === "NAV" ? sensor?.accuracy95Nm ?? null : null;
-    return { left: medium(`${row.label.padEnd(7)}${status.padEnd(4)}${nm(distance).padStart(4)}${bearing}${nm(accuracy).padStart(5)}`, status === "DSEL" ? "amber" : status === "NAV" ? "green" : "white") };
+    return { left: medium(`${row.label.padEnd(8)}${status.padEnd(4)}${nm(distance).padStart(4)}${bearing}${nm(accuracy).padStart(4)}`, status === "DSEL" ? "amber" : status === "NAV" ? "green" : "white") };
   });
   return [...lines, ...Array<undefined>(5 - lines.length).fill(undefined)];
 }
@@ -352,7 +361,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     render: (fms, index) => index === 1 ? [
       title("POS INIT", "2/2"), caption(" FMS POS", `${fms.navState.mode} `),
       { left: medium(formatPosition(fms.position)) },
-      caption("MODE   STS DIS BRG ACCUR"),
+      caption("MODE    STS DIS BRG  ACC"),
       ...sensorTable(fms),
       caption(fms.validBaroAltitude !== null ? " ALT (CORR)" : " ALT (STD)"), { left: (fms.validBaroAltitude ?? fms.pressureAltitude) !== null ? medium(`${Math.round((fms.validBaroAltitude ?? fms.pressureAltitude)!)}FT`) : dashes(6) },
       caption(fms.manualQnhAvailable ? ` QNH SET ${fms.qnhUnits}` : undefined), { left: fms.manualQnhAvailable ? fms.qnhText === null ? boxes(5) : medium(`>${fms.qnhText}`) : undefined },

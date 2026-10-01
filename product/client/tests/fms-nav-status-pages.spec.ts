@@ -196,19 +196,19 @@ test('F9: the POS INIT 2/2 table lists each equipped mode with its status, dista
   fms.open('POS'); fms.press('NEXT')
   expect(lines()[0]).toMatch(/^POS INIT\s+2\/2$/)
   expect(lines()[1]).toMatch(/^ FMS POS\s+GPS $/)
-  expect(lines()[3]).toBe('MODE   STS DIS BRG ACCUR')
+  expect(lines()[3]).toBe('MODE    STS DIS BRG  ACC')
   const table = lines().slice(4, 9)
-  expect(table.map(line => line.slice(0, 7).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'KALMAN', 'DVS'])
+  expect(table.map(line => line.slice(0, 8).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'KALMAN', 'DVS'])
   expect(table.every(line => line.length === 24)).toBe(true)
   const gps = fms.sensorSolutions.find(sensor => sensor.mode === 'GPS')!
-  expect(table[0]).toMatch(/^GPS    NAV 0\.00---- \d\.\d\d$/)
-  expect(Number(table[0].slice(19))).toBeCloseTo(gps.accuracy95Nm!, 2)
+  expect(table[0]).toMatch(/^GPS     NAV 0\.00----\d\.\d\d$/)
+  expect(Number(table[0].slice(20))).toBeCloseTo(gps.accuracy95Nm!, 2)
   // The KALMAN position follows the FMS position while GPS aids it; DVS has no position of its own.
-  expect(table[3]).toMatch(/^KALMAN NAV \d\.\d\d(----|\d{3}[°T]) \d\.\d\d$/)
-  expect(table[4]).toMatch(/^DVS    NAV --------( \d\.\d\d| ----)$/)
+  expect(table[3]).toMatch(/^KALMAN  NAV \d\.\d\d(----|\d{3}[°T])\d\.\d\d$/)
+  expect(table[4]).toMatch(/^DVS     NAV --------(\d\.\d\d|----)$/)
   fms.setDeselected('KALMAN', true)
   fms.open('DESELECT'); fms.open('POS'); fms.press('NEXT')
-  expect(lines()[7]).toBe('KALMAN DSEL-------- ----')
+  expect(lines()[7]).toBe('KALMAN  DSEL------------')
   // An admitted adapter range is two NM south of a station five NM north of the selected GPS position.
   // The independent page oracle is therefore 3.00 NM due north, not a value computed with the production geometry.
   const now = Date.UTC(2026, 8, 30, 14)
@@ -230,11 +230,24 @@ test('F9: the POS INIT 2/2 table lists each equipped mode with its status, dista
   adapter.updateNavigation(0)
   expect(adapter.navState.mode).toBe('GPS')
   adapter.toggleAngleReference(); adapter.open('POS'); adapter.press('NEXT')
-  expect(screenText(adapter.screen())[6]).toBe('VORDMTCNAV 3.00360T 0.66')
+  expect(screenText(adapter.screen())[6]).toBe('VORDMTC NAV 3.00360T0.66')
+  // Actual receiver words supply the page accuracy; rounded width boundaries must not alter source values.
+  for (const [accuracy, printed] of [[9.999, '10.0'], [10, '10.0'], [99.999, ' 100'], [100, ' 100'],
+    [null, '----'], [NaN, '----'], [Infinity, '----'], [10000, '****']] as const) {
+    for (const word of frame.gps) {
+      word.sequence++
+      word.value!['247'] = { ssm: accuracy === null ? 'NCD' : 'NORMAL', value: accuracy }
+    }
+    adapter.updateNavigation(0)
+    const row = screenText(adapter.screen())[4]
+    expect(row).toHaveLength(24)
+    expect(row.slice(20)).toBe(printed)
+    expect(adapter.navigationInputs!.gps[0].value!['247'].value).toBe(accuracy)
+  }
   // Without a KALMAN mode configured there is no KALMAN line.
   const bare = unit(withoutOption('kalman'))
   bare.step(3); bare.fms.open('POS'); bare.fms.press('NEXT')
-  expect(bare.lines().slice(4, 9).map(line => line.slice(0, 7).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'DVS', ''])
+  expect(bare.lines().slice(4, 9).map(line => line.slice(0, 8).trim())).toEqual(['GPS', 'DME/DME', 'VORDMTC', 'DVS', ''])
 })
 
 test('F9: the crew water current moves the DVS solution in SEA mode only (M300 12-22, 12-23)', () => {
