@@ -79,7 +79,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         caption(" DME 1", "DME 2 "),
         { left: dme1 ? medium(`${dme1} ${frequency(fms, dme1)}`) : dashes(4), right: dme2 ? medium(`${dme2} ${frequency(fms, dme2)}`) : dashes(4) },
         // LSK3R opens GPS STATUS for both receivers; the GPS line describes the one navigated on (or GPS1).
-        caption(" VOR", "GPS STATUS> "),
+        caption(" VOR/DME/TCN", "GPS STATUS> "),
         { left: nav.vor ? medium(`${nav.vor} ${frequency(fms, nav.vor)}`) : dashes(4), right: medium(gps.text, gps.ok ? "white" : "amber") },
         caption(" DR ESTIMATE", "PRAIM> "),
         { left: medium(nav.mode === "DR" ? nav.airValid ? "HDG/TAS/WIND" : "NO AIR DATA" : "STBY"), right: medium(fms.gpsNavSelected ? sbasSummary(shown) : "----") },
@@ -94,6 +94,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
       if (side === "R" && row === 3) { fms.open("GPS_STATUS"); return; }
       if (side === "R" && row === 4) { fms.open("PREDICT_RAIM"); return; }
       if (side === "R" && row === 5) { fms.open("DME_STATUS"); return; }
+      if (side === "L" && row === 3) { fms.open("VOR_DME_STATUS"); return; }
       if (row !== 6) return;
       fms.open(side === "L" ? "INIT_REF" : "NAV_OPTIONS");
     },
@@ -209,6 +210,38 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
       list.splice(Math.min(slot, list.length), 0, scratch);
       fms.setDmeDeselected(list); fms.setScratch("");
     },
+  },
+
+  // Plan F7 (M300 12-19, 12-20): the stations VOR/DME/TACAN navigation uses: each NAV's VOR (radial) and its paired DME
+  // (slant range), the TACAN (channel, bearing and distance), and the VOR/DME position. Blank without a station.
+  VOR_DME_STATUS: {
+    pages: () => 1,
+    render: fms => {
+      const three = (value: number) => String(Math.round(value) % 360 || 360).padStart(3, "0");
+      const vor = (device: "nav1" | "nav2", label: string): Line => {
+        const station = fms.navStation(device), radial = fms.navRadial(device);
+        return { left: medium(`${label} ${(station?.ident ?? "").padEnd(4)} ${station ? station.frequency : "      "} ${radial === null ? "" : `${three(radial)}°`}`) };
+      };
+      const dme = (device: "dme1" | "dme2", label: string): Line => {
+        const station = fms.dmeStation(device), distance = fms.dmeDistance(device);
+        return { left: medium(`${label} ${(station?.ident ?? "").padEnd(4)} ${station ? station.frequency : "      "} ${distance}`) };
+      };
+      const tacan = fms.tacanStation(), tacanWords = fms.tacanBearingAndRange();
+      const fix = fms.lastRadioFixes.find(entry => entry.mode === "VOR/DME");
+      return [
+        title("VOR/DME/TCN STATUS", "1/1"),
+        caption(" SOURCE/ID  FREQ RAD/DME"),
+        vor("nav1", "VOR1"), dme("dme1", "DME1"), vor("nav2", "VOR2"), dme("dme2", "DME2"),
+        undefined,
+        { left: medium(`TCN  ${(tacan?.ident ?? "").padEnd(4)}${tacan?.channel ?? ""} ${tacanWords ? `${three(tacanWords.bearing)}°/${Math.round(tacanWords.rangeNm)}NM` : ""}`) },
+        undefined,
+        caption(" POSITION"),
+        { left: fix ? medium(formatPosition(fix.position)) : dashes(18) },
+        { left: dashes(24) },
+        { left: prompt("<NAV STATUS") },
+      ];
+    },
+    lsk: (fms, side, row) => { if (side === "L" && row === 6) fms.open("NAV_STATUS"); },
   },
 
   NAV_OPTIONS: {

@@ -82,7 +82,8 @@
     "fms-rms-radios.spec.ts",
     "fms-nav-radio.spec.ts",
     "fms-sensor-transitions.spec.ts",
-    "fms-dme-dme.spec.ts"
+    "fms-dme-dme.spec.ts",
+    "fms-vor-dme.spec.ts"
   ],
   "rendered": [
     "layout-settled.spec.ts",

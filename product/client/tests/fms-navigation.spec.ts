@@ -652,8 +652,11 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still 
   const sensor = unit.navPerformance.sensor
   expect(sensor.integrity).toBe(false)
   expect(unit.navState.anp).toBe(sensor.accuracy95Nm)
-  expect(sensor.naimComparisonNm).not.toBeNull()
-  expect(sensor.naimComparisonNm).not.toBe(sensor.integrityNm)
+  // The only radio here is a VOR/DME more than 7 NM away: 1.5 NM accurate (M300 15-3), so without integrity at this RNP. It
+  // is no qualifying NAIM backup (plan C1), so no comparison is made and the uncertain GPS is retained (resolver step 2).
+  const backup = unit.lastRadioFixes.find(fix => fix.mode === 'VOR/DME')
+  if (backup) expect(backup.anp).toBeGreaterThanOrEqual(unit.navPerformance.rnp)
+  expect(sensor.naimComparisonNm).toBeNull()
   expect(unit.approachType).toBe('NO APPR')
   for (let i = 0; i < 3; i += 1) unit.sequence()
   unit.directTo('FERDI'); unit.press('EXEC')

@@ -266,7 +266,8 @@ test('GPS loss raises GPS NAV LOST and falls back to radio updating; with no DME
   expect(unit.lamps().has('POS')).toBe(false)
   press(unit, 'CLR', 'PROG')
   expect(lines(unit)[12]).toMatch(/^VOR\/DME/)
-  expect(lines(unit)[10]).toMatch(/^1\.00\/0\.5\dNM/)
+  // The VOR/DME more than 7 NM away: 1.5 NM 95% accuracy (M300 15-3).
+  expect(lines(unit)[10]).toMatch(/^1\.00\/1\.50NM/)
   unit.setCondition('dmeOutage', true)
   // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
   unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)

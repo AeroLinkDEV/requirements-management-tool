@@ -74,7 +74,7 @@ const options = {
   gpsDual: on("Dual GPS receivers (CMA-5024)", "M300 1-4, 12-1 to 12-3", "partial", "two modelled receivers with automatic and manual selection"),
   dme1: on("DME 1 (DME/DME scanning)", "M300 1-4, 12-16 to 12-18, 13-20", "partial", "bench receiver tuned by navigation; RMS channels, command and feedback pending (plan C3, F8)"),
   dme2: on("DME 2", "M300 12-16, 13-20", "partial", "as DME 1"),
-  tacan: on("TACAN", "M300 1-4, 12-19 to 12-20", "pending", "DEC-150: on; DME/DME may use TACAN ranges and VOR/DME/TCN one TACAN (plan F6, F7)"),
+  tacan: on("TACAN", "M300 1-4, 12-19 to 12-20", "partial", "DEC-150: on; DME/DME may use TACAN ranges and VOR/DME/TCN one TACAN (plan F6, F7)"),
   kalman: on("AHRS/APIRS KALMAN navigation", "M300 1-5, 12-23 to 12-24, 15-4", "partial", "DEC-150 item 2 with its clarification: equipped; a 2-minute coast from the last integrity-qualified GPS aiding, then the best remaining usable source (DR only when nothing else is); not RNP-applicable (plan C2, F11); KALMAN STATUS page pending (F9)"),
   doppler: on("Doppler velocity sensor (DVS) navigation", "M300 1-3, 12-20 to 12-23", "partial", "DEC-150: on; lowest priority, without integrity in the civil option (plan F11); DVS STATUS pages pending (F9)"),
   autoVorNavigation: on("AUTO-tuned VOR eligible for VOR/DME navigation", "M300 12-19 (manual default: manually tuned stations only), 13-21", "implemented", "DEC-150 overrides the manual default: an AUTO-tuned NAV's bearing feeds VOR/DME (plan F8a)"),

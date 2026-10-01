@@ -1052,6 +1052,35 @@ export class ScriptedFms implements CduBackend {
     if (!this.rms) return;
     const stations = this.vorDmeStations();
     (["nav1", "nav2"] as const).forEach((device, index) => { if (stations[index]) this.rms!.autoTune(device, stations[index].frequency); });
+    // Plan F7 (M300 12-19): the TACAN unit is tuned by the FMS to the nearest TACAN-capable station's channel.
+    const tacan = this.tacanStations()[0];
+    const channel = tacan?.channel;
+    if (channel && this.options()?.tacan?.configured === true) {
+      const pending = this.rms.requests.find(request => request.device === "tacan" && request.status === "PENDING");
+      if ((pending?.value ?? this.rms.state.tacan) !== channel) this.rms.tune("tacan", channel);
+    }
+  }
+  private options() { return this.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined; }
+  /** TACAN-capable stations in range, nearest first (a TACAN or VORTAC with a channel). */
+  tacanStations(): Navaid[] {
+    return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && ["TACAN", "VORTAC"].includes(entry.type)
+      && entry.channel !== undefined && !this.inhibited.includes(entry.ident))
+      .sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position));
+  }
+  /** The TACAN's measured magnetic bearing to its station and its slant range (null without valid words). */
+  tacanBearingAndRange(): { bearing: number; rangeNm: number } | null {
+    const station = this.tacanStation();
+    const observation = station ? this.sensorFrame?.radios.find(entry => entry.station.ident === station.ident) : undefined;
+    const bearing = observation ? sampled(observation.bearingTrue, this.now.getTime(), this.sensorMaxAge) : null;
+    const range = observation ? sampled(observation.slantRangeNm, this.now.getTime(), this.sensorMaxAge) : null;
+    const variation = station ? this.magvar.field(station.position, 0, this.utcTime)?.declination : undefined;
+    if (bearing === null || range === null || variation === undefined) return null;
+    return { bearing: normalizeAngle(bearing - variation), rangeNm: range };
+  }
+  /** The station the TACAN reports it is tuned to: the nearest TACAN-capable station on its channel (none while it reports nothing). */
+  tacanStation(): Navaid | undefined {
+    const channel = this.rms?.receiving("tacan") ?? null;
+    return channel === null ? undefined : this.tacanStations().find(station => station.channel === channel);
   }
 
   /** A standalone computer's radios advance with it; every computer raises its own radio messages (Appendix E). */
@@ -1110,6 +1139,13 @@ export class ScriptedFms implements CduBackend {
       const ranging = this.dmeStation(dme);
       if (ranging && rms.dmeReceiving(dme)) { stations.set(ranging.ident, ranging); range.add(ranging.ident); this.assignRange(ranging.ident, dme, 1, ranging.frequency); }
     });
+    // Plan F7: the TACAN gives its station's bearing and range for VOR/DME/TCN; AUTO-tuned, it is eligible under the same
+    // autoVorNavigation choice as an AUTO-tuned VOR (DEC-150; M300 12-19's default is manually tuned only).
+    const tacan = this.tacanStation();
+    if (tacan) {
+      stations.set(tacan.ident, tacan); range.add(tacan.ident);
+      if (autoEligible) bearing.add(tacan.ident);
+    }
     return { stations: [...stations.values()], use: { range, bearing }, acquisition };
   }
 
