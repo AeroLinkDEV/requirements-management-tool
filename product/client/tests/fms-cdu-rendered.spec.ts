@@ -1476,6 +1476,9 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   }
   await page.setViewportSize({ width: 1440, height: 900 })
   await open(page)
+  // This isolated bench omits the workspace shell. Load its real density tokens so the product's
+  // 40px button minimum is present; otherwise a faceplate regression can pass only in the fixture.
+  await page.addStyleTag({ url: '/src/Density.css' })
   await centredKeys()
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
   const boxes = async () => {
@@ -1486,6 +1489,9 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   }
   const wide = await boxes()
   await centredKeys()
+  await page.evaluate(() => { document.documentElement.dataset.density = 'compact' })
+  await centredKeys()
+  await page.evaluate(() => { delete document.documentElement.dataset.density })
   await page.screenshot({ path: testInfo.outputPath('centred-cockpit-keys.png'), fullPage: true })
   expect(wide.cdu.width).toBeGreaterThanOrEqual(320)
   expect(wide.pfd.width).toBeGreaterThanOrEqual(280)
