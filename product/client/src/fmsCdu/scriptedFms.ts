@@ -1128,10 +1128,15 @@ export class ScriptedFms implements CduBackend {
    */
   dmeDistance(device: DmeDevice): string {
     if (!this.rms?.dmeReceiving(device)) return "****";
+    const range = this.dmeSlantRangeNm(device);
+    return range === null ? "" : `${range < 100 ? range.toFixed(1) : Math.round(range)}NM`;
+  }
+  /** The slant range the DME measures to the station it ranges on, NM: null without a fresh range (the bus's word, F13). */
+  dmeSlantRangeNm(device: DmeDevice): number | null {
+    if (!this.rms?.dmeReceiving(device)) return null;
     const station = this.dmeStation(device);
     const word = station ? this.sensorFrame?.radios.find(observation => observation.station.ident === station.ident)?.slantRangeNm : undefined;
-    const range = word ? sampled(word, this.now.getTime(), this.sensorMaxAge) : null;
-    return range === null ? "" : `${range < 100 ? range.toFixed(1) : Math.round(range)}NM`;
+    return word ? sampled(word, this.now.getTime(), this.sensorMaxAge) : null;
   }
   /**
    * The ADF receiver (sensor side, from the plant): the relative bearing to the NDB it reports tuned, while healthy, in

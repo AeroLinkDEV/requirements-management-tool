@@ -19,6 +19,8 @@ import type { ScriptedFms } from "./scriptedFms";
 export type Validity =
   /** A Word: NORMAL, NCD or FAIL beside the value. */
   | "word"
+  /** A record of words, per device and field (the radios, Stage F C3): each leaf a Word with its own status. */
+  | "word per field"
   /** The value is null (or a null field inside it) when it is not available; there is no separate status. */
   | "null when unavailable"
   /** Always valid in this bench: a laboratory simplification, declared (rev 3 F10 for baro, heading and attitude). */
@@ -76,6 +78,11 @@ export const FMS_OUTPUT_TAGS: { [K in keyof FmsOutputs]: OutputTag } = {
   integrityValid: data("the selected navigation solution: integrity against the active error limit (M300 1-3)"),
   positionUncertain: data("FMS navigation: the GPS position held as uncertain (GPS POS UNCERTAIN)"),
   naimComparisonNm: data("laboratory NAIM comparison of an uncertain GPS against a qualifying radio fix: laboratory, never integrity"),
+  // Stage F C3, C4 (F13 part 2): the radios and the KALMAN and DVS sources, each field a word with its own validity.
+  radios: data("the shared radio management system through this computer's port: each radio's reported frequency or channel, this computer's last command status, and its control path, measurement bus and receiver states", "word per field"),
+  radioMeasurements: data("each radio's measurements from the sensor frame: NAV station and magnetic radial, DME station and slant range, ADF relative bearing; TACAN bearing and distance NCD (not yet measured by the bench, F7)", "word per field"),
+  kalman: data("the KALMAN solution (F11): its availability and laboratory 95% accuracy, selected or not"),
+  dvs: data("the DVS solution (F11): its availability and 95% accuracy, selected or not"),
   activeRoute: plan("the active flight plan"),
   modifiedRoute: plan("the modification pending EXEC"),
   offsetTrack: plan("the executed parallel offset"),

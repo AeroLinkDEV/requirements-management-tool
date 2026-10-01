@@ -68,6 +68,7 @@
     "fms-route-append.spec.ts",
     "fms-stage-f-mission.spec.ts",
     "fms-output-bus-nav.spec.ts",
+    "fms-output-bus-radios.spec.ts",
     "fms-obstacles.spec.ts",
     "fms-pins-approach.spec.ts",
     "fms-gps-scenario.spec.ts",
