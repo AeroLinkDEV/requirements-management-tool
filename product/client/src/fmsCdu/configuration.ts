@@ -67,8 +67,18 @@ const options = {
   externalTarget: off("ATOS/radar target reception", "M300 11-88", "no external ATOS or radar equipment selected; moving targets use bench input"),
   joystick: off("External joystick position", "M300 11-18, 11-31", "no external radar/AHCAS joystick selected"),
   ess: off("External MCDU subsystem control", "M300 16-1", "no external ARINC 739 subsystem selected"),
-  irs: off("EGI/IRS and its maintenance information", "M300 A-88 to A-89", "civil heading/TAS/wind DR selected; no inertial equipment declared"),
-  doppler: off("Doppler navigation", "M300 1-3", "no Doppler equipment selected"),
+  irs: off("EGI/IRS and its maintenance information", "M300 A-88 to A-89, 12-25 to 12-28", "civil heading/TAS/wind DR selected; no inertial equipment declared"),
+  // Stage F navigation sensors (plan F0; DEC-150, Sean's answers of 30 September 2026).
+  gpsDual: on("Dual GPS receivers (CMA-5024)", "M300 1-4, 12-1 to 12-3", "partial", "two modelled receivers with automatic and manual selection"),
+  dme1: on("DME 1 (DME/DME scanning)", "M300 1-4, 12-16 to 12-18, 13-20", "partial", "bench receiver tuned by navigation; RMS channels, command and feedback pending (plan C3, F8)"),
+  dme2: on("DME 2", "M300 12-16, 13-20", "partial", "as DME 1"),
+  tacan: on("TACAN", "M300 1-4, 12-19 to 12-20", "pending", "DEC-150: on; DME/DME may use TACAN ranges and VOR/DME/TCN one TACAN (plan F6, F7)"),
+  kalman: on("AHRS/APIRS KALMAN navigation", "M300 1-5, 12-23 to 12-24, 15-4", "pending", "DEC-150 item 2 with its clarification: equipped; a 2-minute coast from the last integrity-qualified GPS aiding, then the best remaining usable source (DR only when nothing else is); not RNP-applicable (plan C2, F11)"),
+  doppler: on("Doppler velocity sensor (DVS) navigation", "M300 1-3, 12-20 to 12-23", "pending", "DEC-150: on; lowest priority, without integrity in the civil option (plan F11)"),
+  autoVorNavigation: on("AUTO-tuned VOR eligible for VOR/DME navigation", "M300 12-19 (manual default: manually tuned stations only), 13-21", "pending", "DEC-150 overrides the manual default (plan F7)"),
+  ndbApproach: on("NDB and NDB/DME approaches", "M300 7-1", "pending", "DEC-150: database approaches on FMS guidance, ADF bearing as raw data; no ADF navigation mode (plan F16)"),
+  externalRadioHead: off("External radio control head or backup tuning controller", "M300 13-3, 13-20", "DEC-150: the FMS is the only tuning source"),
+  anpHil99999: off("ANP/HIL = 1.0 (99.999%) ANP presentation", "M300 15-2", "DEC-150: ANP is the 95% figure"),
 } satisfies Record<string, ConfiguredOption>;
 
 /** All 87 literal 'if configured' occurrences, including contents references and repetitions.
@@ -104,6 +114,24 @@ const references: readonly [string, number, number, keyof typeof options][] = [
   ["A-142", 588, 27, "planData"], ["A-147", 593, 41, "tacticalApproach"], ["A-147", 593, 48, "tacticalApproach"],
   ["A-164", 610, 21, "tacticalApproach"], ["A-164", 610, 23, "tacticalApproach"], ["A-165", 611, 12, "missedPrompt"],
   ["A-238", 684, 40, "missedPrompt"], ["A-242", 688, 10, "movingWaypoint"], ["E-2", 752, 15, "adfControlAlert"],
+];
+
+/**
+ * Stage F navigation sensors (plan F0). For each, the option that declares it and what may exist only while it is on:
+ * the navigation modes it provides, its navigation page prompts and its M300 Appendix E alerts. A guard test ties the
+ * declared status to these consumers: equipment that is off has none, a pending sensor has none yet, and a built one
+ * has at least one.
+ */
+export const STAGE_F_SENSORS: readonly { option: keyof typeof options; modes: readonly string[]; prompts: readonly string[]; alerts: readonly string[] }[] = [
+  { option: "gpsDual", modes: ["GPS"], prompts: ["GPS STATUS"], alerts: ["GPS NAV LOST", "GPS POS UNCERTAIN"] },
+  { option: "dme1", modes: ["DME/DME"], prompts: [], alerts: ["DME/DME NAV LOST"] },
+  { option: "nav1", modes: ["VOR/DME"], prompts: [], alerts: ["VOR/DME NAV LOST"] },
+  { option: "tacan", modes: ["VOR/DME/TCN"], prompts: ["VOR/DME/TCN", "TACAN STATUS"], alerts: ["VOR/DME/TCN NAV LOST", "TACAN NAV LOST"] },
+  { option: "kalman", modes: ["KALMAN"], prompts: ["KALMAN"], alerts: ["KALMAN NAV LOST", "APIRS FAILED"] },
+  { option: "doppler", modes: ["DVS"], prompts: ["DVS"], alerts: ["DVS NAV LOST"] },
+  { option: "irs", modes: ["INERTIAL", "IRS", "INS/GPS", "INS/DVS"], prompts: ["IRS", "INS", "INERTIAL"], alerts: ["INS NAV LOST", "INS/GPS NAV LOST", "IRS1 ALIGN FAIL", "SET INS POS"] },
+  { option: "externalRadioHead", modes: [], prompts: [], alerts: ["RADIO TUNING DISABLED"] },
+  { option: "military", modes: ["mGPS", "cGPS"], prompts: ["MGPS", "CGPS"], alerts: ["mGPS NAV LOST", "cGPS NAV LOST", "EGI POS DIFF"] },
 ];
 
 export const CIVIL_SAR_CONFIGURATION = {

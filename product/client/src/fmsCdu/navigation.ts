@@ -4,7 +4,10 @@
  * Phase defaults and time-to-alert remain representative bench values, not a CMA installation's approval table.
  */
 
-export type NavMode = "GPS" | "DME/DME" | "VOR/DME" | "DR";
+/** The navigation modes the estimator can select. Stage F adds modes here only with the equipment that provides them
+ * (configuration.ts STAGE_F_SENSORS, plan F0). */
+export const NAV_MODES = ["GPS", "DME/DME", "VOR/DME", "DR"] as const;
+export type NavMode = typeof NAV_MODES[number];
 export type FlightPhase = "EN ROUTE" | "TERMINAL" | "APPROACH";
 
 /** Default RNP and time to alert by phase of flight (seconds). */
