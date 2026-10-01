@@ -634,7 +634,7 @@ test('a manual RNP larger than the phase default asks the crew to VERIFY RNP VAL
 })
 
 test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still the 95% accuracy, and no RNAV approach guidance', () => {
-  const unit = new ScriptedFms()
+  const unit = new ScriptedFms(() => new Date('2026-10-01T10:52:00Z'))
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   // S300 uses the executed route and measured GPS integrity; later-software FAS acceptance is a separate profile.
@@ -657,8 +657,10 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still 
   expect(unit.approachType).toBe('NO APPR')
   for (let i = 0; i < 3; i += 1) unit.sequence()
   unit.directTo('FERDI'); unit.press('EXEC')
-  unit.placeAircraft({ position: offset(unit.coordinates('FERDI')!, 251, 1.9), altitude: 2000, track: 71 }, 'test: denied approach before FAF')
-  unit.armApproach()
+  unit.placeAircraft({ position: offset(unit.coordinates('FERDI')!, 251, 1.0), altitude: 2000, track: 71 }, 'test: denied approach before FAF')
+  // Pin the clock and prove the measured position is inside the admission window (#1419).
+  expect(unit.distanceToFaf).toBeLessThan(2)
+  expect(unit.armApproach()).toBe(true)
   unit.updateNavigation(0)
   expect(unit.flightPhase).toBe('TERMINAL')
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
