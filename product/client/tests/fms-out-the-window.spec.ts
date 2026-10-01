@@ -1,4 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
+import * as Cesium from '@cesium/engine'
+import { aircraftCamera } from '../src/fmsCdu/otwCamera'
 import {
   AIRCRAFT_PARTS, CHASE_ABOVE, CHASE_BEHIND, FT, HOVER_LOOK_DOWN, TILE_PIXELS, WATER, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres, rampColour, routeHeights,
   RELIEF_MAX_ZOOM, sampleHeights, shadeTile, tileLatitude, type AircraftSample,
@@ -15,6 +17,32 @@ const grid = (height: (x: number, y: number) => number) => {
 }
 const pixel = (rgba: Uint8ClampedArray, x: number, y: number) => Array.from(rgba.slice((y * TILE_PIXELS + x) * 4, (y * TILE_PIXELS + x) * 4 + 3))
 const level: AircraftSample = { position: { lat: 45.5, lon: -73.7 }, altitude: 3000, heading: 90, pitch: 0, bank: 0 }
+
+test('a frozen aircraft stays fixed through Cesium camera updates, while a new pose still moves the view', async () => {
+  // Native camera and native request-render predicate, without a WebGL renderer or a network. This pose
+  // discriminates the heading/roll transform round trips from the post-render matrix diagnostic (#1298).
+  const { default: NativeView } = await import('@cesium/engine/Source/Scene/View.js')
+  const scene = { drawingBufferWidth: 700, drawingBufferHeight: 500, mapProjection: new Cesium.GeographicProjection(), cameraEventWaitTime: 500 }
+  const camera = new Cesium.Camera(scene as Cesium.Scene)
+  const nativeCamera = camera as Cesium.Camera & { _updateCameraChanged(): void }
+  camera.changed.addEventListener(() => {}) // CesiumWidget's scene observes this event too.
+  const follow = aircraftCamera(Cesium, camera)
+  const pose = { longitude: -82.6252295775339, latitude: 51.20897239772603, height: 2976.4214015565813,
+    heading: Cesium.Math.toRadians(297.82114905305207), pitch: Cesium.Math.toRadians(-3.919777825474739), roll: Cesium.Math.toRadians(1.6368842055089772) }
+  follow(pose)
+  const view = { camera, _cameraClone: Cesium.Camera.clone(camera), _cameraStartFired: false }
+  const changed = () => NativeView.prototype.checkForCameraUpdates.call(view, scene)
+  let pausedChanges = 0
+  for (let frame = 0; frame < 600; frame++) {
+    camera.update(Cesium.SceneMode.SCENE3D)
+    nativeCamera._updateCameraChanged()
+    follow(pose)
+    if (changed()) pausedChanges++
+  }
+  expect(pausedChanges, 'the native render predicate must remain false for a frozen aircraft').toBe(0)
+  follow({ ...pose, longitude: pose.longitude + 0.001, heading: pose.heading + 0.01 })
+  expect(changed(), 'a real position/attitude change must still request a frame').toBe(true)
+})
 
 test('Terrarium pixels decode to metres, below sea level included', () => {
   const heights = decodeTerrarium([...terrarium(0), ...terrarium(1234.5), ...terrarium(-50), ...terrarium(8848)])
