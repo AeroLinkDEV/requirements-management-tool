@@ -3,7 +3,7 @@ import { CivilNavigation, type PositionMeasurement } from '../src/fmsCdu/civilNa
 import { anpText, bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
 import { assessReceiver } from '../src/fmsCdu/gpsSensors'
-import { solveRadio, type RadioFix } from '../src/fmsCdu/radioNavigation'
+import { radioFixes, type RadioFix } from '../src/fmsCdu/radioNavigation'
 import { NAV_MODES } from '../src/fmsCdu/navigation'
 import { NAV_OUTPUT_VOCABULARY } from '../src/fmsCdu/sensorState'
 import type { RadioObservation } from '../src/fmsCdu/sensorPorts'
@@ -162,13 +162,13 @@ test('C1: three DMEs on one line leave a mirror ambiguity the prior resolves; sp
     return { station, slantRangeNm: { at: now, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(at, station.position), altitudeFt / 6076.12) },
       bearingTrue: { at: now, sequence: 1, status: 'NORMAL', value: bearingDeg(station.position, at) } }
   })
-  const ambiguous = solveRadio(collinear, offset(at, 90, 0.5), altitudeFt, now)!
+  const ambiguous = radioFixes(collinear, offset(at, 90, 0.5), altitudeFt, now).find(fix => fix.mode === 'DME/DME')!
   expect(ambiguous.mode).toBe('DME/DME')
   expect(distanceNm(ambiguous.position, at)).toBeLessThan(0.05)
   expect(ambiguous.priorResolved).toBe(true)
   // With the prior on the other side, the same ranges give the mirror point: the prior decided.
-  expect(distanceNm(solveRadio(collinear, offset(west, 270, 3.5), altitudeFt, now)!.position, at)).toBeGreaterThan(5)
-  const spread = solveRadio(observe([90, 0, 225]), offset(at, 220, 2), altitudeFt, now)!
+  expect(distanceNm(radioFixes(collinear, offset(west, 270, 3.5), altitudeFt, now).find(fix => fix.mode === 'DME/DME')!.position, at)).toBeGreaterThan(5)
+  const spread = radioFixes(observe([90, 0, 225]), offset(at, 220, 2), altitudeFt, now).find(fix => fix.mode === 'DME/DME')!
   expect(spread.priorResolved).toBe(false)
 })
 

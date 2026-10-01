@@ -120,6 +120,8 @@ export type FmsOutputs = {
   integrityBasis: Word<IntegrityBasis>;
   /** Whether the solution has integrity against the active error limit (M300 1-3). */
   integrityValid: Word<boolean>;
+  /** GPS INT's independent raise/clear state (plan F3, M300 1-4), retained after a forced GPS reversion. */
+  gpsIntegrityAnnunciation: Word<boolean>;
   /** The GPS position is held as uncertain (GPS POS UNCERTAIN): integrity lost, the position kept. */
   positionUncertain: Word<boolean>;
   /**
@@ -250,16 +252,17 @@ function alongPolyline(line: LatLon[], nm: number): LatLon | null {
   return null;
 }
 
-type NavigationWords = Pick<FmsOutputs, "accuracy95Nm" | "accuracyBasis" | "gpsDependent" | "integrityBoundNm" | "integrityBasis" | "integrityValid" | "positionUncertain" | "naimComparisonNm">;
+type NavigationWords = Pick<FmsOutputs, "accuracy95Nm" | "accuracyBasis" | "gpsDependent" | "integrityBoundNm" | "integrityBasis" | "integrityValid" | "gpsIntegrityAnnunciation" | "positionUncertain" | "naimComparisonNm">;
 
 /** The selected solution's C1 values as words (Stage F C4): FAIL from a failed FMS, NCD for a value it does not have. */
 function navigationWords(fms: ScriptedFms, failed: boolean): NavigationWords {
-  if (failed) return { accuracy95Nm: fail(), accuracyBasis: fail(), gpsDependent: fail(), integrityBoundNm: fail(), integrityBasis: fail(), integrityValid: fail(), positionUncertain: fail(), naimComparisonNm: fail() };
+  if (failed) return { accuracy95Nm: fail(), accuracyBasis: fail(), gpsDependent: fail(), integrityBoundNm: fail(), integrityBasis: fail(), integrityValid: fail(), gpsIntegrityAnnunciation: fail(), positionUncertain: fail(), naimComparisonNm: fail() };
   const sensor = fms.navPerformance.sensor;
   const word = <T>(value: T | null): Word<T> => (value === null ? ncd() : normal(value));
   return {
     accuracy95Nm: word(sensor.accuracy95Nm), accuracyBasis: word(sensor.accuracyBasis), gpsDependent: normal(sensor.gpsDependent),
     integrityBoundNm: word(sensor.integrityNm), integrityBasis: normal(sensor.integrityBasis), integrityValid: normal(sensor.integrity),
+    gpsIntegrityAnnunciation: normal(fms.gpsIntegrityAnnunciation),
     positionUncertain: normal(fms.navState.uncertain), naimComparisonNm: word(sensor.naimComparisonNm),
   };
 }
