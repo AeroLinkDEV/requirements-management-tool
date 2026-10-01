@@ -1270,7 +1270,8 @@ test('B1.7: a paused run stops its clock: the predictions and the fuel on FUEL a
 
 // F9 rendered owner: real keys/status colours and the physical 24-column table. Solver/source rules stay in logic owners.
 test('F9 Conditions applies and records measured Doppler surface on FMS1 while CDU2 shows the shared word', async ({ page }) => {
-  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  const start = new Date('2026-09-27T14:00:00Z')
+  await page.clock.install({ time: start }); await page.clock.pauseAt(start)
   await open(page)
   await page.getByLabel('CDU inspected').selectOption('2')
   const scenarios = page.getByRole('region', { name: 'Scenarios' })
@@ -1279,8 +1280,9 @@ test('F9 Conditions applies and records measured Doppler surface on FMS1 while C
   const card = page.getByRole('region', { name: 'Sensor fault laboratory' })
   await card.getByLabel('Measured Doppler surface').selectOption('SEA')
   await card.getByRole('button', { name: 'Apply Doppler surface' }).click()
+  await page.clock.runFor(250) // One declared bench tick samples the shared word on the peer, then time stays frozen.
   await expect(card.getByTestId('sensor-stimulus-result')).toContainText('set the measured Doppler surface to SEA (laboratory)')
-  await expect(card.getByTestId('sensor-dvs-readout')).toContainText(/Doppler SEA; VX .*sample 2026-09-27T14:00:00\.000Z; status NORMAL; source native laboratory/)
+  await expect(card.getByTestId('sensor-dvs-readout')).toContainText(/Doppler SEA; VX .*sample 2026-09-27T14:00:00\.250Z; status NORMAL; source native laboratory/)
   await card.screenshot({ path: test.info().outputPath('f9-measured-dvs-conditions.png') })
   await key(page, 'INIT_REF').click(); await key(page, 'NEXT').click(); await key(page, 'LSK5R').click(); await key(page, 'LSK3L').click()
   await expectLine(page, 0, /^DVS STATUS\s+1\/2/)
