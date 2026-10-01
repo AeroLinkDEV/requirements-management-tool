@@ -203,6 +203,9 @@ async function startScene(
       return tile ? sampleHeights(tile, source.offsetX, source.offsetY, source.span, MESH_SAMPLES) : new Float32Array(MESH_SAMPLES * MESH_SAMPLES);
     },
   });
+  // A disabled relay has no heights to refine. Cesium's native flat provider uses smaller zero-height
+  // meshes on the same tile grid; live/missing/unreachable terrain keeps the measured-height provider.
+  const flatTerrainProvider = new Cesium.EllipsoidTerrainProvider({ tilingScheme });
 
   // The ground: aerial imagery where the relay has some (groundImagery.ts: the United States), otherwise relief drawn
   // from the same heights, shaded in a worker (reliefShader.ts) so a burst of new tiles does not freeze the page.
@@ -256,7 +259,7 @@ async function startScene(
 
   // Throws when the browser has no WebGL; the component says so rather than failing the page.
   const widget = new Cesium.CesiumWidget(container, {
-    baseLayer: false, terrainProvider, creditContainer,
+    baseLayer: false, terrainProvider: tiles.status === "off" ? flatTerrainProvider : terrainProvider, creditContainer,
     skyBox: false, showRenderLoopErrors: false, targetFrameRate: 30, useBrowserRecommendedResolution: true, msaaSamples: 4,
     // Draw only when something changes: a paused bench, or a view waiting for the next tick, costs nothing. Cesium
     // itself asks for frames while tiles load and when the window is resized.
@@ -273,6 +276,15 @@ async function startScene(
     asked = true;
     scene.requestRender();
   };
+  const selectFlatTerrainWhenOff = () => {
+    if (tiles.status !== "off" || scene.globe.terrainProvider === flatTerrainProvider) return;
+    // Off is sticky for this cache. One provider change rebuilds the quadtree; the logical imagery
+    // layer and terrain-colouring material remain in place while Cesium rebuilds their tile resources.
+    scene.globe.terrainProvider = flatTerrainProvider;
+    request("terrain off");
+  };
+  const stopTerrainWatch = tiles.subscribe(selectFlatTerrainWhenOff);
+  selectFlatTerrainWhenOff();
   // #1298: why each frame was drawn, by the first that applies: this code asked, the camera had moved, the globe was
   // still loading tiles, or Cesium's own after-render work since the last frame: a web worker's task or a network
   // request completing (each asks for a frame), the texture atlas still filling, an event, or other. Counted per drawn
@@ -505,6 +517,7 @@ async function startScene(
       });
     },
     destroy: () => {
+      stopTerrainWatch();
       helicopter.destroy();
       obstacles.destroy();
       scene.preUpdate.removeEventListener(updateCamera);
