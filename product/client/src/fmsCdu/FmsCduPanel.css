@@ -36,6 +36,10 @@
   margin: 0;
   padding: 0;
   border: 0;
+  /* These controls follow the physical faceplate; the shell's minimum button height would move their legends. */
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
   background-color: transparent;
   background-repeat: no-repeat;
   color: #f2f2ee;
@@ -62,6 +66,8 @@
   font-weight: 600;
   font-size: max(12px, 2.05cqw);
   letter-spacing: 0.01em;
+  text-align: center;
+  white-space: nowrap;
   /* Screen-printed paint on a slightly glossy key. */
   text-shadow: 0 0.08cqw 0 rgba(0, 0, 0, 0.6);
   pointer-events: none;
@@ -83,19 +89,18 @@
   font-size: max(12px, 2.05cqw);
 }
 
-/* The product's 12px readability floor holds on the panel too; the keys have room for it at full size. */
+/* Preserve full-size lettering, but fit compact physical keys rather than spilling onto adjacent faces (#1444).
+   The display and annunciators retain their readability floors. */
 .fmsCduKey .legend.long {
-  font-size: max(12px, 1.9cqw);
+  font-size: min(max(12px, 1.9cqw), 2.45cqw);
 }
 
 .fmsCduKey .legend.two {
-  align-items: flex-start;
-  font-size: max(12px, 1.75cqw);
+  font-size: min(max(12px, 1.75cqw), 2.4cqw);
 }
 
 .fmsCduKey .legend.two .second {
-  margin-left: 1.3cqw;
-  font-size: max(12px, 1.55cqw);
+  font-size: inherit;
 }
 
 .fmsCduKey .legend.compass span:first-child {
