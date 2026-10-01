@@ -351,7 +351,7 @@ const onGps2 = (bench: EnRoute = enRoute()) => {
   return bench
 }
 const navOptions = (fms: ScriptedFms) => {
-  for (const key of ['INIT_REF', 'NEXT', 'LSK5R', 'LSK6R'] as const) fms.press(key)
+  for (const key of ['INIT_REF', 'NEXT', 'LSK5R', 'LSK4R', 'LSK6R'] as const) fms.press(key)
   const lines = screenText(fms.screen())
   expect(lines[0]).toMatch(/^NAV OPTIONS/)
   return { lines, cells: fms.screen() }

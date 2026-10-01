@@ -111,6 +111,8 @@ export class CivilNavigation {
   }
   /** KALMAN STATUS 2 SIGMA POS ERR (M300 12-24): 2 sigma; not a 95% radial figure (plan C1). */
   get kalmanTwoSigmaNm() { return this.kalman ? 2 * this.kalmanAxisSigma() : null; }
+  /** The emulated INS position (KALMAN STATUS, M300 12-24), or null before its first aiding. */
+  get kalmanPosition(): LatLon | null { return this.kalman ? { ...this.kalman.position } : null; }
   /** The KALMAN solution's 95% accuracy: 2.448 sigma under the stated isotropic model (plan C1). */
   private kalmanAccuracy95() { return accuracy95Isotropic(this.kalmanAxisSigma()); }
   /** Power interruption (M300 12-24): the emulated INS starts again unaided. */

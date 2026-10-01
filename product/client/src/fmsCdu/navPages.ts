@@ -3,7 +3,7 @@ import { MODE_TEXT, shownReceiver, type GpsChoice, type ReceiverAssessment } fro
 import type { FlightPhase } from "./navigation";
 import { navaidComponent, type NavEntry } from "./navData";
 import type { Line } from "./screen";
-import type { ScriptedFms } from "./scriptedFms";
+import type { DeselectableInput, ScriptedFms } from "./scriptedFms";
 
 /**
  * NAV STATUS shows what the FMS navigates with (mode, ANP against RNP, the DMEs and VOR it has tuned, GPS and SBAS);
@@ -62,7 +62,171 @@ const receiverColumn = (assessment: ReceiverAssessment | undefined, value: (a: R
   return text === null ? dashes(4) : medium(text);
 };
 
+/** Whether the profile configures an option (a NAV STATUS INDEX prompt exists only for configured equipment, M300 5-26). */
+export const configured = (fms: ScriptedFms, option: string) =>
+  (fms.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined)?.[option]?.configured === true;
+
 export const NAV_PAGES: Record<NavPageId, Page> = {
+  // Plan F9 (M300 5-26): the index to each configured navigation sensor's status page, and DESELECT. The bench's own
+  // navigation summary (NAV MODE>) sits where the unconfigured INS prompt would be.
+  NAV_STATUS_INDEX: {
+    pages: () => 1,
+    render: fms => [
+      title("NAV STATUS INDEX", "1/1"),
+      undefined,
+      { left: prompt("<PREDICT RAIM"), right: prompt("GPS>") },
+      undefined,
+      { right: configured(fms, "dme1") ? prompt("DME>") : undefined },
+      undefined,
+      { left: configured(fms, "doppler") ? prompt("<DVS") : undefined, right: configured(fms, "nav1") || configured(fms, "tacan") ? prompt("VOR/DME/TCN>") : undefined },
+      undefined,
+      { right: prompt("NAV MODE>") },
+      undefined,
+      { right: configured(fms, "kalman") ? prompt("KALMAN>") : undefined },
+      { left: dashes(24) },
+      { left: prompt("<INIT/REF"), right: prompt("DESELECT>") },
+    ],
+    lsk: (fms, side, row) => {
+      const target: Partial<Record<string, string>> = { L1: "PREDICT_RAIM", R1: "GPS_STATUS", R2: configured(fms, "dme1") ? "DME_STATUS" : "",
+        L3: configured(fms, "doppler") ? "DVS_STATUS" : "", R3: "VOR_DME_STATUS", R4: "NAV_STATUS", R5: configured(fms, "kalman") ? "KALMAN_STATUS" : "",
+        L6: "INIT_REF", R6: "DESELECT" };
+      const page = target[`${side}${row}`];
+      if (page) fms.open(page as Parameters<ScriptedFms["open"]>[0]);
+    },
+  },
+
+  // Plan F9 (M300 17-2, 17-3; the dual-GPS layout): each input or navigation source VALID, ACQ or DESEL; an LSK toggles
+  // it. GPS> opens GPS DESELECT. Only configured equipment has a line.
+  DESELECT: {
+    pages: () => 1,
+    render: fms => {
+      const state = (input: DeselectableInput) => { const value = fms.inputState(input); return medium(value, value === "DESEL" ? "amber" : value === "ACQ" ? "cyan" : "green"); };
+      const line = (left: DeselectableInput | null, right: DeselectableInput | null): (Line | undefined)[] => [
+        caption(left ? ` ${left}` : undefined, right ? `${right} ` : undefined),
+        { left: left ? [{ text: ">", color: "cyan" }, state(left)] : undefined, right: right ? [state(right), { text: "<", color: "cyan" }] : undefined },
+      ];
+      return [
+        title("DESELECT", "1/1"),
+        caption(" TAS"), { left: [{ text: ">", color: "cyan" }, state("TAS")], right: prompt("GPS>") },
+        ...line("HDG", configured(fms, "dme1") ? "DME" : null),
+        ...line(configured(fms, "doppler") ? "DVS" : null, configured(fms, "nav1") || configured(fms, "tacan") ? "VOR/DME/TCN" : null),
+        ...line(configured(fms, "kalman") ? "KALMAN" : null, null),
+        undefined, undefined,
+        { left: prompt("<NAV STATUS") },
+      ];
+    },
+    lsk: (fms, side, row) => {
+      if (side === "L" && row === 6) { fms.open("NAV_STATUS_INDEX"); return; }
+      if (side === "R" && row === 1) { fms.open("GPS_DESELECT"); return; }
+      const lines: Partial<Record<string, DeselectableInput>> = { L1: "TAS", L2: "HDG", R2: "DME", L3: "DVS", R3: "VOR/DME/TCN", L4: "KALMAN" };
+      const input = lines[`${side}${row}`];
+      if (!input) return;
+      if (input === "DME" && !configured(fms, "dme1") || input === "DVS" && !configured(fms, "doppler") || input === "KALMAN" && !configured(fms, "kalman")) return;
+      fms.setDeselected(input, !fms.deselectedInputs.has(input));
+    },
+  },
+
+  // Plan F9 (M300 12-24): the KALMAN mode's state. No data entries.
+  KALMAN_STATUS: {
+    pages: () => 1,
+    render: fms => {
+      const status = fms.kalmanStatus;
+      return [
+        title("KALMAN STATUS", "1/1"),
+        caption(" OP MODE"), { left: medium(status.opMode, status.opMode === "NAV" ? "green" : "white") },
+        caption(" KALMAN POSITION"), { left: medium(status.kalmanPosition ? formatPosition(status.kalmanPosition) : "***°**.** ****°**.**") },
+        caption(" GPS POSITION"), { left: status.gpsPosition ? medium(formatPosition(status.gpsPosition)) : dashes(18) },
+        caption(" 2 SIGMA POS ERR"), { left: status.twoSigmaM === null ? dashes(4) : medium(`${Math.round(status.twoSigmaM)} M`) },
+        caption(" GPS READY", "APIRS READY "), { left: medium(status.gpsReady ? "YES" : "NO"), right: medium(status.apirsReady ? "YES" : "NO") },
+        { left: dashes(24) },
+        { left: prompt("<NAV STATUS") },
+      ];
+    },
+    lsk: (fms, side, row) => { if (side === "L" && row === 6) fms.open("NAV_STATUS_INDEX"); },
+  },
+
+  // Plan F9 (M300 12-21 to 12-23; the RDN-85 style): 1/2 the Doppler's velocities and mode; 2/2 the system wind (TRUE or MAG,
+  // entered only while the FMS cannot compute it) and the water current the crew enters (direction toward / speed).
+  DVS_STATUS: {
+    pages: () => 2,
+    render: (fms, index) => {
+      if (index === 0) {
+        const status = fms.dvsStatus;
+        const kt = (value: number | null) => value === null ? "----" : `${value >= 0 ? "+" : "-"}${Math.abs(value).toFixed(1)} KTS`;
+        return [
+          title("DVS STATUS", "1/2"),
+          caption(" VELOCITIES"),
+          { left: medium(`VX ${kt(status.vxKt)}`) },
+          { left: medium(`VY ${kt(status.vyKt)}`) },
+          { left: medium(`VZ ${status.vzFtMin === null ? "----" : `${status.vzFtMin >= 0 ? "+" : "-"}${Math.abs(Math.round(status.vzFtMin))} FT/MIN`}`) },
+          caption(" MODE"), { left: medium(status.mode, status.mode === "FAIL" ? "amber" : "white") },
+          undefined, undefined, undefined, undefined,
+          { left: dashes(24) },
+          { left: prompt("<NAV STATUS") },
+        ];
+      }
+      const wind = fms.systemWind, magnetic = fms.dvsWindMagnetic;
+      const variation = fms.magneticField?.declination ?? 0;
+      const direction = Math.round(((magnetic ? wind.direction - variation : wind.direction) % 360 + 360) % 360) || 360;
+      const current = fms.waterCurrentEntry;
+      return [
+        title("DVS STATUS", "2/2"),
+        caption(` ${magnetic ? "MAG" : "TRUE"} WIND`),
+        { left: { text: `>${String(direction).padStart(3, "0")}°/${Math.round(wind.speed)} KTS`, size: fms.windComputed ? "medium" : "large" } },
+        caption(" WATER CURRENT"),
+        { left: current ? medium(`${String(Math.round(current.toward) || 360).padStart(3, "0")}°/${current.speedKt.toFixed(1)} KTS`) : dashes(10) },
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        { left: dashes(24) },
+        { left: prompt("<NAV STATUS") },
+      ];
+    },
+    lsk: (fms, side, row, scratch, index) => {
+      if (side === "L" && row === 6) { fms.open("NAV_STATUS_INDEX"); return; }
+      if (index !== 1 || side !== "L") return;
+      if (row === 1) {
+        if (!scratch) { if (!fms.inPolarArea) fms.setDvsWindMagnetic(!fms.dvsWindMagnetic); return; }
+        const wind = /^(\d{3})\/(\d{1,3})$/.exec(scratch);
+        if (!wind || Number(wind[1]) > 360 || Number(wind[2]) > 200) return "invalid";
+        const variation = fms.magneticField?.declination ?? 0;
+        const trueDirection = ((fms.dvsWindMagnetic ? Number(wind[1]) + variation : Number(wind[1])) % 360 + 360) % 360;
+        if (!fms.enterManualWind({ direction: trueDirection, speed: Number(wind[2]) })) return "not-allowed";
+        fms.setScratch(""); return;
+      }
+      if (row === 2 && scratch) {
+        if (scratch === "DELETE") { fms.setWaterCurrent(null); fms.setScratch(""); return; }
+        const current = /^(\d{3})\/(\d{1,2}(?:\.\d)?)$/.exec(scratch);
+        if (!current || Number(current[1]) > 360) return "invalid";
+        fms.setWaterCurrent(Number(current[1]) % 360, Number(current[2]));
+        fms.setScratch("");
+      }
+    },
+  },
+
+  // Plan F9 (M300 17-3): each GPS receiver VALID or DESEL; deselecting one navigates on the other, both selects GPS out.
+  GPS_DESELECT: {
+    pages: () => 1,
+    render: fms => {
+      const choice = fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF";
+      const desel = (index: 0 | 1) => choice === "OFF" || choice === (index === 0 ? "GPS2" : "GPS1");
+      const state = (index: 0 | 1) => desel(index) ? medium("DESEL", "amber") : medium("VALID", "green");
+      return [
+        title("GPS DESELECT", "1/1"),
+        caption(undefined, "GPS1 "), { right: [state(0), { text: "<", color: "cyan" }] },
+        caption(undefined, "GPS2 "), { right: [state(1), { text: "<", color: "cyan" }] },
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        { left: prompt("<DESELECT") },
+      ];
+    },
+    lsk: (fms, side, row) => {
+      if (side === "L" && row === 6) { fms.open("DESELECT"); return; }
+      if (side !== "R" || (row !== 1 && row !== 2)) return;
+      const choice = fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF";
+      const off = { one: choice === "OFF" || choice === "GPS2", two: choice === "OFF" || choice === "GPS1" };
+      if (row === 1) off.one = !off.one; else off.two = !off.two;
+      fms.selectGpsReceiver(off.one && off.two ? "OFF" : off.one ? "GPS2" : off.two ? "GPS1" : "AUTO");
+    },
+  },
+
   NAV_STATUS: {
     pages: () => 1,
     render: fms => {
@@ -96,7 +260,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
       if (side === "R" && row === 5) { fms.open("DME_STATUS"); return; }
       if (side === "L" && row === 3) { fms.open("VOR_DME_STATUS"); return; }
       if (row !== 6) return;
-      fms.open(side === "L" ? "INIT_REF" : "NAV_OPTIONS");
+      fms.open(side === "L" ? "NAV_STATUS_INDEX" : "NAV_OPTIONS");
     },
   },
 
@@ -116,7 +280,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         { left: prompt("<NAV STATUS"), right: prompt("SAT DESEL>") }];
     },
     lsk: (fms, side, row, scratch) => {
-      if (row === 6) { fms.open(side === "L" ? "NAV_STATUS" : "SAT_DESELECT"); return; }
+      if (row === 6) { fms.open(side === "L" ? "NAV_STATUS_INDEX" : "SAT_DESELECT"); return; }
       if (side !== "L" || !scratch) return;
       if (row === 1) return fms.predictRaimAt(scratch) ? undefined : "not-in-database";
       if (row === 2) return fms.predictRaimEta(scratch) ? undefined : "invalid";
@@ -171,7 +335,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
     },
     lsk: (fms, side, row) => {
       if (row !== 6) return;
-      fms.open(side === "L" ? "NAV_STATUS" : "DME_DESELECT");
+      fms.open(side === "L" ? "NAV_STATUS_INDEX" : "DME_DESELECT");
     },
   },
 
@@ -241,7 +405,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         { left: prompt("<NAV STATUS") },
       ];
     },
-    lsk: (fms, side, row) => { if (side === "L" && row === 6) fms.open("NAV_STATUS"); },
+    lsk: (fms, side, row) => { if (side === "L" && row === 6) fms.open("NAV_STATUS_INDEX"); },
   },
 
   NAV_OPTIONS: {
@@ -313,7 +477,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
       ];
     },
     lsk: (fms, side, row) => {
-      if (row === 6) fms.open(side === "L" ? "NAV_STATUS" : "POS_SENSORS");
+      if (row === 6) fms.open(side === "L" ? "NAV_STATUS_INDEX" : "POS_SENSORS");
     },
   },
 

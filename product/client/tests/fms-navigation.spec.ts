@@ -667,7 +667,7 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still 
   unit.updateNavigation(0)
   expect(unit.flightPhase).toBe('TERMINAL')
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
-  press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
+  press(unit, 'INIT_REF', 'NEXT', 'LSK5R', 'LSK4R')
   // The condition leaves each receiver five satellites (one degree of freedom: detection without exclusion).
   expect(lines(unit)[6]).toMatch(/5 SAT NO RAIM$/)
 })
@@ -676,7 +676,7 @@ test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out',
   const { unit, fly } = setup()
   // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
   unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
-  press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
+  press(unit, 'INIT_REF', 'NEXT', 'LSK5R', 'LSK4R')
   expect(lines(unit)[0]).toMatch(/^NAV STATUS/)
   expect(lines(unit)[2]).toMatch(/^GPS/)
   unit.press('LSK6R')

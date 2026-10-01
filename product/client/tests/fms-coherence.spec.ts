@@ -36,7 +36,7 @@ const progressPerformance = (unit: ScriptedFms) => {
 }
 /** ANP and RNP as NAV STATUS shows them (its ANP/RNP value, right of the nav mode). */
 const navStatusPerformance = (unit: ScriptedFms) => {
-  press(unit, 'PROG', 'LSK6R')
+  press(unit, 'PROG', 'LSK6R', 'LSK4R')
   expect(lines(unit)[0]).toMatch(/^NAV STATUS/)
   const [anp, rnp] = lines(unit)[2].trim().split(/\s+/).pop()!.split('/').map(Number)
   return { rnp, anp }
@@ -88,7 +88,7 @@ test('a forced value is labelled as forced on the pages that show it (R11)', () 
   unit.setCondition('rnpExceeded', true)
   press(unit, 'PROG')
   expect(lines(unit).join('\n')).toMatch(/RNP\/ANP TEST/)
-  press(unit, 'LSK6R')
+  press(unit, 'LSK6R', 'LSK4R')
   expect(lines(unit)[1]).toMatch(/ANP\/RNP TEST/)
 })
 
@@ -304,7 +304,7 @@ test('no authored page line writes one caption or value over another, or past th
 test('NAV STATUS in the terminal phase shows its nav mode and ANP/RNP captions intact (R19)', () => {
   const unit = fms()
   expect(unit.flightPhase).toBe('TERMINAL')
-  press(unit, 'PROG', 'LSK6R')
+  press(unit, 'PROG', 'LSK6R', 'LSK4R')
   expect(lines(unit)[1]).toMatch(/^ NAV MODE\s+ANP\/RNP TERM\s*$/)
 })
 

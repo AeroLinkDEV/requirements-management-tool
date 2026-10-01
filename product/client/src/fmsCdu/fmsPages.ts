@@ -8,7 +8,7 @@ import {
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
-import { gpsSummary, navModeText, sbasSummary } from "./navPages";
+import { configured, gpsSummary, navModeText, sbasSummary } from "./navPages";
 import type { Line, Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
 
@@ -211,6 +211,32 @@ function vnavDescent(fms: ScriptedFms): (Line | undefined)[] {
 const gpsFix = (fms: ScriptedFms) => (fms.gpsStatus.chosen === null ? null : fms.gpsStatus.assessed[fms.gpsStatus.chosen].fix);
 
 /**
+ * Plan F9 (M300 12-27 layout without the inertial rows): one line per equipped navigation mode with its status (NAV while
+ * the mode is available, DSEL when the crew deselected it, ACQ otherwise), its distance from the FMS position (no figure
+ * for DVS, which has no position of its own) and its 95% accuracy, NM. Always five lines, blank past the equipped modes.
+ */
+function sensorTable(fms: ScriptedFms): (Line | undefined)[] {
+  const sensors = fms.sensorSolutions, deselected = fms.deselectedInputs;
+  const radio = (mode: "DME/DME" | "VOR/DME") => [...fms.lastRadioFixes].filter(fix => fix.mode === mode).sort((a, b) => a.anp - b.anp)[0]?.position ?? null;
+  const rows: { label: string; mode: string; off: boolean; position: { lat: number; lon: number } | null }[] = [
+    { label: "GPS", mode: "GPS", off: !fms.gpsNavSelected, position: gpsFix(fms) },
+    ...configured(fms, "dme1") ? [{ label: "DME/DME", mode: "DME/DME", off: deselected.has("DME"), position: radio("DME/DME") }] : [],
+    ...configured(fms, "nav1") || configured(fms, "tacan") ? [{ label: "VORDMTC", mode: "VOR/DME", off: deselected.has("DME") || deselected.has("VOR/DME/TCN"), position: radio("VOR/DME") }] : [],
+    ...configured(fms, "kalman") ? [{ label: "KALMAN", mode: "KALMAN", off: deselected.has("KALMAN"), position: fms.kalmanStatus.kalmanPosition }] : [],
+    ...configured(fms, "doppler") ? [{ label: "DVS", mode: "DVS", off: deselected.has("DVS"), position: null }] : [],
+  ];
+  const nm = (value: number | null) => value === null ? "----" : value < 10 ? value.toFixed(2) : value < 100 ? value.toFixed(1) : String(Math.round(value));
+  const lines = rows.map((row): Line => {
+    const sensor = sensors.find(candidate => candidate.mode === row.mode);
+    const status = row.off ? "DSEL" : sensor?.available ? "NAV" : "ACQ";
+    const distance = row.position && status === "NAV" ? distanceNm(fms.position, row.position) : null;
+    const accuracy = status === "NAV" ? sensor?.accuracy95Nm ?? null : null;
+    return { left: medium(`${row.label.padEnd(8)}${status.padEnd(4)}${nm(distance).padStart(6)}${nm(accuracy).padStart(6)}`, status === "DSEL" ? "amber" : status === "NAV" ? "green" : "white") };
+  });
+  return [...lines, ...Array<undefined>(5 - lines.length).fill(undefined)];
+}
+
+/**
  * PROGRESS 1/4's lines for a hover procedure in the active route (M300 A-124, A-129): TDN and MRK, each with the
  * course of the leg into it, the distance to go along the route and the leg's index (for its ETA); null without one.
  */
@@ -280,7 +306,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     lsk: (fms, side, row, _scratch, index) => {
       const target: Record<string, PageId> = index === 0
         ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "SETUP", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER", L6: "MAINT", R6: "PLAN_DATA" }
-        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS", R5: "NAV_STATUS", L6: "MOVING_WPT", R6: "RNDZ" };
+        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS", R5: "NAV_STATUS_INDEX", L6: "MOVING_WPT", R6: "RNDZ" };
       const page = target[`${side}${row}`];
       if (page === "HOLD" && !fms.route.hold) { fms.open("LEGS"); fms.setScratch("/H"); return; }
       if (page) fms.open(page);
@@ -322,11 +348,10 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
   POS: {
     pages: () => 2,
     render: (fms, index) => index === 1 ? [
-      title("POS INIT", "2/2"), caption(" NAV MODE", "RNP/ANP NM "),
-      { left: medium(navModeText(fms)), right: medium(`${fixed(fms.navPerformance.rnp, 2)}/${anpText(fms.navPerformance.anp)}`) },
-      caption(" TRUE WIND", "TAS "), { left: medium(`${three(fms.wind.direction)}T/${Math.round(fms.wind.speed)}KT`), right: medium(`${fms.trueAirspeed === null ? "---" : Math.round(fms.trueAirspeed)}KT`) },
-      caption(" HDG/DA", "TK/GS "), { left: medium(`${fms.angleText(fms.heading)}/${fixed(fms.track - fms.heading, 1)}°`), right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`) },
-      caption(" MAGVAR", "TKE/XTK "), { left: fms.magneticField ? medium(`${fms.magneticField.declination < 0 ? "W" : "E"}${fixed(Math.abs(fms.magneticField.declination), 1)}°`) : dashes(5), right: medium(`${fixed(fms.trackError, 0)}°/${fixed(fms.crossTrack, 2)}NM`) },
+      title("POS INIT", "2/2"), caption(" FMS POS", `${fms.navState.mode} `),
+      { left: medium(formatPosition(fms.position)) },
+      caption("MODE    STS    DIS ACCUR"),
+      ...sensorTable(fms),
       caption(fms.validBaroAltitude !== null ? " ALT (CORR)" : " ALT (STD)"), { left: (fms.validBaroAltitude ?? fms.pressureAltitude) !== null ? medium(`${Math.round((fms.validBaroAltitude ?? fms.pressureAltitude)!)}FT`) : dashes(6) },
       caption(fms.manualQnhAvailable ? ` QNH SET ${fms.qnhUnits}` : undefined), { left: fms.manualQnhAvailable ? fms.qnhText === null ? boxes(5) : medium(`>${fms.qnhText}`) : undefined },
     ] : [
@@ -685,7 +710,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     },
     lsk: (fms, side, row, scratch, index) => {
       if (index === 0) {
-        if (side === "R" && row === 6) { if (fms.missedPromptShown) fms.requestMissedApproach(); else fms.open("NAV_STATUS"); return; }
+        if (side === "R" && row === 6) { if (fms.missedPromptShown) fms.requestMissedApproach(); else fms.open("NAV_STATUS_INDEX"); return; }
         if (side === "L" && row === 3 && scratch) {
           // WIND: a manual entry only while the FMS cannot compute the wind; DELETE returns to the last computed wind.
           const wind = scratch === "DELETE" ? null : /^(\d{3})\/(\d{1,3})$/.exec(scratch);

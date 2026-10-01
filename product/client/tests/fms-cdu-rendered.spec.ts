@@ -672,7 +672,7 @@ test('AUTO keeps GPS 2 after GPS 1 recovers: the strip says so, GPS 1 shows as a
   await expect(page.getByTestId('route-current-source')).toHaveText('AUTO — FMS on GPS2')
   await expect(page.getByTestId('route-source-note')).toContainText('Last transfer: GPS1 to GPS2 (GPS1 NOT USABLE: HIL 99.00 >= HAL')
   // The CDU's own presentation: NAV OPTIONS under GPS NAV, not only the bench.
-  for (const id of ['INIT_REF', 'NEXT', 'LSK5R', 'LSK6R']) await key(page, id).click()
+  for (const id of ['INIT_REF', 'NEXT', 'LSK5R', 'LSK4R', 'LSK6R']) await key(page, id).click()
   await expectLine(page, 0, /NAV OPTIONS/)
   await expectLine(page, 8, /^AUTO GPS2\s+GPS1 STBY$/)
   await expectLine(page, 9, /^AUTO KEEPS SUITABLE RCVR$/)

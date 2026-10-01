@@ -26,7 +26,7 @@ const fix = (b: GpsBus | null): LatLon | null =>
 const press = (unit: ScriptedFms, ...fns: CduFunction[]) => { for (const fn of fns) unit.press(fn) }
 const lines = (unit: ScriptedFms) => screenText(unit.screen())
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
-const navStatus = (unit: ScriptedFms) => { press(unit, 'PROG', 'LSK6R'); return lines(unit) }
+const navStatus = (unit: ScriptedFms) => { press(unit, 'PROG', 'LSK6R', 'LSK4R'); return lines(unit) }
 const metresApart = (a: LatLon, b: LatLon) => distanceNm(a, b) * 1852
 
 test('the FMS owns two navigating receivers and its position in GPS mode is GPS1\'s fix (3a.1, 3a.3)', () => {
@@ -152,7 +152,7 @@ test('the GPS integrity condition holds through a whole flight as the sky moves:
 
 test('GPS NAV on NAV OPTIONS selects AUTO, GPS1, GPS2 or off, and a manual choice does not fall to the other receiver (3a.2)', () => {
   const { unit, advance } = setup()
-  press(unit, 'PROG', 'LSK6R', 'LSK6R')
+  press(unit, 'PROG', 'LSK6R', 'LSK4R', 'LSK6R')
   expect(lines(unit)[0]).toMatch(/^NAV OPTIONS/)
   expect(lines(unit)[6]).toMatch(/^<AUTO\/GPS1\/GPS2\/OFF/)
   press(unit, 'LSK3L')
@@ -163,7 +163,7 @@ test('GPS NAV on NAV OPTIONS selects AUTO, GPS1, GPS2 or off, and a manual choic
   advance(1000)
   // GPS1 chosen by hand and failed: the FMS does not silently use GPS2.
   expect(unit.navState.mode).not.toBe('GPS')
-  press(unit, 'PROG', 'LSK6R', 'LSK6R', 'LSK3L')
+  press(unit, 'PROG', 'LSK6R', 'LSK4R', 'LSK6R', 'LSK3L')
   expect(unit.navState.mode).toBe('GPS')
   expect(metresApart(unit.position, fix(bus(unit, 1))!)).toBeLessThan(0.01)
 })
