@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent } from "react";
 import { CDU_ASSETS as ASSETS, type CduKeyEvent, type CduLayout } from "./layout";
 import { displayLuminance, screenBrightness, type Lighting } from "./lighting";
 import { COLUMNS, type CduBackend, type CduCell, type Lamp } from "./screen";
@@ -33,6 +33,19 @@ function Cell({ cell }: { cell: CduCell }) {
   return <span className={`cduCell cdu-${cell.color} cdu-${cell.size}${cell.inverse ? " cduInverse" : ""}`}>{cell.ch === " " ? " " : cell.ch}</span>;
 }
 
+const sameCell = (a: CduCell, b: CduCell) => a.ch === b.ch && a.color === b.color && a.size === b.size && a.inverse === b.inverse;
+/**
+ * One screen line. The screen is rebuilt on every simulation tick, four times a second, but most lines are unchanged:
+ * a line is redrawn only when one of its cells is (#1349: rebuilding all 336 cells each tick held the main thread).
+ */
+const CduLine = memo(function CduLine({ row }: { row: readonly CduCell[] }) {
+  return (
+    <div className="cduLine" style={{ gridTemplateColumns: `repeat(${COLUMNS}, 1fr)` }}>
+      {row.map((cell, column) => <Cell key={column} cell={cell} />)}
+    </div>
+  );
+}, (before, after) => before.row.length === after.row.length && before.row.every((cell, i) => sameCell(cell, after.row[i])));
+
 type Props = {
   backend: CduBackend;
   variant: CduVariant;
@@ -59,22 +72,22 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
     onKey?.({ keyId, fn, held, at: new Date() });
   }, [backend, onKey, variant]);
 
-  const down = (keyId: string) => {
+  const down = useCallback((keyId: string) => {
     setPressed(current => new Set(current).add(keyId));
     heldFired.current = false;
     if (functionFor(keyId, variant) === "CLR") {
       // CLR held for more than one second clears the whole scratchpad (Operator's Manual item 15).
       holdTimer.current = window.setTimeout(() => { heldFired.current = true; fire(keyId, true); }, HOLD_MS);
     } else fire(keyId);
-  };
-  const up = (keyId: string) => {
+  }, [fire, variant]);
+  const up = useCallback((keyId: string) => {
     setPressed(current => { const next = new Set(current); next.delete(keyId); return next; });
     if (holdTimer.current !== null) {
       window.clearTimeout(holdTimer.current);
       holdTimer.current = null;
       if (!heldFired.current) fire(keyId);
     }
-  };
+  }, [fire]);
   /**
    * Abandons every press without firing anything: the key-up may never reach the panel once focus, pointer capture or
    * the page itself has gone, and a CLR hold timer left running would clear the scratchpad after the operator moved
@@ -137,11 +150,7 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
 
       <div className="fmsCduScreen" role="img" aria-label={screen.map(row => row.map(cell => cell.ch).join("").trimEnd()).join("\n")}
         style={{ left: pct(s.x, W), top: pct(s.y, H), width: pct(s.w, W), height: pct(s.h, H) }}>
-        {screen.map((row, line) => (
-          <div className="cduLine" key={line} style={{ gridTemplateColumns: `repeat(${COLUMNS}, 1fr)` }}>
-            {row.map((cell, column) => <Cell key={column} cell={cell} />)}
-          </div>
-        ))}
+        {screen.map((row, line) => <CduLine key={line} row={row} />)}
       </div>
 
       {layout.annunciators.map(annunciator => {
@@ -157,39 +166,46 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
         );
       })}
 
-      {layout.keys.map(key => {
-        const legend = legendFor(key.id, variant);
-        const fn = functionFor(key.id, variant);
-        const isPressed = pressed.has(key.id);
-        const label = key.kind === "lsk" ? `Line select key ${key.id.slice(3, 4)} ${key.id.endsWith("L") ? "left" : "right"}` : legend.join(" ");
-        return (
-          <button
-            key={key.id}
-            type="button"
-            tabIndex={-1}
-            className={`fmsCduKey ${key.kind} role-${key.role}${isPressed ? " pressed" : ""}`}
-            data-key={key.id}
-            data-fn={fn}
-            aria-label={label}
-            style={{
-              left: pct(key.x, W), top: pct(key.y, H), width: pct(key.w, W), height: pct(key.h, H),
-              backgroundImage: isPressed ? `url(${ASSETS}pressed.webp)` : undefined,
-              backgroundSize: `${(W / key.w) * 100}% ${(H / key.h) * 100}%`,
-              backgroundPosition: `${(key.x / (W - key.w)) * 100}% ${(key.y / (H - key.h)) * 100}%`,
-            }}
-            onPointerDown={event => { event.preventDefault(); event.currentTarget.parentElement?.focus(); event.currentTarget.setPointerCapture(event.pointerId); down(key.id); }}
-            onPointerUp={() => up(key.id)}
-            onPointerCancel={cancel}
-          >
-            {key.kind === "lsk" ? <i className={`lskTick ${key.id.endsWith("L") ? "l" : "r"}`} /> : null}
-            {legend.length > 0 && (
-              <span className={`legend${legend.length > 1 ? " two" : ""}${legend[0].length >= 4 ? " long" : ""}${COMPASS_LETTERS.has(legend[0]) ? " compass" : ""}`}>
-                <span>{legend[0]}</span>{legend[1] ? <span className="second">{legend[1]}</span> : null}
-              </span>
-            )}
-          </button>
-        );
-      })}
+      {layout.keys.map(key => (
+        <CduKey key={key.id} physical={key} variant={variant} pressed={pressed.has(key.id)} width={W} height={H} down={down} up={up} cancel={cancel} />
+      ))}
     </div>
   );
 }
+
+type CduKeyProps = {
+  physical: CduLayout["keys"][number]; variant: CduVariant; pressed: boolean; width: number; height: number;
+  down: (keyId: string) => void; up: (keyId: string) => void; cancel: () => void;
+};
+/** One physical key. Its props change only with the variation or its own press, so a simulation tick skips it (#1349). */
+const CduKey = memo(function CduKey({ physical: key, variant, pressed, width: W, height: H, down, up, cancel }: CduKeyProps) {
+  const legend = legendFor(key.id, variant);
+  const fn = functionFor(key.id, variant);
+  const label = key.kind === "lsk" ? `Line select key ${key.id.slice(3, 4)} ${key.id.endsWith("L") ? "left" : "right"}` : legend.join(" ");
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      className={`fmsCduKey ${key.kind} role-${key.role}${pressed ? " pressed" : ""}`}
+      data-key={key.id}
+      data-fn={fn}
+      aria-label={label}
+      style={{
+        left: pct(key.x, W), top: pct(key.y, H), width: pct(key.w, W), height: pct(key.h, H),
+        backgroundImage: pressed ? `url(${ASSETS}pressed.webp)` : undefined,
+        backgroundSize: `${(W / key.w) * 100}% ${(H / key.h) * 100}%`,
+        backgroundPosition: `${(key.x / (W - key.w)) * 100}% ${(key.y / (H - key.h)) * 100}%`,
+      }}
+      onPointerDown={event => { event.preventDefault(); event.currentTarget.parentElement?.focus(); event.currentTarget.setPointerCapture(event.pointerId); down(key.id); }}
+      onPointerUp={() => up(key.id)}
+      onPointerCancel={cancel}
+    >
+      {key.kind === "lsk" ? <i className={`lskTick ${key.id.endsWith("L") ? "l" : "r"}`} /> : null}
+      {legend.length > 0 && (
+        <span className={`legend${legend.length > 1 ? " two" : ""}${legend[0].length >= 4 ? " long" : ""}${COMPASS_LETTERS.has(legend[0]) ? " compass" : ""}`}>
+          <span>{legend[0]}</span>{legend[1] ? <span className="second">{legend[1]}</span> : null}
+        </span>
+      )}
+    </button>
+  );
+});
