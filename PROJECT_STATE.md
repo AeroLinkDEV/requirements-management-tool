@@ -495,7 +495,10 @@ display unit for engineers.
     and station faults are shared independently of cross-talk; station components resolve against the active database
     and unavailable or ambiguous targets fail closed. Navigation TAS/heading validity and heading bias do not change
     aircraft/AFCS truth. Recorded power targets FMS1 and models the C2 KALMAN interruption rule; GPS pair presets
-    override integrity or position words separately. Reports retain applied time, value and laboratory source.
+    override integrity or position words separately and refuse an independently connected input adapter; the dual
+    bench retains its explicitly shared receiver authority. DME tuning follows its paired NAV receiver, so independent
+    DME control-path stimuli are refused; NAV control timeout, DME receiver and measurement-bus faults remain available.
+    Reports retain applied time, value and laboratory source.
     The default profile refuses external radio-head stimuli (DEC-150). These are simulator controls, not installed
     RF, AFCS sensor-loss or hardware acceptance evidence.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and

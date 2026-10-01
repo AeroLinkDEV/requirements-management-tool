@@ -98,10 +98,10 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
   const usable = observations.flatMap(observation => {
     const slant = sampled(observation.slantRangeNm, now, parameters.sensorMaxAge.value * 1000);
     const station = observation.station, at = dmeAt(station);
+    if (!validPosition(at) || !hasDme(station) || slant === null) return [];
     if (observation.reportedDmeIdent && sampled(observation.reportedDmeIdent, now, parameters.sensorMaxAge.value * 1000) !== station.ident) {
       rejected.push({ ident: station.ident, reason: "DME ident missing or mismatched" }); return [];
     }
-    if (!validPosition(at) || !hasDme(station) || slant === null) return [];
     const allowanceFt = station.elevation.source === "assumed" ? parameters.assumedNavaidElevationUncertainty.value
       : station.elevation.source === "terrain" ? parameters.terrainNavaidElevationUncertainty.value : 0;
     const result = horizontalRange(slant, (altitudeFt - station.elevation.feet) / 6076.12, allowanceFt / 6076.12);

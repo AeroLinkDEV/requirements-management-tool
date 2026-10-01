@@ -249,6 +249,10 @@ test('F14 DME no-reply and mismatched ident affect only the range; shared-world 
       expect(words.nav1.vorRadial.status).toBe('NORMAL')
       // WMM decimal-year interpolation advances with the clock; <1e-6 degree is not a station fault.
       expect(words.nav1.vorRadial.value!).toBeCloseTo(before[index].nav1.vorRadial.value!, 6)
+      if (!('reportedIdent' in action)) {
+        const ranges = rangeObservations(unit.radioObservations(), unit.altitude, now)
+        expect(ranges.rejected.some(entry => entry.ident === station.ident && entry.reason.includes('ident'))).toBe(false)
+      }
       if ('reportedIdent' in action) {
         expect(words.dme1.stationIdent).toEqual({ status: 'NORMAL', value: 'BAD' })
         const ranges = rangeObservations(unit.radioObservations(), unit.altitude, now)
@@ -274,6 +278,11 @@ test('F14 VOR radial bias changes the measured bearing by the stated 10 degrees 
   expect(lab.fms.heading).toBe(90)
   lab.replay([{ kind: 'stationFault', ident: station.ident, component: 'VOR', biasDeg: 0 }])
   expect(fmsOutputs(lab.fms, lab.sim).radioMeasurements.nav1.vorRadial.value!).toBeCloseTo(before.nav1.vorRadial.value!, 6)
+  // The demonstration RIG 112.10 facility is VOR-only. Its absent DME word is no ident mismatch.
+  lab.replay([{ kind: 'keys', keys: ['RADIO'] }, { kind: 'type', text: '112.10' }, { kind: 'keys', keys: ['LSK3L'] }])
+  for (let i = 0; i < 40; i++) lab.tick()
+  expect(lab.fms.radioObservations().find(entry => entry.station.ident === 'RIG')?.station.type).toBe('VOR')
+  expect(rangeObservations(lab.fms.radioObservations(), lab.fms.altitude, lab.clock()).rejected.some(entry => entry.ident === 'RIG')).toBe(false)
 })
 
 test('F14 measured air replay biases heading without moving truth, and heading invalid withdraws healthy DVS', () => {
@@ -316,6 +325,24 @@ test('F14 GPS pair integrity-only retains both positions and accuracy; position-
     }
     if (mode === 'INTEGRITY_ONLY') expect(fmsOutputs(lab.fms, lab.sim).integrityValid).toEqual({ status: 'NORMAL', value: false })
   }
+  // An independently connected input adapter owns these GPS words; hidden bench receivers cannot change them.
+  const frame = lab.fms.navigationInputs!
+  for (const mode of ['INTEGRITY_ONLY', 'POSITION_GONE', 'NORMAL'] as const) {
+    const external = new ScriptedFms(() => new Date(lab.clock()), { sensors: { read: () => frame } })
+    external.updateNavigation(0)
+    const runner = new ScenarioRunner(scenario([step({ kind: 'start' }, { kind: 'gpsPair', mode })]), external)
+    expect(runner.outcome, reportMarkdown(runner)).toBe('error')
+    expect(runner.results[0].actual).toContain('external input adapter owns')
+    expect(external.navigationInputs!.gps).toEqual(frame.gps)
+  }
+  let now = lab.clock()
+  const dual = new DualFmsSystem(() => new Date(now))
+  const tick = () => { now += 250; dual.tick(); dual.computers.forEach(unit => unit.updateNavigation(0.25)) }
+  for (let i = 0; i < 120; i++) tick()
+  const shared = new ScenarioRunner(scenario([step({ kind: 'start' }, { kind: 'gpsPair', mode: 'POSITION_GONE' })]), dual.computers[1])
+  expect(shared.results[0].status).toBe('done')
+  tick()
+  for (const unit of dual.computers) for (const sample of unit.navigationInputs!.gps) expect(sample.value!['110'].ssm).toBe('NCD')
 })
 
 test('F14 new action admission fails closed on malformed values and default-profile external radio head', () => {
@@ -325,6 +352,8 @@ test('F14 new action admission fails closed on malformed values and default-prof
     [{ kind: 'stationFault', ident: 'BTV', component: 'NDB', biasDeg: 3 }, /component/], [{ kind: 'powerInterrupt', durationMs: -1 }, /durationMs/],
     [{ kind: 'gpsPair', mode: 'MAYBE' }, /mode/], [{ kind: 'externalRadioHead', on: true }, /not equipped.*DEC-150/],
     [{ kind: 'radioFault', device: 'constructor', receiver: 'FAILED' }, /needs a radio/],
+    [{ kind: 'radioFault', device: 'dme1', controlPath: 'LOST' }, /DME control path.*paired NAV/],
+    [{ kind: 'radioFault', device: 'dme2', controlPath: 'NORMAL' }, /DME control path.*paired NAV/],
     [{ kind: 'radioFault', device: 'nav1', receiver: ['NORMAL'] }, /receiver/], [{ kind: 'gpsPair', mode: ['NORMAL'] }, /mode/],
     [{ kind: 'stationFault', ident: 'YOW', component: 'VOR', biasDeg: 10, reply: false }, /unsupported fields/],
   ] as const

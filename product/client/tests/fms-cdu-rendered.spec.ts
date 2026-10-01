@@ -28,9 +28,27 @@ test('F14 real bench sensor controls drive the full fault matrix and recorded re
   await scenarios.getByLabel('Recording name').fill('F14 sensor controls')
   await tab(page, 'Conditions')
   const card = page.getByRole('region', { name: 'Sensor fault laboratory' })
+  await card.getByLabel('Fault station ident').fill('ZZZZ')
+  await card.getByLabel('Ground station stimulus').selectOption('DME_NO_REPLY')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('Refused: DME ZZZZ requires one unambiguous compatible facility')
+  // Built-in BOBTU is a unique five-character NDB; the same admitted ident must fit the actual form.
+  await card.getByLabel('Ground station stimulus').selectOption('NDB_OFF')
+  await card.getByLabel('Fault station ident').fill('BOBTU')
+  await expect(card.getByLabel('Fault station ident')).toHaveValue('BOBTU')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('take NDB BOBTU off the air')
+  await card.getByLabel('Ground station stimulus').selectOption('NDB_ON')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('restore NDB BOBTU on the air')
   const radio = card.getByTestId('sensor-radio-readout')
   for (const device of ['nav1', 'nav2', 'dme1', 'dme2', 'tacan', 'adf', 'adf2']) {
     await card.getByLabel('Fault radio').selectOption(device)
+    if (device === 'dme1' || device === 'dme2') {
+      await expect(card.getByRole('button', { name: 'Apply control path' })).toBeDisabled()
+      await expect(card).toContainText('DME tuning follows its paired NAV receiver.')
+      if (device === 'dme1') await card.screenshot({ path: test.info().outputPath('f14-dme-control-boundary.png') })
+    }
     for (const receiver of ['SILENT', 'FAILED', 'NORMAL']) {
       await card.getByLabel('Radio receiver state').selectOption(receiver)
       await card.getByRole('button', { name: 'Apply receiver state' }).click()
@@ -131,6 +149,8 @@ test('F14 real bench sensor controls drive the full fault matrix and recorded re
   const recording = JSON.parse(await readFile(await saved.path(), 'utf8')) as { steps: { action: { kind: string; [key: string]: unknown } }[] }
   for (const kind of ['radioFault', 'stationFault', 'airInput', 'powerInterrupt', 'gpsPair', 'ndb']) expect(recording.steps.some(step => step.action.kind === kind), kind).toBe(true)
   expect(recording.steps.filter(step => step.action.kind === 'radioFault' && step.action.receiver === 'SILENT')).toHaveLength(7)
+  expect(recording.steps.some(step => step.action.ident === 'ZZZZ')).toBe(false)
+  expect(recording.steps.filter(step => step.action.kind === 'ndb' && step.action.ident === 'BOBTU').map(step => step.action.offAir)).toEqual([true, false])
   await saved.saveAs(test.info().outputPath('f14-recorded.json'))
   await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
   // These are stimuli, with external effect assertions above; a recording with no checks is honestly NO CHECKS.

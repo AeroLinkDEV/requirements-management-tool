@@ -1210,6 +1210,8 @@ export class ScriptedFms implements CduBackend {
   }
   /** Requested stimulus state for the bench controls; navigationInputs remains the sampled word readback. */
   get airInputStimulus() { return { ...this.airInputFaults }; }
+  /** Bench-owned or explicitly shared receivers supply GPS words; an independent input adapter cannot be overridden here. */
+  get gpsStimulusAvailable() { return this.benchRaim; }
   radioObservations() { return [...(this.sensorFrame?.radios ?? [])]; }
 
   private autoRadioStations() {

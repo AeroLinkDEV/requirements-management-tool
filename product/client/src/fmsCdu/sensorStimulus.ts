@@ -30,6 +30,7 @@ export function sensorStimulusProblem(value: unknown): string | null {
   switch (a.kind) {
     case "radioFault":
       if (typeof a.device !== "string" || !Object.hasOwn(RADIO_NAMES, a.device)) return `radioFault needs a radio (${Object.keys(RADIO_NAMES).join(", ")})`;
+      if ((a.device === "dme1" || a.device === "dme2") && a.controlPath !== undefined) return "DME control path stimuli are unsupported: DME tuning follows its paired NAV receiver";
       if (a.controlPath === undefined && a.measurementBus === undefined && a.receiver === undefined) return "radioFault needs at least one of controlPath, measurementBus and receiver";
       if (a.controlPath !== undefined && a.controlPath !== "NORMAL" && a.controlPath !== "LOST") return "radioFault controlPath is NORMAL or LOST";
       if (a.measurementBus !== undefined && a.measurementBus !== "NORMAL" && a.measurementBus !== "LOST") return "radioFault measurementBus is NORMAL or LOST";
@@ -94,6 +95,7 @@ export function applySensorStimulus(fms: ScriptedFms, a: SensorStimulus): void {
     }
     case "powerInterrupt": fms.powerInterrupt(a.durationMs); return;
     case "gpsPair": {
+      if (!fms.gpsStimulusAvailable) throw new Error("an external input adapter owns this FMS's GPS words");
       const port = stimulusFor(fms);
       for (const receiver of [0, 1] as const) {
         // Only the declared words are overridden. Accuracy, RF reception, and physical position remain independent.

@@ -41,10 +41,11 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
     </form>
     <div className="fmsBenchAlert">
       <label>Control path <select aria-label="Radio control path" value={path} onChange={event => setPath(event.target.value as typeof path)}>{["NORMAL", "LOST"].map(state => <option key={state}>{state}</option>)}</select></label>
-      <button type="button" onClick={() => apply({ kind: "radioFault", device, controlPath: path })}>Apply control path</button>
+      <button type="button" disabled={device === "dme1" || device === "dme2"} onClick={() => apply({ kind: "radioFault", device, controlPath: path })}>Apply control path</button>
       <label>Measurement bus <select aria-label="Radio measurement bus" value={measurement} onChange={event => setMeasurement(event.target.value as typeof measurement)}>{["NORMAL", "LOST"].map(state => <option key={state}>{state}</option>)}</select></label>
       <button type="button" onClick={() => apply({ kind: "radioFault", device, measurementBus: measurement })}>Apply measurement bus</button>
     </div>
+    {device === "dme1" || device === "dme2" ? <p className="fmsBenchHint">DME tuning follows its paired NAV receiver. An independent DME control path fault is not supported; receiver and measurement bus faults remain available.</p> : null}
     <p className="fmsBenchReadout" data-testid="sensor-radio-readout">{RADIO_NAMES[device]}: receiver {faults?.receiver}, control {faults?.controlPath}, bus {faults?.measurementBus}; reported frequency {device === "dme1" || device === "dme2" ? backend.radioPort?.dmeReceiving(device) ? backend.dmeStation(device)?.frequency ?? "none" : "none" : backend.radioReceiving(device) ?? "none"}.
       {device === "nav1" || device === "nav2" ? ` Radial ${number(backend.navRadial(device))}°.` : device === "dme1" || device === "dme2" ? ` Range ${number(backend.dmeSlantRangeNm(device))} NM; ident ${backend.dmeReportedIdent(device) ?? "none"}.` : device === "adf" || device === "adf2" ? ` Relative bearing ${number(backend.adfRelativeBearing(device))}°.` : " TACAN measurements remain unavailable in this bench."}</p>
     <form className="fmsBenchAlert" onSubmit={event => {
@@ -57,7 +58,7 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
               : { kind: "stationFault", ident, component: "DME", reply: world === "DME_REPLY" };
       apply(action);
     }}>
-      <label>Station ident <input aria-label="Fault station ident" value={station} onChange={event => setStation(event.target.value.toUpperCase())} maxLength={4} /></label>
+      <label>Station ident <input aria-label="Fault station ident" value={station} onChange={event => setStation(event.target.value.toUpperCase())} maxLength={world === "NDB_OFF" || world === "NDB_ON" ? 7 : 4} /></label>
       <label>World stimulus <select aria-label="Ground station stimulus" value={world} onChange={event => setWorld(event.target.value)}>
         <option value="DME_NO_REPLY">DME stops replying</option><option value="DME_REPLY">DME replies</option><option value="DME_IDENT">DME reported ident</option>
         <option value="VOR_BIAS">VOR radial bias</option><option value="OFF_AIR">Facility off air</option><option value="ON_AIR">Facility on air</option>
