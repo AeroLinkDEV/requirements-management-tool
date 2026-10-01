@@ -156,6 +156,15 @@ export const VELOCITY_VECTOR_PX_PER_KT = 3, VELOCITY_VECTOR_MAX_KT = 40;
 const LATERAL_FULL_SCALE = { "EN ROUTE": 5, TERMINAL: 1, APPROACH: 0.3 } as const;
 
 /**
+ * The HSI full-scale deviation, NM (M300 15-1, Table 15-1): the phase default's, or for a crew RNP entry, by the entry
+ * whatever the phase: above 1.01 NM, 5.0; above 0.31, 1.0; any other entry, 0.3.
+ */
+export function cdiFullScaleNm(phase: keyof typeof LATERAL_FULL_SCALE, performance: { rnp: number; rnpSource: "PHASE" | "MANUAL" | "TEST" }) {
+  if (performance.rnpSource !== "MANUAL") return LATERAL_FULL_SCALE[phase];
+  return performance.rnp > 1.01 ? 5 : performance.rnp > 0.31 ? 1 : 0.3;
+}
+
+/**
  * The connected points of a route for the map, up to the first discontinuity or the first fix without a position: the
  * line never bridges geometry the plan does not have. The active marker is on the active leg's fix only (the first leg
  * of the route), so an unresolved active fix leaves nothing marked active.
@@ -195,7 +204,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     rollCommand: fail(), distanceToGo: fail(), toWaypoint: fail(), eta: fail(), targetSpeed: fail(), targetAltitude: fail(),
     lateralMode: sim.lateralMode === "HDG" ? (sim.headingHeld ? "HDG HOLD" : "HDG SEL") : g.mode, lateralArmed: [],
     verticalMode: sim.verticalMode, verticalArmed: [], approach: { type: null, state: "OFF" },
-    lateralFullScaleNm: LATERAL_FULL_SCALE[phase], verticalFullScaleFt: 400, phase, rnp: fms.navPerformance.rnp, anp: fms.navPerformance.anp,
+    lateralFullScaleNm: cdiFullScaleNm(phase, fms.navPerformance), verticalFullScaleFt: 400, phase, rnp: fms.navPerformance.rnp, anp: fms.navPerformance.anp,
     navMode: fms.navState.mode, activeRoute: [], modifiedRoute: null, offsetTrack: null, holdFix: null, topOfDescent: null, endOfDescent: null,
   };
   // A failed FMS publishes failure warnings; the displays remove its data and flag it. The modes remain: they are the
@@ -246,7 +255,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     lateralArmed: sim.lnavIsArmed ? ["LNAV"] : [],
     verticalArmed: sim.approachMode === "ARMED" && verticalLevel ? [type] : [],
     approach: { type, state: sim.approachMode },
-    lateralFullScaleNm: lateralScale ? lateralScale.lateralFullScaleFt / 6076.12 : LATERAL_FULL_SCALE[phase],
+    lateralFullScaleNm: lateralScale ? lateralScale.lateralFullScaleFt / 6076.12 : cdiFullScaleNm(phase, fms.navPerformance),
     verticalFullScaleFt: advisory ? advisory.fullScaleFt : gpsScale ? gpsScale.verticalFullScaleFt : path?.source === "APPR" ? 150 : 400,
     activeRoute,
     modifiedRoute: fms.routeStatus === "MOD" ? routePoints(fms, fms.route) : null,

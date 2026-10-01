@@ -2,6 +2,10 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { ALERTS } from '../src/fmsCdu/alerts'
 import { APPENDIX_E, appendixEClass } from '../src/fmsCdu/appendixE'
+import { fmsOutputs } from '../src/fmsCdu/efis'
+import { FlightSimulator } from '../src/fmsCdu/flight'
+import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 
 // Stage F12 groundwork: every message the bench raises is traced to its M300 Appendix E row (appendixE.ts), or is
 // declared laboratory with its reason. The raise sites are read from the source, so a new message without a row fails
@@ -57,4 +61,55 @@ test('F12: Appendix E classes follow its contents page ranges, and anything else
     'STATUS ADVISORY', 'STATUS ADVISORY', 'DATA ENTRY ADVISORY', 'DATA ENTRY ADVISORY',
   ])
   for (const page of ['E-0', 'E-51', 'E-52', 'E-i', '3-1', 'E-', '']) expect(appendixEClass(page), page).toBeNull()
+})
+
+// The behaviour rows (F12; M300 15-1, 15-2, 5-16/5-25/5-32 and E-17), on the demonstration route, which starts in the
+// terminal phase.
+const bench = () => {
+  let now = Date.UTC(2026, 8, 27, 14, 0, 0)
+  const unit = new ScriptedFms(() => new Date(now), {})
+  const sim = new FlightSimulator(unit)
+  const fly = (seconds: number) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1) } }
+  return { unit, sim, fly }
+}
+const scratchpad = (unit: ScriptedFms) => screenText(unit.screen())[SCRATCHPAD_LINE].trim()
+
+test('F12: the CDI full scale follows Table 15-1: the phase default, or the crew\'s RNP entry by its value', () => {
+  const { unit, sim, fly } = bench()
+  fly(2)
+  expect(unit.flightPhase).toBe('TERMINAL')
+  expect(fmsOutputs(unit, sim).lateralFullScaleNm).toBe(1)
+  // M300 15-1, Table 15-1: an entry above 1.01 is 5.0; above 0.31, 1.0; any other entry, 0.3, whatever the phase.
+  for (const [entry, fullScale] of [[2, 5], [1.02, 5], [1.01, 1], [0.5, 1], [0.32, 1], [0.31, 0.3], [0.1, 0.3]] as const) {
+    unit.setRnp(entry)
+    expect(fmsOutputs(unit, sim).lateralFullScaleNm, `RNP ${entry}`).toBe(fullScale)
+  }
+  unit.setRnp(null)
+  expect(fmsOutputs(unit, sim).lateralFullScaleNm).toBe(1)
+})
+
+test('F12: VERIFY RNP VALUE is a condition: raised while an entry above the phase default is in use, and gone when it is not', () => {
+  const { unit, fly } = bench()
+  fly(2)
+  expect(APPENDIX_E['VERIFY RNP VALUE']).toEqual({ page: 'E-17' })
+  // The terminal default is 1.0 (M300 5-32): an entry of 1.0 is not above it, 1.5 is.
+  unit.setRnp(1)
+  expect(scratchpad(unit)).not.toContain('VERIFY RNP VALUE')
+  unit.setRnp(1.5)
+  expect(scratchpad(unit)).toBe('VERIFY RNP VALUE')
+  // Back to the default: the condition no longer exists, so the alert goes by itself (Appendix E, E-1).
+  unit.setRnp(null)
+  fly(1)
+  expect(scratchpad(unit)).not.toContain('VERIFY RNP VALUE')
+})
+
+test('F12: CHECK ANP waits 30 s in the terminal phase (M300 15-2), not the demonstration\'s 60', () => {
+  const { unit, fly } = bench()
+  fly(2)
+  // An RNP below any ANP the bench reaches: the exceedance starts now.
+  unit.setRnp(0.01)
+  fly(29)
+  expect(scratchpad(unit)).not.toContain('CHECK ANP')
+  fly(2)
+  expect(scratchpad(unit)).toBe('CHECK ANP')
 })

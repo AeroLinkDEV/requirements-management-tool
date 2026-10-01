@@ -57,9 +57,9 @@ test('steps run strictly in order: a later step waits for an earlier one even if
 })
 
 test('an expectation waits up to its "within", passing when met and failing after it with what was shown', () => {
-  // CHECK ANP comes after the 60-second time to alert, inside the 120-second window: it passes when it comes.
+  // CHECK ANP comes after the terminal phase's 30-second time to alert (M300 15-2), inside the 120-second window: it passes when it comes.
   const rnp = runHeadless(library('manual-rnp')).runner
-  expect(rnp.results[7]).toEqual({ status: 'pass', at: 60, actual: 'CHECK ANP' })
+  expect(rnp.results[7]).toEqual({ status: 'pass', at: 30, actual: 'CHECK ANP' })
 
   const waiting: Scenario = {
     id: 'wait', title: 'Wait', objective: '', maxSeconds: 60,
@@ -160,7 +160,7 @@ test('a scenario becomes test procedure text, and its run a Markdown report mark
   expect(text.steps.split('\n')[0]).toBe('1. At the start, press PROG.')
   // After the first step, a step with no trigger of its own follows on: "then".
   expect(text.steps).toMatch(/^2\. Then type \.01 into the scratchpad\.$/m)
-  expect(text.steps).toMatch(/^7\. At 30 s, check that screen line 14 matches/m)
+  expect(text.steps).toMatch(/^7\. At 25 s, check that screen line 14 matches/m)
   expect(text.steps).toMatch(/^8\. Then check that the alert CHECK ANP has been raised within 120 s\.$/m)
   expect(text.expectedResult).toMatch(/^- the RNP annunciator is lit\.$/m)
 
