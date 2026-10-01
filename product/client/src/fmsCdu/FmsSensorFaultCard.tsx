@@ -29,6 +29,7 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
   const faults = backend.radioPort?.faults(device);
   const input = sensorOwner.navigationInputs;
   const doppler = sensorOwner.dvsStatus;
+  const tacan = backend.tacanBearingAndRange();
   const observation = input?.radios.find(entry => entry.station.ident === station);
   const number = (value: number | null | undefined) => value === null || value === undefined ? "—" : value.toFixed(2);
   return <section className="fmsBenchCard fmsSensorFaultCard" aria-label="Sensor fault laboratory">
@@ -49,7 +50,7 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
     </div>
     {device === "dme1" || device === "dme2" ? <p className="fmsBenchHint">DME tuning follows its paired NAV receiver. An independent DME control path fault is not supported; receiver and measurement bus faults remain available.</p> : null}
     <p className="fmsBenchReadout" data-testid="sensor-radio-readout">{RADIO_NAMES[device]}: receiver {faults?.receiver}, control {faults?.controlPath}, bus {faults?.measurementBus}; reported frequency {device === "dme1" || device === "dme2" ? backend.radioPort?.dmeReceiving(device) ? backend.dmeStation(device)?.frequency ?? "none" : "none" : backend.radioReceiving(device) ?? "none"}.
-      {device === "nav1" || device === "nav2" ? ` Radial ${number(backend.navRadial(device))}°.` : device === "dme1" || device === "dme2" ? ` Range ${number(backend.dmeSlantRangeNm(device))} NM; ident ${backend.dmeReportedIdent(device) ?? "none"}.` : device === "adf" || device === "adf2" ? ` Relative bearing ${number(backend.adfRelativeBearing(device))}°.` : " TACAN measurements remain unavailable in this bench."}</p>
+      {device === "nav1" || device === "nav2" ? ` Radial ${number(backend.navRadial(device))}°.` : device === "dme1" || device === "dme2" ? ` Range ${number(backend.dmeSlantRangeNm(device))} NM; ident ${backend.dmeReportedIdent(device) ?? "none"}.` : device === "adf" || device === "adf2" ? ` Relative bearing ${number(backend.adfRelativeBearing(device))}°.` : ` TACAN station ${backend.tacanStation()?.ident ?? "none"}; paired navigation measurements ${tacan ? `bearing ${number(tacan.bearing)}°, range ${number(tacan.rangeNm)} NM` : "unavailable"}.`}</p>
     <form className="fmsBenchAlert" onSubmit={event => {
       event.preventDefault();
       const ident = station.trim().toUpperCase();

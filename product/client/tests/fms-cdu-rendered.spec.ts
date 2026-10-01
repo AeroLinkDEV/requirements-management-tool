@@ -1338,4 +1338,8 @@ test('F679 navigation status keys show actual GPS loss, crew deselection and the
   await expectLine(page, 0, /^VOR\/DME\/TCN STATUS/)
   await expectLine(page, 6, /^NAV1 AUTO\s+NAV2 AUTO/)
   await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('f679-vor-sources.png') })
+  await tab(page, 'Conditions')
+  const sensors = page.getByRole('region', { name: 'Sensor fault laboratory' })
+  await sensors.getByLabel('Fault radio').selectOption('tacan')
+  await expect(sensors.getByTestId('sensor-radio-readout')).toContainText('TACAN station none; paired navigation measurements unavailable.')
 })
