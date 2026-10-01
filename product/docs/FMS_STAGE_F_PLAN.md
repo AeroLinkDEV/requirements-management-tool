@@ -6,6 +6,14 @@
   - F3 now carries the transition table itself;
   - F5's worked cases are corrected;
   - F16 names its actual CIFP fixtures.
+- **Revision 3 (30 Sep, late):** answers Astra's delta review of db5acc48 (DF-01 to DF-05 and her two clarifications). The changes:
+  - C1 gains the approach permission states, preserving the existing S300 established-final continuation;
+  - F3 gains an ordered resolver and an annunciation contract;
+  - F16 gains a real NDB/DME fixture, PASD Q32, after a full-file scan;
+  - C3 maps each radio message from its own Appendix E row;
+  - the KALMAN model is stated as isotropic and independent;
+  - C3 gains the scan roster, the used set and a bounded cache;
+  - C1 states the valid-HIL, missing-HFOM case.
 - **Follows:** the helicopter-first plan (rev 3 §8, rev 3.1 addendum). Stage F starts after v1 (Stages A–E).
 - **Governing rule (Sean, 29 Sep):** realism and closeness to the CMA-9000 always win. Build full functions, with no laboratory stand-ins where the manual defines the behaviour. Where the manual gives no model, the bench declares one, labels it laboratory and makes no certification claim.
 - **Carries forward:**
@@ -103,7 +111,7 @@ Every sensor solution carries five distinct values, each with its meaning, units
 
 | Value | Meaning | GPS | DME/DME, VOR/DME | KALMAN | DVS | DR |
 |---|---|---|---|---|---|---|
-| **accuracy95Nm** | Estimated horizontal radial error at 95%, NM | Receiver HFOM (label 247) | Declared model reproducing M300 15-3's typical figures (F6, F7) | 2.448 × max(σx, σy), a conservative bound (below) | Declared growth, laboratory (F11) | Declared growth from input uncertainties (F10) |
+| **accuracy95Nm** | Estimated horizontal radial error at 95%, NM | Receiver HFOM (label 247) | Declared model reproducing M300 15-3's typical figures (F6, F7) | 2.448 σ under the stated isotropic, independent model (below) | Declared growth, laboratory (F11) | Declared growth from input uncertainties (F10) |
 | **integrityBoundNm** | A containment bound, NM | Receiver HIL (label 130) | None (M300 15-3 rests on criteria, not an NP) | None | None | None |
 | **integrityValid** | The civil integrity criteria are met (M300 1-3) | HIL valid, fresh and strictly below the limit | Accuracy strictly below the limit **and** the reasonableness checks of 15-3 passed | Never (15-4) | Never (12-20) | Never |
 | **naimComparisonNm** (laboratory) | GPS-to-backup discrepancy plus the backup's accuracy95 (F5) | Only when retaining an uncertain GPS against a qualifying backup | — | — | — | — |
@@ -113,15 +121,17 @@ Every sensor solution carries five distinct values, each with its meaning, units
 
 **The limit** is the active RNP (DEC-150 item 4), whether the phase default or the crew entry. "Strictly below" is `value < limit`.
 
-**KALMAN's 2 σ is not a 95% radial figure.**
-- The KALMAN STATUS page shows 2 SIGMA POS ERR as 2 σ of the larger per-axis error.
-- accuracy95Nm is **2.448 × max(σx, σy)**. This is a conservative bound, and it is labelled laboratory:
-  - 2.448 = √(−2 ln 0.05) is the exact 95% radius only for a circular bivariate normal (equal, uncorrelated axes);
-  - for unequal axes the true 95% radius is smaller, so the bound over-states the error, never under-states it.
-- F11's model applies the same σ₀ and σₐ on both axes, so in practice σx = σy and the bound is exact.
-- **Independent check (owner test):**
-  - σx = 1, σy = 1: the true 95% radius is 2.448, and the bound is 2.448;
-  - σx = 1, σy = 0: the error is one-dimensional, the true 95% radius is 1.960 (the two-sided 95% normal quantile), and the bound is 2.448.
+**KALMAN's 2 σ is not a 95% radial figure (DF-05).**
+- **The model's assumption:** the nominal laboratory KALMAN error model is stated as **zero-mean, independent, isotropic Gaussian** on the north and east axes: every contributor (C2) has the same σ on both axes, with no correlation between them. The model preserves that assumption by construction. A change that breaks it must change this contract too.
+- **Under that assumption:**
+  - the radial error is Rayleigh-distributed;
+  - its exact 95% radius is **2.448 σ**, where 2.448 = √(−2 ln 0.05);
+  - accuracy95Nm is 2.448 σ;
+  - the KALMAN STATUS page shows 2 SIGMA POS ERR as 2 σ.
+- **Not a general bound:** 2.448 × max(σx, σy) does not bound the 95% radius of an arbitrary error. With correlated axes (X = Y = Z for a standard normal Z) both σ are 1, yet the 95% radius is √2 × 1.960 = 2.772. The bench therefore makes no claim beyond the stated isotropic model, and a deliberate fault (C2) is outside the model by definition.
+- **Independent checks (owner test):**
+  - isotropic σ = 1: the Monte Carlo 95% radius is 2.448 ± 0.02;
+  - the correlated case above gives 2.772 ± 0.03, and is recorded as the reason no general bound is claimed.
 - No page shows the 2 σ value as the 95% figure, or the reverse.
 
 **The NAIM comparison never manufactures integrity.**
@@ -129,7 +139,8 @@ Every sensor solution carries five distinct values, each with its meaning, units
   - the backup must be a fresh (within `sensorMaxAge`), GPS-independent **radio** fix (DME/DME or VOR/DME) with integrity;
   - KALMAN (GPS-aided) and DVS or DR (propagated from GPS positions) never qualify.
 - It decides one thing: whether an uncertain GPS may stay selected when a backup exists (F4, F5).
-- A retained GPS stays **uncertain**: INT lit, GPS POS UNCERTAIN, no approach or hover authority.
+- A retained GPS stays **uncertain**: INT lit, GPS POS UNCERTAIN, integrityValid false.
+- **No new approach admission and no hover authority.** An S300 final already established when integrity is lost keeps its own sourced continuation, which is not integrity (C1 approach permission, below).
 
 **Consumers.** Each consumer reads exactly one value:
 
@@ -139,9 +150,24 @@ Every sensor solution carries five distinct values, each with its meaning, units
 | GPS STATUS 2/2 HOR INT | The selected receiver's integrityBoundNm (HIL word) | Dashes when the word is invalid or stale. Never the NAIM value. |
 | 100 m accuracy comparison (F3, dual FMS) | accuracy95Nm of both candidates | A candidate without accuracy cannot win an accuracy comparison |
 | CHECK ANP (F12) | accuracy95Nm of the selected solution against the RNP | Episode semantics in F12 |
-| INT annunciator, GPS POS UNCERTAIN | GPS navigated without integrityValid | See the boundary table |
+| INT annunciator | Its own raise and clear predicate (F3, the annunciation contract) | Not derived from the selected mode alone |
+| GPS POS UNCERTAIN | GPS navigated without integrityValid | See the boundary table |
 | Mode selection | integrityValid, then accuracy95Nm, then priority (F3) | |
-| Approach and hover permission | Selected mode approach-eligible **and** integrityValid, then the existing #1243 and hover guards | Never from the NAIM comparison |
+| Approach permission | The approach permission states below (admission, established-final continuation, cancellation, crew recovery) | Never from the NAIM comparison |
+| Hover permission | integrityValid, then the existing hover guards | Unchanged |
+
+**Approach permission states (DF-01; S300 profile, M300 7-12; the existing sourced policy, preserved).** Each state is its own predicate, and integrityValid stays false whenever integrity is lost:
+
+| State | Predicate | Owner |
+|---|---|---|
+| **Admission** | Arming and entering the approach phase need GPS with integrityValid for the approach (the existing `approachIntegrityEligible` and `gpsApproachAuthority`). | #1243 owners |
+| **Established-final continuation** | After the FAF, on the final segment with the approach phase active, an **integrity-only** loss starts a **300 s** continuation. "Integrity-only" means the position is valid, the receiver's reason is INTEGRITY, and HDOP is valid and at most 4. Guidance and NAV continue during it. It is a separate permission flag, not integrity; the NAIM comparison plays no part. | `fms-navigation.spec.ts` "S300 after-FAF integrity-only cancellation waits 300 seconds…"; FMS_APPLICABILITY.md GPS-DEGRADED |
+| **Cancellation** | At once on an invalid position, HDOP over 4 or invalid, a non-integrity rejection or a mode other than GPS; otherwise at 300 s. Effects: NO APPR INTEGRITY, the approach phase ends, `approachSteeringValid` is false, so the AFCS guidance reverts to **HDG** and NAV is withdrawn (flight.ts). | The same owner; the C.3.1 mission test |
+| **Crew recovery** | MISSED APPR (or TOGA) clears the cancellation: terminal phase, RNP 1.0, the missed-approach legs. The crew selects NAV again. Re-arming the approach after disarming it also clears it (the existing arming rule). Nothing restores approach permission automatically. | FMS_APPLICABILITY.md MAP-CREW; C.3.1 |
+
+- **Later-SBAS profile:** keeps its own #1243 rules (no 300 s continuation), unchanged.
+- **Stage F extends these owners** only for the new NDB integration (F16) and the new sensor modes. It adds no duplicate timer tests.
+- **Correction to revision 2:** revision 2 said any integrity loss withdraws approach permission. That over-generalized, and Astra corrected her own earlier wording too. The established-final continuation stands.
 
 **M300 12-1's HIL-as-ANP presentation** belongs to the configuration where ANP presents the integrity value (the 15-2 "ANP/HIL" option). DEC-150 item 6 chose the 95% figure instead, so the bench shows HFOM as ANP and the HIL on GPS STATUS 2/2. It cites 12-1 as the behaviour that is not configured.
 
@@ -165,8 +191,13 @@ At equality the solution therefore has no integrity, and no CHECK ANP episode st
 
 **Unavailable and stale values:**
 - **Stale:** a word older than `sensorMaxAge` is unavailable.
-- **No accuracy:** the solution can be selected only by priority among candidates without integrity. ANP shows dashes, and a CHECK ANP episode runs as though ANP exceeded the RNP (conservative).
+- **No accuracy, valid HIL:** the HIL's validity is unchanged. A GPS with a valid HIL below the limit keeps integrityValid and is still selected on integrity (F3 step 2). Its accuracy is unavailable:
+  - it cannot win an accuracy comparison;
+  - ANP shows dashes;
+  - a CHECK ANP episode runs as though ANP exceeded the RNP (conservative).
+- **No accuracy, no integrity:** the solution is selected only by priority among candidates without integrity.
 - **No HIL:** GPS has no integrity. GPS STATUS HIL shows dashes.
+- **The radio integrity predicate** (95% accuracy strictly below the limit, plus the 15-3 reasonableness checks) is **simulator policy**. It is not a demonstrated OEM integrity probability.
 
 ### C2. KALMAN and DVS measured inputs and clocks (SF-02)
 
@@ -181,10 +212,14 @@ This is a bench interface, not ARINC 705 or Doppler framing. The laboratory erro
 
 **Aiding.** The emulated INS is aided (reset to the GPS position and velocity) only by an **integrity-qualified** GPS update. That update needs a GPS with integrityValid and valid velocity words 166 and 174. An uncertain GPS, a GPS without velocity words, and radio fixes never aid it.
 
-**Error model (laboratory):**
-- σ₀ per axis at aiding = HFOM / 2.448 (the circular case: HFOM is a radial 95% figure);
-- the unaided growth adds ½ σₐ t² per axis, where σₐ is the declared accelerometer noise;
-- the KALMAN STATUS page shows 2 × max(σx, σy); accuracy95Nm is 2.448 × max(σx, σy) (C1).
+**Nominal error model (laboratory; zero-mean, independent, isotropic Gaussian per axis, C1).** Three contributors, each with the same σ on both axes, combine in quadrature:
+- **Initial position:** σ₀ = HFOM / 2.448 at aiding. HFOM is a radial 95% figure, and the conversion is the isotropic case.
+- **Initial velocity:** σᵥ (a declared GPS velocity 1 σ), contributing σᵥ t.
+- **Residual accelerometer bias:** σ_b (a declared residual after aiding), contributing ½ σ_b t².
+
+So σ(t) = √(σ₀² + (σᵥ t)² + (½ σ_b t²)²), where t is the time since the last aiding; accuracy95Nm is 2.448 σ(t), and the page shows 2 σ(t).
+
+**Fault injection is separate.** The sensor generator's nominal APIRS output is truth plus zero-mean noise drawn from the same declared σ values. A deliberate accelerometer bias (or any other APIRS fault) is a bench **stimulus** (F14). The estimator never knows about it, and its accuracy is then expected to understate the error, which the test asserts. Today's fixed laboratory bias in the generator becomes that stimulus.
 
 **Clocks.** All clocks run on simulation time, never wall time or tick counts.
 - **Readiness:** KALMAN is unavailable until one minute after FMS power-up (M300 12-24).
@@ -225,12 +260,16 @@ One `RadioManagementSystem` (#1350) owns every radio. Stage F extends it; it doe
 - Each DME has three channels:
   - channel 1 follows its paired NAV frequency, or the held frequency under DME HOLD;
   - channels 2 and 3 are the FMS's navigation scan.
-- The scan assigns up to six stations across the four scan channels (two per DME) by the F6 selection. Each channel dwells on its stations in turn.
-- **Measurement identity:** every range is tagged (receiver, channel, frequency, command sequence, station ident, time).
-- **Freshness:**
-  - a range is usable for `sensorMaxAge` after its measurement;
-  - a retune of that channel invalidates its older ranges at once;
-  - nothing is cached beyond that.
+- **The scan roster** holds up to six stations (F6 selection). Its stations are distributed over the four scan channels (two per DME). Each channel dwells on its roster stations in turn, with a declared dwell (laboratory).
+- **The used-fix set** is a separate thing: the roster stations that currently hold a usable range and pass the F6 checks. DME STATUS shows every roster station's state (used, REJ, N/A, pending), not only the used ones.
+- **Measurement identity:** every range is tagged (receiver, channel, frequency, command sequence, station ident, measurement time).
+- **Freshness, through a bounded per-station cache:**
+  - the newest range of each roster station is kept, keyed by station and epoch, after its channel has moved on to the next roster station;
+  - it is usable until its age exceeds the cache age limit, declared so that a full dwell cycle fits inside it;
+  - the solver time-aligns each cached range to the fix epoch with the FMS's own ground velocity, and the residual motion error is part of the declared range accuracy;
+  - a range whose station leaves the roster, whose frequency is commanded differently, or whose receiver fails or enters TEST is dropped at once;
+  - at most one range per roster station is ever held, and nothing outlives the age limit.
+- **Without the cache,** only the four scan channels' current observations would survive, at most four when both channel 1s are held. That is why the cache is declared rather than implied.
 - A range on channel 1 counts for navigation when its station is identified.
 
 **HOLD, TEST and manual tuning:**
@@ -238,15 +277,33 @@ One `RadioManagementSystem` (#1350) owns every radio. Stage F extends it; it doe
 - **TEST** removes that receiver's ranges from navigation for the test's duration; the other receiver continues.
 - **MAN tuning of a NAV** moves channel 1 only.
 
-**Three separate states per radio.** Their consequences are defined separately:
+**Separate internal states per radio (DF-04).** The internal states stay separate:
 
-| State | Values | Consequence |
+| State | Values | What it does internally |
 |---|---|---|
-| Command status | PENDING, ACK, REJECTED, SUPERSEDED, TIMEOUT | Inverse while PENDING. A later request supersedes an earlier one, with no alert. REJECTED shows small amber and raises no CONTROL LOST. TIMEOUT raises XX CONTROL LOST on the requesting side (E-2, E-6, E-13). |
-| Receiver health | NORMAL, CONTROL LOST (bus), FAIL, SILENT | A lost control path does not stop reception: the last acknowledged frequency's measurements stay usable. FAIL or SILENT raises the configured XX FAILED advisory once, on both sides, and drops that receiver's measurements. |
-| Reception | Station identified, no reply, ident mismatch | An acknowledged healthy radio with no reply shows a blank distance or bearing. It raises **no alert**. |
+| Command status | PENDING, ACK, REJECTED, SUPERSEDED, TIMEOUT | Inverse while PENDING. A later request supersedes an earlier one. REJECTED shows small amber. |
+| Control path | NORMAL, LOST | Whether tune commands reach the radio. |
+| Measurement bus | NORMAL, LOST | Whether the radio's measurements reach the FMS. |
+| Receiver | NORMAL, FAILED | The radio's own failure report. |
+| Reception | Station identified, no reply, ident mismatch | An acknowledged healthy radio with no reply shows a blank distance or bearing. |
 
-**An untuned or out-of-coverage healthy ADF** shows no bearing and the RMI flag. It does **not** raise ADF CONTROL LOST. ADF CONTROL LOST stays for an actual control-path failure (E-2).
+**The alert and advisory names are not internal categories.** Each Appendix E message is raised from its **own row's** condition, subject to that row's configuration and inhibits. One fault can satisfy both an alert row and an advisory row, and then both are raised, each through its own collector and scratchpad rules.
+
+| Message | Row | Raised when | Configuration and inhibits |
+|---|---|---|---|
+| ADFx CONTROL LOST (alert) | E-2 | ADF radio failure **or** ADF receiver communication-bus failure | Only if configured; inhibited in the polar area and above 20° of roll |
+| DMEx CONTROL LOST (alert) | E-6 | The FMS cannot control the DME paired with the NAV radio, or the DME channel used for manual tuning fails | DME interface |
+| NAVx CONTROL LOST (alert) | E-13 | The FMS cannot control the NAV (VOR/ILS) radio | NAV radio interface configured as NAV |
+| ADFx FAILED (advisory) | E-21 | ADF radio failure **or** ADF receiver communication-bus failure | ADF interface |
+| DMEx FAILED (advisory) | E-23 | DME communication-bus failure | DME interface |
+| NAVx FAILED (advisory) | E-27 | NAV radio **or** NAV radio communication-bus failure | NAV interface configured as NAV |
+
+**Consequences that the rows imply:**
+- An ADF receiver or bus failure raises **both** E-2 (when configured and not inhibited) and E-21.
+- A **command-only timeout** loses the control path while the measurement bus is live. For a NAV radio that raises NAV CONTROL LOST (E-13), and its measurements stay usable. Its advisory row (E-27) is not met: neither the radio nor the bus carrying its data has failed.
+- **Loss of the measurement bus** drops the measurements and meets the FAILED row (E-21, E-23, E-27). Where the row is the same as a CONTROL LOST row's condition (ADF, E-2), both are raised.
+- **REJECTED and SUPERSEDED** commands raise nothing.
+- **An untuned or out-of-coverage healthy ADF** shows no bearing and the RMI flag. It raises **no** fault alert or advisory, because no row's condition is met.
 
 **Deselection has three named meanings:**
 - **Station deselection** (DME DESELECT, 12-18): that station is never scanned or used. It does not affect any VOR/DME.
@@ -371,36 +428,41 @@ Each sensor solution carries C1's five values, with availability, source and fre
 
 **Three selection layers:**
 1. **Receiver selection** (within one FMS): GPS1 or GPS2. #1251's qualified transfer, the crew's manual choice and retention of the current suitable receiver are unchanged. F3 does not add a hysteresis there. There is no new reset to GPS1 on either computer.
-2. **Mode selection** (within one FMS): the table below.
+2. **Mode selection** (within one FMS): the ordered resolver below.
 3. **Peer selection** (synchronized dual FMS, #1350):
    - the on-side preference;
    - a peer's solution of the same type is adopted only when its accuracy95Nm is 100 m better (M300 1-3, 3-25);
    - different types go by layer 2's order;
    - F3 extends this owner and does not replace it.
 
-**Mode selection rules:**
-- **Civil priority (as equipped, DEC-150):** GPS, then DME/DME, then VOR/DME/TCN, then KALMAN, then DVS, then DR.
-- **Integrity first:** a candidate with integrityValid outranks one without.
-- **GPS integrity:** GPS with integrity is selected on integrity (1-4), not on accuracy.
-- **Accuracy-based transitions:**
-  - between the radio modes with integrity, the most accurate wins;
-  - the mode in use is kept until another is **at least 100 m** more accurate;
-  - VOR/DME with integrity to DME/DME with integrity has **no hysteresis**;
-  - the manual's other exception, GPS to INS/GPS, needs an EGI, which is not equipped.
-- **Immediate reversions:** losing integrity or availability reverts at once. Hysteresis never delays it.
-- **No integrity anywhere:** the highest-priority available candidate. An uncertain GPS is retained over KALMAN and DVS when no approved radio backup exists (1-4: the backups the manual names are DME/DME and VOR/DME).
-- **Candidates:**
-  - both radio modes are candidates whenever each can be solved;
-  - M300 1-5's "fewer than three DMEs" describes where VOR/DME is typically used, not a gate;
-  - the accuracy models of F6 and F7 make DME/DME the usual winner.
+**The ordered mode resolver (DF-02).** It runs every navigation update. **The first step that yields a mode wins**, so no later rule can override an earlier one:
+
+0. **Candidates:**
+   - every equipped mode's solution, minus anything unavailable, stale, deselected (C3) or phase-ineligible (radio modes in the approach phase, 15-3);
+   - KALMAN only while ready and within its coast (C2);
+   - both radio modes whenever each can be solved; M300 1-5's "fewer than three DMEs" describes where VOR/DME is typically used, not a gate.
+1. **GPS with integrity** (the layer-1 receiver, integrityValid): **GPS.** GPS is selected on integrity (1-4), not on accuracy. The manual's GPS to INS/GPS exception needs an EGI, which is not equipped.
+2. **The uncertain-GPS retention exception** (a GPS with a valid position but no integrity), which **precedes** the integrity comparator:
+   - no qualifying radio backup (C1): **GPS, uncertain**. This holds even over KALMAN and DVS, since the backups 1-4 names are DME/DME and VOR/DME;
+   - a qualifying backup with the NAIM comparison strictly below the RNP: **GPS, uncertain**;
+   - otherwise, go on to step 3.
+3. **Radio modes with integrity: the accuracy comparator with hysteresis,** relative to the mode in use:
+   - if the mode in use is one of them, it is kept unless another is at least **100 m** more accurate (accuracy95Nm);
+   - VOR/DME with integrity to DME/DME with integrity needs no margin;
+   - a candidate without accuracy cannot win;
+   - if the mode in use is not one of them, the most accurate is taken, and ties go by priority;
+   - **nominal priority never overrides a better current accuracy.** In use VOR/DME 0.30 NM, a returning DME/DME 0.40 NM: VOR/DME stays.
+4. **No integrity anywhere:** the first available in civil priority order (DEC-150): DME/DME, then VOR/DME/TCN (approved radio modes without integrity), then KALMAN, then DVS, then DR.
+
+**Reversions** fall out of the order. A mode that loses integrity or availability fails its step at the next update, so the reversion is immediate, and hysteresis (step 3) only ever compares modes that both have integrity.
 
 **The transition table** (written before F4–F7 and F11 are accepted; each row is an owner test):
 
 | From | Event | To | Hysteresis | Alert | Position | Authority after |
 |---|---|---|---|---|---|---|
-| GPS (integrity) | HIL reaches the limit; no approved radio backup | GPS uncertain | — | GPS POS UNCERTAIN; INT | Continuous | No approach or hover |
-| GPS (integrity) | HIL reaches the limit; qualifying radio backup; NAIM comparison < RNP | GPS uncertain | — | GPS POS UNCERTAIN; INT | Continuous | No approach or hover |
-| GPS (integrity) | As above, NAIM comparison ≥ RNP | Best radio mode | — | GPS NAV LOST; INT | Step to the radio fix | Radio eligibility |
+| GPS (integrity) | HIL reaches the limit; no approved radio backup | GPS uncertain (step 2) | — | GPS POS UNCERTAIN; INT | Continuous | No new admission or hover. An established S300 final continues per C1's continuation state. |
+| GPS (integrity) | HIL reaches the limit; qualifying radio backup; NAIM comparison < RNP | GPS uncertain (step 2) | — | GPS POS UNCERTAIN; INT | Continuous | As above |
+| GPS (integrity) | As above, NAIM comparison ≥ RNP | Best radio mode (step 3) | — | GPS NAV LOST; INT | Step to the radio fix | Radio eligibility. An established final is cancelled (C1). |
 | GPS (any) | Both receivers lose position | Best of radio, KALMAN, DVS, DR | — | GPS NAV LOST; INT | Step (radio) or continuous | Per new mode |
 | GPS (integrity) | Velocity words lost, position valid | GPS | — | None | Continuous | Unchanged. The wind is not computed; KALMAN is not aided and its coast clock runs. |
 | GPS | One receiver fails | GPS (layer 1 transfer) | — | GPSx NOT USABLE | Step within noise | Unchanged |
@@ -414,21 +476,43 @@ Each sensor solution carries C1's five values, with availability, source and fre
 | DVS | DVS fails or goes stale | DR | — | DVS NAV LOST; FMS NAV IN DR | Continuous | None |
 | KALMAN, DVS, DR | A GPS with integrity, or a radio fix, returns | That mode | — | POSITION SHIFT over 0.5 NM | Step | Per new mode |
 | DR | DVS returns | DVS | — | None | Continuous | None |
-| Any | A higher mode returns | That mode | — | None besides POSITION SHIFT | Step | Per new mode |
+| Any | A higher-priority mode becomes available | The resolver's result: GPS with integrity always (step 1); between radio modes only by step 3's accuracy and hysteresis (VOR/DME 0.30 in use keeps against a returning DME/DME 0.40) | Step 3's | None besides POSITION SHIFT | Step | Per new mode |
+| GPS uncertain | A qualifying radio backup with integrity appears; NAIM comparison < RNP | GPS uncertain (step 2 precedes step 3) | — | None | Continuous | Unchanged |
+| Radio mode or lower, after GPS NAV LOST | GPS with integrity returns | GPS (step 1) | — | POSITION SHIFT over 0.5 NM; INT clears | Step | Per GPS |
 | Any, dual SYNC | Peer's same-type solution 100 m better | Peer's | 100 m | None | Step | Unchanged |
 
 **Alert rule:** leaving a mode for a lower one *because it can no longer be navigated on* raises that mode's NAV LOST. Being outranked on accuracy raises nothing, and nor does moving up.
+
+**The annunciation contract (DF-02).** Each annunciation has its own sourced raise and clear predicate. None is derived from the selected mode alone.
+
+| Annunciation | Raised when | Cleared when | Source |
+|---|---|---|---|
+| **INT** (GPS integrity annunciator) | GPS is navigated without integrity (step 2), **or** the FMS reverted away from GPS because GPS lost its integrity or became unavailable (GPS NAV LOST) | GPS with integrity is selected again (step 1) | M300 1-4 (both branches) |
+| INT (crew deselection) | Not raised by the crew selecting GPS out, since that is not a loss. This is **simulator policy**: the manual does not say. | — | Simulator policy, declared in FMS_APPLICABILITY.md |
+| POS | DR is selected | DR is left | C-9, the POS annunciator |
+| GPS POS UNCERTAIN | Step 2 retains an uncertain GPS (once per episode) | — (message) | 1-4, E-8 |
+| GPS NAV LOST | GPS is left after step 1 and step 2 both failed | — (message) | 1-4, E-8 |
+
+**One transition owner.** `fms-sensor-transitions.spec.ts` owns the resolver, the table and the annunciation contract, including recovery and clearing. Other items reference it rather than restating it.
 
 **Code form:** the table exists as one exported table, and every ordered pair of equipped modes is driven through it. The rows above, with their triggers, are the owner tests.
 
 **Exit:**
 - the table is complete for every ordered pair of equipped modes;
-- the owner tests cover both receivers failing together, and uncertain GPS alongside KALMAN and DVS candidates without integrity.
+- the owner tests cover:
+  - both receivers failing together;
+  - uncertain GPS alongside KALMAN and DVS candidates without integrity;
+  - the step 2 versus step 3 overlap;
+  - the returning-higher-mode case;
+  - INT raise and clear.
 
 **Owner tests:** `fms-sensor-transitions.spec.ts`:
 - one test per row;
 - "DME/DME to VOR/DME waits for 100 m of accuracy advantage; VOR/DME to DME/DME does not";
 - "an integrity loss reverts at once whatever the hysteresis";
+- "VOR/DME 0.30 NM in use is kept against a returning DME/DME 0.40 NM";
+- "an uncertain GPS whose NAIM comparison is below the RNP is retained although the radio backup has integrity";
+- "INT stays lit after reversion to DME/DME and clears when GPS with integrity returns";
 - "a station gained or lost in DME/DME moves the position, and the coupled roll command follows it".
 
 The existing layer-1 and layer-3 owners (`fms-gps-authority`, the #1350 dual tests) gain only the newly exposed failures.
@@ -439,13 +523,13 @@ The existing layer-1 and layer-3 owners (`fms-gps-authority`, the #1350 dual tes
 |---|---|---|
 | Two healthy receivers | As today (#1251 selection) | 1-4 |
 | One receiver silent, faulted, with invalid coordinates or impossible values | Independent rejection, kept from #1243 | |
-| HIL at or over the limit, **no qualifying backup** | GPS stays selected: **uncertain**, INT, **GPS POS UNCERTAIN**. Not approach- or hover-authorized. | 1-4, E-8 |
+| HIL at or over the limit, **no qualifying backup** | GPS stays selected: **uncertain**, INT, **GPS POS UNCERTAIN**. No new approach admission or hover authority. An established S300 final follows C1's continuation state. | 1-4, E-8, 7-12 |
 | HIL at or over the limit, **qualifying radio backup** | The NAIM comparison (F5). Below the RNP: uncertain GPS retained as above. At or above it: revert to the backup, INT, **GPS NAV LOST**. | 1-4, 12-1 |
 | GPS unavailable | The next eligible mode. **DR only when none remains** (Astra). GPS NAV LOST, INT. | 1-4, E-8 |
 | GPS–GPS disagreement in independent dual FMS | **GPS-GPS POS DISAGREE** | 3-26 |
 | Lateral-only versus vertical approach loss | Kept as the separate #1243 authorities | |
 
-**Exit:** each row is a test, and the approach authority reads only integrity-qualified state (C1).
+**Exit:** each row is a test, and approach permission reads only C1's approach permission states.
 
 **Owner tests:** `fms-gps-decision.spec.ts`, one test per row. Rows already protected by `fms-gps-authority` are referenced, not duplicated.
 
@@ -691,7 +775,7 @@ This extends #1350's shared `RadioManagementSystem` to C3's model.
   - **Acknowledgement:** clearing the message neither ends the episode nor re-raises it.
   - **Time base:** timers run on simulation time, so a paused bench pauses them, and the tick grouping cannot change them.
   - **Guidance:** CHECK ANP's persistence never delays withdrawing guidance that already lacks authority (C1).
-- **INT annunciator:** lit while GPS is navigated without integrityValid (C1's boundary table).
+- **INT annunciator:** F3's annunciation contract: lit while GPS is navigated without integrity, and after a reversion away from GPS (M300 1-4), until GPS with integrity is selected again.
 - **CDI full scale (15-1, Table 15-1):**
   - 5.0 NM en route, or for an RNP entry above 1.01;
   - 1.0 NM terminal, or above 0.31;
@@ -779,10 +863,9 @@ Each fault is a scenario step, validated on admission and listed in the run repo
 3. A NAV radio's control path is lost, and its CONTROL LOST appears while its reception continues.
 4. VOR/DME is used on an AUTO-tuned VOR (`autoVorNavigation`), and VOR/DME/TCN on a TACAN.
 
-**NDB variant (F16):**
-- It starts separately, at KIAG.
-- The runway NDB approach is flown on FMS guidance with GPS, and the ADF bearing is on the RMI throughout.
-- GPS approach integrity is lost on the final.
+**NDB variants (F16):**
+- **KIAG N28:** it starts separately, at KIAG. The approach is flown on FMS guidance with GPS, with the ADF bearing on the RMI throughout. An integrity-only loss after the FAF continues for 300 s, then cancels to HDG; the crew's MISSED APPR restores terminal guidance.
+- **PASD Q32:** it starts separately, at PASD. The NDB/DME approach is flown with the DME distance from HBT shown, and the NDB goes off the air on the final.
 
 **Throughout:**
 - the computed position is checked against bench truth, independently of the displayed confidence;
@@ -809,8 +892,18 @@ This is the bench's implementation scope. It does not prove every installed CMA 
 - An NDB off the air, or an ADF failure, is its own failure case. It is not silently covered by GPS.
 - CIFP carries no overlay authorization. The chart title in dTPP 2609 is recorded in the fixture metadata, and no overlay case is claimed unless a title says so.
 
-**Fixtures (selected from CIFP 2609):**
-- The cycle codes 23 NDB approaches (final route type N) and **no NDB/DME approach**: no route-type Q record exists.
+**Fixtures (selected from CIFP 2609; DF-03).**
+
+**The data:**
+- The source is FAACIFP18 from `CIFP_260903.zip`, with SHA-256 FBEA2179A990E1D371D77439961D137E83252582B3C67B6EC85B8D9D11C76CAD (the ZIP's is AE016B916FEF71DCF6CF25778636C8607191357886D80B8E7E5FAF33727606E1).
+- The query covers every area: airport and heliport sections P and H, approach subsection F, final route type N or Q (column 20), distinct airport and procedure.
+- The result is **24 NDB (N) and 4 NDB/DME (Q) approaches**.
+
+**Correction to revision 2:** revision 2's "no NDB/DME approach is coded" came from a scan limited to the SUSA area. The full file has:
+- the Q approaches **PASD Q32**, **PGSN Q07-Z**, **PGUM Q24R** and **PTKK Q22**;
+- **PTPN NDB-A**, the 24th N approach.
+
+The three fixtures:
 - **KIAG N28**, Niagara Falls:
   - NDB runway 28, with the runway MAP RW28;
   - the FAF and recommended navaid is the NDB IA;
@@ -821,7 +914,13 @@ This is the bench's implementation scope. It does not prove every installed CMA 
   - the FAF and recommended navaid is the NDB BKT;
   - the MELIA and NUTTS transitions have PI course reversals;
   - the missed approach is CA, DF, HM.
-- **NDB/DME:** DEC-150 item 8 names NDB/DME approaches. With none coded in 2609, the NDB D path is covered by the same loader and page code, and flown when a later cycle codes one. The plan says so rather than inventing a fixture.
+- **PASD Q32**, Sand Point, Alaska (route type Q, the NDB/DME fixture; FAACIFP18 lines 12252–12258 for the final):
+  - the final runs IF WONBA, CF JOTOK (the FAF), CF OTIPE (the step-down) and CF RW32 (the runway MAP, coded 0.4 NM from HBT);
+  - the recommended navaid is **HBT**. It is an NDB (390 kHz) with a separately coded co-located DME, also HBT, paired at 113.20, which F1's DME-only reading supplies;
+  - the CUBPA, DUGAC, RAYMD and SAFKO transitions run IF, TF HBT, TF JOTOK, then a **PI** at JOTOK referenced to HBT, then CF WONBA;
+  - the missed approach is CA, DF HBT, HM at HBT;
+  - every leg type it uses (IF, TF, CF, PI, CA, DF, HM) is one the decoder flies today, so no leg is unsupported. The fixture test still asserts each decoded leg against the records, since sharing a loader branch does not prove support.
+- **The chart:** before each fixture is frozen, its dTPP 2609 chart title, recommended navaid, DME distances, MAP and missed approach are reconciled with the coded data and recorded in the fixture metadata. The title also settles conventional versus overlay applicability.
 
 **Loader:**
 - The importer already maps route types N and Q to NDB. So F16 is not "add route letters".
@@ -830,43 +929,51 @@ This is the bench's implementation scope. It does not prove every installed CMA 
   - flown to the MAP and into the missed approach;
   - never classified as PinS;
   - never treated as a completed landing.
-- The recommended navaid and the N/Q distinction are kept on the procedure.
+- The recommended navaid, the N/Q distinction and the DME distances coded on the final (PASD Q32's 0.4 NM at RW32) are kept on the procedure.
 - A leg type the loader cannot fly is refused with the reason, as today.
 
 **Selection:** the approach page lists NDB and NDB D approaches with their prefix (7-1). Loading one arms the recommended NDB for ADF tuning, as a request on the ADF (C3) that the crew confirms on the ADF page.
 
-**Guidance and authority:**
+**Guidance and authority (C1's approach permission states; DF-01):**
 - The approach phase, RNP 0.3 and the CDI full scale of Table 15-1 apply as for any approach.
-- Today NO APPR INTEGRITY applies to RNAV approaches only. F16 extends it to NDB approaches flown on FMS guidance.
-- **The AFCS consequence (S300 profile, as the bench does today for an RNAV approach, C.3.1):** when GPS approach integrity is lost:
+- **Admission:** the existing S300 rule. The S300 approach authority already covers every non-ILS approach type, including NDB.
+- **Established final:** an integrity-only loss after the FAF, with a valid position and HDOP at most 4, starts the **300 s continuation** (M300 7-12). Guidance and NAV continue during it. Today's owner (`fms-navigation.spec.ts`, the 299/300 s and HDOP 4.01 cases) is extended with one NDB case, not duplicated.
+- **Cancellation** (at once on an invalid position or HDOP over 4; otherwise at 300 s):
   - NO APPR INTEGRITY and INT;
-  - the approach phase is cancelled to terminal (RNP 1.0);
-  - FMS LNAV stays coupled on the route **without approach authority**;
+  - the approach phase ends;
+  - `approachSteeringValid` is false, so the AFCS guidance reverts to **HDG** and **NAV is withdrawn** (the C.3.1 behaviour);
   - the mode event is recorded.
-- Nothing restores FMS approach authority automatically. Continuing on the NDB raw data (HDG or ATT on the AFCS) or going around (MISSED APPR, TOGA) is a **crew action**.
+  - A loaded route is not valid coupled steering.
+- **Crew recovery:** the crew's MISSED APPR (or TOGA) restores terminal guidance on the missed-approach legs, and the crew selects NAV again. Continuing on the NDB raw data (HDG or ATT on the AFCS) is the other crew action. Nothing restores approach permission automatically.
+- **Code change:** today the NO APPR INTEGRITY alert is gated on RNAV approaches. F16 extends the gate to NDB approaches flown on FMS guidance.
 - DME/DME and VOR/DME are never approach-eligible (15-3), so they cannot stand in.
 
 **Raw data:**
 - ADF1/2 bearing to the tuned NDB on the RMI (C3, C4), with validity;
 - an NDB off the air, or an ADF failure, flags the RMI;
 - an **untuned or out-of-coverage healthy ADF raises no alert** (C3);
-- ADF CONTROL LOST is only for a lost control path.
+- ADF CONTROL LOST (E-2) and ADF FAILED (E-21) are raised from their own rows (C3): an ADF receiver or bus failure raises both, subject to E-2's configuration and its polar and roll inhibits.
 
 **EFIS:** NDBs within map range are drawn when the NDB option is on (C-10, A-47).
 
 **Exit:**
-- KIAG N28 and KBKT NDB-A load from CIFP 2609 and are flown to their MAPs on FMS guidance with GPS;
+- KIAG N28, KBKT NDB-A and PASD Q32 load from CIFP 2609 and are flown to their MAPs on FMS guidance with GPS, PASD Q32 with its DME distances;
 - the RMI shows the ADF bearing to the recommended NDB throughout;
-- GPS approach integrity lost on the final removes approach authority, with the AFCS consequence above, and no position is derived from the ADF.
+- on the final:
+  - an integrity-only loss continues for 300 s, then cancels with the AFCS consequence above;
+  - an invalid position cancels at once;
+  - no position is derived from the ADF.
 
 **Owner tests:** `fms-ndb-approach.spec.ts`:
 - "KIAG N28 loads with its prefix, legs, HF reversal and missed approach";
 - "KBKT NDB-A loads with a conventional non-runway MAP, not as PinS";
+- "PASD Q32 loads as NDB D with its PI reversal, recommended NDB/DME HBT and the 0.4 NM DME distance at the MAP, every leg matching its record";
 - "loading it requests the recommended NDB on the ADF";
 - "flown on GPS to the MAP with the RMI on the NDB";
-- "GPS integrity lost on the final: NO APPR INTEGRITY, approach cancelled, LNAV on route without authority, ADF bearing still shown";
+- "GPS integrity lost after the FAF on an NDB final: guidance continues for 300 s, then NO APPR INTEGRITY, HDG, NAV withdrawn, ADF bearing still shown; MISSED APPR restores terminal guidance" (extending the S300 owner);
+- "an invalid GPS position on the NDB final cancels at once";
 - "the NDB off the air flags the RMI";
-- "an ADF failure flags the RMI and raises its FAILED advisory".
+- "an ADF receiver failure flags the RMI and raises ADF CONTROL LOST (where configured) and ADF FAILED".
 
 ---
 
@@ -874,14 +981,14 @@ This is the bench's implementation scope. It does not prove every installed CMA 
 
 | Row | Requirement | Source | Owner test file | Status |
 |---|---|---|---|---|
-| C1 | Accuracy, integrity bound, integrity validity, NAIM (laboratory) and authority kept distinct, with named consumers and boundary rows | M300 1-3, 12-1, 15-1 to 15-4; DEC-150 | fms-sensor-state | Open |
+| C1 | Accuracy (with its basis), integrity bound, integrity validity, NAIM (laboratory), the approach permission states and the isotropic KALMAN model, with named consumers and boundary rows | M300 1-3, 7-12, 12-1, 15-1 to 15-4; DEC-150 | fms-sensor-state | Open |
 | C2 | KALMAN/DVS measured inputs, aiding, simulation clocks, interruption, expiry | M300 1-5, 12-20 to 12-24; DEC-150 with its clarification | fms-kalman-dvs | Open |
-| C3 | Radio ownership: DME channels, TACAN, HOLD/TEST/MAN, command status, health and reception separate | M300 12-16, 12-19, 13-3 to 13-26, App. E | fms-rms-radios | Open |
+| C3 | Radio ownership: DME channels, the scan roster versus the used set, the bounded station cache, TACAN, HOLD/TEST/MAN, separate internal states, messages mapped from each Appendix E row | M300 12-16, 12-19, 13-3 to 13-26, App. E (E-2, E-6, E-13, E-21, E-23, E-27) | fms-rms-radios | Open |
 | C4 | Output vocabulary | Bench contract; #1345, #1376 | fms-output-bus-nav | Open |
 | F0 | Stage F equipment declared, with nothing simulated for absent equipment | M300 1-4, configuration | fms-stage-f-configuration | Open |
 | F1 | DME-only and TACAN navaids, station elevation with its source and allowance propagated exactly, co-located DME position, Annex 10 pairing, refusals | ARINC 424 4.1.2; ICAO Annex 10; rev 2 F1 | fms-navaid-data | Open |
 | F2 | Split sensor state and its consumers | M300 1-3, 15-3 | fms-sensor-state | Open |
-| F3 | Three selection layers; the transition table; 100 m hysteresis and its exception; immediate reversion | M300 1-3 to 1-5, 3-25 | fms-sensor-transitions | Open |
+| F3 | Three selection layers; the ordered resolver; the transition table; the annunciation contract (INT); 100 m hysteresis and its exception; immediate reversion | M300 1-3 to 1-5, 3-25 | fms-sensor-transitions | Open |
 | F4 | GPS decision table (7 rows) | M300 1-4, 3-26, E-8 | fms-gps-decision | Partial (#1243, #1251) |
 | F5 | NAIM (laboratory formula, corrected worked cases, no 10⁻⁵/h claim) | M300 1-4, 12-1 | fms-naim | Open |
 | F6 | DME/DME with 6 stations, REJ/N/A, deselect 25, 3-range unavailability, unique-hypothesis isolation | M300 12-16 to 12-18, 15-3 | fms-dme-dme | Partial |
@@ -894,7 +1001,7 @@ This is the bench's implementation scope. It does not prove every installed CMA 
 | F13 | Output bus tags for C4, EFIS from the bus only | Bench contract; #1345, #1376 | fms-output-bus-nav | Open |
 | F14 | Bench sensor and radio failure stimuli in scenarios; no external head in the default profile | rev 3 §10 pattern; DEC-150 | per item | Open |
 | F15 | Reproducible Stage F acceptance mission | Astra gap assessment, item 1 | fms-stage-f-mission | Open |
-| F16 | KIAG N28 and KBKT NDB-A from CIFP 2609 on FMS guidance; ADF raw data; conventional non-runway MAP; AFCS consequence of lost authority | M300 7-1, 1-3; AIM 1-2-3; DEC-150 | fms-ndb-approach | Open |
+| F16 | KIAG N28, KBKT NDB-A and PASD Q32 (NDB/DME) from CIFP 2609 on FMS guidance; ADF raw data; conventional non-runway MAP; the S300 continuation and cancellation with the HDG consequence | M300 7-1, 7-12, 1-3; AIM 1-2-3; DEC-150 | fms-ndb-approach | Open |
 
 ## 6. Order and size
 
@@ -934,8 +1041,13 @@ Local, unpushed branches exist for F0, F1 (session 4), F2, F8a (the RMS extensio
 |---|---|
 | F1 | Built by session 4 to this section's contract. `Navaid.elevation` becomes required, so every navaid builder in the other pieces supplies it on rebase. |
 | F0 | The external head is declared off with its pages guarded. The KALMAN row carries the clarification. |
-| F2 | The GPS entry's integrity bound stays the receiver HIL. The NAIM comparison moves out of `integrityNm` into its own laboratory field. Every consumer reads per C1's table. The GPS measurement's HFOM-or-HIL fallback for ANP goes. |
+| F2 (done locally, b32a05b8) | The GPS entry's integrity bound stays the receiver HIL. The NAIM comparison moves out of `integrityNm` into its own laboratory field. Every consumer reads per C1's table. The GPS measurement's HFOM-or-HIL fallback for ANP goes. |
 | F8a | Radio health separates CONTROL LOST (timeout, reception kept) from FAIL/SILENT. REJECTED and SUPERSEDED command states are added. DME channels and HOLD and TEST per C3. A TACAN device. No ADF alert when untuned. |
 | F8b | TEST removes that receiver's ranges from navigation. DME HOLD becomes C3's channel 1. |
-| F11 | σ becomes per axis, with the 2 σ page value and a 2.448 × max(σx, σy) accuracy. The coast clock runs from the last integrity-qualified aiding, which also requires the GPS velocity words (already so). `powerInterrupt(ms)` gets the 50 ms boundary. The APIRS and Doppler failure conditions stay. |
-| F3 | Being built from §4 F3's table. |
+| F11 (done locally, b32a05b8) | σ per axis, with the 2 σ page value. The coast clock runs from the last integrity-qualified aiding, which also requires the GPS velocity words (already so). `powerInterrupt(ms)` gets the 50 ms boundary. The APIRS and Doppler failure conditions stay. |
+| F3 | Built from §4 F3's ordered resolver. Changes against today's code:
+- a qualifying NAIM backup must have integrity (C1); today any approved radio fix is compared;
+- step 3's comparator;
+- INT gets its own predicate;
+- `transitionAlert` stays the alert rule. |
+| F11 (DF-05) | The σ model becomes the quadrature sum of C2's three contributors, under the isotropic assumption. The generator's fixed laboratory APIRS bias moves out of the nominal model into a fault stimulus. The 2.448 × max(σx, σy) helper is replaced by the isotropic 2.448 σ. |
