@@ -1469,6 +1469,11 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
           || legend.top < face.y - 1 || legend.bottom > face.y + face.h + 1)) errors.push(`${key.dataset.key}: legend exceeds physical face`)
         if (legend && (Math.abs(legend.x + legend.width / 2 - face.x - face.w / 2) > 1
           || Math.abs(legend.y + legend.height / 2 - face.y - face.h / 2) > 1)) errors.push(`${key.dataset.key}: legend is not centred`)
+        for (const line of key.querySelectorAll('.legend > span')) {
+          const ink = line.getBoundingClientRect()
+          if (ink.left < face.x - 1 || ink.right > face.x + face.w + 1
+            || Math.abs(ink.x + ink.width / 2 - face.x - face.w / 2) > 1) errors.push(`${key.dataset.key}: legend line is not centred within its face`)
+        }
         return errors
       })
     }), geometry)
@@ -1480,6 +1485,13 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   // 40px button minimum is present; otherwise a faceplate regression can pass only in the fixture.
   await page.addStyleTag({ url: '/src/Density.css' })
   await centredKeys()
+  const variation = page.getByRole('combobox', { name: 'Hardware variation' })
+  const variations = await variation.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))
+  for (const value of variations) {
+    await variation.selectOption(value)
+    await centredKeys()
+  }
+  await variation.selectOption(variations[0])
   await page.screenshot({ path: testInfo.outputPath('centred-engineering-keys.png'), fullPage: true })
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
   const boxes = async () => {
@@ -1501,6 +1513,12 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   const pilotControls = await page.getByRole('form', { name: 'Vertical and speed selections' }).boundingBox()
   expect(pilotControls!.y + pilotControls!.height).toBeLessThanOrEqual(900)
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
+  await tab(page, 'Flight and setup')
+  for (const value of variations) {
+    await variation.selectOption(value)
+    await centredKeys()
+  }
+  await variation.selectOption(variations[0])
   await tab(page, 'GPS sensors')
   const ios = await page.getByRole('region', { name: 'Instructor station', exact: true }).boundingBox()
   expect(ios!.y + ios!.height).toBeLessThanOrEqual(wide.cdu.y)
