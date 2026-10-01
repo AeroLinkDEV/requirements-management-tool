@@ -1,0 +1,81 @@
+HDR01FAACIFP18      001P013203968112609  12-AUG-202618:29:21  U.S.A. DOT FAA                                                FBB95AD8
+SCAND        BTT   PA011600VDHW N66541803W151320918    N66541803W151320918E0200006372     NARBETTLES                       002522002
+SCANEAENRT   CYCLE PA0    C   L N66340534W150551947                       E0136     NAR           CYCLE                    010432605
+SCANEAENRT   HORAG PA0    C   L N66443699W151142102                       E0135     NAR           HORAG                    015622605
+SCANEAENRT   JEVUM PA0    C   L N67083943W151213106                       E0134     NAR           JEVUM                    017302605
+SCANEAENRT   OCOCU PA0    C   L N67050890W151450043                       E0132     NAR           OCOCU                    021952605
+SCANEAENRT   TEGDE PA0    W   L N67224518W151083530                       E0134     NAR           TEGDE                    026472605
+SCANEAENRT   ZENLA PA0    C   L N67075686W151474469                       E0132     NAR           ZENLA                    030542605
+SCANP PABTPAABTT     0     051YSN66545020W151314460E016000647         1800018000C    MNAR    BETTLES                       060471805
+SCANP PABTPACCUPOV PA0    W     N66495405W151393920                       E0133     NAR           CUPOV                    060482605
+SCANP PABTPACHUVAD PA0    W     N67004614W150455600                       E0136     NAR           HUVAD                    060492605
+SCANP PABTPACIKIVE PA0    W     N66483384W152053688                       E0131     NAR           IKIVE                    060502605
+SCANP PABTPACIYOLU PA0    W     N67074953W150550466                       E0136     NAR           IYOLU                    060512605
+SCANP PABTPACKIYEP PA0    W     N66595424W151245001                       E0134     NAR           KIYEP                    060522605
+SCANP PABTPACLEVGE PA0    W     N66553672W151302964                       E0133     NAR           LEVGE                    060532605
+SCANP PABTPACMELME PA0    W     N66442116W151482820                       E0132     NAR           MELME                    060542605
+SCANP PABTPACNITYI PA0    R     N66510963W152013022                       E0131     NAR           NITYI                    060552605
+SCANP PABTPACNOYIR PA0    W     N67041910W151103852                       E0135     NAR           NOYIR                    060562605
+SCANP PABTPACPIBIC PA0    W     N66400662W151312538                       E0134     NAR           PIBIC                    060572605
+SCANP PABTPACSIYOD PA0    W     N66533231W151331287                       E0133     NAR           SIYOD                    060582605
+SCANP PABTPACSUCNO PA0    R     N66483336W151461200                       E0132     NAR           SUCNO                    060592605
+SCANP PABTPACUMYAR PA0    W     N67160314W151022280                       E0135     NAR           UMYAR                    060602605
+SCANP PABTPACVORUC PA0    R     N66454056W151531095                       E0132     NAR           VORUC                    060612605
+SCANP PABTPACWULPI PA0    W     N66540393W151325893                       E0133     NAR           WULPI                    060622605
+SCANP PABTPACWUTOM PA0    W     N67013577W151193769                       E0134     NAR           WUTOM                    060632605
+SCANP PABTPACYUSNU PA0    R     N66512585W151391141                       E0133     NAR           YUSNU                    060642605
+SCANP PABTPAFR02   AIKIVE 010IKIVEPAPC0E  A    IF                                             18000                 B PS   060652403
+SCANP PABTPAFR02   AIKIVE 020MELMEPAPC0EE B 010TF                                 + 03400                           B PS   060662403
+SCANP PABTPAFR02   AMELME 010MELMEPAPC0EE AR   HF                     01600040    + 03400     18000                 B PS   060672403
+SCANP PABTPAFR02   APIBIC 010PIBICPAPC0E  A    IF                                             18000                 B PS   060682403
+SCANP PABTPAFR02   APIBIC 020MELMEPAPC0EE B 010TF                                 + 03400                           B PS   060692403
+SCANP PABTPAFR02   R      010MELMEPAPC0E  I    IF                                 + 03400     18000                 B PS   060702403
+SCANP PABTPAFR02   R      020CUPOVPAPC1E  F 010TF                                 + 02400                           B PS   060712403
+SCANP PABTPAFR02   R      020CUPOVPAPC2WN          N          ALNAV                                                   PS   060722403
+SCANP PABTPAFR02   R      030WULPIPAPC0EY M 031TF                                   00827             -300          B PS   060732403
+SCANP PABTPAFR02   R      040         0  M     CA                     0162        + 01800                           B PS   060742403
+SCANP PABTPAFR02   R      050MELMEPAPC0EY  L010DF                                 + 03400          230              B-PS   060752403
+SCANP PABTPAFR02   R      060MELMEPAPC0EE  R   HM                     01600040    + 03400                           B PS   060762403
+SCANP PABTPAFR20   ACYCLE 010CYCLEPAEA0E       IF                                             18000                 B PS   060772403
+SCANP PABTPAFR20   ACYCLE 020HUVADPAPC0E  A 020TF                                 + 05100                           B PS   060782403
+SCANP PABTPAFR20   ACYCLE 030NOYIRPAPC0EE B 010TF                                 + 04300                           B PS   060792403
+SCANP PABTPAFR20   ATEGDE 010TEGDEPAEA0E       IF                                             18000                 B PS   060802403
+SCANP PABTPAFR20   ATEGDE 020UMYARPAPC0E    020TF                                 + 08300                           B PS   060812403
+SCANP PABTPAFR20   ATEGDE 030IYOLUPAPC0E  A 020TF                                 + 07100                           B PS   060822403
+SCANP PABTPAFR20   ATEGDE 040NOYIRPAPC0EE B 010TF                                 + 04300                           B PS   060832403
+SCANP PABTPAFR20   AUMYAR 010UMYARPAPC0E       IF                                             18000                 B PS   060842403
+SCANP PABTPAFR20   AUMYAR 020IYOLUPAPC0E  A 020TF                                 + 07100                           B PS   060852403
+SCANP PABTPAFR20   AUMYAR 030NOYIRPAPC0EE B 010TF                                 + 04300                           B PS   060862403
+SCANP PABTPAFR20   R      010NOYIRPAPC0E  I    IF                                 + 04300     18000                 B PS   060872403
+SCANP PABTPAFR20   R      011WUTOMPAPC0E    010TF                                 + 03200                           B PS   060882403
+SCANP PABTPAFR20   R      020KIYEPPAPC1E  F 010TF                                 + 02400                 LEVGE PAPCB PS   060892403
+SCANP PABTPAFR20   R      020KIYEPPAPC2WN          N          ALNAV                                                   PS   060902403
+SCANP PABTPAFR20   R      030LEVGEPAPC0EY M 031TF                                   00855             -300          B PS   060912403
+SCANP PABTPAFR20   R      040         0  M     CA                     1914        + 01047                           B PS   060922403
+SCANP PABTPAFR20   R      050SIYODPAPC0E    010DF                                                                   B PS   060932403
+SCANP PABTPAFR20   R      060MELMEPAPC0EY   010TF                                 + 03200                           B PS   060942403
+SCANP PABTPAFR20   R      070MELMEPAPC0EE  R   HM                     01600040    + 03200                           B PS   060952403
+SCANP PABTPAFS02   AHORAG 010HORAGPAEA0E  A    IF                                             18000                 0 DS   060962201
+SCANP PABTPAFS02   AHORAG 020VORUCPAPC0EE BR   AF BTT PA      204001201240    D   + 03200                           0 DS   060972201
+SCANP PABTPAFS02   AJEVUM 010JEVUMPAEA0E       IF                                             18000                 0 DS   060982201
+SCANP PABTPAFS02   AJEVUM 020BTT  PAD 0V       TF                                 B 0600004500                      0 DS   060992201
+SCANP PABTPAFS02   AJEVUM 030BTT  PAD 0VE AR   PI BTT PA      0000000015900100D   + 03400                           0 DS   061002201
+SCANP PABTPAFS02   AOCOCU 010OCOCUPAEA0E  A    IF                                             18000                 0 DS   061012201
+SCANP PABTPAFS02   AOCOCU 020NITYIPAPC0E   L   AF BTT PA      235001203152    D   + 03800                           0 DS   061022201
+SCANP PABTPAFS02   AOCOCU 030VORUCPAPC0EE BL   AF BTT PA      204001202350    D   + 03200                           0 DS   061032201
+SCANP PABTPAFS02   AZENLA 010ZENLAPAEA0E       IF                                             18000                 0 DS   061042201
+SCANP PABTPAFS02   AZENLA 020BTT  PAD 0V       TF                                 B 0600004500                      0 DS   061052201
+SCANP PABTPAFS02   AZENLA 030BTT  PAD 0VE AR   PI BTT PA      0000000015900100D   + 03400                           0 DS   061062201
+SCANP PABTPAFS02   S      010VORUCPAPC0E  I    IF BTT PA      20400120        D   + 03200     18000                 0 DS   061072201
+SCANP PABTPAFS02   S      011SUCNOPAPC0E       CF BTT PA      2040008002400040D   + 02600                           0 DS   061082201
+SCANP PABTPAFS02   S      020YUSNUPAPC0E  F    CF BTT PA      2040004002400040D   + 02000                 BTT   PAD 0 DS   061092201
+SCANP PABTPAFS02   S      030BTT  PAD 0VY M    CF BTT PA      0000000002400040D     00714              000          0 DS   061102201
+SCANP PABTPAFS02   S      040         0  M     CA                     0240        + 01047                           0 DS   061112201
+SCANP PABTPAFS02   S      050HORAGPAEA0EY  R   CFYBTT PA      1240012012400120D   + 03500                           0 DS   061122201
+SCANP PABTPAFS02   S      060HORAGPAEA0EE  R   HM                     1240T010    + 03500                           0 DS   061132201
+SCANP PABTPAGRW02    0051900160 N66542859W151321930         +0200900635000036150R                                          061141806
+SCANP PABTPAGRW14W   0041001525 N66533457W151294913               00649000050200D                                          061152210
+SCANP PABTPAGRW20    0051901960 N66551177W151310983         +0204600647000052150R                                          061161806
+SCANP PABTPAGRW32W   0041003325 N66525503W151292874               00649000050200D                                          061172210
+SCANP PABTPASBTT  PAD                 0   18018006525                                                                  M   061181806
+SCANP PABTPASLEVGEPAPC                0   18018007025                                                                  M   061191806

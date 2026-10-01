@@ -248,7 +248,7 @@ test('F16: KBKT NDB-A loads with a conventional non-runway MAP, not as PinS, and
   // Its MELIA and NUTTS transitions end in a PI at BKT that the final's IF follows, with no CF: the decoder refuses that
   // reversal today (as it does every PI coded so in the CIFP), so the transitions are left out here and the refusal is
   // pinned below. The final and missed approach are the fixture.
-  expect(parseArinc424(KBKT, { airports: ['KBKT'] }).errors).toEqual(['KBKT NDB-A: transition MELIA: PI without reference, direction, outbound course or following CF'])
+  expect(parseArinc424(KBKT, { airports: ['KBKT'] }).errors).toEqual(['KBKT NDB-A: transition MELIA: PI at BKT ends the transition, and the final does not begin IF, then a CF to BKT'])
   const finalOnly = KBKT.split('\n').filter(line => !/^SUSAP KBKTK6FNDB-A A/.test(line)).join('\n')
   const { data, errors } = parseArinc424(finalOnly, { airports: ['KBKT'] })
   expect(errors).toEqual([])

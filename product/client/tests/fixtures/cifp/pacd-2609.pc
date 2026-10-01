@@ -1,0 +1,213 @@
+HDR01FAACIFP18      001P013203968112609  12-AUG-202618:29:21  U.S.A. DOT FAA                                                FBB95AD8
+SCAND        CDB   PA011260VTHW N55160226W162462639    N55160226W162462639E0100000992     NARCOLD BAY                      002532010
+SCANDB       ELF   PA003410H  W N55174614W162472127                       E0100           NARELFEE                         003692010
+SCANEAENRT   BINAL PA0    C   B N55455999W161595643                       E0093     NAR           BINAL                    005662605
+SCANEAENRT   CHUNA PA0    R   L N55085716W163371946                       E0087     NAR           CHUNA                    009182605
+SCANEAENRT   GENFU PA0    C   L N55231864W163062078                       E0089     NAR           GENFU                    013752605
+SCANEAENRT   GLENT PA0    C   L N55242772W162315263                       E0091     NAR           GLENT                    013952605
+SCANEAENRT   KOPEC PA0    C     N54525337W162301399                       E0091     NAR           KOPEC                    018882605
+SCANEAENRT   KOTIZ PA0    R   L N55180391W162291902                       E0091     NAR           KOTIZ                    018912605
+SCANEAENRT   LAPLE PA0    C   L N55264893W162262418                       E0091     NAR           LAPLE                    019282605
+SCANEAENRT   MILAM PA0    R   L N55183134W161540992                       E0094     NAR           MILAM                    020452605
+SCANEAENRT   MORDI PA0    C   B N54524987W165031524                       E0081     NAR           MORDI                    020712605
+SCANEAENRT   SAFKO PA0    C   L N55464866W162020795                       E0093     NAR           SAFKO                    024552605
+SCANEAENRT   UCLON PA0    R     N55182555W162025629                       E0093     NAR           UCLON                    027222605
+SCANEAENRT   UNETE PA0    R   L N55145415W163034915                       E0089     NAR           UNETE                    027432605
+SCANEAENRT   WETSI PA0    R   L N55233335W162345543                       E0091     NAR           WETSI                    028802605
+SCANP PACDPAACDB     0     101YHN55122130W162433450E012000100         1800018000C    MNAR    COLD BAY                      061261901
+SCANP PACDPACAFVEK PA0    W     N54592601W162300441                       E0091     NAR           AFVEK                    061272605
+SCANP PACDPACATELE PA0    W     N55115067W162414108                       E0090     NAR           ATELE                    061282605
+SCANP PACDPACAVVUH PA0    W     N55014010W162174960                       E0092     NAR           AVVUH                    061292605
+SCANP PACDPACBUKAY PA0    W     N54540678W162442760                       E0090     NAR           BUKAY                    061302605
+SCANP PACDPACCOTRA PA0    C     N55150743W162453074                       E0090     NAR           COTRA                    061312605
+SCANP PACDPACDEADS PA0    C     N55252197W162524016                       E0090     NAR           DEADS                    061322605
+SCANP PACDPACEPHEX PA0    W     N54594158W162345113                       E0091     NAR           EPHEX                    061332605
+SCANP PACDPACJEGNO PA0    C     N55180330W162473323                       E0090     NAR           JEGNO                    061342605
+SCANP PACDPACLEMMR PA0    W     N55170481W162232822                       E0092     NAR           LEMMR                    061352605
+SCANP PACDPACODOWO PA0    C     N55053110W162385156                       E0091     NAR           ODOWO                    061362605
+SCANP PACDPACPABGE PA0    C     N55090022W162411601                       E0091     NAR           PABGE                    061372605
+SCANP PACDPACRIDOY PA0    R     N55102082W162421180                       E0090     NAR           RIDOY                    061382605
+SCANP PACDPACRIGTE PA0    W     N55281939W162393719                       E0091     NAR           RIGTE                    061392605
+SCANP PACDPACSOTOE PA0    W     N55124125W162330223                       E0091     NAR           SOTOE                    061402605
+SCANP PACDPACTECON PA0    R     N55003596W162121427                       E0093     NAR           TECON                    061412605
+SCANP PACDPADCHUNA21RW08  010         0        VA                     0828        + 01000     18000                        061422010
+SCANP PACDPADCHUNA21RW08  020ELF  PADB0N   L   CFYCDB PA      3332001828000100D                                            061432010
+SCANP PACDPADCHUNA21RW08  030CHUNAPAEA0EE      TF                                                                          061442010
+SCANP PACDPADCHUNA21RW15  010         0        VA                     1464        + 01000     18000                        061452010
+SCANP PACDPADCHUNA21RW15  020ELF  PADB0N   L   CFYCDB PA      3332001831500100D                                            061462010
+SCANP PACDPADCHUNA21RW15  030CHUNAPAEA0EE      TF                                                                          061472010
+SCANP PACDPADCHUNA21RW26  010         0        VI                     2750                    18000                        061482010
+SCANP PACDPADCHUNA21RW26  020CHUNAPAEA0EE      CF CDB PA      2467030024320220D                                            061492010
+SCANP PACDPADCHUNA21RW33  010         0        VA                     3264        + 00500     18000                        061502010
+SCANP PACDPADCHUNA21RW33  020         0        VI                     2630                                                 061512010
+SCANP PACDPADCHUNA21RW33  030CHUNAPAEA0EE      CF CDB PA      2467030024320240D                                            061522010
+SCANP PACDPADCHUNA23MORDI 010CHUNAPAEA0E       IF                                             18000                        061532010
+SCANP PACDPADCHUNA23MORDI 020MORDIPAEA0EE      TF                                 + 09000                                  061542010
+SCANP PACDPADWETSI21RW08  010         0        VA                     0828        + 00500     18000                        061552010
+SCANP PACDPADWETSI21RW08  020         0    L   VIY                    3350                                                 061562010
+SCANP PACDPADWETSI21RW08  030WETSIPAEA0EE      CF CDB PA      0311010003100080D                                            061572010
+SCANP PACDPADWETSI21RW15  010         0        VA                     1463        + 00500     18000                        061582010
+SCANP PACDPADWETSI21RW15  020         0    L   VIY                    3350                                                 061592010
+SCANP PACDPADWETSI21RW15  030WETSIPAEA0EE      CF CDB PA      0311010003100080D                                            061602010
+SCANP PACDPADWETSI21RW26  010         0        VA                     2628        + 00500     18000                        061612010
+SCANP PACDPADWETSI21RW26  020CDB  PAD 0V       DF                                                                          061622010
+SCANP PACDPADWETSI21RW26  030WETSIPAEA0EE      TF                                                                          061632010
+SCANP PACDPADWETSI21RW33  010CDB  PAD 0V       DF                                             18000                        061642010
+SCANP PACDPADWETSI21RW33  020WETSIPAEA0EE      TF                                                                          061652010
+SCANP PACDPADWETSI23BINAL 010WETSIPAEA0E       IF                                             18000                        061662010
+SCANP PACDPADWETSI23BINAL 020BINALPAEA0EE      TF                                 + 08000                                  061672010
+SCANP PACDPAFB33   ACDB   010CDB  PAD 0V       IF                                             18000                 0 DS   061681210
+SCANP PACDPAFB33   ACDB   020KOPECPAEA0EY      TF                                 + 07200                           0 DS   061692209
+SCANP PACDPAFB33   ACDB   030KOPECPAEA0EE AR   HF ICDBPA      146402023263T010PI  + 04600                           0 DS   061702209
+SCANP PACDPAFB33   AELF   010ELF  PADB0N       IF                                             18000                 0 DS   061711210
+SCANP PACDPAFB33   AELF   020KOPECPAEA0EY      TF                                 + 07500                           0 DS   061722209
+SCANP PACDPAFB33   AELF   030KOPECPAEA0EE AR   HF ICDBPA      146402023263T010PI  + 04600                           0 DS   061732209
+SCANP PACDPAFB33   AUCLON 010UCLONPAEA0E  A    IF                                             18000                 0 DS   061742209
+SCANP PACDPAFB33   AUCLON 020TECONPAPC0E   R   AF CDB PA      118002500742    D   + 10000                           0 DS   061752010
+SCANP PACDPAFB33   AUCLON 030KOPECPAEA0EE BR   AF CDB PA      148002501180    D   + 04600                           0 DS   061762014
+SCANP PACDPAFB33   B      010KOPECPAEA0E  I    IF ICDBPA      14640202        PI  + 04600     18000                 0 DS   061772014
+SCANP PACDPAFB33   B      020ODOWOPAPC0E  F    CF ICDBPA      1464006632600136PI  + 02300                 CDB   PAD 0 DS   061781310
+SCANP PACDPAFB33   B      021PABGEPAPC0E S     CF ICDBPA      1464002932600038PI  + 01100             -300          0 DS   061791310
+SCANP PACDPAFB33   B      030RIDOYPAPC0EY M    CF ICDBPA      1464001432600014PI    00657             -300          0 DS   061802209
+SCANP PACDPAFB33   B      040CDB  PAD 0VYM     DF                                 + 04000                           0 DS   061811210
+SCANP PACDPAFB33   B      050CDB  PAD 0VE  L   HM                     1492T010    + 04000                           0 DS   061822209
+SCANP PACDPAFI15   ACDB   010CDB  PAD 0V       IF                                             18000                 0 DS   061832010
+SCANP PACDPAFI15   ACDB   020DEADSPAPC0EY      TF                                 + 02700                           0 DS   061842010
+SCANP PACDPAFI15   ACDB   030DEADSPAPC0EE AL   HF ICDBPA      326401481464T010PI  + 02700                           0 DS   061852010
+SCANP PACDPAFI15   AELF   010ELF  PADB0N       IF                                             18000                 0 DS   061862010
+SCANP PACDPAFI15   AELF   020DEADSPAPC0EY      TF                                 + 05900                           0 DS   061872010
+SCANP PACDPAFI15   AELF   030DEADSPAPC0EE AL   HF ICDBPA      326401481464T010PI  + 02700                           0 DS   061882010
+SCANP PACDPAFI15   AKOTIZ 010KOTIZPAEA0E  A    IF CDB PA      06820100        D               18000                 0 DS   061892010
+SCANP PACDPAFI15   AKOTIZ 020WETSIPAEA0E   L   AF CDB PA      031101000682    D   + 02700                           0 DS   061902010
+SCANP PACDPAFI15   AKOTIZ 030DEADSPAPC0EE BL   AF CDB PA      329201000311    D   + 02700                           0 DS   061912010
+SCANP PACDPAFI15   AUNETE 010UNETEPAEA0E  A    IF CDB PA      25360100        D               18000                 0 DS   061922010
+SCANP PACDPAFI15   AUNETE 020DEADSPAPC0EE BR   AF CDB PA      329201002536    D   + 02700                           0 DS   061932010
+SCANP PACDPAFI15   AWETSI 010WETSIPAEA0E  A    IF CDB PA      03110100        D               18000                 0 DS   061942010
+SCANP PACDPAFI15   AWETSI 020DEADSPAPC0EE BL   AF CDB PA      329201000311    D   + 02700                           0 DS   061952010
+SCANP PACDPAFI15   I      010DEADSPAPC0E  I    IF ICDBPA      32640148        PI  J 027000180018000                 0 DS   061962010
+SCANP PACDPAFI15   I      020JEGNOPAPC0E  F    CF ICDBPA      3264006914600079PI  H 0180001800            CDB   PAD 0 DS   061972010
+SCANP PACDPAFI15   I      030RW15 PAPG0GY M    CF ICDBPA      3264001814600051PI    00128             -310          0 DS   061982010
+SCANP PACDPAFI15   I      040         0  M     CA                     1464        + 01100                           0 DS   061992010
+SCANP PACDPAFI15   I      050CDB  PAD 0VY  L   DF                                 + 02700                           0 DS   062002010
+SCANP PACDPAFI15   I      060CDB  PAD 0VE  L   HM                     1492T010    + 02700                           0 DS   062012010
+SCANP PACDPAFL15   ACDB   010CDB  PAD 0V       IF                                             18000                 0 DS   062021210
+SCANP PACDPAFL15   ACDB   020DEADSPAPC0EY      TF                                 + 02700                           0 DS   062031310
+SCANP PACDPAFL15   ACDB   030DEADSPAPC0EE AL   HF ICDBPA      326401481464T010PI  + 02700                           0 DS   062041310
+SCANP PACDPAFL15   AELF   010ELF  PADB0N       IF                                             18000                 0 DS   062051210
+SCANP PACDPAFL15   AELF   020DEADSPAPC0EY      TF                                 + 05900                           0 DS   062061310
+SCANP PACDPAFL15   AELF   030DEADSPAPC0EE AL   HF ICDBPA      326401481464T010PI  + 02700                           0 DS   062071310
+SCANP PACDPAFL15   AKOTIZ 010KOTIZPAEA0E  A    IF CDB PA      06820100        D               18000                 0 DS   062082010
+SCANP PACDPAFL15   AKOTIZ 020WETSIPAEA0E   L   AF CDB PA      031101000682    D   + 02700                           0 DS   062092010
+SCANP PACDPAFL15   AKOTIZ 030DEADSPAPC0EE BL   AF CDB PA      329201000311    D   + 02700                           0 DS   062102010
+SCANP PACDPAFL15   AUNETE 010UNETEPAEA0E  A    IF CDB PA      25360100        D               18000                 0 DS   062112010
+SCANP PACDPAFL15   AUNETE 020DEADSPAPC0EE BR   AF CDB PA      329201002536    D   + 02700                           0 DS   062122010
+SCANP PACDPAFL15   AWETSI 010WETSIPAEA0E  A    IF CDB PA      03110100        D               18000                 0 DS   062132010
+SCANP PACDPAFL15   AWETSI 020DEADSPAPC0EE BL   AF CDB PA      329201000311    D   + 02700                           0 DS   062142010
+SCANP PACDPAFL15   L      010DEADSPAPC0E  I    IF ICDBPA      32640148        PI  + 02700     18000                 0 DS   062151310
+SCANP PACDPAFL15   L      020JEGNOPAPC0E  F    CF ICDBPA      3264006914600079PI  + 01800                 CDB   PAD 0 DS   062161310
+SCANP PACDPAFL15   L      021COTRAPAPC0E S     CF ICDBPA      3264003714600032PI  + 00760             -314          0 DS   062172010
+SCANP PACDPAFL15   L      030RW15 PAPG0G  M    CF ICDBPA      3264001814600019PI    00128             -314          0 DS   062182010
+SCANP PACDPAFL15   L      040         0  M     CA                     1464        + 01100                           0 DS   062192010
+SCANP PACDPAFL15   L      050CDB  PAD 0VY  L   DF                                 + 02700                           0 DS   062201210
+SCANP PACDPAFL15   L      060CDB  PAD 0VE  L   HM                     1492T010    + 02700                           0 DS   062212010
+SCANP PACDPAFR15   AAFVEK 010AFVEKPAPC0E       IF                                             18000                 A JS   062221310
+SCANP PACDPAFR15   AAFVEK 020DEADSPAPC0EY   010TF                                 + 04100                           A JS   062232010
+SCANP PACDPAFR15   AAFVEK 030DEADSPAPC0EE AL   HF                     14620040    + 03000                           A JS   062242010
+SCANP PACDPAFR15   ABINAL 010BINALPAEA0E       IF                                             18000                 A JS   062251303
+SCANP PACDPAFR15   ABINAL 020RIGTEPAPC0E  A 010TF                                 + 03700                           A JS   062262010
+SCANP PACDPAFR15   ABINAL 030DEADSPAPC0EE B 010TF                                 + 03000                           A JS   062272010
+SCANP PACDPAFR15   ACDB   010CDB  PAD 0V       IF                                             18000                 A JS   062281303
+SCANP PACDPAFR15   ACDB   020DEADSPAPC0EY   010TF                                 + 03000                           A JS   062292010
+SCANP PACDPAFR15   ACDB   030DEADSPAPC0EE AL   HF                     14620040    + 03000                           A JS   062302010
+SCANP PACDPAFR15   ACHUNA 010CHUNAPAEA0E       IF                                             18000                 A JS   062311303
+SCANP PACDPAFR15   ACHUNA 020GENFUPAEA0E  A 010TF                                 + 04100                           A JS   062322010
+SCANP PACDPAFR15   ACHUNA 030DEADSPAPC0EE B 010TF                                 + 03000                           A JS   062332010
+SCANP PACDPAFR15   AELF   010ELF  PADB0N       IF                                             18000                 A JS   062341303
+SCANP PACDPAFR15   AELF   020DEADSPAPC0EY   010TF                                 + 03000                           A JS   062352010
+SCANP PACDPAFR15   AELF   030DEADSPAPC0EE AL   HF                     14620040    + 03000                           A JS   062362010
+SCANP PACDPAFR15   ALAPLE 010LAPLEPAEA0E       IF                                             18000                 A JS   062371303
+SCANP PACDPAFR15   ALAPLE 020RIGTEPAPC0E  A 010TF                                 + 03000                           A JS   062382010
+SCANP PACDPAFR15   ALAPLE 030DEADSPAPC0EE B 010TF                                 + 03000                           A JS   062392010
+SCANP PACDPAFR15   ASAFKO 010SAFKOPAEA0E       IF                                             18000                 A JS   062401303
+SCANP PACDPAFR15   ASAFKO 020RIGTEPAPC0E  A 010TF                                 + 03700                           A JS   062412010
+SCANP PACDPAFR15   ASAFKO 030DEADSPAPC0EE B 010TF                                 + 03000                           A JS   062422010
+SCANP PACDPAFR15   R      010DEADSPAPC0E  I    IF                                 + 03000     18000                 A JS   062431310
+SCANP PACDPAFR15   R      020JEGNOPAPC1E  F 010TF                                 + 01800                 RW15  PAPGA JS   062442010
+SCANP PACDPAFR15   R      020JEGNOPAPC2WALPV       ALNAV/VNAV ALNAV                                                   JS   062451310
+SCANP PACDPAFR15   R      021COTRAPAPC0E S  031TF                                 V 0076000760        -310          A JS   062462010
+SCANP PACDPAFR15   R      030RW15 PAPG0GY M 031TF                                   00128             -310          A JS   062472010
+SCANP PACDPAFR15   R      040         0  M     CA                     1463        + 00275                           A JS   062481410
+SCANP PACDPAFR15   R      050PABGEPAPC0E    010DF                                                                   A JS   062492010
+SCANP PACDPAFR15   R      060AFVEKPAPC0EY   010TF                                 + 04100                           A JS   062502010
+SCANP PACDPAFR15   R      070AFVEKPAPC0EE  R   HM                     31420050    + 04100                           A JS   062511310
+SCANP PACDPAFR26   ABINAL 010BINALPAEA0E       IF                                             18000                 A JS   062521311
+SCANP PACDPAFR26   ABINAL 020GLENTPAEA0EY   020TF                     20820282    + 03700                           A JS   062531311
+SCANP PACDPAFR26   ABINAL 030LEMMRPAPC0EE A 010TF                     13500088    + 03000                           A JS   062541907
+SCANP PACDPAFR26   AGENFU 010GENFUPAEA0E       IF                                             18000                 A JS   062551907
+SCANP PACDPAFR26   AGENFU 020GLENTPAEA0EY   020TF                     07440197    + 03700                           A JS   062561907
+SCANP PACDPAFR26   AGENFU 030LEMMRPAPC0EE A 010TF                     13500088    + 03000                           A JS   062571907
+SCANP PACDPAFR26   AGLENT 010GLENTPAEA0E  A    IF                                             18000                 A JS   062581907
+SCANP PACDPAFR26   AGLENT 020LEMMRPAPC0EE B 010TF                     13500088    + 03000                           A JS   062591907
+SCANP PACDPAFR26   ASAFKO 010SAFKOPAEA0E       IF                                             18000                 A JS   062601311
+SCANP PACDPAFR26   ASAFKO 020GLENTPAEA0EY   020TF                     20520280    + 03700                           A JS   062611311
+SCANP PACDPAFR26   ASAFKO 030LEMMRPAPC0EE A 010TF                     13500088    + 03000                           A JS   062621907
+SCANP PACDPAFR26   AUNETE 010UNETEPAEA0E       IF                                             18000                 A JS   062631907
+SCANP PACDPAFR26   AUNETE 020GLENTPAEA0EY   020TF                     05010206    + 03700                           A JS   062641907
+SCANP PACDPAFR26   AUNETE 030LEMMRPAPC0EE A 010TF                     13500088    + 03000                           A JS   062651907
+SCANP PACDPAFR26   R      010LEMMRPAPC0E  I    IF                                 + 03000     18000                 A JS   062661311
+SCANP PACDPAFR26   R      020SOTOEPAPC1E  F 010TF                     21930070    + 01900                 ATELE PAPCA JS   062671713
+SCANP PACDPAFR26   R      020SOTOEPAPC2WALP        N          ALNAV                                                   JS   062681311
+SCANP PACDPAFR26   R      030ATELEPAPC0EY M 031TF                     24840050      00302             -300          A JS   062691907
+SCANP PACDPAFR26   R      040         0  M     CA                     2484        + 00800                           A JS   062701713
+SCANP PACDPAFR26   R      050GLENTPAEA0EY  R010DF                                 + 03700                           A JS   062711713
+SCANP PACDPAFR26   R      060GLENTPAEA0EE  R   HM                     13500040    + 03700                           A JS   062721311
+SCANP PACDPAFR33   ACDB   010CDB  PAD 0V       IF                                             18000                 A JS   062731210
+SCANP PACDPAFR33   ACDB   020EPHEXPAPC0EY   010TF                                 + 03800                           A JS   062742010
+SCANP PACDPAFR33   ACDB   030EPHEXPAPC0EE AR   HF                     32650040    + 03800                           A JS   062751310
+SCANP PACDPAFR33   ACHUNA 010CHUNAPAEA0E       IF                                             18000                 A JS   062761210
+SCANP PACDPAFR33   ACHUNA 020BUKAYPAPC0E  A 010TF                                 + 04500                           A JS   062772010
+SCANP PACDPAFR33   ACHUNA 030EPHEXPAPC0EE B 010TF                                 + 03800                           A JS   062782010
+SCANP PACDPAFR33   AELF   010ELF  PADB0N       IF                                             18000                 A JS   062791210
+SCANP PACDPAFR33   AELF   020EPHEXPAPC0EY   010TF                                 + 03800                           A JS   062802010
+SCANP PACDPAFR33   AELF   030EPHEXPAPC0EE AR   HF                     32650040    + 03800                           A JS   062811310
+SCANP PACDPAFR33   AMILAM 010MILAMPAEA0E       IF                                             18000                 A JS   062821212
+SCANP PACDPAFR33   AMILAM 020AVVUHPAPC0E  A 010TF                                 + 05600                           A JS   062832010
+SCANP PACDPAFR33   AMILAM 030EPHEXPAPC0EE B 010TF                                 + 03800                           A JS   062842010
+SCANP PACDPAFR33   R      010EPHEXPAPC0E  I    IF                                 + 03800     18000                 A JS   062851310
+SCANP PACDPAFR33   R      020ODOWOPAPC1E  F 010TF                                 + 02300                 RW33  PAPGA JS   062862010
+SCANP PACDPAFR33   R      020ODOWOPAPC2WALPV       ALNAV/VNAV ALNAV                                                   JS   062871310
+SCANP PACDPAFR33   R      021PABGEPAPC0E S  031TF                                 V 0110001104        -300          A JS   062882010
+SCANP PACDPAFR33   R      030RW33 PAPG0GY M 031TF                                   00148             -300          A JS   062892010
+SCANP PACDPAFR33   R      040         0  M     CA                     3264        + 00293                           A JS   062902010
+SCANP PACDPAFR33   R      050DEADSPAPC0EY   010DF                                 + 03000                           A JS   062912010
+SCANP PACDPAFR33   R      060DEADSPAPC0EE  L   HM                     14620040    + 03000                           A JS   062922010
+SCANP PACDPAFS15   ACHUNA 010CHUNAPAEA0E       IF                                             18000                 0 DS   062932201
+SCANP PACDPAFS15   ACHUNA 020CDB  PAD 0V       TF                                 + 02800                           0 DS   062942201
+SCANP PACDPAFS15   ACHUNA 030CDB  PAD 0VE AL   PI CDB PA      0000000001030100D   + 02700                           0 DS   062952201
+SCANP PACDPAFS15   AKOTIZ 010KOTIZPAEA0E  A    IF                                             18000                 0 DS   062962201
+SCANP PACDPAFS15   AKOTIZ 020DEADSPAPC0EE BL   AF CDB PA      329101000680    D   + 02700                           0 DS   062972201
+SCANP PACDPAFS15   AUNETE 010UNETEPAEA0E  A    IF                                             18000                 0 DS   062982201
+SCANP PACDPAFS15   AUNETE 020DEADSPAPC0EE BR   AF CDB PA      329101002536    D   + 02700                           0 DS   062992201
+SCANP PACDPAFS15   AWETSI 010WETSIPAEA0E  A    IF                                             18000                 0 DS   063002201
+SCANP PACDPAFS15   AWETSI 020DEADSPAPC0EE BL   AF CDB PA      329101000311    D   + 02700                           0 DS   063012201
+SCANP PACDPAFS15   S      010DEADSPAPC0E  I    IF CDB PA      32910100        D   + 02700     18000                 0 DS   063022201
+SCANP PACDPAFS15   S      020CDB  PAD 0V  F    CF CDB PA      0000000014920100D   + 01100                 CDB   PAD 0 DS   063032201
+SCANP PACDPAFS15   S      030RW15 PAPG0GY M    CF CDB PA      1453003014530030D     00123             -310          0 DS   063042201
+SCANP PACDPAFS15   S      040         0  M     CA                     1453        + 01200                           0 DS   063052201
+SCANP PACDPAFS15   S      050CDB  PAD 0VY  L   DF                                 + 02700                           0 DS   063062201
+SCANP PACDPAFS15   S      060CDB  PAD 0VE  L   HM                     1492T010    + 02700                           0 DS   063072201
+SCANP PACDPAGRW08    0049000830 N55115716W162435673         +0042600089000038150V                                          063082010
+SCANP PACDPAGRW15    0101791460 N55132050W162441642         +0037500073000055150IICDB1                                     063092010
+SCANP PACDPAGRW26    0049002630 N55115314W162423259         +0045800100000045150R                                          063101907
+SCANP PACDPAGRW33    0101793260 N55114724W162431171         +0044000093000055150R                                          063111901
+SCANP PACDPAIICDB1   011030RW15 N55114098W1624307361463N55131277W1624403650684 10020370310E01205500071                     063122010
+SCANP PACDPAPR15   RW15 001 0000W15A0N5513204995W16244164235+003750310N5511472460W16243117090106750000000553F400350E5DD5531063132010
+SCANP PACDPAPR15   RW15 002E      +00221+00221LPV       45612                                                              063142010
+SCANP PACDPAPR26   RW26 001 0000W26A0N5511456670W16242320220+004580300N5511305885W16245052350106750000000450F400000A7CCFCA8063151907
+SCANP PACDPAPR26   RW26 002E      +00303+00303LP        42730                                                              063161907
+SCANP PACDPAPR33   RW33 001 0000W33A0N5511472425W16243117070+004400300N5513204960W16244164210106750000000550F40035041B972C4063172010
+SCANP PACDPAPR33   RW33 002E      +00284+00284LPV       49106                                                              063182010
+SCANP PACDPASATELEPAPC                0   18018007125                                                                  M   063191310
+SCANP PACDPASCDB  PAD                 0   090180030251802700622527009007125                                            M   063201210
+SCANP PACDPASRW15 PAPG                0   18018007125                                                                  M   063211303
+SCANP PACDPASRW33 PAPG                0   18018007125                                                                  M   063221210
