@@ -3,6 +3,7 @@ import { CDU_ASSETS as ASSETS, type CduKeyEvent, type CduLayout } from "./layout
 import { displayLuminance, screenBrightness, type Lighting } from "./lighting";
 import { COLUMNS, type CduBackend, type CduCell, type Lamp } from "./screen";
 import { COMPASS_LETTERS, functionFor, legendFor, type CduFunction, type CduVariant } from "./variants";
+import { useFmsStationDocument } from "./FmsStationSurface";
 import "./FmsCduPanel.css";
 
 const HOLD_MS = 1000;
@@ -55,6 +56,10 @@ type Props = {
 };
 
 export default function FmsCduPanel({ backend, variant, layout, onKey, lighting = DAYLIGHT }: Props) {
+  // Resolve in the bench owner's JavaScript document before the same faceplate moves to an about:blank child.
+  const assetBase = useMemo(() => new URL(ASSETS, document.baseURI).href, []);
+  const destinationDocument = useFmsStationDocument();
+  const destinationWindow = destinationDocument.defaultView ?? window;
   const subscribe = useCallback((listener: () => void) => backend.subscribe(listener), [backend]);
   const version = useSyncExternalStore(subscribe, () => backend.revision());
   const screen = useMemo(() => backend.screen(), [backend, version]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -77,17 +82,17 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
     heldFired.current = false;
     if (functionFor(keyId, variant) === "CLR") {
       // CLR held for more than one second clears the whole scratchpad (Operator's Manual item 15).
-      holdTimer.current = window.setTimeout(() => { heldFired.current = true; fire(keyId, true); }, HOLD_MS);
+      holdTimer.current = destinationWindow.setTimeout(() => { heldFired.current = true; fire(keyId, true); }, HOLD_MS);
     } else fire(keyId);
-  }, [fire, variant]);
+  }, [fire, variant, destinationWindow]);
   const up = useCallback((keyId: string) => {
     setPressed(current => { const next = new Set(current); next.delete(keyId); return next; });
     if (holdTimer.current !== null) {
-      window.clearTimeout(holdTimer.current);
+      destinationWindow.clearTimeout(holdTimer.current);
       holdTimer.current = null;
       if (!heldFired.current) fire(keyId);
     }
-  }, [fire]);
+  }, [fire, destinationWindow]);
   /**
    * Abandons every press without firing anything: the key-up may never reach the panel once focus, pointer capture or
    * the page itself has gone, and a CLR hold timer left running would clear the scratchpad after the operator moved
@@ -95,13 +100,14 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
    */
   const cancel = useCallback(() => {
     setPressed(new Set());
-    if (holdTimer.current !== null) { window.clearTimeout(holdTimer.current); holdTimer.current = null; }
-  }, []);
+    if (holdTimer.current !== null) { destinationWindow.clearTimeout(holdTimer.current); holdTimer.current = null; }
+  }, [destinationWindow]);
   useEffect(() => {
-    const hidden = () => { if (document.visibilityState === "hidden") cancel(); };
-    document.addEventListener("visibilitychange", hidden);
-    return () => { document.removeEventListener("visibilitychange", hidden); cancel(); };
-  }, [cancel, backend]);
+    const hidden = () => { if (destinationDocument.visibilityState === "hidden") cancel(); };
+    destinationDocument.addEventListener("visibilitychange", hidden);
+    destinationWindow.addEventListener("blur", cancel);
+    return () => { destinationDocument.removeEventListener("visibilitychange", hidden); destinationWindow.removeEventListener("blur", cancel); cancel(); };
+  }, [cancel, backend, destinationDocument, destinationWindow]);
 
   const keyForFunction = useMemo(() => {
     const map = new Map<CduFunction, string>();
@@ -146,7 +152,7 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
       onKeyUp={onKeyUp}
       onBlur={cancel}
     >
-      <img className="fmsCduImage" src={`${ASSETS}panel.webp`} alt="" draggable={false} />
+      <img className="fmsCduImage" src={`${assetBase}panel.webp`} alt="" draggable={false} />
 
       <div className="fmsCduScreen" role="img" aria-label={screen.map(row => row.map(cell => cell.ch).join("").trimEnd()).join("\n")}
         style={{ left: pct(s.x, W), top: pct(s.y, H), width: pct(s.w, W), height: pct(s.h, H) }}>
@@ -167,18 +173,18 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
       })}
 
       {layout.keys.map(key => (
-        <CduKey key={key.id} physical={key} variant={variant} pressed={pressed.has(key.id)} width={W} height={H} down={down} up={up} cancel={cancel} />
+        <CduKey key={key.id} physical={key} variant={variant} pressed={pressed.has(key.id)} assetBase={assetBase} width={W} height={H} down={down} up={up} cancel={cancel} />
       ))}
     </div>
   );
 }
 
 type CduKeyProps = {
-  physical: CduLayout["keys"][number]; variant: CduVariant; pressed: boolean; width: number; height: number;
+  physical: CduLayout["keys"][number]; variant: CduVariant; pressed: boolean; assetBase: string; width: number; height: number;
   down: (keyId: string) => void; up: (keyId: string) => void; cancel: () => void;
 };
 /** One physical key. Its props change only with the variation or its own press, so a simulation tick skips it (#1349). */
-const CduKey = memo(function CduKey({ physical: key, variant, pressed, width: W, height: H, down, up, cancel }: CduKeyProps) {
+const CduKey = memo(function CduKey({ physical: key, variant, pressed, assetBase, width: W, height: H, down, up, cancel }: CduKeyProps) {
   const legend = legendFor(key.id, variant);
   const fn = functionFor(key.id, variant);
   const label = key.kind === "lsk" ? `Line select key ${key.id.slice(3, 4)} ${key.id.endsWith("L") ? "left" : "right"}` : legend.join(" ");
@@ -192,7 +198,7 @@ const CduKey = memo(function CduKey({ physical: key, variant, pressed, width: W,
       aria-label={label}
       style={{
         left: pct(key.x, W), top: pct(key.y, H), width: pct(key.w, W), height: pct(key.h, H),
-        backgroundImage: pressed ? `url(${ASSETS}pressed.webp)` : undefined,
+        backgroundImage: pressed ? `url(${assetBase}pressed.webp)` : undefined,
         backgroundSize: `${(W / key.w) * 100}% ${(H / key.h) * 100}%`,
         backgroundPosition: `${(key.x / (W - key.w)) * 100}% ${(key.y / (H - key.h)) * 100}%`,
       }}

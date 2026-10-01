@@ -381,6 +381,41 @@ These receiver/FAS contracts apply to `cma9000-later-sbas-heli` and the laborato
 
 Sources: CMC Electronics CMA-5024 datasheets ([current](https://cmcelectronics.ca/wp-content/uploads/2022/09/4.1.3-CMC-CMA5024-GPS-19-011.pdf), [earlier](http://jproc.ca/rrp/rrp3/ch148_cma5024.pdf)); the CMA-5024 GLSSU Installation Manual as hosted on [ManualsLib](https://www.manualslib.com/manual/2035147/Cmc-Electronic-Esterline-Cma-5024.html) (operating modes p. 49, outputs and SSM pp. 110–111, output tables pp. 113–122, labels 060 p. 134, 156 p. 139, 273 p. 148, 305 p. 150, 355 p. 154, FAS block p. 196); ARINC 743A label summaries ([GlobalSpec](https://standards.globalspec.com/std/10392102/arinc-743a)); FAA [AC 20-138D](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-138D_Change_1.pdf). RTCA DO-229D is cited through these, not read directly.
 
+## Cockpit and station arrangements
+
+Engineering view remains the initial layout and immediate fallback. Cockpit view places the two physical CDUs
+on either side of the EFIS and pilot controls; instructor tools open in a drawer. Narrow windows stack the panels.
+Focus bench hides application navigation until Show navigation restores it. Recording and playback still target
+CDU 1; selecting or typing into CDU 2 does not change the EFIS/AFCS guidance source or add its keys to a recording.
+
+In Cockpit view, Station arrangement offers fixed presets:
+
+| Arrangement | Bench tab | Station windows |
+| --- | --- | --- |
+| Single screen | Outside view, both CDUs, EFIS/AFCS and instructor drawer | None |
+| Two screens | Both CDUs, EFIS/AFCS and instructor drawer | Outside view |
+| Three screens | Instructor console and live dock | Outside view; complete cockpit with both CDUs and EFIS/AFCS |
+| Instructor apart | The selected preset's pilot panels and dock | Adds an instructor window to the selected preset |
+
+Restore station opens one requested window per click, preserving browser popup activation. Move windows to the
+desired screens and use the browser's full-screen command if wanted. The preset and requested window geometry
+are remembered per signed-in user in this browser; browsers can ignore placement requests. A remembered preset
+does not open windows automatically or claim they are already open. A blocked popup leaves its panel here and
+shows the retry instruction.
+
+Each live slot has Return, and each child has Return to bench. Closing a child docks its panel automatically;
+Return all panels or Engineering view restores the single-window bench. The moved React portal container retains
+its component tree, so CDU state, scenario/recording state and unfinished instructor forms survive transfer.
+The outside-view WebGL scene rebuilds when its destination document changes; loading time depends on the browser,
+renderer and available assets. Its render loop and resize follow the displayed window. CDU input/hold cleanup and
+synthetic-vision rendering likewise follow their destination document.
+
+The original bench tab owns the only simulation and clock. Keep it open and visible for continuous updates:
+browsers can throttle a hidden or minimized owner. Child rendering does not advance or compensate the simulation
+clock. Closing the owner or leaving the bench closes its station windows. These arrangements use one browser
+session, with both CDUs together; they do not provide a tablet or networked-device session. In Two screens the
+instructor drawer covers part of the cockpit until closed; in Three screens the owner is the instructor console.
+
 ## Out-the-window view
 
 "Show the view" above the cockpit opens a 3D view from the simulated aircraft, drawn with CesiumJS (Apache 2.0, bundled and served by AeroLink like the rest of the client). It is hidden until asked for, because it loads a 3D engine and the terrain around the aircraft; the choice, the layout and the view are remembered.
