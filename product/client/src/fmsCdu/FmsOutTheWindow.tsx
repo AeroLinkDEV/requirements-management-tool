@@ -228,11 +228,11 @@ async function startScene(
   // Imagery goes deeper than relief (16 against 14); past the relief's depth, a tile with no imagery is refused, and
   // Cesium draws its parent's relief there instead.
   const shader = workerReliefShader();
-  const flat = canvas(renderingDocument);
-  flat.getContext("2d")!.putImageData(new ImageData(shadeTile(new Float32Array(TILE_PIXELS * TILE_PIXELS), 30), TILE_PIXELS, TILE_PIXELS), 0, 0);
+  const flatRelief = canvas(renderingDocument);
+  flatRelief.getContext("2d")!.putImageData(new ImageData(shadeTile(new Float32Array(TILE_PIXELS * TILE_PIXELS), 30), TILE_PIXELS, TILE_PIXELS), 0, 0);
   const reliefImage = async (x: number, y: number, level: number) => {
     const tile = await heights(level, x, y);
-    if (!tile) return flat;
+    if (!tile) return flatRelief;
     const rgba = await shader.shade(tile, pixelMetres(level, tileLatitude(level, y)));
     const image = canvas(renderingDocument);
     image.getContext("2d")!.putImageData(new ImageData(rgba, TILE_PIXELS, TILE_PIXELS), 0, 0);
@@ -253,16 +253,20 @@ async function startScene(
     return image;
   };
   const groundProvider = (ground: Ground) => {
+    // Confirmed off is sticky and its relief is the same opaque image everywhere. One world tile
+    // preserves every pixel while avoiding a separate texture upload for each refined terrain mesh.
+    const flat = ground === "relief" && tiles.status === "off";
     const errorEvent = new Cesium.Event();
     // A refused tile is expected (no imagery past the relief's depth): Cesium draws the parent, and nothing is retried.
     errorEvent.addEventListener((error: { retry: boolean }) => { error.retry = false; });
     return {
       tilingScheme, rectangle: tilingScheme.rectangle, tileWidth: TILE_PIXELS, tileHeight: TILE_PIXELS,
-      minimumLevel: 0, maximumLevel: ground === "imagery" ? IMAGERY_MAX_ZOOM : RELIEF_MAX_ZOOM, hasAlphaChannel: false, ready: true,
+      minimumLevel: 0, maximumLevel: flat ? 0 : ground === "imagery" ? IMAGERY_MAX_ZOOM : RELIEF_MAX_ZOOM, hasAlphaChannel: false, ready: true,
       errorEvent, credit: undefined, proxy: undefined, tileDiscardPolicy: undefined,
       getTileCredits: () => [],
       pickFeatures: () => undefined,
       requestImage: async (x: number, y: number, level: number) => {
+        if (flat) return flatRelief;
         if (ground === "imagery") {
           const photo = await imagery.load(level, x, y);
           if (photo) return photo.partial ? underRelief(photo.image, x, y, level) : photo.image;
@@ -295,15 +299,6 @@ async function startScene(
     asked = true;
     scene.requestRender();
   };
-  const selectFlatTerrainWhenOff = () => {
-    if (tiles.status !== "off" || scene.globe.terrainProvider === flatTerrainProvider) return;
-    // Off is sticky for this cache. One provider change rebuilds the quadtree; the logical imagery
-    // layer and terrain-colouring material remain in place while Cesium rebuilds their tile resources.
-    scene.globe.terrainProvider = flatTerrainProvider;
-    request("terrain off");
-  };
-  const stopTerrainWatch = tiles.subscribe(selectFlatTerrainWhenOff);
-  selectFlatTerrainWhenOff();
   // #1298: why each frame was drawn, by the first that applies: this code asked, the camera had moved, the globe was
   // still loading tiles, or Cesium's own after-render work since the last frame: a web worker's task or a network
   // request completing (each asks for a frame), the texture atlas still filling, an event, or other. Counted per drawn
@@ -329,15 +324,30 @@ async function startScene(
 
   // The ground layer, replaced when the ground choice changes (imagery or relief).
   let groundChoice: Ground | null = null;
+  let groundFlat = false;
   let groundLayer: InstanceType<typeof Cesium.ImageryLayer> | null = null;
   const setGround = (ground: Ground) => {
-    if (ground === groundChoice) return;
+    const flat = ground === "relief" && tiles.status === "off";
+    if (ground === groundChoice && flat === groundFlat) return;
     groundChoice = ground;
+    groundFlat = flat;
     if (groundLayer) scene.imageryLayers.remove(groundLayer, true);
     groundLayer = scene.imageryLayers.addImageryProvider(groundProvider(ground), 0);
     request("ground");
   };
   setGround("imagery");
+  const selectFlatTerrainWhenOff = () => {
+    if (tiles.status !== "off") return;
+    // One sticky-off transition rebuilds the mesh quadtree. Relief also becomes one uniform world
+    // tile; photographic imagery and the terrain-colouring material retain their existing behavior.
+    if (scene.globe.terrainProvider !== flatTerrainProvider) {
+      scene.globe.terrainProvider = flatTerrainProvider;
+      request("terrain off");
+    }
+    if (groundChoice === "relief") setGround("relief");
+  };
+  const stopTerrainWatch = tiles.subscribe(selectFlatTerrainWhenOff);
+  selectFlatTerrainWhenOff();
 
   // Terrain colouring (terrainAwareness.ts), computed per pixel on the GPU from the height of the ground there: red and
   // amber against the aircraft's altitude (relative), or height bands (absolute), with a faint contour every 500 ft,
@@ -419,7 +429,8 @@ async function startScene(
   void helicopter.ready.then(outcome => { if (disposed()) return; container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; request("model"); });
   // The FAA obstacles near the bench areas (otwObstacles.ts, Brief C), coloured as the terrain colouring colours their
   // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed").
-  const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, requestRender: () => request("obstacles") });
+  const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, postRender: scene.postRender,
+    renderError: scene.renderError, requestRender: () => request("obstacles") });
   void obstacles.ready.then(outcome => { if (disposed()) return; container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; request("obstacles"); });
   const orientation = new Cesium.HeadingPitchRoll();
   // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.

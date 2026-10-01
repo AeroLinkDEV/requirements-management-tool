@@ -22,10 +22,10 @@ type ModelNode = NonNullable<ReturnType<LoadedModel["getNode"]>>;
 type Matrix4 = InstanceType<CesiumModule["Matrix4"]>;
 
 export type AircraftModel = {
-  /** Places the model and turns its rotors; nothing until it has loaded. */
+  /** Places a decoded model; turns its rotors only after Cesium's GPU readiness boundary. */
   update(modelMatrix: Matrix4 | undefined, rotorAngleRad: number, show: boolean): void;
   destroy(): void;
-  /** Whether the model has loaded (the view hides its fallback then). */
+  /** Whether the model is render-ready (the view hides its fallback then). */
   readonly loaded: boolean;
   readonly ready: Promise<{ loaded: true } | { failed: string }>;
 };
@@ -38,13 +38,41 @@ export function createAircraftModel(Cesium: CesiumModule, scene: ModelScene, url
   let destroyed = false;
   let main: ModelNode | undefined, tail: ModelNode | undefined;
   let mainBase: Matrix4 | undefined, tailBase: Matrix4 | undefined;
-  const ready = Cesium.Model.fromGltfAsync({ url, upAxis: Cesium.Axis.Z, forwardAxis: Cesium.Axis.X, show: false }).then(loaded => {
-    if (destroyed) { loaded.destroy(); return { failed: "destroyed before the model loaded" } as const; }
+  let removeReady: (() => void) | undefined, removeError: (() => void) | undefined;
+  let settle: ((result: { loaded: true } | { failed: string }) => void) | undefined;
+  const ready: AircraftModel["ready"] = new Promise(resolve => { settle = resolve; });
+  const detach = () => { removeReady?.(); removeError?.(); removeReady = removeError = undefined; };
+  const finish = (result: { loaded: true } | { failed: string }) => {
+    detach();
+    settle?.(result);
+    settle = undefined;
+  };
+  const failed = (error: unknown) => {
+    finish({ failed: `helicopter model not loaded: ${error instanceof Error ? error.message : String(error)}` });
+    // Cesium can emit errorEvent during Model.update and continue using the model on that stack.
+    // Keep the fallback immediately, but release GPU resources only once that update has unwound.
+    const failedModel = model;
+    model = null;
+    if (failedModel) void Promise.resolve().then(() => { scene.primitives.remove(failedModel); });
+    if (!destroyed) scene.requestRender?.();
+  };
+  void Cesium.Model.fromGltfAsync({ url, upAxis: Cesium.Axis.Z, forwardAxis: Cesium.Axis.X, show: false }).then(loaded => {
+    if (destroyed) { loaded.destroy(); return; }
+    // File decoding finishes before GPU initialization. The primitive must enter the scene so its first
+    // render can initialize it; waiting for ready before adding it would prevent that render entirely.
     model = scene.primitives.add(loaded);
-    return { loaded: true } as const;
-  }, (error: unknown) => ({ failed: `helicopter model not loaded: ${error instanceof Error ? error.message : String(error)}` }) as const);
+    const rendered = () => {
+      if (destroyed || model !== loaded || !loaded.ready) return;
+      finish({ loaded: true });
+      scene.requestRender?.();
+    };
+    removeReady = loaded.readyEvent.addEventListener(rendered);
+    removeError = loaded.errorEvent.addEventListener(failed);
+    scene.requestRender?.();
+    rendered(); // Also support a model whose GPU initialization has already completed.
+  }).catch(failed);
   const nodes = () => {
-    if (!model || main) return;
+    if (!model?.ready || main) return;
     // The nodes are reachable once the model is ready (its first frames); their original matrices hold the hub places.
     main = model.getNode("main_rotor");
     tail = model.getNode("tail_rotor");
@@ -52,19 +80,21 @@ export function createAircraftModel(Cesium: CesiumModule, scene: ModelScene, url
     if (tail) tailBase = Cesium.Matrix4.clone(tail.originalMatrix);
   };
   return {
-    get loaded() { return model !== null; },
+    get loaded() { return model?.ready === true; },
     ready,
     update(modelMatrix, rotorAngleRad, show) {
       if (!model) return;
       model.show = show;
       if (!show || !modelMatrix) return;
       model.modelMatrix = modelMatrix;
+      if (!model.ready) return;
       nodes();
       if (main && mainBase) main.matrix = Cesium.Matrix4.multiply(mainBase, Cesium.Matrix4.fromRotation(Cesium.Matrix3.fromRotationZ(rotorAngleRad)), new Cesium.Matrix4());
       if (tail && tailBase) tail.matrix = Cesium.Matrix4.multiply(tailBase, Cesium.Matrix4.fromRotation(Cesium.Matrix3.fromRotationY(rotorAngleRad * TAIL_TO_MAIN)), new Cesium.Matrix4());
     },
     destroy() {
       destroyed = true;
+      finish({ failed: "destroyed before the model was render-ready" });
       if (model) scene.primitives.remove(model);
       model = null;
     },
