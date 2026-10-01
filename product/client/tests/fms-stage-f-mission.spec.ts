@@ -10,7 +10,7 @@ import {
   REAL_COASTAL_STATIONS, SYNTHETIC_COASTAL_STATIONS, SYNTHETIC_PROVENANCE, canonicalJson, fixtureHash, stageFMissionManifest,
 } from '../src/fmsCdu/stageFMission'
 
-// F15 (FMS_STAGE_F_PLAN.md), Astra's integration item 7: the Stage F acceptance mission's fixture. It is reproducible
+// F15 of the Stage F plan, Astra's integration item 7: the Stage F acceptance mission's fixture. It is reproducible
 // (the same declared inputs give the same fixture hash), it names its data files by SHA-256, and the coastal coverage
 // the real CIFP extract lacks is synthetic: flagged, declared with a terrain elevation (F1's contract), and never
 // found by a lookup in the CIFP data. The expected results are slots for the items that will compute them.
