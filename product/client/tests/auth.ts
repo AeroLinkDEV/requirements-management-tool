@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test'
 import type { APIRequestContext, Locator, Page } from '@playwright/test'
+import { retryOnBufferSpace } from './bootstrap-retry'
 export const apiBase=process.env.AEROLINK_E2E_API_BASE??'http://127.0.0.1:5082'
 
 export type ShowcaseSeed = {
@@ -59,7 +60,7 @@ async function discoverFmsTarget(page: Page): Promise<Pick<ShowcaseSeed, 'progra
   }
 }
 
-export async function login(page:Page,userName='admin',options:LoginOptions={}){
+async function signIn(page:Page,userName:string){
   await page.goto('/')
   // A journey may change users without creating a new BrowserContext. The shell redirects an already
   // authenticated session straight to Projects, so clear that session before looking for the login form.
@@ -74,6 +75,12 @@ export async function login(page:Page,userName='admin',options:LoginOptions={}){
   await page.getByLabel('Password').fill('AeroLink!2026')
   await page.getByRole('button',{name:/Sign in securely/}).click()
   await expect(page.getByRole('heading',{name:/Create your first program|Projects/})).toBeVisible()
+}
+
+export async function login(page:Page,userName='admin',options:LoginOptions={}){
+  // #986: only a bootstrap that failed with net::ERR_NO_BUFFER_SPACE is retried, annotated and logged (bootstrap-retry.ts).
+  // Signing in again is safe: an attempt that got as far as signing in is signed out first.
+  await retryOnBufferSpace(page,'login bootstrap',()=>signIn(page,userName))
   if(options.openProject!==false&&await page.getByRole('heading',{name:'Projects'}).count()){
     // The display name is intentionally non-unique. Use the exact server identity supplied by global setup;
     // the strict fallback preserves old isolated fixtures without silently picking an arbitrary duplicate.
