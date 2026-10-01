@@ -27,9 +27,9 @@ import { coldTemperatureCorrection, computeProfile, formatConstraint, parseConst
 import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
 import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from "./civilNavigation";
 import type { SensorSolution } from "./sensorState";
-import { BenchRadioReceiver, radioFixes, type RadioFix, type RadioMotion } from "./radioNavigation";
+import { BenchRadioReceiver, radioFixes, type DmeStationStatus, type RadioFix, type RadioMotion } from "./radioNavigation";
 import { transitionAlert } from "./sensorTransitions";
-import { sampled, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
+import { MAX_ACCEPTED_TAS_KT, sampled, sampledDoppler, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
 import { RADIO_PAGES } from "./radioPages";
 import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
@@ -185,6 +185,9 @@ export type MovingRendezvous = {
   ttg: number | null;
   distanceNm: number | null;
 };
+
+/** The DESELECT 1/1 lines (M300 17-2) of the equipment this profile configures; GPS has its own page. */
+export type DeselectableInput = "TAS" | "HDG" | "DME" | "VOR/DME/TCN" | "DVS" | "KALMAN";
 
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
@@ -1053,6 +1056,37 @@ export class ScriptedFms implements CduBackend {
     if (!this.rms) return;
     const stations = this.vorDmeStations();
     (["nav1", "nav2"] as const).forEach((device, index) => { if (stations[index]) this.rms!.autoTune(device, stations[index].frequency); });
+    // Plan F7 (M300 12-19): the TACAN unit is tuned by the FMS to the nearest TACAN-capable station's channel.
+    const tacan = this.tacanStations()[0];
+    const channel = tacan?.channel;
+    if (channel && this.options()?.tacan?.configured === true) {
+      const pending = this.rms.requests.find(request => request.device === "tacan" && request.status === "PENDING");
+      if ((pending?.value ?? this.rms.state.tacan) !== channel) this.rms.autoTune("tacan", channel);
+    }
+  }
+  private options() { return this.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined; }
+  /** TACAN-capable stations in range, nearest first (a TACAN or VORTAC with a channel). */
+  tacanStations(): Navaid[] {
+    return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && ["TACAN", "VORTAC"].includes(entry.type)
+      && entry.channel !== undefined && !this.inhibited.includes(entry.ident))
+      .sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position));
+  }
+  /** The TACAN's measured magnetic bearing to its station and its slant range (null without valid words). */
+  tacanBearingAndRange(): { bearing: number; rangeNm: number } | null {
+    const station = this.tacanStation();
+    const observation = station ? this.sensorFrame?.radios.find(entry => entry.station.ident === station.ident) : undefined;
+    if (!station || !observation || sampled(observation.reportedDmeIdent, this.now.getTime(), this.sensorMaxAge) !== station.ident) return null;
+    const bearing = observation ? sampled(observation.bearingTrue, this.now.getTime(), this.sensorMaxAge) : null;
+    const range = observation ? sampled(observation.slantRangeNm, this.now.getTime(), this.sensorMaxAge) : null;
+    const variation = station ? this.magvar.field(station.position, 0, this.utcTime)?.declination : undefined;
+    if (bearing === null || range === null || variation === undefined || !Number.isFinite(bearing) || !Number.isFinite(range) || range < 0) return null;
+    // The observation supplies station-to-aircraft radial. This page promises bearing TO the station.
+    return { bearing: normalizeAngle(bearing + 180 - variation), rangeNm: range };
+  }
+  /** The station the TACAN reports it is tuned to: the nearest TACAN-capable station on its channel (none while it reports nothing). */
+  tacanStation(): Navaid | undefined {
+    const channel = this.rms?.receiving("tacan") ?? null;
+    return channel === null ? undefined : this.tacanStations().find(station => station.channel === channel);
   }
 
   /** A standalone computer's radios advance with it; every computer raises its own radio messages (Appendix E). */
@@ -1089,7 +1123,8 @@ export class ScriptedFms implements CduBackend {
     // Plan C3: the scan roster (up to six DME-capable stations, F6's selection) goes to the DMEs' scan channels; only the
     // stations a scan channel is on now are tuned, with the scan channel's acquisition time.
     const parameters = this.aircraftProfile.parameters;
-    const roster = this.autoRadioStations().filter(dmeCapable);
+    // DME DESELECT (M300 12-18): a deselected station is never scanned.
+    const roster = this.autoRadioStations().filter(station => dmeCapable(station) && !this.dmeDeselected.includes(station.ident));
     this.rangeOwner.clear();
     rms.setScanRoster(roster.map(station => ({ ident: station.ident, frequency: station.frequency })), parameters.dmeScanDwell.value);
     for (const on of rms.scanning()) {
@@ -1110,6 +1145,13 @@ export class ScriptedFms implements CduBackend {
       const ranging = this.dmeStation(dme);
       if (ranging && rms.dmeReceiving(dme)) { stations.set(ranging.ident, ranging); range.add(ranging.ident); this.assignRange(ranging.ident, dme, 1, ranging.frequency); }
     });
+    // Plan F7: the TACAN gives its station's bearing and range for VOR/DME/TCN; AUTO-tuned, it is eligible under the same
+    // autoVorNavigation choice as an AUTO-tuned VOR (DEC-150; M300 12-19's default is manually tuned only).
+    const tacan = this.tacanStation();
+    if (tacan) {
+      stations.set(tacan.ident, tacan); range.add(tacan.ident);
+      if (rms.navMode("tacan") === "MAN" || autoEligible) bearing.add(tacan.ident);
+    }
     return { stations: [...stations.values()], use: { range, bearing }, acquisition };
   }
 
@@ -1117,6 +1159,9 @@ export class ScriptedFms implements CduBackend {
   private rangeOwner = new Map<string, RangeIdentity>();
   private rangeCache = new Map<string, RadioObservation>();
   private previousMeasuredRadio: RadioFix | null = null;
+  private radioFixesLast: RadioFix[] = [];
+  /** Candidate positions and original measurement provenance feed the sensor status pages. */
+  get lastRadioFixes(): readonly RadioFix[] { return structuredClone(this.radioFixesLast); }
   private radioMotion: RadioMotion | null = null;
   private assignRange(ident: string, receiver: DmeDevice, channel: 1 | 2 | 3, frequency: string) {
     const identity = this.rms?.dmeTuning(receiver, channel);
@@ -1200,9 +1245,11 @@ export class ScriptedFms implements CduBackend {
     if (this.radioMotion && now >= this.radioMotion.at && now - this.radioMotion.at <= this.sensorMaxAge) return this.radioMotion;
     const dvs = this.dopplerEarth(now), air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
     if (dvs) return { source: "DVS", at: Math.min(this.sensorFrame!.dvs!.at, this.sensorFrame!.air.at),
-      northKt: dvs.northKt + (this.waterCurrent?.northKt ?? 0), eastKt: dvs.eastKt + (this.waterCurrent?.eastKt ?? 0), gpsDependent: false };
+      northKt: dvs.northKt + (dvs.surface === "SEA" ? this.waterCurrent?.northKt ?? 0 : 0),
+      eastKt: dvs.eastKt + (dvs.surface === "SEA" ? this.waterCurrent?.eastKt ?? 0 : 0), gpsDependent: false };
     const wind = this.navigation.measuredWind;
-    if (!air || air.tasValid === false || air.headingValid === false || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
+    if (this.deselected.has("TAS") || this.deselected.has("HDG") || !air || air.tasValid === false || air.headingValid === false
+      || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
       || ![air.tasKt, air.headingTrue, wind.north, wind.east].every(Number.isFinite)) return null;
     const heading = air.headingTrue * Math.PI / 180;
     return { source: "AIR_WIND", at: Math.min(this.sensorFrame!.air.at, wind.at),
@@ -1292,7 +1339,7 @@ export class ScriptedFms implements CduBackend {
 
   // The radios, for the bench and tests.
   radioReceiving(device: RadioDevice) { return this.rms?.receiving(device) ?? null; }
-  navRadioMode(device: "nav1" | "nav2") { return this.rms?.navMode(device) ?? "MAN"; }
+  navRadioMode(device: "nav1" | "nav2" | "tacan") { return this.rms?.navMode(device) ?? "MAN"; }
   setNavRadioMode(device: "nav1" | "nav2", mode: "AUTO" | "MAN") { this.rms?.setNavMode(device, mode); }
   /**
    * Bench/scenario stimulus through the physical RMS port, shared in dual operation independently of cross-talk.
@@ -1367,7 +1414,7 @@ export class ScriptedFms implements CduBackend {
     const apirs = { northMs2: accel(north, previous?.north, bias.north), eastMs2: accel(east, previous?.east, bias.east) };
     const heading = (this.aircraft.heading ?? this.heading) * Math.PI / 180;
     const overSurfaceNorth = north - this.surfaceDrift.northKt, overSurfaceEast = east - this.surfaceDrift.eastKt;
-    const dvs = { alongKt: overSurfaceNorth * Math.cos(heading) + overSurfaceEast * Math.sin(heading),
+    const dvs = { surface: this.dvsInputSurface, verticalFtMin: this.aircraft.verticalSpeed ?? 0, alongKt: overSurfaceNorth * Math.cos(heading) + overSurfaceEast * Math.sin(heading),
       acrossKt: -overSurfaceNorth * Math.sin(heading) + overSurfaceEast * Math.cos(heading) };
     const word = <T>(value: T, failed: boolean) => ({ at: now, sequence, status: failed ? "FAIL" as const : "NORMAL" as const, value: failed ? null : value });
     return { apirs: word(apirs, this.sensorHealth.APIRS === "FAIL" || this.injected.has("apirsFail")),
@@ -1388,6 +1435,46 @@ export class ScriptedFms implements CduBackend {
   setApirsFaultBias(northMs2: number, eastMs2: number) { this.apirsFaultBias = { north: northMs2, east: eastMs2 }; }
   setSensorHealth(sensor: "APIRS" | "DVS", health: "NORMAL" | "FAIL") { this.sensorHealth[sensor] = health; }
   /** DVS STATUS 2/2 WATER CURRENT (M300 12-23): the surface's drift the crew enters, direction toward and speed. */
+  private dvsMagnetic = false;
+  /** DVS STATUS 2/2 shows the wind magnetic (or true); outside the polar area the crew toggles it (M300 12-22). */
+  get dvsWindMagnetic() { return this.dvsMagnetic && !polarRegion(this.position); }
+  setDvsWindMagnetic(on: boolean) { this.dvsMagnetic = on; }
+  get inPolarArea() { return polarRegion(this.position); }
+  /** Native laboratory producer setting. Navigation consumes only the resulting measured word. */
+  private dvsInputSurface: "LAND" | "SEA" = "LAND";
+  setDvsInputSurface(surface: "LAND" | "SEA"): boolean {
+    if (this.sensorPort || surface !== "LAND" && surface !== "SEA") return false;
+    this.dvsInputSurface = surface;
+    this.updateNavigation(0);
+    return true;
+  }
+  /** The water current the crew entered (direction toward, true, and speed), for DVS STATUS 2/2. */
+  get waterCurrentEntry(): { toward: number; speedKt: number } | null {
+    const current = this.waterCurrent;
+    return current ? { toward: (Math.atan2(current.eastKt, current.northKt) * 180 / Math.PI + 360) % 360, speedKt: Math.hypot(current.northKt, current.eastKt) } : null;
+  }
+  /** DVS STATUS 1/2 (M300 12-21): the Doppler's body-axis velocities and its mode (FAIL without a valid word). */
+  get dvsStatus() {
+    const word = sampledDoppler(this.sensorFrame?.dvs, this.now.getTime(), this.sensorMaxAge);
+    const source = this.sensorPort ? "external adapter" : "native laboratory";
+    const at = this.sensorFrame?.dvs && Number.isFinite(this.sensorFrame.dvs.at) ? this.sensorFrame.dvs.at : null;
+    if (!word) return { vxKt: null, vyKt: null, vzFtMin: null, mode: "FAIL", at, source };
+    return { vxKt: word.alongKt, vyKt: word.acrossKt, vzFtMin: word.verticalFtMin ?? null, mode: word.surface ?? "LAND", at, source };
+  }
+  /**
+   * KALMAN STATUS 1/1 (M300 12-24): the operating mode (INI until the mode is available, NAV while it is), the emulated INS
+   * and GPS positions, the 2-sigma position error in metres, and whether GPS aiding and the APIRS are ready.
+   */
+  get kalmanStatus() {
+    const now = this.now.getTime(), sensors = this.sensorState?.sensors ?? [];
+    const kalman = sensors.find(sensor => sensor.mode === "KALMAN");
+    const gps = sensors.find(sensor => sensor.mode === "GPS");
+    const chosen = this.gpsStatus.chosen === null ? null : this.gpsStatus.assessed[this.gpsStatus.chosen]?.fix ?? null;
+    const twoSigma = this.navigation.kalmanTwoSigmaNm;
+    return { opMode: kalman?.available ? "NAV" : "INI", kalmanPosition: kalman?.available ? this.navigation.kalmanPosition : null,
+      gpsPosition: chosen, twoSigmaM: twoSigma === null || !kalman?.available ? null : twoSigma * 1852,
+      gpsReady: gps?.integrity === true, apirsReady: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge) !== null && now - this.poweredAt >= 60_000 };
+  }
   setWaterCurrent(toward: number | null, speedKt = 0) {
     this.waterCurrent = toward === null ? null
       : { northKt: speedKt * Math.cos(toward * Math.PI / 180), eastKt: speedKt * Math.sin(toward * Math.PI / 180) };
@@ -1399,11 +1486,13 @@ export class ScriptedFms implements CduBackend {
 
   /** The Doppler velocity in earth axes, rotated with the FMS's own heading (null without a valid word). */
   private dopplerEarth(now: number) {
-    const body = sampled(this.sensorFrame?.dvs, now, this.sensorMaxAge);
+    const body = sampledDoppler(this.sensorFrame?.dvs, now, this.sensorMaxAge);
     const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
+    // A deselected DVS, or a deselected heading (the DVS needs it to resolve its velocities), gives no DVS solution.
+    if (this.deselected.has("DVS") || this.deselected.has("HDG")) return null;
     if (!body || !air || air.headingValid === false || !Number.isFinite(air.headingTrue)) return null;
     const heading = air.headingTrue * Math.PI / 180;
-    return { northKt: body.alongKt * Math.cos(heading) - body.acrossKt * Math.sin(heading), eastKt: body.alongKt * Math.sin(heading) + body.acrossKt * Math.cos(heading) };
+    return { northKt: body.alongKt * Math.cos(heading) - body.acrossKt * Math.sin(heading), eastKt: body.alongKt * Math.sin(heading) + body.acrossKt * Math.cos(heading), surface: body.surface ?? "LAND" };
   }
 
   /** Last input as published, for replay/adapter diagnostics. This is separate from the computed position. */
@@ -1476,14 +1565,23 @@ export class ScriptedFms implements CduBackend {
     const gps = this.updateGps(this.sensorFrame);
     const previous = this.nav.mode, previousSource = this.nav.gpsSource;
     const now = this.now.getTime();
-    const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
-    // External adapters supply their own identity; missing identity stays fresh-only and cannot qualify for NAIM.
+    // Plan F9 (M300 17-2, 17-3): a deselected TAS or HDG is not used (a deselected TAS stops the wind computation; dead
+    // reckoning then has no air data), a deselected DME takes every DME range (so DME/DME and VOR/DME), and a deselected
+    // VOR/DME/TCN takes the VOR/DME candidates.
+    const measuredAir = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
+    const air = measuredAir && { ...measuredAir, ...(this.deselected.has("TAS") ? { tasKt: NaN } : {}), ...(this.deselected.has("HDG") ? { headingTrue: NaN } : {}) };
+    // External adapters supply original receiver identity, verified against physical feedback.
     if (this.sensorPort) this.radioTuning();
     this.updateRangeCache(this.sensorFrame?.radios ?? [], now);
-    const observations = this.rangeObservationsForFix().filter(observation => !this.inhibited.includes(observation.station.ident));
-    const radios = air ? radioFixes(observations, this.here, air.altitudeFt, now,
-      this.aircraftProfile.parameters, { rangeMaxAgeS: this.aircraftProfile.parameters.dmeRangeCacheAge.value,
-        motion: this.rangeMotion(now, observations, air.altitudeFt), unalignedMotionKt: air.tasKt + this.aircraftProfile.parameters.rangeMotionWindAllowance.value }) : [];
+    const radioInput = this.deselected.has("DME") ? [] : this.rangeObservationsForFix().filter(observation => !this.inhibited.includes(observation.station.ident));
+    const allRadios = air ? radioFixes(radioInput, this.here, air.altitudeFt, now,
+      this.aircraftProfile.parameters, { rangeMaxAgeS: this.aircraftProfile.parameters.dmeRangeCacheAge.value, motion: this.rangeMotion(now, radioInput, air.altitudeFt),
+        // With TAS selected out, widen old geometry against the existing accepted-air ceiling. This is only an age
+        // allowance: no measured translation and no independent NAIM qualification are obtained from it.
+        unalignedMotionKt: (Number.isFinite(air.tasKt) ? air.tasKt : MAX_ACCEPTED_TAS_KT) + this.aircraftProfile.parameters.rangeMotionWindAllowance.value,
+        typical95Nm: this.flightPhase === "EN ROUTE" ? 0.5 : 0.4, dmeDeselected: new Set(this.dmeDeselected) }, this.dmeStatusLast = []) : [];
+    const radios = allRadios.filter(fix => !(fix.mode === "VOR/DME" && this.deselected.has("VOR/DME/TCN")));
+    this.radioFixesLast = radios;
     const measurement = (index: number): PositionMeasurement | null => {
       const assessed = gps.assessed[index], bus = gps.buses[index];
       if (!assessed?.fix || !bus) return null;
@@ -1497,11 +1595,13 @@ export class ScriptedFms implements CduBackend {
     if (previousSource !== null && uncertainOrder.includes(previousSource - 1)) uncertainOrder.sort(index => index === previousSource - 1 ? -1 : 1);
     const uncertainIndex = uncertainOrder.find(index => gps.assessed[index].reason === "INTEGRITY" && gps.assessed[index].fix !== null);
     const predicted = this.navigation.current.position;
+    const doppler = this.dopplerEarth(now);
     const selection = this.navigation.update({ dt, air, airAt: this.sensorFrame?.air.at, gps: gps.chosen === null ? null : measurement(gps.chosen),
       uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio: null, radios,
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp,
-      apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: this.dopplerEarth(now), waterCurrent: this.waterCurrent,
-      kalmanReady: now - this.poweredAt >= 60_000, now, naimMaxAgeS: this.aircraftProfile.parameters.naimRangeMaxAge.value });
+      // The crew's water current corrects the Doppler only in SEA mode (M300 12-22).
+      apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: doppler, waterCurrent: doppler?.surface === "SEA" ? this.waterCurrent : null,
+      kalmanReady: now - this.poweredAt >= 60_000 && !this.deselected.has("KALMAN"), now, naimMaxAgeS: this.aircraftProfile.parameters.naimRangeMaxAge.value });
     // Entering dead reckoning from another mode: FMS NAV IN DR, a status advisory (M300 Appendix E, E-33), white in the
     // scratchpad and below any alert raised with it. Each mode's NAV LOST is raised by the transition table below.
     if (previous !== "DR" && selection.mode === "DR") this.advisory("FMS NAV IN DR");
@@ -1714,6 +1814,29 @@ export class ScriptedFms implements CduBackend {
   /** How the FMS judged each receiver at the last navigation update, and which it navigates on (index), if any. */
   get gpsStatus(): GpsAssessment { return this.gpsAssessment; }
   get gpsReceiverChoice(): GpsChoice { return this.gpsChoice; }
+  /** DESELECT 1/1 (M300 17-2, 17-3): the inputs and navigation sources the crew has deselected. */
+  private deselected = new Set<DeselectableInput>();
+  get deselectedInputs(): ReadonlySet<DeselectableInput> { return this.deselected; }
+  setDeselected(input: DeselectableInput, deselected: boolean) {
+    if (deselected) this.deselected.add(input); else this.deselected.delete(input);
+    this.updateNavigation(0);
+  }
+  /**
+   * Each DESELECT line's state (M300 17-3): DESEL when the crew deselected it, VALID when it provides valid data now, ACQ
+   * (acquiring) when it is selected but provides none.
+   */
+  inputState(input: DeselectableInput): "VALID" | "ACQ" | "DESEL" {
+    if (this.deselected.has(input)) return "DESEL";
+    const now = this.now.getTime(), air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
+    const sensors = this.sensorState?.sensors ?? [];
+    const valid = input === "TAS" ? air !== null && air.tasValid !== false && Number.isFinite(air.tasKt) && air.tasKt >= 0 && air.tasKt <= MAX_ACCEPTED_TAS_KT
+      : input === "HDG" ? air !== null && air.headingValid !== false && Number.isFinite(air.headingTrue)
+      : input === "DME" ? this.lastRadioFixes.some(fix => fix.mode === "DME/DME") || this.rangeCache.size > 0
+      : input === "VOR/DME/TCN" ? this.lastRadioFixes.some(fix => fix.mode === "VOR/DME")
+      : input === "DVS" ? this.dopplerEarth(now) !== null
+      : sensors.some(sensor => sensor.mode === "KALMAN" && sensor.available);
+    return valid ? "VALID" : "ACQ";
+  }
   /** Whether the approach may be flown on the selected receiver after the last source change, and why a transfer was refused. */
   get gpsApproachSource() { return this.gpsSelection; }
   /** Receivers lost and recovered, and each transfer of the FMS's GPS source with its reason, newest first. */
@@ -2966,6 +3089,25 @@ export class ScriptedFms implements CduBackend {
   get navState() { return this.nav; }
   get truePosition() { return this.truth; }
   get inhibitedNavaids() { return this.inhibited; }
+  /** DME DESELECT (M300 12-18): up to 25 stations the crew keeps out of DME navigation. */
+  private dmeDeselected: string[] = [];
+  private dmeStatusLast: DmeStationStatus[] = [];
+  get dmeDeselectedStations(): readonly string[] { return this.dmeDeselected; }
+  setDmeDeselected(idents: readonly string[]) { this.dmeDeselected = [...new Set(idents)].slice(0, 25); this.updateNavigation(0); }
+  /**
+   * DME STATUS (M300 12-17): each roster station with its status: used (blank), REJ (geometry, or a range the consistency
+   * check excluded) or N/A (no reply to its tuning), its frequency and its slant range.
+   */
+  get dmeStatus(): { ident: string; status: "" | "REJ" | "N/A"; reason?: string; frequency: string; slantNm: number | null }[] {
+    const rms = this.rms;
+    if (!rms) return [];
+    return rms.scanRoster().map(station => {
+      const solved = this.dmeStatusLast.find(entry => entry.ident === station.ident);
+      const range = this.rangeCache.get(station.ident)?.slantRangeNm.value ?? null;
+      const status = !solved ? "N/A" as const : solved.status === "USED" ? "" as const : "REJ" as const;
+      return { ident: station.ident, status, ...(solved?.reason ? { reason: solved.reason } : {}), frequency: station.frequency, slantNm: range };
+    });
+  }
   get gpsNavSelected() { return this.gpsSelected; }
   /**
    * RNP and ANP as every consumer reads them: PROGRESS, NAV STATUS, the EFIS, the RNP annunciator and CHECK ANP (R11).

@@ -99,6 +99,8 @@ test('F2: the selected candidate need not be the first weighed: a GPS rejected a
   const unit = new ScriptedFms(() => new Date(now))
   const step = (seconds: number) => { for (let i = 0; i < seconds; i++) { now += 1000; unit.updateNavigation(1) } }
   step(60)
+  // A crew RNP of 2: the VOR/DME here (1.5 NM accurate past 7 NM, M300 15-3) then has integrity and is a qualifying backup.
+  unit.setRnp(2)
   for (const index of [0, 1]) {
     stimulusFor(unit).apply(index, { op: 'override', label: '130', kind: 'FORCE', amount: 3 })
     stimulusFor(unit).apply(index, { op: 'override', label: '110', kind: 'BIAS', amount: 0.05 })

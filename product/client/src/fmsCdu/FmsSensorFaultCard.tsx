@@ -16,10 +16,11 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
   const [radialBias, setRadialBias] = useState("10");
   const [headingBias, setHeadingBias] = useState("10");
   const [duration, setDuration] = useState("51");
+  const [dvsSurface, setDvsSurface] = useState<"LAND" | "SEA">("LAND");
   const [notice, setNotice] = useState("No sensor stimulus applied.");
   const apply = (action: SensorStimulus) => {
     try {
-      const owner = action.kind === "airInput" || action.kind === "gpsPair" || action.kind === "powerInterrupt" ? sensorOwner : backend;
+      const owner = action.kind === "airInput" || action.kind === "dvsInput" || action.kind === "gpsPair" || action.kind === "powerInterrupt" ? sensorOwner : backend;
       applySensorStimulus(owner, action);
       recordTo?.sensor(action);
       setNotice(`${owner.utcTime.toISOString()}: ${describeSensorStimulus(action)}.`);
@@ -27,6 +28,8 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
   };
   const faults = backend.radioPort?.faults(device);
   const input = sensorOwner.navigationInputs;
+  const doppler = sensorOwner.dvsStatus;
+  const tacan = backend.tacanBearingAndRange();
   const observation = input?.radios.find(entry => entry.station.ident === station);
   const number = (value: number | null | undefined) => value === null || value === undefined ? "—" : value.toFixed(2);
   return <section className="fmsBenchCard fmsSensorFaultCard" aria-label="Sensor fault laboratory">
@@ -47,7 +50,7 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
     </div>
     {device === "dme1" || device === "dme2" ? <p className="fmsBenchHint">DME tuning follows its paired NAV receiver. An independent DME control path fault is not supported; receiver and measurement bus faults remain available.</p> : null}
     <p className="fmsBenchReadout" data-testid="sensor-radio-readout">{RADIO_NAMES[device]}: receiver {faults?.receiver}, control {faults?.controlPath}, bus {faults?.measurementBus}; reported frequency {device === "dme1" || device === "dme2" ? backend.radioPort?.dmeReceiving(device) ? backend.dmeStation(device)?.frequency ?? "none" : "none" : backend.radioReceiving(device) ?? "none"}.
-      {device === "nav1" || device === "nav2" ? ` Radial ${number(backend.navRadial(device))}°.` : device === "dme1" || device === "dme2" ? ` Range ${number(backend.dmeSlantRangeNm(device))} NM; ident ${backend.dmeReportedIdent(device) ?? "none"}.` : device === "adf" || device === "adf2" ? ` Relative bearing ${number(backend.adfRelativeBearing(device))}°.` : " TACAN measurements remain unavailable in this bench."}</p>
+      {device === "nav1" || device === "nav2" ? ` Radial ${number(backend.navRadial(device))}°.` : device === "dme1" || device === "dme2" ? ` Range ${number(backend.dmeSlantRangeNm(device))} NM; ident ${backend.dmeReportedIdent(device) ?? "none"}.` : device === "adf" || device === "adf2" ? ` Relative bearing ${number(backend.adfRelativeBearing(device))}°.` : ` TACAN station ${backend.tacanStation()?.ident ?? "none"}; paired navigation measurements ${tacan ? `bearing ${number(tacan.bearing)}°, range ${number(tacan.rangeNm)} NM` : "unavailable"}.`}</p>
     <form className="fmsBenchAlert" onSubmit={event => {
       event.preventDefault();
       const ident = station.trim().toUpperCase();
@@ -77,6 +80,11 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
       <label>Navigation heading bias<input type="number" aria-label="Navigation heading bias degrees" min={-180} max={180} value={headingBias} onChange={event => setHeadingBias(event.target.value)} required /></label><button type="submit">Apply heading bias</button>
     </form>
     <p className="fmsBenchReadout" data-testid="sensor-air-readout">Measured navigation TAS {number(input?.air.value?.tasKt)} kt ({input?.air.value?.tasValid === false ? "invalid" : "valid"}); heading {number(input?.air.value?.headingTrue)}° ({input?.air.value?.headingValid === false ? "invalid" : "valid"}). Physical heading {number(sensorOwner.heading)}°. APIRS {input?.apirs?.status ?? "NCD"}; DVS {input?.dvs?.status ?? "NCD"}; navigation {sensorOwner.navPerformance.sensor.mode}.</p>
+    <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); apply({ kind: "dvsInput", surface: dvsSurface }); }}>
+      <label>Measured Doppler surface<select aria-label="Measured Doppler surface" value={dvsSurface} onChange={event => setDvsSurface(event.target.value as typeof dvsSurface)}><option value="LAND">LAND</option><option value="SEA">SEA</option></select></label>
+      <button type="submit">Apply Doppler surface</button>
+    </form>
+    <p className="fmsBenchReadout" data-testid="sensor-dvs-readout">Doppler {doppler.mode}; VX {number(doppler.vxKt)} kt, VY {number(doppler.vyKt)} kt; sample {doppler.at === null ? "none" : new Date(doppler.at).toISOString()}; status {input?.dvs?.status ?? "NCD"}; source {doppler.source}. Crew water current applies only to a usable SEA word.</p>
     <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); apply({ kind: "powerInterrupt", durationMs: Number(duration) }); }}>
       <label>Power interruption ms<input type="number" aria-label="Power interruption duration ms" min={0} max={3_600_000} value={duration} onChange={event => setDuration(event.target.value)} required /></label><button type="submit">Interrupt KALMAN power</button>
     </form>

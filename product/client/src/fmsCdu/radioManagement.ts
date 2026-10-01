@@ -101,7 +101,7 @@ export class RadioManagementSystem {
   private faultState = new Map<RadioDevice | DmeDevice, RadioFaults>();
   /** Bench stimulus: the radio refuses its next tune command (REJECTED). */
   private rejecting = new Set<RadioDevice>();
-  private navModes: Record<"nav1" | "nav2", NavMode> = { nav1: "AUTO", nav2: "AUTO" };
+  private navModes: Record<"nav1" | "nav2" | "tacan", NavMode> = { nav1: "AUTO", nav2: "AUTO", tacan: "AUTO" };
   private events: [RadioEvent[], RadioEvent[]] = [[], []];
   /** The fault rows currently met, so each is raised once per episode. */
   private metRows = new Set<string>();
@@ -240,7 +240,7 @@ export class RadioManagementSystem {
       get state() { return { ...system.active, ...system.standby[side - 1] }; },
       get requests() { return system.requests.filter(request => request.side === side); },
       tune(key, value) {
-        if (key === "nav1" || key === "nav2") system.navModes[key] = "MAN";
+        if (key === "nav1" || key === "nav2" || key === "tacan") system.navModes[key] = "MAN";
         system.tune(side, key, value);
       },
       receiving(device) { return system.receiving(device); },

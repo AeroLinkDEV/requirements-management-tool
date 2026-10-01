@@ -290,7 +290,7 @@ test('S300 after-FAF integrity-only cancellation waits 300 seconds, while HDOP a
   expect(recalled(immediate.unit, 'NO APPR INTEGRITY')).toBe(true)
 })
 
-test('an external sensor mailbox refuses a receiver replay even when its air-data packet is newer', () => {
+test('an external sensor mailbox refuses receiver and Doppler replay even when its air-data packet is newer', () => {
   const template = new ScriptedFms().navigationInputs!
   const port = new BufferedSensorPort()
   expect(port.publish(template)).toBe(true)
@@ -301,6 +301,33 @@ test('an external sensor mailbox refuses a receiver replay even when its air-dat
   replay.gps[0].at -= 1000
   expect(port.publish(replay)).toBe(false)
   expect(port.read()).toEqual(template)
+  const newer = structuredClone(template)
+  newer.air.at += 1000; newer.air.sequence++
+  for (const dvs of [
+    { ...template.dvs!, at: template.dvs!.at - 1, sequence: template.dvs!.sequence + 1 },
+    { ...template.dvs!, value: { ...template.dvs!.value!, surface: 'SEA' } }, // A different value cannot reuse an epoch/sequence.
+    { ...template.dvs!, sequence: -1 },
+    { ...template.dvs!, value: { alongKt: NaN, acrossKt: 0, surface: 'SEA' } },
+    { ...template.dvs!, value: { alongKt: 0, acrossKt: 0, surface: 'UNKNOWN' } },
+  ]) {
+    expect(port.publish({ ...newer, dvs } as SensorFrame)).toBe(false)
+    expect(port.read()).toEqual(template)
+  }
+  newer.dvs = { ...template.dvs!, at: newer.air.at, sequence: template.dvs!.sequence + 1,
+    value: { alongKt: 0, acrossKt: 10, surface: 'SEA' } }
+  expect(port.publish(newer)).toBe(true)
+  expect(port.read()!.dvs).toEqual(newer.dvs)
+  const gap = structuredClone(newer)
+  gap.air.at += 1000; gap.air.sequence++; delete gap.dvs
+  expect(port.publish(gap)).toBe(true)
+  const afterGap = structuredClone(gap)
+  afterGap.air.at += 1000; afterGap.air.sequence++
+  afterGap.dvs = { ...newer.dvs, value: { ...newer.dvs.value!, surface: 'LAND' } }
+  expect(port.publish(afterGap)).toBe(false) // Omission cannot erase the prior SEA word's replay watermark.
+  expect(port.read()).toEqual(gap)
+  afterGap.dvs = { ...afterGap.dvs, at: afterGap.air.at, sequence: newer.dvs.sequence + 1 }
+  expect(port.publish(afterGap)).toBe(true)
+  expect(port.read()!.dvs).toEqual(afterGap.dvs)
 })
 
 test('radio AUTO acquisition restarts at the first sample in range after a loss', () => {
@@ -652,8 +679,11 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still 
   const sensor = unit.navPerformance.sensor
   expect(sensor.integrity).toBe(false)
   expect(unit.navState.anp).toBe(sensor.accuracy95Nm)
-  expect(sensor.naimComparisonNm).not.toBeNull()
-  expect(sensor.naimComparisonNm).not.toBe(sensor.integrityNm)
+  // The only radio here is a VOR/DME more than 7 NM away: 1.5 NM accurate (M300 15-3), so without integrity at this RNP. It
+  // is no qualifying NAIM backup (plan C1), so no comparison is made and the uncertain GPS is retained (resolver step 2).
+  const backup = unit.lastRadioFixes.find(fix => fix.mode === 'VOR/DME')
+  if (backup) expect(backup.anp).toBeGreaterThanOrEqual(unit.navPerformance.rnp)
+  expect(sensor.naimComparisonNm).toBeNull()
   expect(unit.approachType).toBe('NO APPR')
   for (let i = 0; i < 3; i += 1) unit.sequence()
   unit.directTo('FERDI'); unit.press('EXEC')
@@ -664,7 +694,7 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still 
   unit.updateNavigation(0)
   expect(unit.flightPhase).toBe('TERMINAL')
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
-  press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
+  press(unit, 'INIT_REF', 'NEXT', 'LSK5R', 'LSK4R')
   // The condition leaves each receiver five satellites (one degree of freedom: detection without exclusion).
   expect(lines(unit)[6]).toMatch(/5 SAT NO RAIM$/)
 })
@@ -673,7 +703,7 @@ test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out',
   const { unit, fly } = setup()
   // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
   unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
-  press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
+  press(unit, 'INIT_REF', 'NEXT', 'LSK5R', 'LSK4R')
   expect(lines(unit)[0]).toMatch(/^NAV STATUS/)
   expect(lines(unit)[2]).toMatch(/^GPS/)
   unit.press('LSK6R')

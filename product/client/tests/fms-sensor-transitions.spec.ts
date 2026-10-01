@@ -234,7 +234,7 @@ test('F3 annunciation: INT lights when GPS NAV LOST forces a reversion, stays li
   expect(fms.navState.mode).toBe('GPS')
   expect(bus()).toEqual({ value: false, status: 'NORMAL' })
   // The crew selects GPS out: GPS NAV LOST, but no integrity annunciation.
-  fms.press('INIT_REF'); fms.press('NEXT'); fms.press('LSK5R'); fms.press('LSK6R')
+  fms.press('INIT_REF'); fms.press('NEXT'); fms.press('LSK5R'); fms.press('LSK4R'); fms.press('LSK6R')
   fms.press('LSK3L'); fms.press('LSK3L'); fms.press('LSK3L')
   step(2)
   expect(fms.gpsNavSelected).toBe(false)

@@ -221,7 +221,7 @@ export type CorePageId =
   | "MENU" | "INIT_REF" | "IDENT" | "POS" | "MSG_RECALL" | "LEGS" | "PROG" | "RADIO" | "FUEL" | "HOLD" | "FIX" | "PREDEF"
   | "VNAV" | "TIMER" | "MAINT" | "PLAN_DATA" | "USER_WPT" | "SETUP";
 export type PlanningPageId = "RTE" | "DEP_ARR" | "DEPARTURES" | "ARRIVALS" | "NAV_DATA" | "SELECT_WPT" | "SEC_FPLN" | "CO_ROUTES";
-export type NavPageId = "NAV_STATUS" | "NAV_OPTIONS" | "GPS_STATUS" | "POS_SENSORS" | "PREDICT_RAIM" | "SAT_DESELECT";
+export type NavPageId = "NAV_STATUS" | "NAV_OPTIONS" | "GPS_STATUS" | "POS_SENSORS" | "PREDICT_RAIM" | "SAT_DESELECT" | "DME_STATUS" | "DME_DESELECT" | "VOR_DME_STATUS" | "NAV_STATUS_INDEX" | "DESELECT" | "GPS_DESELECT" | "KALMAN_STATUS" | "DVS_STATUS";
 export type TacticalPageId = "TACT" | "SAR" | "TACT_APPR" | "HOVER" | "RNDZ" | "MOVING_WPT" | "TDN";
 export type DatalinkPageId = "ATC" | "FMC_COMM" | "ANS";
 /** The NAV and ADF radio detail pages (plan F8b; M300 13-21 to 13-25). */
