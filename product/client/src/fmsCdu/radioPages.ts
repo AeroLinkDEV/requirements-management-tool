@@ -1,3 +1,4 @@
+import { adfFrequency } from "./radioManagement";
 import { caption, dashes, prompt, small, three, title, type Page, type RadioPageId } from "./fmsModel";
 import type { RadioDevice, TestableDevice } from "./radioManagement";
 import type { ScriptedFms } from "./scriptedFms";
@@ -32,13 +33,6 @@ const navFrequency = (entry: string) => {
   if (!/^1[01]\d\.\d{1,2}$/.test(entry)) return null;
   const value = Number(entry), hundredths = Math.round(value * 100);
   return value >= 108 && value <= 117.95 && hundredths % 5 === 0 ? value.toFixed(2) : null;
-};
-/** ADF-462: 190.0 to 1799.5 kHz and 2179.0 to 2185.0 kHz at 0.5 kHz (M300 13-23, Figure 13-1). */
-const adfFrequency = (entry: string) => {
-  if (!/^\d{3,4}(\.\d)?$/.test(entry)) return null;
-  const value = Number(entry);
-  const inRange = value >= 190 && value <= 1799.5 || value >= 2179 && value <= 2185;
-  return inRange && Math.round(value * 10) % 5 === 0 ? (Number.isInteger(value) ? String(value).padStart(4, "0") : value.toFixed(1)) : null;
 };
 
 const testText = (fms: ScriptedFms, device: TestableDevice) => fms.radioPort?.testState(device) ?? "READY";
@@ -121,7 +115,9 @@ export const RADIO_PAGES: Record<RadioPageId, Page> = {
           title("ADF", on(fms, "radioTest") ? "1/2" : "1/1"),
           caption(" ADF1", "ADF2 "),
           { left: activeFrequency(fms, "adf"), right: activeFrequency(fms, "adf2") },
-          undefined, undefined,
+          // The standby frequency, beside the active one (M300 13-23): an entry goes there, LSK 1L/1R swaps it in.
+          { left: small(` STBY ${fms.radioState.adfStby}`), right: small(`${fms.radioState.adf2Stby} STBY `) },
+          undefined,
           caption(" MODE", "MODE "),
           { left: prompt(`>${settings("adf").mode}`), right: prompt(`${settings("adf2").mode}<`) },
           caption(" BFO", "BFO "),
@@ -147,13 +143,15 @@ export const RADIO_PAGES: Record<RadioPageId, Page> = {
       if (!port) return;
       const adf = side === "L" ? "adf" : "adf2";
       if (index === 1) { if (row === 5) port.pressTest(adf); return; }
+      // M300 13-23: an entry goes to standby; with the scratchpad empty, the LSK swaps standby and active.
       if (row === 1 && scratch) {
         const value = adfFrequency(scratch);
         if (value === null) return "invalid";
-        fms.setRadio(adf, value);
+        fms.setRadio(adf === "adf" ? "adfStby" : "adf2Stby", value);
         fms.setScratch("");
         return;
       }
+      if (row === 1) { fms.swapRadio(adf); return; }
       const settings = port.adf(adf);
       if (row === 3) port.setAdf(adf, { mode: settings.mode === "ADF" ? "ANT" : "ADF" });
       if (row === 4) port.setAdf(adf, { bfo: !settings.bfo });

@@ -28,7 +28,7 @@ export interface RadioManagementPort {
   readonly state: RadioState;
   readonly requests: readonly RadioRequest[];
   tune(key: RadioKey, value: string): void;
-  swap(key: "com1" | "com2"): void;
+  swap(key: "com1" | "com2" | "adf" | "adf2"): void;
   /** Plan F8a: what a radio reports it is on (null while failed or silent), and whether a DME transceiver answers. */
   receiving(device: RadioDevice): string | null;
   dmeReceiving(device: DmeDevice): boolean;
