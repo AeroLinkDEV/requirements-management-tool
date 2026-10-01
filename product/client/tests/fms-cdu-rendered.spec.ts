@@ -1450,7 +1450,7 @@ test('cockpit CDU focus stays on its physical side and never selects aircraft gu
 
 test('the cockpit preserves faceplate and display proportions and stacks below its readable width floor', async ({ page }, testInfo) => {
   // The published faceplate geometry is the independent key-face oracle, not the overlay's CSS height (#1444).
-  const geometry = JSON.parse(await readFile('public/fms-cdu/layout.json', 'utf8')) as {
+  const geometry = JSON.parse(await readFile(new URL('../public/fms-cdu/layout.json', import.meta.url), 'utf8')) as {
     image: { w: number; h: number }; keys: Array<{ id: string; x: number; y: number; w: number; h: number }>
   }
   const centredKeys = async () => {
