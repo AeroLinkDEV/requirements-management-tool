@@ -1449,8 +1449,34 @@ test('cockpit CDU focus stays on its physical side and never selects aircraft gu
 })
 
 test('the cockpit preserves faceplate and display proportions and stacks below its readable width floor', async ({ page }, testInfo) => {
+  // The published faceplate geometry is the independent key-face oracle, not the overlay's CSS height (#1444).
+  const geometry = JSON.parse(await readFile('public/fms-cdu/layout.json', 'utf8')) as {
+    image: { w: number; h: number }; keys: Array<{ id: string; x: number; y: number; w: number; h: number }>
+  }
+  const centredKeys = async () => {
+    const faults = await page.locator('.fmsCdu').evaluateAll((panels, layout) => panels.flatMap(panel => {
+      const plate = panel.getBoundingClientRect()
+      if (!plate.width || !plate.height) return []
+      return [...panel.querySelectorAll<HTMLElement>('.fmsCduKey')].flatMap(key => {
+        const physical = layout.keys.find(item => item.id === key.dataset.key)!
+        const face = { x: plate.x + physical.x / layout.image.w * plate.width,
+          y: plate.y + physical.y / layout.image.h * plate.height,
+          w: physical.w / layout.image.w * plate.width, h: physical.h / layout.image.h * plate.height }
+        const box = key.getBoundingClientRect(), legend = key.querySelector('.legend')?.getBoundingClientRect()
+        const errors: string[] = []
+        if (Math.abs(box.height - face.h) > 1 || Math.abs(box.width - face.w) > 1) errors.push(`${key.dataset.key}: button exceeds physical face`)
+        if (legend && (legend.left < face.x - 1 || legend.right > face.x + face.w + 1
+          || legend.top < face.y - 1 || legend.bottom > face.y + face.h + 1)) errors.push(`${key.dataset.key}: legend exceeds physical face`)
+        if (legend && (Math.abs(legend.x + legend.width / 2 - face.x - face.w / 2) > 1
+          || Math.abs(legend.y + legend.height / 2 - face.y - face.h / 2) > 1)) errors.push(`${key.dataset.key}: legend is not centred`)
+        return errors
+      })
+    }), geometry)
+    expect(faults).toEqual([])
+  }
   await page.setViewportSize({ width: 1440, height: 900 })
   await open(page)
+  await centredKeys()
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
   const boxes = async () => {
     const cdu = await page.locator('.fmsBenchCduStation .fmsCdu').first().boundingBox()
@@ -1459,6 +1485,8 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
     return { cdu: cdu!, pfd: pfd!, nd: nd! }
   }
   const wide = await boxes()
+  await centredKeys()
+  await page.screenshot({ path: testInfo.outputPath('centred-cockpit-keys.png'), fullPage: true })
   expect(wide.cdu.width).toBeGreaterThanOrEqual(320)
   expect(wide.pfd.width).toBeGreaterThanOrEqual(280)
   expect(Math.abs(wide.cdu.height / wide.cdu.width - 1420 / 1216)).toBeLessThan(0.01)
@@ -1473,11 +1501,13 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 800, height: 900 })
   const narrow = await boxes()
+  await centredKeys()
   expect(narrow.pfd.y).toBeGreaterThan(narrow.cdu.y)
   expect(narrow.cdu.width).toBeGreaterThanOrEqual(320)
   expect(narrow.pfd.width).toBeGreaterThanOrEqual(280)
   await page.setViewportSize({ width: 400, height: 900 })
   const phone = await boxes()
+  await centredKeys()
   expect(phone.pfd.y).toBeGreaterThan(phone.cdu.y)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(400)
   await page.screenshot({ path: testInfo.outputPath('narrow-cockpit.png'), fullPage: true })
