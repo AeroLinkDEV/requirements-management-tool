@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { apiLogin, login, selectProgram } from '../auth'
+import { observeFmsNodeWorker } from '../../test-support/fms-node-worker-telemetry'
 
 /**
  * The FMS Test Bench's out-the-window view, against the build and under the document's real Content Security Policy.
@@ -15,6 +16,9 @@ test.use({ launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=s
 
 test('the out-the-window view and synthetic vision start under the production policy, from this server only, with terrain off', async ({ page, request, baseURL, context }) => {
   test.setTimeout(180_000)
+  const telemetry = observeFmsNodeWorker(test.info())
+  let ownerBodyThrew = false
+  try {
   const origin = new URL(baseURL!).origin
   const offOrigin: string[] = [], missing: string[] = [], problems: string[] = []
   // Context listeners include the station child's first stylesheet/worker request, before its Page is delivered.
@@ -214,4 +218,6 @@ test('the out-the-window view and synthetic vision start under the production po
   expect(offOrigin, 'requests to another origin').toEqual([])
   expect(missing, 'files the build should have served').toEqual([])
   expect(problems, 'errors in the page').toEqual([])
+  } catch (error) { ownerBodyThrew = true; throw error }
+  finally { try { telemetry.finish(ownerBodyThrew) } catch (error) { if (!ownerBodyThrew) throw error } }
 })
