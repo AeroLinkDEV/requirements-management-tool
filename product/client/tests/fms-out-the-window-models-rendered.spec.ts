@@ -26,8 +26,17 @@ test('the chase view flies the glTF helicopter model, its rotors turning, in pla
   await modelRequested
   await page.getByRole('radiogroup', { name: 'Window view' }).getByText('Chase', { exact: true }).click()
   await expect(view).toHaveClass(/view-chase/)
+  // Engine-ready is not aircraft-ready: explain the real pending GLB without blocking the view.
+  // This assertion fails on the pre-fix renderer even though its data-status already says ready.
+  await expect(view).toHaveAttribute('data-status', 'ready')
+  await expect(view.getByRole('status')).toContainText('Loading the aircraft model')
+  await page.getByRole('radiogroup', { name: 'Window view' }).getByText('Map', { exact: true }).click()
+  await expect(view).not.toContainText('Loading the aircraft model')
+  await page.getByRole('radiogroup', { name: 'Window view' }).getByText('Chase', { exact: true }).click()
+  await expect(view.getByRole('status')).toContainText('Loading the aircraft model')
   releaseModel()
   await expect(scene, 'the helicopter model becomes render-ready in Chase').toHaveAttribute('data-model', 'glb', { timeout: 60_000 })
+  await expect(view).not.toContainText('Loading the aircraft model')
   await page.getByRole('button', { name: 'Fly' }).click()
   await page.waitForTimeout(2000)
   const first = await view.screenshot({ path: testInfo.outputPath('chase-model-1.png') })

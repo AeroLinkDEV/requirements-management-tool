@@ -33,6 +33,8 @@ type Props = {
 export const groundImagery = (source: ImagerySource) => new GroundImagery(source, browserImageryDecoder());
 
 type Status = "loading" | "ready" | "no-webgl" | "failed";
+type SceneProgress = { firstFrame: boolean; groundSettled: boolean; model: "loading" | "glb" | "fallback" };
+const initialProgress: SceneProgress = { firstFrame: false, groundSettled: false, model: "loading" };
 
 /** Heights per side of a terrain mesh tile: 65 puts a vertex about every 75 m at level 13, where 33 put one every 150 m. */
 const MESH_SAMPLES = 65;
@@ -66,6 +68,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   const [sceneEpoch, setSceneEpoch] = useState(0);
   const [status, setStatus] = useState<Status>("loading");
   const [failure, setFailure] = useState("");
+  const [progress, setProgress] = useState({ ...initialProgress, destination: renderingDocument, tiles, imagery });
   const terrain = useSyncExternalStore(listener => tiles.subscribe(listener), () => tiles.status);
   const imageryStatus = useSyncExternalStore(listener => imagery.subscribe(listener), () => imagery.status);
   const esriImagery = useSyncExternalStore(listener => imagery.subscribe(listener), () => imagery.usesEsri);
@@ -96,12 +99,14 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
     for (const name of ["frames", "frameCauses", "requests", "tileQueue", "tilesLoaded", "model", "obstacles"]) delete host.current!.dataset[name];
     setStatus("loading");
     setFailure("");
+    setProgress({ ...initialProgress, destination: renderingDocument, tiles, imagery });
     const failed = (error: unknown) => {
       if (disposed) return;
       setFailure(error instanceof Error ? error.message : String(error));
       setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
     };
-    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed)
+    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed,
+      next => { if (!disposed) setProgress({ ...next, destination: renderingDocument, tiles, imagery }); })
       .then(created => {
         if (disposed) { created.destroy(); return; }
         handle = created;
@@ -123,6 +128,17 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   }, [routeKey, sceneEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hud = layout === "hud" && view === "cockpit";
+  // Engine construction, a public draw and tile settlement are separate stages. None establishes
+  // compositor presentation or completed GPU lighting. A destination change starts a new scene.
+  const currentProgress = progress.destination === renderingDocument && progress.tiles === tiles && progress.imagery === imagery ? progress : initialProgress;
+  const pending = status === "loading" ? "Loading the 3D view…"
+    : status !== "ready" ? null
+    : [
+      !currentProgress.firstFrame ? "Drawing the 3D scene…" : null,
+      view === "chase" && currentProgress.model === "loading" ? "Loading the aircraft model…"
+        : view === "chase" && currentProgress.model === "fallback" ? "Using a simplified aircraft." : null,
+      currentProgress.firstFrame && !currentProgress.groundSettled ? "Loading ground detail…" : null,
+    ].filter(Boolean).join(" ");
   const note = status === "no-webgl" ? "This browser cannot draw 3D graphics (WebGL is unavailable), so the view is off."
     : status === "failed" ? `The 3D view could not start: ${failure}`
     : terrain === "off" ? "Terrain data is off on this installation, so the ground is drawn flat. An administrator can turn it on with the FmsBench:TerrainRelay setting (the server then fetches open elevation tiles from AWS)."
@@ -140,8 +156,9 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
         <svg viewBox="-40 -14 80 28"><circle r="7" /><path d="M-7 0 H-30 M7 0 H30 M0 -7 V-14" /></svg>
       </div>
       {hud ? <Hud air={air} modes={modes} /> : null}
-      {status === "loading" ? <p className="fmsOtwNote" role="status">Loading the 3D view…</p> : null}
-      {note ? <p className="fmsOtwNote" role="status">{note}</p> : null}
+      {pending || note ? <p className={`fmsOtwNote${note ? "" : " fmsOtwProgress"}`} role="status">
+        {pending}{pending && note ? " " : null}{note}
+      </p> : null}
       <div className="fmsOtwCredits">
         <div ref={credits} />
         <span>
@@ -199,6 +216,7 @@ async function startScene(
   container: HTMLElement, creditContainer: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
   tiles: TerrainTiles, imagery: GroundImagery<ImageBitmap>,
   renderingDocument: Document, disposed: () => boolean, onFailure: (error: unknown) => void,
+  onProgress: (progress: SceneProgress) => void,
 ): Promise<SceneHandle> {
   (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = CESIUM_BASE;
   // The engine alone: the `cesium` package's widgets evaluate a string as script, which the policy refuses.
@@ -290,6 +308,13 @@ async function startScene(
     requestRenderMode: true, maximumRenderTimeChange: Number.POSITIVE_INFINITY,
   }); } catch (error) { shader.dispose(); throw error; }
   const { scene, camera } = widget;
+  let progress = initialProgress;
+  // Called only on actual public stage transitions, never dispatched to React on every frame.
+  const progressed = (firstFrame: boolean, groundSettled: boolean, model = progress.model) => {
+    if (firstFrame === progress.firstFrame && groundSettled === progress.groundSettled && model === progress.model) return;
+    progress = { firstFrame, groundSettled, model };
+    if (!disposed()) onProgress(progress);
+  };
   // #1298: who asked for each frame, on the scene element, so a paused view that goes on drawing says whether this code
   // asked (and which part of it) or Cesium itself did, with Cesium's tile-load queue (it draws as tiles arrive).
   const requested: Record<string, number> = {};
@@ -315,7 +340,12 @@ async function startScene(
     }
     return pushAfterRender(...work);
   };
-  const stopQueueWatch = scene.globe.tileLoadProgressEvent.addEventListener((queued: number) => { container.dataset.tileQueue = String(queued); });
+  let tileQueue = 0;
+  const stopQueueWatch = scene.globe.tileLoadProgressEvent.addEventListener((queued: number) => {
+    container.dataset.tileQueue = String(queued);
+    tileQueue = queued;
+    progressed(progress.firstFrame, scene.globe.tilesLoaded && queued === 0);
+  });
   scene.globe.depthTestAgainstTerrain = true;
   scene.globe.baseColor = Cesium.Color.fromBytes(74, 112, 62);
   scene.globe.maximumScreenSpaceError = 1.6;
@@ -427,7 +457,13 @@ async function startScene(
   // The glTF helicopter (otwAircraftModel.ts), with turning rotors; the boxes and ellipsoids stay the fallback until it
   // has loaded, or if it cannot. The scene draws only on change, so it asks for a frame once the model is there.
   const helicopter = createAircraftModel(Cesium, { primitives: scene.primitives, requestRender: () => request("model") });
-  void helicopter.ready.then(outcome => { if (disposed()) return; container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; request("model"); });
+  void helicopter.ready.then(outcome => {
+    if (disposed()) return;
+    const model = "loaded" in outcome ? "glb" : "fallback";
+    container.dataset.model = model;
+    progressed(progress.firstFrame, progress.groundSettled, model);
+    request("model");
+  });
   // The FAA obstacles near the bench areas (otwObstacles.ts, Brief C), coloured as the terrain colouring colours their
   // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed").
   const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, postRender: scene.postRender,
@@ -512,6 +548,7 @@ async function startScene(
   const counted = () => {
     container.dataset.frames = String(++frames);
     container.dataset.tilesLoaded = String(scene.globe.tilesLoaded);
+    progressed(true, scene.globe.tilesLoaded && tileQueue === 0);
     const cause = asked ? "asked" : !Cesium.Matrix4.equals(camera.viewMatrix, lastView) ? "camera" : tilesWereLoading ? "tiles"
       : internal.size ? [...internal].sort().join("+") : "unattributed";
     causes[cause] = (causes[cause] ?? 0) + 1;
