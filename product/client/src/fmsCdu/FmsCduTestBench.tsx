@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type HTMLAttributes, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type HTMLAttributes, type ReactNode } from "react";
 import { ALERTS } from "./alerts";
 import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAP_RANGES } from "./flight";
@@ -246,6 +246,16 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     try { window.localStorage.setItem(SVS_KEY, on ? "on" : "off"); } catch { /* a remembered choice is a convenience only */ }
   };
   const [outside, setOutside] = useState<WindowChoice>(storedWindow);
+  const outsideToggle = useRef<HTMLButtonElement>(null);
+  const outsideToggleFocus = useRef<Document | null>(null);
+  useLayoutEffect(() => {
+    const destination = outsideToggleFocus.current;
+    outsideToggleFocus.current = null;
+    const button = outsideToggle.current;
+    // Showing/hiding remounts the toolbar. Only hand back the focused user's toggle; an external
+    // preset change or a document transfer must not focus an unrelated or stale destination.
+    if (destination && button?.isConnected && button.ownerDocument === destination) button.focus();
+  }, [outside.shown]);
   const variant = variantById(variantId);
 
   // Time moves in ticks (scenario.ts): while flying, each callback runs `rate` ticks, each advancing the clock, the
@@ -413,7 +423,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                 </div>
               </>
             ) : null}
-            <button type="button" aria-expanded={outside.shown} onClick={() => chooseWindow({ shown: !outside.shown })}>
+            <button type="button" ref={outsideToggle} aria-expanded={outside.shown} onClick={event => {
+              outsideToggleFocus.current = event.currentTarget.ownerDocument.activeElement === event.currentTarget ? event.currentTarget.ownerDocument : null;
+              chooseWindow({ shown: !outside.shown });
+            }}>
               {outside.shown ? "Hide the view" : "Show the view"}
             </button>
           </div>
