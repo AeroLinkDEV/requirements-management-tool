@@ -436,7 +436,9 @@ test('every workspace chunk arrives and keeps the design contract in both densit
           tiny: [
             ...new Set(
               leaves
-                .filter(element => fontPixels(element) < 12)
+                // Physical CDU key lettering scales to its faceplate (#1444), with fit/centering owned by
+                // fms-cdu-rendered. Its display, lamps and every surrounding control keep the 12px floor.
+                .filter(element => !element.closest('.fmsCduKey .legend') && fontPixels(element) < 12)
                 .map(element => `${(element.textContent || '').trim().slice(0, 24)} @ ${fontPixels(element).toFixed(2)}px`),
             ),
           ],

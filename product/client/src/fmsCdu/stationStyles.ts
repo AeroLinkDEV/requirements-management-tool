@@ -45,7 +45,12 @@ export function mirrorStationStyles(owner: Document, child: Document, onFailure:
 
   const sync = () => {
     if (disposed) return [];
-    const sources = [...owner.head.querySelectorAll("style, link[rel~='stylesheet']")];
+    const sources = [...owner.head.querySelectorAll("style, link[rel~='stylesheet']")].filter(source => {
+      if (source.tagName !== "LINK") return true;
+      // Extension styles belong to the browser extension, rather than this application's cascade.
+      const protocol = new URL((source as HTMLLinkElement).href, owner.baseURI).protocol;
+      return protocol !== "chrome-extension:" && protocol !== "moz-extension:";
+    });
     const loads: Promise<void>[] = [];
     for (const [source, entry] of copies) if (!sources.includes(source)) { entry.node.remove(); copies.delete(source); }
     for (const source of sources) {
