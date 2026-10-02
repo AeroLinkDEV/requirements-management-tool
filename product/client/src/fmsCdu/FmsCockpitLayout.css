@@ -16,7 +16,7 @@
 .fmsBenchCockpitView .fmsBenchHeader { gap: 6px; margin-bottom: 0; }
 .fmsBenchCockpitView .fmsBenchHeader .fmsBenchProfile,
 .fmsBenchCockpitView .fmsBenchHeader .fmsBenchEyebrow { display: none; }
-.fmsBenchCockpitView .fmsBenchUpper { display: grid; position: relative; order: 2; min-width: 0; gap: 10px; grid-template-areas: "outside" "cockpit"; }
+.fmsBenchCockpitView .fmsBenchUpper { --fms-ios-drawer-width: 620px; display: grid; position: relative; order: 2; min-width: 0; gap: 10px; grid-template-areas: "outside" "cockpit"; }
 .fmsBenchCockpitView .fmsBenchWindow { grid-area: outside; }
 .fmsBenchCockpitView .fmsBenchCockpit { grid-area: cockpit; }
 .fmsBenchCockpitView .fmsBenchWindow { min-height: 210px; padding: 8px; box-sizing: border-box; }
@@ -53,7 +53,7 @@
   grid-area: outside;
   z-index: 5;
   inset: 0 0 0 auto;
-  width: min(620px, 100%);
+  width: min(var(--fms-ios-drawer-width, 620px), 100%);
   box-sizing: border-box;
   overflow: auto;
   padding: 12px;
@@ -67,6 +67,15 @@
 }
 .fmsBenchIosHead { position: sticky; top: 0; z-index: 6; background: #f5f8fb; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; padding-block: 4px; }
 .fmsBenchIosHead button { min-height: 32px; }
+.fmsBenchOtwCoveredHint { flex-basis: 100%; }
+/* Reserve the whole scene, including its HUD and credits, without narrowing the toolbar or pilot panels. */
+/* Below this provisional floor, retain the overlay rather than leave a thin or empty scene. */
+@container fms-bench (min-width: 1040px) {
+  .fmsBenchCockpitView .fmsBenchIosReservesOutside .fmsBenchWindow .fmsOtw {
+    margin-inline-end: calc(var(--fms-ios-drawer-width) + 10px);
+  }
+  .fmsBenchIosReservesOutside .fmsBenchOtwCoveredHint { display: none; }
+}
 .fmsBenchCockpitView .fmsBenchTabs { gap: 2px; }
 .fmsBenchCockpitView .fmsBenchTabs button { padding: 8px; font-size: 12px; }
 .fmsBenchCockpitView .fmsBenchTools .fmsBenchCards { grid-template-columns: minmax(0, 1fr); }
