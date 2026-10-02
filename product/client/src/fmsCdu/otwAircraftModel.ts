@@ -56,7 +56,10 @@ export function createAircraftModel(Cesium: CesiumModule, scene: ModelScene, url
     if (failedModel) void Promise.resolve().then(() => { scene.primitives.remove(failedModel); });
     if (!destroyed) scene.requestRender?.();
   };
-  void Cesium.Model.fromGltfAsync({ url, upAxis: Cesium.Axis.Z, forwardAxis: Cesium.Axis.X, show: false }).then(loaded => {
+  void Cesium.Model.fromGltfAsync({
+    url, upAxis: Cesium.Axis.Z, forwardAxis: Cesium.Axis.X, show: false,
+    environmentMapOptions: { enabled: false },
+  }).then(loaded => {
     if (destroyed) { loaded.destroy(); return; }
     // File decoding finishes before GPU initialization. The primitive must enter the scene so its first
     // render can initialize it; waiting for ready before adding it would prevent that render entirely.
@@ -85,6 +88,9 @@ export function createAircraftModel(Cesium: CesiumModule, scene: ModelScene, url
     update(modelMatrix, rotorAngleRad, show) {
       if (!model) return;
       model.show = show;
+      // Cesium updates the environment map before checking Model.show. Request lighting work only
+      // for a placed, visible aircraft; disabling it retains its maps but cannot cancel queued GPU work.
+      model.environmentMapManager.enabled = show && !!modelMatrix;
       if (!show || !modelMatrix) return;
       model.modelMatrix = modelMatrix;
       if (!model.ready) return;
