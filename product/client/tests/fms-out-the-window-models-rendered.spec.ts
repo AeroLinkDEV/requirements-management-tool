@@ -21,7 +21,7 @@ test('the chase view flies the glTF helicopter model, its rotors turning, in pla
   try {
   await open(page, 'off')
   const view = await show(page)
-  const component = page.getByLabel('Out-the-window view')
+  const component = page.getByLabel('Out-the-window view', { exact: true })
   const status = page.getByRole('status', { name: 'Out-the-window view status', exact: true })
   const scene = view.locator('.fmsOtwScene')
   // The model (public/fms-cdu/models/helicopter-light-twin.glb) loads from the bench's own origin.
