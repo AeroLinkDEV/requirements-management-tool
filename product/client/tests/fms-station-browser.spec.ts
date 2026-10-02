@@ -24,6 +24,16 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/tests/fixtures/fms-station.html')
   await expect(page.locator('.fmsCdu')).toBeVisible()
+  // Browser extensions can add their own stylesheet metadata to the app document. This disabled
+  // synthetic link exercises that presence without installing an extension or making external requests.
+  await page.evaluate(() => {
+    const extension = document.createElement('link')
+    extension.rel = 'stylesheet'
+    extension.disabled = true
+    extension.type = 'application/x-extension-fixture'
+    extension.href = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/content.css'
+    document.head.appendChild(extension)
+  })
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
   const ios = page.getByRole('region', { name: 'Instructor station', exact: true })
@@ -42,6 +52,20 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
   const outsideTwo = await twoOpened
   await expect(outsideTwo.getByRole('region', { name: 'Out-the-window view' })).toBeVisible()
+  await expect(outsideTwo.locator('head link[href^="chrome-extension:"]')).toHaveCount(0)
+  await page.evaluate(() => {
+    const extension = document.createElement('link')
+    extension.rel = 'stylesheet'
+    extension.disabled = true
+    extension.type = 'application/x-extension-fixture'
+    extension.href = 'moz-extension://extension-fixture/content.css'
+    const authored = document.createElement('style')
+    authored.textContent = '.fmsStationWindowHeader { --station-extension-control: 17px; }'
+    document.head.append(extension, authored)
+  })
+  await expect.poll(() => outsideTwo.locator('.fmsStationWindowHeader').evaluate(header =>
+    getComputedStyle(header).getPropertyValue('--station-extension-control').trim())).toBe('17px')
+  await expect(outsideTwo.locator('head link[href^="moz-extension:"]')).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Out the window dock' })).toBeVisible()
   await expect(page.locator('.fmsBenchCduStation .fmsCdu')).toHaveCount(2)
   await expect(right.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /STAYS\s*$/)
@@ -55,6 +79,22 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await expect(page.getByRole('region', { name: 'Out the window dock' })).toHaveCount(0)
 
   await disclosure.click()
+  // Ignoring extension metadata must not admit an ordinary foreign application stylesheet.
+  await page.evaluate(() => {
+    const foreign = document.createElement('link')
+    foreign.rel = 'stylesheet'
+    foreign.disabled = true
+    foreign.type = 'application/x-extension-fixture'
+    foreign.href = 'https://example.invalid/station.css'
+    foreign.dataset.stationForeignFixture = ''
+    document.head.appendChild(foreign)
+  })
+  await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
+  await expect(controls.getByRole('status')).toContainText('The station stylesheet must come from this AeroLink installation.')
+  await expect(page.getByRole('region', { name: 'Out-the-window view' })).toBeVisible()
+  await expect(page.locator('.fmsBenchCduStation .fmsCdu')).toHaveCount(2)
+  expect(context.pages()).toHaveLength(1)
+  await page.locator('link[data-station-foreign-fixture]').evaluate(link => link.remove())
   await controls.getByLabel('Fixed station arrangement').selectOption('three')
   const threeOutsideOpened = page.waitForEvent('popup')
   await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
