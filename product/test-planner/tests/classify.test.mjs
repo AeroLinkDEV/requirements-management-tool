@@ -733,6 +733,7 @@ const FMS_PATH_REFERENCES = {
   'product/client/src/App.tsx': 'imports the bench; the client gate builds it and the FMS journeys include the specs that navigate to it',
   'product/client/src/icons.tsx': 'names the bench icon; built by the client gate',
   'product/client/src/routing.ts': 'routes to the bench; built by the client gate and asserted by routing-contract.spec.ts, an FMS journey',
+  'product/client/test-support/isolation-probes/native-server.ts': 'uses the bundled CDU faceplate as a representative native image in the isolation probe; FMS rendered owners load that same faceplate, while changes to this probe or its isolation/dependency helpers retain the broad client gates',
   'product/client/tests/primary-navigation-alignment.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
   'product/client/tests/routing-contract.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
   'product/client/vite.config.ts': 'aliases meshoptimizer to a bench file; the client gate and the production journeys build with it',
