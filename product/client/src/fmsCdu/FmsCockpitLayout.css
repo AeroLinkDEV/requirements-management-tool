@@ -75,6 +75,21 @@
 .fmsBenchCockpitView .fmsBenchTools .fmsBenchConditions { grid-template-columns: minmax(0, 1fr); }
 .fmsBenchCockpitView .fmsGpsReceivers,
 .fmsBenchCockpitView .fmsGpsSky { grid-template-columns: minmax(0, 1fr); }
+/* A stacked receiver must not stretch its 200-unit sky plot to the whole drawer width. */
+/* Below 200px, scroll the plot locally to retain its 12px labels rather than shrinking them. */
+.fmsBenchCockpitView .fmsGpsSky { min-width: 0; overflow-x: auto; }
+.fmsBenchCockpitView .fmsGpsSkyPlot {
+  width: clamp(200px, 100%, 220px);
+  max-width: none;
+  margin-inline: auto;
+}
+/* Measure the tools panel, including detached windows, rather than the owner viewport. */
+@container fms-ios (min-width: 560px) {
+  .fmsBenchCockpitView .fmsGpsSky { grid-template-columns: minmax(200px, 220px) minmax(0, 1fr); }
+}
+@container fms-ios (min-width: 1000px) {
+  .fmsBenchCockpitView .fmsGpsReceivers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .fmsBenchCockpitView .fmsGpsRouting { overflow-x: auto; }
 .fmsBenchCockpitView .fmsGpsRouting svg { min-width: 640px; }
 .fmsBenchCockpitView .fmsBenchTools .fmsBenchTabs { flex-shrink: 0; }
