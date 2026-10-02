@@ -37,7 +37,7 @@ test('with no imagery (outside the coverage, or the service\'s blank filler) the
     await choose(page, 'Window view', 'Map')
     await drawn(page)
     expect((await shares(page)).imagery, `${mode}: no imagery drawn`).toBeLessThan(0.03)
-    await expect(page.locator('.fmsOtwSourceWarning')).toBeEmpty()
+    await expect(page.locator('.fmsOtwSourceWarning')).toHaveCount(0)
     // What is drawn instead is the relief, as choosing Relief draws it: not a flat colour. (Once: the fallback is the
     // same code whichever way the imagery was missing, and each draw is slow on a software renderer.)
     if (mode === 'none') {
@@ -75,7 +75,7 @@ test('along the edge of the coverage an imagery tile\'s transparent part shows t
   expect(imagery, 'the imagery half of each tile').toBeGreaterThan(0.2)
   expect(imagery, 'and only that half').toBeLessThan(0.8)
   expect(dark, 'nothing drawn black where the tiles are transparent').toBeLessThan(0.03)
-  await expect(page.locator('.fmsOtwSourceWarning')).toBeEmpty()
+  await expect(page.locator('.fmsOtwSourceWarning')).toHaveCount(0)
 })
 
 test('terrain colouring: red where the ground reaches the aircraft (relative), height bands (absolute), none when off; remembered', async ({ page }) => {

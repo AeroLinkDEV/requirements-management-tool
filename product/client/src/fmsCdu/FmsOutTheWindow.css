@@ -45,11 +45,9 @@
 .fmsOtwHeaderNotice {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font: 600 12px var(--font-body);
 }
 
-.fmsOtwSourceWarning { width: 15ch; color: #795114; }
+.fmsOtwSourceWarning { font-weight: 600; }
 
 /* Fit the existing title line; its larger hit area does not consume another toolbar row. */
 .fmsBenchWindow .fmsOtwHeaderTitle .fmsOtwDetailsButton {
