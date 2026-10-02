@@ -190,7 +190,10 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
     <FmsOutTheWindowHeader controls={controls} notice={
       <button type="button" className="fmsOtwDetailsButton" ref={detailsButton} aria-label="View status and sources"
         aria-haspopup="dialog" onClick={openDetails} title="View status and sources">ⓘ</button>
-    } />
+    } status={!fatal && (pending || sourceWarning) ? <p className="fmsOtwHeaderStatus" role="status" aria-label="Out-the-window view status">
+      {sourceWarning ? <><span className="fmsOtwSourceWarning">{sourceWarning}</span>{pending ? " · " : null}</> : null}
+      {pending}
+    </p> : null} />
     <div className={`fmsOtw layout-${layout} view-${view}`} data-status={status} data-terrain={terrain} data-imagery={imageryStatus}
       data-ground={ground} data-colouring={colouring}>
       <div className="fmsOtwScene" ref={host} />
@@ -199,10 +202,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
         <svg viewBox="-40 -14 80 28"><circle r="7" /><path d="M-7 0 H-30 M7 0 H30 M0 -7 V-14" /></svg>
       </div>
       {hud ? <Hud air={air} modes={modes} /> : null}
-      {pending || fatal || sourceWarning ? <p className={`fmsOtwNote${fatal ? "" : " fmsOtwProgress"}`} role="status">
-        {!fatal && sourceWarning ? <><span className="fmsOtwSourceWarning">{sourceWarning}</span>{pending ? " · " : null}</> : null}
-        {pending}{pending && fatal ? " " : null}{fatal}
-      </p> : null}
+      {fatal ? <p className="fmsOtwNote" role="status">{fatal}</p> : null}
       <div className="fmsOtwCredits">
         <div ref={credits} />
         <span>
@@ -226,9 +226,13 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
 }
 
 /** The shown and hidden view use the same toolbar; status remains with the shown scene owner. */
-export function FmsOutTheWindowHeader({ controls, notice }: { controls: ReactNode; notice?: ReactNode }) {
+export function FmsOutTheWindowHeader({ controls, notice, status }: { controls: ReactNode; notice?: ReactNode; status?: ReactNode }) {
   return <div className="fmsBenchMapHead">
-    <h2 className="fmsOtwHeaderTitle">Out the window{notice ? <span className="fmsOtwHeaderNotice">{notice}</span> : null}</h2>
+    <div className="fmsOtwHeaderTitleGroup">
+      <h2 className="fmsOtwHeaderTitle">Out the window</h2>
+      {notice ? <span className="fmsOtwHeaderNotice">{notice}</span> : null}
+      {status}
+    </div>
     {controls}
   </div>;
 }

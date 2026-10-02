@@ -35,12 +35,16 @@
   pointer-events: none;
 }
 
-.fmsBenchWindow .fmsOtwHeaderTitle {
+.fmsBenchWindow .fmsOtwHeaderTitleGroup {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  white-space: nowrap;
+  gap: 6px 10px;
+  min-width: 0;
+  max-width: 100%;
 }
+
+.fmsBenchWindow .fmsOtwHeaderTitle { white-space: nowrap; }
 
 .fmsOtwHeaderNotice {
   display: inline-flex;
@@ -49,8 +53,16 @@
 
 .fmsOtwSourceWarning { font-weight: 600; }
 
-/* Fit the existing title line; its larger hit area does not consume another toolbar row. */
-.fmsBenchWindow .fmsOtwHeaderTitle .fmsOtwDetailsButton {
+.fmsOtwHeaderStatus {
+  margin: 0;
+  min-width: 0;
+  color: #775c24;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Keep the Details control beside the heading; the group wraps naturally with the status text. */
+.fmsBenchWindow .fmsOtwHeaderTitleGroup .fmsOtwDetailsButton {
   position: relative;
   min-height: 0;
   padding: 0;
@@ -96,17 +108,6 @@
   line-height: 1.4;
   text-align: center;
   pointer-events: none;
-}
-
-/* Brief progress sits at the edge; source-policy and failure notices retain their existing layout. */
-.fmsOtwProgress {
-  top: 6px;
-  left: 8px;
-  max-width: calc(100% - 16px);
-  padding: 4px 8px;
-  transform: none;
-  font-size: 12px;
-  text-align: left;
 }
 
 .layout-hud.view-cockpit .fmsOtwNote {
