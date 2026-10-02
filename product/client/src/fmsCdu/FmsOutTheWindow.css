@@ -49,6 +49,18 @@
   font-size: 13px;
   line-height: 1.4;
   text-align: center;
+  pointer-events: none;
+}
+
+/* Brief progress sits at the edge; source-policy and failure notices retain their existing layout. */
+.fmsOtwProgress {
+  top: 6px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  padding: 4px 8px;
+  transform: none;
+  font-size: 12px;
+  text-align: left;
 }
 
 .layout-hud.view-cockpit .fmsOtwNote {
