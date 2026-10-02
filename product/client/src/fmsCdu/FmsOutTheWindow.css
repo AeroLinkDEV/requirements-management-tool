@@ -35,6 +35,54 @@
   pointer-events: none;
 }
 
+.fmsBenchWindow .fmsOtwHeaderTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.fmsOtwHeaderNotice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 600 12px var(--font-body);
+}
+
+.fmsOtwSourceWarning { width: 15ch; color: #795114; }
+
+/* Fit the existing title line; its larger hit area does not consume another toolbar row. */
+.fmsBenchWindow .fmsOtwHeaderTitle .fmsOtwDetailsButton {
+  position: relative;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fmsOtwDetailsButton::after { content: ""; position: absolute; inset: -7px -6px; }
+.fmsOtwDetailsButton:focus-visible { outline: 2px solid #167a9b; outline-offset: 3px; }
+
+.fmsOtwDetails {
+  box-sizing: border-box;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid #687989;
+  border-radius: 8px;
+  color: #14212e;
+  background: #f5f8fb;
+}
+.fmsOtwDetails::backdrop { background: #08152180; }
+.fmsOtwDetails h2 { margin-top: 0; }
+.fmsOtwDetails h3 { margin-bottom: 4px; }
+.fmsOtwDetails p { margin-top: 4px; line-height: 1.5; }
+
 .fmsOtwNote {
   position: absolute;
   top: 12px;

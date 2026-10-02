@@ -60,7 +60,11 @@ test('the out-the-window view and synthetic vision start under the production po
   await expect(view).toHaveAttribute('data-ground', 'relief')
   await expect(view, 'the 3D view starts').toHaveAttribute('data-status', 'ready', { timeout: 90_000 })
   await expect(view).toHaveAttribute('data-terrain', 'off', { timeout: 30_000 })
-  await expect(view.locator('.fmsOtwNote')).toContainText('FmsBench:TerrainRelay')
+  await expect(page.locator('.fmsOtwSourceWarning')).toHaveText('Terrain off')
+  await page.getByRole('button', { name: 'View status and sources', exact: true }).click()
+  const sourceDetails = page.getByRole('dialog', { name: 'View status and sources', exact: true })
+  await expect(sourceDetails).toContainText('FmsBench:TerrainRelay')
+  await sourceDetails.getByRole('button', { name: 'Close', exact: true }).click()
   // Workers build the terrain meshes, so a mesh on screen means the workers ran.
   await expect.poll(() => page.evaluate(() => performance.getEntriesByType('resource')
     .some(entry => /\/cesium\/Workers\/.+\.js$/.test(new URL(entry.name).pathname))), { timeout: 30_000 }).toBe(true)

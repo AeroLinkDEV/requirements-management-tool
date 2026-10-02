@@ -37,7 +37,7 @@ test('with no imagery (outside the coverage, or the service\'s blank filler) the
     await choose(page, 'Window view', 'Map')
     await drawn(page)
     expect((await shares(page)).imagery, `${mode}: no imagery drawn`).toBeLessThan(0.03)
-    await expect(view.locator('.fmsOtwNote')).toHaveCount(0)
+    await expect(page.locator('.fmsOtwSourceWarning')).toBeEmpty()
     // What is drawn instead is the relief, as choosing Relief draws it: not a flat colour. (Once: the fallback is the
     // same code whichever way the imagery was missing, and each draw is slow on a software renderer.)
     if (mode === 'none') {
@@ -53,7 +53,12 @@ test('with no imagery (outside the coverage, or the service\'s blank filler) the
   const view = await show(page)
   await choose(page, 'Window view', 'Map')
   await expect(view).toHaveAttribute('data-imagery', 'off', { timeout: 60_000 })
-  await expect(view.locator('.fmsOtwNote')).toContainText('Imagery is off on this installation')
+  await expect(page.locator('.fmsOtwSourceWarning')).toHaveText('Imagery off')
+  await page.getByRole('button', { name: 'View status and sources', exact: true }).click()
+  const details = page.getByRole('dialog', { name: 'View status and sources', exact: true })
+  await expect(details).toContainText('Imagery is off on this installation')
+  await expect(details).toContainText('FmsBench:ImageryRelay')
+  await details.getByRole('button', { name: 'Close', exact: true }).click()
 })
 
 test('along the edge of the coverage an imagery tile\'s transparent part shows the relief beneath it, not black', async ({ page }) => {
@@ -70,7 +75,7 @@ test('along the edge of the coverage an imagery tile\'s transparent part shows t
   expect(imagery, 'the imagery half of each tile').toBeGreaterThan(0.2)
   expect(imagery, 'and only that half').toBeLessThan(0.8)
   expect(dark, 'nothing drawn black where the tiles are transparent').toBeLessThan(0.03)
-  await expect(view.locator('.fmsOtwNote')).toHaveCount(0)
+  await expect(page.locator('.fmsOtwSourceWarning')).toBeEmpty()
 })
 
 test('terrain colouring: red where the ground reaches the aircraft (relative), height bands (absolute), none when off; remembered', async ({ page }) => {

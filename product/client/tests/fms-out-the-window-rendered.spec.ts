@@ -45,6 +45,8 @@ test('with terrain turned off on the installation, the view still flies and says
   const view = await show(page)
   await expect(view).toHaveAttribute('data-terrain', 'off', { timeout: 30_000 })
   await expect(view.locator('canvas')).toBeVisible()
+  await expect(page.locator('.fmsOtwSourceWarning')).toHaveText('Terrain off')
+  const sceneBox = await view.boundingBox()
   const details = page.getByRole('button', { name: 'View status and sources', exact: true })
   await details.focus()
   await page.keyboard.press('Enter')
@@ -55,6 +57,7 @@ test('with terrain turned off on the installation, the view still flies and says
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
   await expect(details).toBeFocused()
+  expect(await view.boundingBox(), 'opening and closing details does not resize the scene').toEqual(sceneBox)
 })
 
 test('the chase view shows the aircraft model behind which the camera flies', async ({ page }, testInfo) => {
