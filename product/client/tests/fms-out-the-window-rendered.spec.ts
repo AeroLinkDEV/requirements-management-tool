@@ -44,8 +44,17 @@ test('with terrain turned off on the installation, the view still flies and says
   await open(page, 'off')
   const view = await show(page)
   await expect(view).toHaveAttribute('data-terrain', 'off', { timeout: 30_000 })
-  await expect(view.locator('.fmsOtwNote')).toContainText('Terrain data is off on this installation')
   await expect(view.locator('canvas')).toBeVisible()
+  const details = page.getByRole('button', { name: 'View status and sources', exact: true })
+  await details.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'View status and sources', exact: true })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('Terrain data is off on this installation')
+  await expect(dialog).toContainText('FmsBench:TerrainRelay')
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(details).toBeFocused()
 })
 
 test('the chase view shows the aircraft model behind which the camera flies', async ({ page }, testInfo) => {
