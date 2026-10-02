@@ -172,9 +172,7 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
         );
       })}
 
-      {layout.keys.map(key => (
-        <CduKey key={key.id} physical={key} variant={variant} pressed={pressed.has(key.id)} assetBase={assetBase} width={W} height={H} down={down} up={up} cancel={cancel} />
-      ))}
+      <CduKeys keys={layout.keys} variant={variant} pressed={pressed} assetBase={assetBase} width={W} height={H} down={down} up={up} cancel={cancel} />
     </div>
   );
 }
@@ -183,6 +181,13 @@ type CduKeyProps = {
   physical: CduLayout["keys"][number]; variant: CduVariant; pressed: boolean; assetBase: string; width: number; height: number;
   down: (keyId: string) => void; up: (keyId: string) => void; cancel: () => void;
 };
+type CduKeysProps = Omit<CduKeyProps, "physical" | "pressed"> & { keys: CduLayout["keys"]; pressed: ReadonlySet<string> };
+/** The physical key collection stays unchanged between presses, so ticks need not rebuild its elements. */
+const CduKeys = memo(function CduKeys({ keys, variant, pressed, assetBase, width, height, down, up, cancel }: CduKeysProps) {
+  return <>{keys.map(key => (
+    <CduKey key={key.id} physical={key} variant={variant} pressed={pressed.has(key.id)} assetBase={assetBase} width={width} height={height} down={down} up={up} cancel={cancel} />
+  ))}</>;
+});
 /** One physical key. Its props change only with the variation or its own press, so a simulation tick skips it (#1349). */
 const CduKey = memo(function CduKey({ physical: key, variant, pressed, assetBase, width: W, height: H, down, up, cancel }: CduKeyProps) {
   const legend = legendFor(key.id, variant);
