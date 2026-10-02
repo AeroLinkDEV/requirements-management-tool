@@ -58,6 +58,13 @@ test('with terrain turned off on the installation, the view still flies and says
   await expect(dialog).not.toBeVisible()
   await expect(details).toBeFocused()
   expect(await view.boundingBox(), 'opening and closing details does not resize the scene').toEqual(sceneBox)
+  await page.getByRole('button', { name: 'Hide the view', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await expect(view).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Show the view', exact: true })).toBeFocused()
+  await page.keyboard.press('Space')
+  await expect(view).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Hide the view', exact: true })).toBeFocused()
 })
 
 test('the chase view shows the aircraft model behind which the camera flies', async ({ page }, testInfo) => {
