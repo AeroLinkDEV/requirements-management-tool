@@ -10,6 +10,7 @@ import { MAIN_ROTOR_RAD_S, createAircraftModel } from "./otwAircraftModel";
 import { createObstacleLayer } from "./otwObstacles";
 import { workerReliefShader } from "./reliefShader";
 import { aircraftCamera } from "./otwCamera";
+import { aircraftRenderLoop } from "./otwRenderLoop";
 import { useFmsStationDocument } from "./FmsStationSurface";
 import {
   ABSOLUTE_BANDS_FT, ABSOLUTE_RGB, CAUTION_RGB, DANGER_RGB, RELATIVE_CAUTION_FT, RELATIVE_DANGER_FT, type TerrainColouring,
@@ -524,34 +525,21 @@ async function startScene(
 
   // Only rendering follows the visible document. Aircraft interpolation above keeps the owner's performance
   // clock; a child's RAF timestamp is used solely to cap this loop, never as simulation/interpolation time.
-  let renderFrame = 0, lastFrame = 0, stopped = false, destroyed = false, pageHidden = false, renderFailed = false;
-  const stopLoop = () => { stopped = true; renderingWindow.cancelAnimationFrame(renderFrame); renderFrame = 0; };
-  const draw = (at: number) => {
-    renderFrame = 0;
-    if (stopped || disposed() || renderingWindow.closed || widget.isDestroyed()) return;
-    try {
-      const elapsed = at - lastFrame, interval = 1000 / 30;
-      if (elapsed >= interval) {
-        widget.resize();
-        widget.render();
-        lastFrame = at - elapsed % interval;
-      }
-      if (!stopped) renderFrame = renderingWindow.requestAnimationFrame(draw);
-    } catch (error) { renderFailed = true; stopLoop(); onFailure(error); }
-  };
-  const removeRenderError = scene.renderError.addEventListener((_scene: unknown, error: unknown) => { renderFailed = true; stopLoop(); onFailure(error); });
-  const hidePage = () => { pageHidden = true; stopLoop(); };
-  const showPage = () => {
-    // An inline owner can return from the browser's back/forward cache without a React remount.
-    if (!pageHidden || renderFailed || destroyed || disposed() || renderingWindow.closed) return;
-    pageHidden = false;
-    stopped = false;
-    lastFrame = 0;
-    if (!renderFrame) renderFrame = renderingWindow.requestAnimationFrame(draw);
-  };
-  renderingWindow.addEventListener("pagehide", hidePage);
-  renderingWindow.addEventListener("pageshow", showPage);
-  renderFrame = renderingWindow.requestAnimationFrame(draw);
+  let destroyed = false, renderFailed = false;
+  const renderLoop = aircraftRenderLoop({
+    window: renderingWindow, canvas: widget.canvas,
+    unavailable: () => disposed() || widget.isDestroyed() || renderFailed,
+    render: () => {
+      widget.resize();
+      const before = frames;
+      widget.render();
+      return frames !== before;
+    },
+    onFailure: error => { renderFailed = true; onFailure(error); },
+  });
+  const removeRenderError = scene.renderError.addEventListener((_scene: unknown, error: unknown) => {
+    renderFailed = true; renderLoop.destroy(); onFailure(error);
+  });
 
   return {
     requestRender: () => request("tick"),
@@ -581,9 +569,7 @@ async function startScene(
       if (destroyed) return;
       destroyed = true;
       stopTerrainWatch();
-      stopLoop();
-      renderingWindow.removeEventListener("pagehide", hidePage);
-      renderingWindow.removeEventListener("pageshow", showPage);
+      renderLoop.destroy();
       removeRenderError();
       helicopter.destroy();
       obstacles.destroy();

@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import * as Cesium from '@cesium/engine'
 import { aircraftCamera } from '../src/fmsCdu/otwCamera'
+import { aircraftRenderLoop } from '../src/fmsCdu/otwRenderLoop'
 import {
   AIRCRAFT_PARTS, CHASE_ABOVE, CHASE_BEHIND, FT, HOVER_LOOK_DOWN, TILE_PIXELS, WATER, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres, rampColour, routeHeights,
   RELIEF_MAX_ZOOM, sampleHeights, shadeTile, tileLatitude, type AircraftSample,
@@ -17,6 +18,137 @@ const grid = (height: (x: number, y: number) => number) => {
 }
 const pixel = (rgba: Uint8ClampedArray, x: number, y: number) => Array.from(rgba.slice((y * TILE_PIXELS + x) * 4, (y * TILE_PIXELS + x) * 4 + 3))
 const level: AircraftSample = { position: { lat: 45.5, lon: -73.7 }, altitude: 3000, heading: 90, pitch: 0, bank: 0 }
+
+// The render-loop boundary supplies native RAF and GL completion signals; it does not decide admission.
+// The existing real-GPU owners cover appearance/resources, but cannot deterministically hold a GPU fence pending.
+function renderLoopBoundary() {
+  let nextRaf = 0, nextSync = 0
+  const callbacks = new Map<number, FrameRequestCallback>()
+  const listeners = new Map<string, Set<() => void>>()
+  const owned = new Set<WebGLSync>()
+  const deleted: WebGLSync[] = [], polls: number[][] = []
+  let result = 0x911B, lost = false, fenceFails = false, pollThrows = false, flushThrows = false, flushes = 0, maxOwned = 0
+  const gl = {
+    SYNC_GPU_COMMANDS_COMPLETE: 0x9117, ALREADY_SIGNALED: 0x911A, TIMEOUT_EXPIRED: 0x911B, CONDITION_SATISFIED: 0x911C,
+    isContextLost: () => lost,
+    fenceSync: () => {
+      if (fenceFails) return null
+      const sync = { id: ++nextSync } as unknown as WebGLSync
+      owned.add(sync); maxOwned = Math.max(maxOwned, owned.size)
+      return sync
+    },
+    clientWaitSync: (_sync: WebGLSync, flags: number, timeout: number) => {
+      polls.push([flags, timeout])
+      if (pollThrows) throw new Error('driver poll failed')
+      return result
+    },
+    deleteSync: (sync: WebGLSync) => { expect(owned.delete(sync), 'each owned sync is deleted once').toBe(true); deleted.push(sync) },
+    flush: () => { flushes++; if (flushThrows) throw new Error('driver flush failed') },
+  } as unknown as WebGL2RenderingContext
+  const destination = {
+    closed: false,
+    requestAnimationFrame: (callback: FrameRequestCallback) => { callbacks.set(++nextRaf, callback); return nextRaf },
+    cancelAnimationFrame: (id: number) => { callbacks.delete(id) },
+    addEventListener: (name: string, listener: () => void) => {
+      const list = listeners.get(name) ?? new Set<() => void>(); list.add(listener); listeners.set(name, list)
+    },
+    removeEventListener: (name: string, listener: () => void) => { listeners.get(name)?.delete(listener) },
+  } as unknown as Window
+  return {
+    destination, canvas: { getContext: () => gl } as unknown as HTMLCanvasElement,
+    step: (at: number) => {
+      expect(callbacks.size, 'one destination RAF is outstanding').toBe(1)
+      const [id, callback] = callbacks.entries().next().value!
+      callbacks.delete(id); callback(at)
+    },
+    emit: (name: string) => { for (const listener of listeners.get(name) ?? []) listener() },
+    signal: (status: number) => { result = status },
+    fail: (mode: string) => {
+      if (mode === 'lost') lost = true
+      if (mode === 'null') fenceFails = true
+      if (mode === 'poll') pollThrows = true
+      if (mode === 'flush') flushThrows = true
+      if (mode === 'wait-failed') result = 0x911D
+    },
+    stats: () => ({ owned: owned.size, maxOwned, deleted: deleted.length, created: nextSync, flushes, polls, callbacks: callbacks.size,
+      listeners: [...listeners.values()].reduce((total, list) => total + list.size, 0) }),
+  }
+}
+
+test('unfinished GPU work postpones the next draw, then renders the latest pose at the existing cap', () => {
+  const boundary = renderLoopBoundary(), drawn: number[] = []
+  let pose = 0, advance = true
+  const loop = aircraftRenderLoop({ window: boundary.destination, canvas: boundary.canvas, unavailable: () => false,
+    render: () => { drawn.push(pose); return advance }, onFailure: error => { throw error } })
+  boundary.step(34)
+  pose = 1; boundary.step(50) // Below the unchanged 30 Hz admission interval.
+  pose = 2; boundary.step(68)
+  pose = 3; boundary.step(100)
+  expect(drawn, 'the previous draw must finish before another is admitted').toEqual([0])
+  boundary.emit('pagehide')
+  expect(boundary.stats().callbacks).toBe(0)
+  expect(boundary.stats().owned, 'same-context suspension retains its fence').toBe(1)
+  boundary.emit('pageshow'); boundary.step(134)
+  expect(drawn).toEqual([0])
+  boundary.signal(0x911C); boundary.step(168)
+  expect(drawn, 'resume reads current state rather than queued historical poses').toEqual([0, 3])
+  boundary.step(180)
+  expect(drawn).toEqual([0, 3])
+  boundary.signal(0x911A); advance = false; boundary.step(202)
+  expect(boundary.stats().created, 'an engine call with no postRender advance creates no fence').toBe(2)
+  expect(boundary.stats().maxOwned).toBe(1)
+  expect(boundary.stats().flushes).toBe(2)
+  expect(boundary.stats().polls.every(([flags, timeout]) => flags === 0 && timeout === 0)).toBe(true)
+  loop.destroy(); loop.destroy()
+  expect(boundary.stats()).toMatchObject({ owned: 0, deleted: 2, callbacks: 0, listeners: 0 })
+  boundary.emit('pageshow')
+  expect(boundary.stats().callbacks).toBe(0)
+})
+
+test('unsupported or failed GPU admission keeps the existing renderer available without repeating a draw', () => {
+  for (const mode of ['unsupported', 'context-throws', 'null', 'flush', 'poll', 'wait-failed', 'lost']) {
+    const boundary = renderLoopBoundary()
+    let renders = 0
+    const canvas = mode === 'unsupported' ? { getContext: () => null } : mode === 'context-throws'
+      ? { getContext: () => { throw new Error('context unavailable') } } : boundary.canvas
+    if (mode === 'null' || mode === 'flush') boundary.fail(mode)
+    const loop = aircraftRenderLoop({ window: boundary.destination, canvas: canvas as HTMLCanvasElement, unavailable: () => false,
+      render: () => { renders++; return true }, onFailure: error => { throw error } })
+    boundary.step(34)
+    if (mode === 'poll' || mode === 'wait-failed' || mode === 'lost') boundary.fail(mode)
+    boundary.step(68); boundary.step(102)
+    expect(renders, `${mode} falls back without freezing or double-rendering`).toBe(3)
+    expect(boundary.stats().owned).toBe(0)
+    loop.destroy()
+    expect(boundary.stats()).toMatchObject({ callbacks: 0, listeners: 0 })
+  }
+})
+
+test('render-loop disposal and fatal rendering release pending GPU resources and cannot resume', () => {
+  for (const end of ['destroy', 'unavailable', 'closed', 'throw', 'during-render']) {
+    const boundary = renderLoopBoundary(), failures: unknown[] = []
+    let unavailable = false, calls = 0
+    let loop!: ReturnType<typeof aircraftRenderLoop>
+    loop = aircraftRenderLoop({ window: boundary.destination, canvas: boundary.canvas, unavailable: () => unavailable,
+      render: () => {
+        calls++
+        if (calls === 2 && end === 'throw') throw new Error('scene failed')
+        if (calls === 2 && end === 'during-render') loop.destroy()
+        return true
+      }, onFailure: error => failures.push(error) })
+    boundary.step(34)
+    if (end === 'destroy') { boundary.emit('pagehide'); loop.destroy() }
+    else {
+      if (end === 'unavailable') unavailable = true
+      if (end === 'closed') Object.assign(boundary.destination, { closed: true })
+      boundary.signal(0x911A); boundary.step(68)
+    }
+    expect(boundary.stats(), end).toMatchObject({ owned: 0, deleted: 1, callbacks: 0, listeners: 0, created: 1 })
+    expect(failures.length).toBe(end === 'throw' ? 1 : 0)
+    boundary.emit('pageshow'); loop.destroy()
+    expect(boundary.stats().callbacks).toBe(0)
+  }
+})
 
 test('a frozen aircraft stays fixed through Cesium camera updates, while a new pose still moves the view', async () => {
   // Native camera and native request-render predicate, without a WebGL renderer or a network. This pose
