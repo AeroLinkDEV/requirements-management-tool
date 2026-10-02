@@ -51,7 +51,7 @@ export function drawObstacles(Cesium: ObstacleCesium, scene: ObstacleScene, obst
       attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(neutral) },
     }));
     const point = tops.add({ position: top, pixelSize: 5, color: neutral });
-    return { obstacle, point, key: "", attributes: null as { color: Uint8Array; boundingSphere?: unknown } | null };
+    return { obstacle, point, key: -1, attributes: null as { color: Uint8Array; boundingSphere?: unknown } | null };
   });
   const lines = instances.length ? scene.primitives.add(new Cesium.Primitive({ geometryInstances: instances,
     appearance: new Cesium.PolylineColorAppearance({ translucent: false }), asynchronous: true, show: false })) : null;
@@ -83,12 +83,13 @@ export function drawObstacles(Cesium: ObstacleCesium, scene: ObstacleScene, obst
   };
   const recolour = () => {
     const { altitude, mode } = latest;
-    // Recolour only when something that decides a colour has changed by a visible amount.
-    if (last && last.mode === mode && Math.abs(last.altitude - altitude) < 10) return;
+    // Only relative colouring depends on aircraft altitude; keep its cumulative 10-ft update threshold.
+    if (last && last.mode === mode && (mode !== "relative" || Math.abs(last.altitude - altitude) < 10)) return;
     last = { altitude, mode };
     let changed = false;
     for (const item of drawn) {
-      const rgb = obstacleColour(item.obstacle, altitude, mode), key = rgb.join(",");
+      // The palette uses integer RGB bytes, so this value preserves colour equality without a string allocation.
+      const rgb = obstacleColour(item.obstacle, altitude, mode), key = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
       if (key === item.key) continue;
       item.key = key;
       const colour = Cesium.Color.fromBytes(rgb[0], rgb[1], rgb[2]);
