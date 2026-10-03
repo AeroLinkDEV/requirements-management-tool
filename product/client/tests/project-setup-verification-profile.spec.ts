@@ -845,30 +845,39 @@ test("a 409 whose recovered draft is still finalizing is described as in progres
   await page.unroute(new RegExp(`/api/project-setups/${draftId}$`));
 });
 
-test("a 500 without an explanatory message states uncertainty rather than a rollback", async ({ page }, testInfo) => {
-  test.setTimeout(120_000);
-  await login(page, "admin", { openProject: false });
-  const draftId = await readyFreshDraftAtReview(page, `Server error ${Date.now().toString(36)}`);
-  await page.route(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i, async (route) => {
-    await route.fulfill({ status: 500 });
-  });
-  const recovery = page.waitForResponse(
-    (response) =>
-      response.url().endsWith(`/api/project-setups/${draftId}`) && response.request().method() === "GET",
-  );
-  await page.getByRole("button", { name: "Create Project" }).click();
-  await recovery;
+for (const explanation of [
+  undefined,
+  "Finalization is still being checked.",
+  "No success was recorded by this gateway; check the saved setup.",
+]) {
+  test(`a 500 ${explanation ? `with server explanation: ${explanation}` : "without an explanatory message"} states uncertainty rather than a rollback`, async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    await login(page, "admin", { openProject: false });
+    const draftId = await readyFreshDraftAtReview(page, `Server error ${Date.now().toString(36)}`);
+    await page.route(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i, async (route) => {
+      await route.fulfill(explanation
+        ? { status: 500, json: { error: explanation } }
+        : { status: 500 });
+    });
+    const recovery = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/project-setups/${draftId}`) && response.request().method() === "GET",
+    );
+    await page.getByRole("button", { name: "Create Project" }).click();
+    await recovery;
 
-  const failure = page.locator(".projectSetupError");
-  await expect(failure).toContainText(/cannot yet be confirmed/i);
-  await expect(failure).toContainText(/HTTP 500/i);
-  await expect(failure).toContainText(/without an explanatory message/i);
-  await expect(failure).toContainText(/unfinished draft at version/i);
-  await expect(failure).not.toContainText(/No success was recorded/i);
-  await expect(page.getByRole("heading", { name: "Project created", level: 2 })).toHaveCount(0);
-  await page.screenshot({ path: testInfo.outputPath("finalization-uncertain.png"), fullPage: true });
-  await page.unroute(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i);
-});
+    const failure = page.locator(".projectSetupError");
+    await expect(failure).toContainText(/cannot yet be confirmed/i);
+    await expect(failure).toContainText(/HTTP 500/i);
+    if (explanation) await expect(failure).toContainText(explanation);
+    else await expect(failure).toContainText(/without an explanatory message/i);
+    await expect(failure).toContainText(/unfinished draft at version/i);
+    if (!explanation) await expect(failure).not.toContainText(/No success was recorded/i);
+    await expect(page.getByRole("heading", { name: "Project created", level: 2 })).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("finalization-uncertain.png"), fullPage: true });
+    await page.unroute(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i);
+  });
+}
 
 test("a recheck that adopts a changed saved ladder drops the earlier source acceptance", async ({ page }) => {
   test.setTimeout(120_000);
