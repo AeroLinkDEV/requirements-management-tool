@@ -143,21 +143,38 @@ public sealed class IdentityPersistenceTests
         Assert.Equal(secret, identity.RevealMfaSecret(protectedSecret));
     }
 
-    [Fact]
-    public async Task Password_session_role_and_signature_form_an_accountable_chain()
+    [Theory]
+    [InlineData(null)]
+    // Independently generated Node/OpenSSL PBKDF2 vectors preserve legacy and stronger stored factors.
+    [InlineData("pbkdf2-sha256$310000$AAECAwQFBgcICQoLDA0ODw==$5tkXs+gwtS95NKHnSjKdFU7IKDi98yagPWBzw2hseSI=")]
+    [InlineData("pbkdf2-sha256$900000$AAECAwQFBgcICQoLDA0ODw==$FFOUKbE0LGrip5TKbTdCUem4/4gatwrl0Wtl6OuRPPo=")]
+    public async Task Password_session_role_and_signature_form_an_accountable_chain(string? encodedHash)
     {
         var path = Path.Combine(Path.GetTempPath(), $"aerolink-identity-{Guid.NewGuid():N}.db");
         var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={path};Pooling=False").Options;
         try
         {
             await using var db = new AeroLinkDbContext(options); await db.Database.EnsureCreatedAsync(); var now = DateTimeOffset.UtcNow;
-            var program = new ProgramRecord("Identity Program", "IDP"); var user = new UserAccount("reviewer.one", "Reviewer One", "reviewer@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
+            const string password = "FixturePassword!2026";
+            var passwordHash = encodedHash ?? IdentityService.HashPassword(password);
+            var program = new ProgramRecord("Identity Program", "IDP"); var user = new UserAccount("reviewer.one", "Reviewer One", "reviewer@example.test", passwordHash, now);
+            user.RequirePasswordChange(passwordHash);
             db.AddRange(program, user); await db.SaveChangesAsync(); db.ProgramMemberships.Add(new(user.Id, program.Id, ProgramRole.Approver, "admin", now)); await db.SaveChangesAsync();
-            var identity = new IdentityService(db); var login = await identity.LoginAsync("REVIEWER.ONE", "StrongPass!2026", "127.0.0.1", "test", now, default);
+            var identity = new IdentityService(db); var login = await identity.LoginAsync("REVIEWER.ONE", password, "127.0.0.1", "test", now, default);
             Assert.NotNull(login); Assert.True(await identity.HasRoleAsync(login!.User, program.Id, ProgramRole.Approver, now, default));
+            Assert.True(login.User.MustChangePassword);
+            Assert.Equal(passwordHash, (await db.UserAccounts.AsNoTracking().SingleAsync()).PasswordHash);
             var resolved = await identity.ResolveAsync(login.Token, now.AddMinutes(1), default); Assert.Equal("reviewer.one", resolved!.UserName);
             db.ElectronicSignatures.Add(new(user.Id, user.UserName, user.DisplayName, program.Id, "SCR", Guid.NewGuid(), "SRCR-00001.00", "Approve", "Reviewed and approved.", new string('a',64), "127.0.0.1", now)); await db.SaveChangesAsync();
             var signature = await db.ElectronicSignatures.AsNoTracking().SingleAsync(); Assert.Equal("Reviewer One", signature.DisplayName); Assert.Equal(64, signature.ContentHash.Length); Assert.Equal("", signature.Authority);
+            var signatureBefore = System.Text.Json.JsonSerializer.Serialize(signature);
+            var accountBefore = System.Text.Json.JsonSerializer.Serialize(await db.UserAccounts.AsNoTracking().SingleAsync());
+            db.SecurityAuditEvents.Add(new("PendingFixture", user.UserName, "test", "Pending", "Unrelated tracked work.", "local", now));
+            Assert.True(await identity.ConfirmPasswordAsync(user.Id, password, default));
+            Assert.False(await identity.ConfirmPasswordAsync(user.Id, "WrongFixturePassword!2026", default));
+            Assert.False(await db.SecurityAuditEvents.AsNoTracking().AnyAsync(x => x.EventType == "PendingFixture"));
+            Assert.Equal(accountBefore, System.Text.Json.JsonSerializer.Serialize(await db.UserAccounts.AsNoTracking().SingleAsync()));
+            Assert.Equal(signatureBefore, System.Text.Json.JsonSerializer.Serialize(await db.ElectronicSignatures.AsNoTracking().SingleAsync()));
             await identity.LogoutAsync(login.Token, "127.0.0.1", now.AddMinutes(2), default); Assert.Null(await identity.ResolveAsync(login.Token, now.AddMinutes(3), default));
             Assert.Contains(await db.SecurityAuditEvents.AsNoTracking().ToListAsync(), x => x.EventType == "Login" && x.Outcome == "Success");
         }
