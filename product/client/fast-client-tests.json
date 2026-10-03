@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "logic": [
+    "api-client-outcomes.spec.ts",
     "bootstrap-retry.spec.ts",
     "project-navigation-contract.spec.ts",
     "repository-configuration-contract.spec.ts",
@@ -88,6 +89,7 @@
     "fms-nav-status-pages.spec.ts"
   ],
   "rendered": [
+    "client-truth-rendered.spec.ts",
     "layout-settled.spec.ts",
     "review-workflow-rendered.spec.ts",
     "code-source-rendered.spec.ts",

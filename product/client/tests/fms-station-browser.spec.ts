@@ -8,6 +8,7 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/tests/fixtures/fms-station.html')
   await expect(page.locator('.fmsCdu')).toBeVisible()
+  await expect(page.getByText('For separate browser windows, switch to Cockpit view.', { exact: true })).toBeVisible()
   // Browser extensions can add their own stylesheet metadata to the app document. This disabled
   // synthetic link exercises that presence without installing an extension or making external requests.
   await page.evaluate(() => {
@@ -19,6 +20,8 @@ test('fixed station presets move one shared cockpit and instructor draft, return
     document.head.appendChild(extension)
   })
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
+  await expect(page.locator('.fmsStationDock > summary')).toHaveText('Station windows')
+  await expect(page.locator('.fmsStationDock > summary')).toBeVisible()
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
   const ios = page.getByRole('region', { name: 'Instructor station', exact: true })
   await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
@@ -33,7 +36,7 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   const controls = page.getByRole('region', { name: 'Station arrangement', exact: true })
   await controls.getByLabel('Fixed station arrangement').selectOption('two')
   const twoOpened = page.waitForEvent('popup')
-  await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
+  await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   const outsideTwo = await twoOpened
   await expect(outsideTwo.getByRole('region', { name: 'Out-the-window view' })).toBeVisible()
   await expect(outsideTwo.locator('head link[href^="chrome-extension:"]')).toHaveCount(0)
@@ -57,10 +60,15 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
   await expect(ios.getByLabel('Recording name')).toHaveValue('Keep across station windows')
   await page.keyboard.press('Escape')
-  await outsideTwo.getByRole('button', { name: 'Return to bench', exact: true }).click()
+  // The modal makes its child header inert; the owner's live dock can still return this surface.
+  await outsideTwo.getByRole('button', { name: 'View status and sources', exact: true }).click()
+  await expect(outsideTwo.getByRole('dialog', { name: 'View status and sources', exact: true })).toBeVisible()
+  await page.getByRole('region', { name: 'Out the window dock', exact: true }).getByRole('button', { name: 'Return Out the window', exact: true }).click()
   await expect.poll(() => outsideTwo.isClosed()).toBe(true)
   await expect(page.getByRole('region', { name: 'Out-the-window view' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Out the window dock' })).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'View status and sources', exact: true })).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'View status and sources', exact: true })).not.toBeFocused()
 
   await disclosure.click()
   // Ignoring extension metadata must not admit an ordinary foreign application stylesheet.
@@ -73,7 +81,7 @@ test('fixed station presets move one shared cockpit and instructor draft, return
     foreign.dataset.stationForeignFixture = ''
     document.head.appendChild(foreign)
   })
-  await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
+  await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   await expect(controls.getByRole('status')).toContainText('The station stylesheet must come from this AeroLink installation.')
   await expect(page.getByRole('region', { name: 'Out-the-window view' })).toBeVisible()
   await expect(page.locator('.fmsBenchCduStation .fmsCdu')).toHaveCount(2)
@@ -81,11 +89,11 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await page.locator('link[data-station-foreign-fixture]').evaluate(link => link.remove())
   await controls.getByLabel('Fixed station arrangement').selectOption('three')
   const threeOutsideOpened = page.waitForEvent('popup')
-  await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
+  await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   const outsideThree = await threeOutsideOpened
-  await expect(controls.getByRole('button', { name: 'Restore station — open Cockpit', exact: true })).toBeEnabled()
+  await expect(controls.getByRole('button', { name: 'Open cockpit in a window', exact: true })).toBeEnabled()
   const cockpitOpened = page.waitForEvent('popup')
-  await controls.getByRole('button', { name: 'Restore station — open Cockpit', exact: true }).click()
+  await controls.getByRole('button', { name: 'Open cockpit in a window', exact: true }).click()
   const cockpit = await cockpitOpened
   await cockpit.setViewportSize({ width: 1440, height: 900 })
   await expect(cockpit.locator('.fmsBenchCduStation .fmsCdu')).toHaveCount(2)
@@ -119,7 +127,7 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await controls.getByLabel('Instructor apart').check()
   await expect(cockpit.locator('.fmsCdu')).toHaveCount(2)
   const instructorOpened = page.waitForEvent('popup')
-  await controls.getByRole('button', { name: 'Restore station — open Instructor station', exact: true }).click()
+  await controls.getByRole('button', { name: 'Open instructor station in a window', exact: true }).click()
   const instructor = await instructorOpened
   const childIos = instructor.getByRole('region', { name: 'Instructor station', exact: true })
   await expect(childIos.getByLabel('Recording name')).toHaveValue('Keep across station windows')
@@ -150,9 +158,11 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
   await disclosure.click()
   const leavingOpened = page.waitForEvent('popup')
-  await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
+  await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   const leavingChild = await leavingOpened
   await expect(page.getByRole('region', { name: 'Out the window dock' })).toBeVisible()
+  await leavingChild.getByRole('button', { name: 'View status and sources', exact: true }).click()
+  await expect(leavingChild.getByRole('dialog', { name: 'View status and sources', exact: true })).toBeVisible()
   await page.goto('/tests/fixtures/fms-cdu.html')
   await expect.poll(() => leavingChild.isClosed()).toBe(true)
   await page.goto('/tests/fixtures/fms-station.html')
@@ -162,7 +172,7 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await expect(controls.getByLabel('Instructor apart')).toBeChecked()
   expect(context.pages()).toHaveLength(1)
   await expect(controls.getByRole('list', { name: 'Live station dock' })).not.toContainText('In another window')
-  await expect(controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true })).toBeEnabled()
+  await expect(controls.getByRole('button', { name: 'Open outside view in a window', exact: true })).toBeEnabled()
 })
 
 test('a blocked fixed station popup leaves the real panels here and a visible recovery explanation', async ({ page, context }) => {
@@ -173,7 +183,7 @@ test('a blocked fixed station popup leaves the real panels here and a visible re
   await page.locator('.fmsStationDock > summary').click()
   const controls = page.getByRole('region', { name: 'Station arrangement', exact: true })
   await controls.getByLabel('Fixed station arrangement').selectOption('two')
-  await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
+  await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   await expect(controls.getByRole('status')).toContainText(/blocked/i)
   await expect(page.getByRole('region', { name: 'Out-the-window view' })).toBeVisible()
   await expect(page.locator('.fmsBenchCduStation .fmsCdu')).toHaveCount(2)

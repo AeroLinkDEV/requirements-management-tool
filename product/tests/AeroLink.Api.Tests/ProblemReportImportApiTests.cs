@@ -61,6 +61,7 @@ public sealed class ProblemReportImportApiTests
             var form = new MultipartFormDataContent
             {
                 { new StringContent(projectId.ToString()), "projectId" },
+                { new StringContent(Guid.NewGuid().ToString()), "operationId" },
                 { new StringContent(JsonSerializer.Serialize(mapping)), "mapping" },
                 { new ByteArrayContent(Encoding.UTF8.GetBytes(csv)), "file", "jira-export.csv" },
             };
@@ -135,7 +136,7 @@ public sealed class ProblemReportImportApiTests
             Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
     }
 
-    private static async Task BootstrapAsync(HttpClient client)
+    internal static async Task BootstrapAsync(HttpClient client)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/setup/bootstrap")
         {

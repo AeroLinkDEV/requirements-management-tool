@@ -335,6 +335,15 @@ correction was verified instead of a test result (DEC-137); SQA still closes it 
 Problem Reports can be imported from another tool's CSV/XLSX export (DEC-139): every row is previewed and the import is
 signed; source keys, reporters, dates and statuses stay source facts, source-closed reports arrive read-only as Closed in
 source, and an already-imported key is skipped on re-import.
+Reports, revisions, build links, the import ledger, original result receipt and password-confirmed signature
+publish in one project-controlled transaction. Retrying the same project/actor operation with the same source
+file, parsing filename, mapping and reviewed hash returns its original batch, report IDs, display numbers and
+counts, after checking current authority, enabled features and the password again. The import panel retains
+that request and selected file when the response is uncertain; changing the file or mapping starts a new intent.
+Database-derived source keys enforce exact trimmed SourceSystem and trimmed ordinal-ignore-case SourceKey
+identity for both CSV/XLSX and Integrity writers. Existing source text and historical evidence remain unchanged;
+conflicting or invalid existing identity pairs refuse the upgrade. Unsigned legacy batches can be listed through
+the existing authorized batch query and are never retroactively signed or assigned recovery identities.
 
 Integrity source packages have a separate one-time import path (DEC-145,
 [#1186](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1186)).

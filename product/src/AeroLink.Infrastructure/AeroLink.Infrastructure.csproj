@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\AeroLink.DocumentSecurity\AeroLink.DocumentSecurity.csproj" />
@@ -26,6 +26,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Frozen v1 function is part of its additive migration contract. A future version adds a new artifact. -->
+    <EmbeddedResource Include="Persistence\Migrations\ProblemReportSourceIdentityV1.sql" />
     <!-- Composing a message and sending it are separate concerns, and only the first can be asserted without
          a mail relay. Exposing internals to the test assembly is what lets the composed shape be checked. -->
     <InternalsVisibleTo Include="AeroLink.Infrastructure.Tests" />

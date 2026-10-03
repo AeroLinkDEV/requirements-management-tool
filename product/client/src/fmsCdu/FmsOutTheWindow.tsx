@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AircraftData, RoutePoint } from "./efis";
 import { constraintAltitude } from "./flight";
 import {
@@ -27,6 +27,7 @@ export type Ground = "imagery" | "relief";
 type Props = {
   air: AircraftData; route: RoutePoint[]; modes: HudModes; layout: Layout; view: View; tiles: TerrainTiles;
   ground: Ground; colouring: TerrainColouring; imagery: GroundImagery<ImageBitmap>;
+  controls: ReactNode;
 };
 
 /** The imagery tiles for a bench, from a source (the server's relay, or a test fixture's), decoded by the browser. */
@@ -59,10 +60,13 @@ type SceneHandle = {
  * seated pilot sees it, with the bench's CDU, PFD and ND below it standing in for the instrument panel. The engine is
  * loaded only when this is first shown.
  */
-export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles, ground, colouring, imagery }: Props) {
+export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles, ground, colouring, imagery, controls }: Props) {
   const renderingDocument = useFmsStationDocument();
+  const details = useRef<HTMLDialogElement>(null);
+  const detailsButton = useRef<HTMLButtonElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const credits = useRef<HTMLDivElement>(null);
+  const creditViewport = useRef<HTMLDivElement>(null);
   const pathMarker = useRef<HTMLDivElement>(null);
   const scene = useRef<SceneHandle | null>(null);
   const [sceneEpoch, setSceneEpoch] = useState(0);
@@ -72,6 +76,35 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   const terrain = useSyncExternalStore(listener => tiles.subscribe(listener), () => tiles.status);
   const imageryStatus = useSyncExternalStore(listener => imagery.subscribe(listener), () => imagery.status);
   const esriImagery = useSyncExternalStore(listener => imagery.subscribe(listener), () => imagery.usesEsri);
+
+  useLayoutEffect(() => {
+    const dialog = details.current!;
+    const opener = detailsButton.current!;
+    return () => {
+      // Native modal close restores its opener. During transfer/unmount, clear only that unintended
+      // restoration in the old document; the station lifecycle restores its own focus afterward.
+      const focused = renderingDocument.activeElement;
+      if (dialog.open) dialog.close();
+      if (opener.isConnected && opener.ownerDocument === renderingDocument
+        && renderingDocument.activeElement === opener && focused !== opener) {
+        opener.blur();
+        if (focused?.isConnected && focused.ownerDocument === renderingDocument && !dialog.contains(focused)
+          && focused !== renderingDocument.body && focused !== renderingDocument.documentElement) (focused as HTMLElement).focus();
+      }
+    };
+  }, [renderingDocument]);
+  const openDetails = () => {
+    const button = detailsButton.current, dialog = details.current;
+    if (!button?.isConnected || !dialog?.isConnected || button.ownerDocument !== renderingDocument || dialog.ownerDocument !== renderingDocument) return;
+    // Pointer activation does not focus buttons in every browser. Establish the actual modal opener.
+    button.focus();
+    dialog.showModal();
+  };
+  const closeDetails = () => {
+    details.current?.close();
+    const button = detailsButton.current;
+    if (button?.isConnected && button.ownerDocument === renderingDocument) button.focus();
+  };
 
   // The scene reads this every frame; renders only move its target.
   const live = useRef<Live | null>(null);
@@ -105,7 +138,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
       setFailure(error instanceof Error ? error.message : String(error));
       setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
     };
-    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed,
+    startScene(host.current!, credits.current!, creditViewport.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed,
       next => { if (!disposed) setProgress({ ...next, destination: renderingDocument, tiles, imagery }); })
       .then(created => {
         if (disposed) { created.destroy(); return; }
@@ -139,15 +172,29 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
         : view === "chase" && currentProgress.model === "fallback" ? "Using a simplified aircraft." : null,
       currentProgress.firstFrame && !currentProgress.groundSettled ? "Loading ground detail…" : null,
     ].filter(Boolean).join(" ");
-  const note = status === "no-webgl" ? "This browser cannot draw 3D graphics (WebGL is unavailable), so the view is off."
+  const fatal = status === "no-webgl" ? "This browser cannot draw 3D graphics (WebGL is unavailable), so the view is off."
     : status === "failed" ? `The 3D view could not start: ${failure}`
-    : terrain === "off" ? "Terrain data is off on this installation, so the ground is drawn flat. An administrator can turn it on with the FmsBench:TerrainRelay setting (the server then fetches open elevation tiles from AWS)."
+    : null;
+  const terrainNote = terrain === "off" ? "Terrain data is off on this installation, so the ground is drawn flat. An administrator can turn it on with the FmsBench:TerrainRelay setting (the server then fetches open elevation tiles from AWS)."
     : terrain === "unreachable" ? "The server cannot reach the terrain source, so the ground is drawn flat where tiles are missing."
-    : ground === "imagery" && imageryStatus === "off" ? "Imagery is off on this installation, so the ground is drawn as relief. An administrator can turn it on with the FmsBench:ImageryRelay setting (the server then fetches USGS aerial imagery)."
-    : ground === "imagery" && imageryStatus === "unreachable" ? "The server cannot reach the imagery source, so the ground is drawn as relief where imagery is missing."
+    : terrain === "waiting" ? "Waiting for terrain data." : "Terrain data is available.";
+  const imageryNote = imageryStatus === "off" ? "Imagery is off on this installation, so the ground is drawn as relief. An administrator can turn it on with the FmsBench:ImageryRelay setting (the server then fetches USGS aerial imagery)."
+    : imageryStatus === "unreachable" ? "The server cannot reach the imagery source, so the ground is drawn as relief where imagery is missing."
+    : imageryStatus === "waiting" ? "Waiting for imagery data." : "Imagery data is available where the source has coverage.";
+  const sourceWarning = terrain === "off" ? "Terrain off"
+    : terrain === "unreachable" ? "Terrain missing"
+    : ground === "imagery" && imageryStatus === "off" ? "Imagery off"
+    : ground === "imagery" && imageryStatus === "unreachable" ? "Imagery missing"
     : null;
 
-  return (
+  return (<>
+    <FmsOutTheWindowHeader controls={controls} notice={
+      <button type="button" className="fmsOtwDetailsButton" ref={detailsButton} aria-label="View status and sources"
+        aria-haspopup="dialog" onClick={openDetails} title="View status and sources">ⓘ</button>
+    } status={!fatal && (pending || sourceWarning) ? <p className="fmsOtwHeaderStatus" role="status" aria-label="Out-the-window view status">
+      {sourceWarning ? <><span className="fmsOtwSourceWarning">{sourceWarning}</span>{pending ? " · " : null}</> : null}
+      {pending}
+    </p> : null} />
     <div className={`fmsOtw layout-${layout} view-${view}`} data-status={status} data-terrain={terrain} data-imagery={imageryStatus}
       data-ground={ground} data-colouring={colouring}>
       <div className="fmsOtwScene" ref={host} />
@@ -156,20 +203,41 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
         <svg viewBox="-40 -14 80 28"><circle r="7" /><path d="M-7 0 H-30 M7 0 H30 M0 -7 V-14" /></svg>
       </div>
       {hud ? <Hud air={air} modes={modes} /> : null}
-      {pending || note ? <p className={`fmsOtwNote${note ? "" : " fmsOtwProgress"}`} role="status">
-        {pending}{pending && note ? " " : null}{note}
-      </p> : null}
-      <div className="fmsOtwCredits">
-        <div ref={credits} />
-        <span>
-          Terrain: Mapzen Terrain Tiles on AWS Open Data (SRTM, GMTED2010, USGS NED and others).
-          {ground === "imagery" ? " Imagery: USGS The National Map, USDA NAIP (public domain)." : null}
-          {ground === "imagery" && esriImagery ? " Imagery outside the United States: Esri, Maxar, Earthstar Geographics, and the GIS User Community. Powered by Esri." : null}
-          {" "}Route fixes are invented.
-        </span>
-      </div>
+      {fatal ? <p className="fmsOtwNote" role="status">{fatal}</p> : null}
     </div>
-  );
+    <div className="fmsOtwCredits">
+      <div ref={credits} />
+      <span>
+        Terrain: Mapzen Terrain Tiles on AWS Open Data (SRTM, GMTED2010, USGS NED and others).
+        {ground === "imagery" ? " Imagery: USGS The National Map, USDA NAIP (public domain)." : null}
+        {ground === "imagery" && esriImagery ? " Imagery outside the United States: Esri, Maxar, Earthstar Geographics, and the GIS User Community. Powered by Esri." : null}
+        {" "}Route fixes are invented.
+      </span>
+    </div>
+    <div className="fmsOtwCreditViewport" ref={creditViewport}
+      onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }} />
+    <dialog className="fmsOtwDetails" ref={details} aria-label="View status and sources"
+      onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }}
+      onCancel={event => { event.preventDefault(); event.stopPropagation(); closeDetails(); }}>
+      <h2>View status and sources</h2>
+      <p>{fatal || pending || "The 3D view is ready."}</p>
+      <h3>Terrain</h3><p>{terrainNote}</p>
+      <h3>Imagery</h3><p>{ground === "relief" ? "Relief is selected; imagery is not drawn. " : null}{imageryNote}</p>
+      <button type="button" onClick={closeDetails}>Close</button>
+    </dialog>
+  </>);
+}
+
+/** The shown and hidden view use the same toolbar; status remains with the shown scene owner. */
+export function FmsOutTheWindowHeader({ controls, notice, status }: { controls: ReactNode; notice?: ReactNode; status?: ReactNode }) {
+  return <div className="fmsBenchMapHead">
+    <div className="fmsOtwHeaderTitleGroup">
+      <h2 className="fmsOtwHeaderTitle">Out the window</h2>
+      {notice ? <span className="fmsOtwHeaderNotice">{notice}</span> : null}
+      {status}
+    </div>
+    {controls}
+  </div>;
 }
 
 const sameSample = (a: AircraftSample, b: AircraftSample) =>
@@ -213,7 +281,7 @@ function Hud({ air, modes }: { air: AircraftData; modes: HudModes }) {
 const canvas = (owner: Document, size = TILE_PIXELS) => Object.assign(owner.createElement("canvas"), { width: size, height: size });
 
 async function startScene(
-  container: HTMLElement, creditContainer: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
+  container: HTMLElement, creditContainer: HTMLElement, creditViewport: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
   tiles: TerrainTiles, imagery: GroundImagery<ImageBitmap>,
   renderingDocument: Document, disposed: () => boolean, onFailure: (error: unknown) => void,
   onProgress: (progress: SceneProgress) => void,
@@ -299,7 +367,7 @@ async function startScene(
   // Throws when the browser has no WebGL; the component says so rather than failing the page.
   let widget: InstanceType<typeof Cesium.CesiumWidget>;
   try { widget = new Cesium.CesiumWidget(container, {
-    baseLayer: false, terrainProvider: tiles.status === "off" ? flatTerrainProvider : terrainProvider, creditContainer,
+    baseLayer: false, terrainProvider: tiles.status === "off" ? flatTerrainProvider : terrainProvider, creditContainer, creditViewport,
     skyBox: false, showRenderLoopErrors: false, targetFrameRate: 30, useBrowserRecommendedResolution: true, msaaSamples: 4,
     // Cesium's default loop closes over the importing owner's global RAF. A portal does not change that realm.
     useDefaultRenderLoop: false,

@@ -38,6 +38,8 @@ export function createAircraftModel(Cesium: CesiumModule, scene: ModelScene, url
   let destroyed = false;
   let main: ModelNode | undefined, tail: ModelNode | undefined;
   let mainBase: Matrix4 | undefined, tailBase: Matrix4 | undefined;
+  const rotorRotation = new Cesium.Matrix3();
+  const mainTransform = new Cesium.Matrix4(), tailTransform = new Cesium.Matrix4();
   let removeReady: (() => void) | undefined, removeError: (() => void) | undefined;
   let settle: ((result: { loaded: true } | { failed: string }) => void) | undefined;
   const ready: AircraftModel["ready"] = new Promise(resolve => { settle = resolve; });
@@ -95,8 +97,9 @@ export function createAircraftModel(Cesium: CesiumModule, scene: ModelScene, url
       model.modelMatrix = modelMatrix;
       if (!model.ready) return;
       nodes();
-      if (main && mainBase) main.matrix = Cesium.Matrix4.multiply(mainBase, Cesium.Matrix4.fromRotation(Cesium.Matrix3.fromRotationZ(rotorAngleRad)), new Cesium.Matrix4());
-      if (tail && tailBase) tail.matrix = Cesium.Matrix4.multiply(tailBase, Cesium.Matrix4.fromRotation(Cesium.Matrix3.fromRotationY(rotorAngleRad * TAIL_TO_MAIN)), new Cesium.Matrix4());
+      // Node setters copy the transform. Keep each rotor's result separate and its original hub unchanged.
+      if (main && mainBase) main.matrix = Cesium.Matrix4.multiplyByMatrix3(mainBase, Cesium.Matrix3.fromRotationZ(rotorAngleRad, rotorRotation), mainTransform);
+      if (tail && tailBase) tail.matrix = Cesium.Matrix4.multiplyByMatrix3(tailBase, Cesium.Matrix3.fromRotationY(rotorAngleRad * TAIL_TO_MAIN, rotorRotation), tailTransform);
     },
     destroy() {
       destroyed = true;

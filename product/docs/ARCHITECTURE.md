@@ -121,6 +121,19 @@ states before beginning another logical unit of work.
 
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
+Problem Report CSV/XLSX import publishes its reports, immutable revisions, build links, ledger, original result
+receipt and electronic signature under one `ProjectControlledWriteScope`. The project/actor/operation identity
+binds the source bytes, parsing filename, lossless submitted mapping in ordinal key order and expected preview hash. A replay checks current
+authority and password and returns the frozen original receipt before re-previewing existing source keys.
+The signature retains DEC-139's existing file/mapping meaning. Database-generated binary source identities
+enforce exact trimmed SourceSystem and ordinal-ignore-case trimmed SourceKey equality, including the Integrity
+writer. Their immutable v1 function/table is frozen from the qualified .NET comparer; writes and identity-dependent
+previews fail closed if the runtime comparer or Trim rules drift. Frozen historical reads remain available.
+PostgreSQL requires UTF-8 server encoding and receives stored generated keys through its additive migration;
+SQLite's disposable/local path uses virtual generated keys and connection functions that decode the database's
+UTF-8 or UTF-16 encoding. Already-open supplied SQLite connections receive the same functions. Neither path
+rewrites source facts, old receipts, signatures or revisions to install the backstop.
+
 ### Recoverable project creation and source inception
 
 New-project creation is a durable, typed setup draft rather than a browser-only wizard. An AeroLink administrator
@@ -193,7 +206,9 @@ and does not satisfy source mapping, reconciliation, or source-acceptance gates.
 
 ## Security boundary
 
-Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SRCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires TLS, enterprise identity federation/provisioning, configurable policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
+Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SRCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires deployment-specific TLS, policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
+
+The current identity boundary uses local accounts. External-directory federation and provisioning remain deferred under [DEC-051](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-051---identity-federation-is-deferred-until-an-organization-commits-to-deploying-it), including its 2026-08-01 disposition. Their implementation resumes only after a real organization/provider deployment commitment; local provider administration is not evidence of working federation. An organization requiring corporate-directory authentication therefore needs that separate deployment contract and qualification before AeroLink can support it.
 
 ## Enterprise hardening boundary
 

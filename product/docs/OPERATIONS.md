@@ -998,9 +998,33 @@ First qualify `-Apply` on a disposable restored copy using `-Database` and `-Pos
 
 The normal explicit showcase upgrade separately replaces invalid active upstream links in owned scenarios with the approved exact source of the baseline parent. A review interrupted by that correction keeps its prior snapshot and receives a new review cycle. Maintenance removes unapproved links from other active FMS author work without inventing an answer; those Drafts are visibly incomplete until authored. This correction never approves a revision automatically.
 
+## Problem Report import recovery and identity upgrades
+
+Problem Report CSV/XLSX imports keep the selected file, mapping and original preview while an outcome is
+uncertain. Retry that same import to recover its original receipt or complete it; entering a password again
+does not change the operation identity. Changing the file or mapping begins a new operation. Current project
+authority, enabled Problem Reports and password confirmation still apply to receipt replay.
+`GET /api/problem-reports/import/batches?projectId=<id>&unsignedOnly=true` is an authorized, read-only
+diagnostic for batches without a matching `ProblemReportImportBatch` / `ImportProblemReports` signature.
+It never signs or repairs legacy batches, and old null operation identities remain null.
+
+The source-identity migration requires UTF-8 PostgreSQL and refuses existing duplicate, partial, empty or
+untrimmed source pairs inside the same locked transaction that installs its frozen function, generated keys
+and unique constraints. A refusal identifies the affected report IDs; original records and historical evidence
+remain unchanged. Disposition the source-data conflict through the controlled owner before attempting the
+upgrade again. SQLite's equivalent narrow schema guard supports existing disposable/local UTF-8 and UTF-16
+databases; it does not establish a production SQLite upgrade lifecycle. Invalid raw stored text encoding is
+refused with the affected report ID before schema publication; it is not normalized or repaired. Runtime/globalization updates require
+the explicit source-identity compatibility gate to pass before new identity-dependent previews or writes;
+the frozen historical read keys do not depend on the running comparer.
+
 ## Backup and verification
 
-Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, the exact runtime-configured evidence root, runtime configuration, a database-derived attachment inventory, `manifest.json`, and a ZIP SHA-256 sidecar. `Evidence__Root` has environment precedence, then the active appsettings environment, then appsettings, then the LocalAppData default. Backup fails before publication if a referenced object is missing or does not match its size/SHA-256, if attachment metadata changes during capture, or if a pending/repair-required storage operation or partial candidate/released set exists. Retention keeps the latest complete archive per database per local calendar day, for at most 15 calendar days including today. A new same-day capture replaces the previous retained point only after survivor checksum verification. Nested checkpoint folders participate in the same policy.
+Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, the exact runtime-configured evidence root, copies of the source `appsettings.json` and `appsettings.Development.json`, a database-derived attachment inventory, `manifest.json`, and a ZIP SHA-256 sidecar. Those two configuration files do not capture the entire effective runtime configuration, such as environment overrides, service-account settings, or separately provisioned secrets. `Evidence__Root` has environment precedence, then the active appsettings environment, then appsettings, then the LocalAppData default. Backup fails before publication if a referenced object is missing or does not match its size/SHA-256, if attachment metadata changes during capture, or if a pending/repair-required storage operation or partial candidate/released set exists. Retention keeps the latest complete archive per database per local calendar day, for at most 15 calendar days including today. A new same-day capture replaces the previous retained point only after survivor checksum verification. Nested checkpoint folders participate in the same policy.
+
+The checks below qualify database/evidence recovery from this archive. Complete installation recovery also requires the effective configuration and service identity, the Data Protection keyring and any material needed to unlock it, and compatibility with the application discriminator and protection purposes used by existing protected data. Acceptance must start with data protected under the previous hosting configuration; a fresh keyring/restart test alone cannot prove that existing protected secrets or CSRF tokens remain readable. Database-backed session recovery, CSRF validation, and protected-secret recovery require separate evidence. Changing the application isolation name alone does not establish compatibility.
+
+Connector continuity additionally requires the deployment ID, signing key/key ID, origin, and enrolled client trust. The default deployment ID derives from machine/domain identity, so moving the installation can change it even when the signing key is retained. Preserve those identities for continuity, or explicitly reprovision/re-enroll through the existing fingerprint, origin, and retired-key safeguards; restoring a database does not automatically authorize a new connector identity. The current backup script does not archive the Data Protection keyring, its protection material, the connector signing key, or each client's trust store. Complete installation recovery qualification remains owned by the deferred [#750 AD6 and dedicated reliability-child requirement](https://github.com/AeroLinkDEV/requirements-management-tool/issues/750), with distribution/lifecycle work under [#508](https://github.com/AeroLinkDEV/requirements-management-tool/issues/508) and [#509](https://github.com/AeroLinkDEV/requirements-management-tool/issues/509). These boundaries do not change the supported backup/restore commands or claim that an installation recovery failure has been demonstrated.
 
 Run `VERIFY_AEROLINK_BACKUP.bat <absolute-or-repository-backup-zip>`. Verification supports an intentionally relocated ZIP when its adjacent sidecar travels with it, checks the sidecar, rejects unsafe ZIP, manifest, and storage-key paths, verifies every declared file, and independently reconciles every attachment inventory row to the archived evidence size/hash. Orphan objects are reported separately and cannot substitute for a missing referenced object.
 

@@ -1154,14 +1154,18 @@ export default function ProjectSetupWalkthrough({
     if (!scope || scope.draftId !== attempted.draftId || !scopeIsCurrent(scope)) return;
     const generationAtRequest = editGeneration.current;
     const status = failure instanceof ApiError ? failure.status : undefined;
-    // Only a truthful, attributable statement may be repeated. The generic 5xx fallback ("No success was
-    // recorded") asserts an outcome a failed finalization cannot establish, so it is never repeated as fact.
-    const clientReport = failure instanceof ApiError && failure.message ? failure.message : undefined;
-    const reported = clientReport && !clientReport.includes("No success was recorded")
-      ? `${clientReport} `
-      : status
-        ? `AeroLink reported HTTP ${status} for this finalization attempt without an explanatory message. `
-        : "";
+    // Response metadata distinguishes an explanatory server message from shared helper fallback wording.
+    // Keep the HTTP diagnostic and useful 4xx guidance; recovered state establishes the outcome below.
+    const serverReport = failure instanceof ApiError
+      ? failure.details?.error?.toString() || failure.details?.message?.toString()
+      : undefined;
+    const reported = status
+      ? serverReport
+        ? `AeroLink reported HTTP ${status} for this finalization attempt: ${serverReport} `
+        : status >= 500
+          ? `AeroLink reported HTTP ${status} for this finalization attempt without an explanatory message. `
+          : `AeroLink reported HTTP ${status} for this finalization attempt. ${failure instanceof ApiError ? failure.message : ""} `
+      : "";
     let recovered: SetupDraft | undefined;
     let recoveryFailed = false;
     try {

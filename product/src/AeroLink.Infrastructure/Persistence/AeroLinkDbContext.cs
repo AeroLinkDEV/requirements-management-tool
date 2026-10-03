@@ -18,8 +18,17 @@ using System.Text.Json;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> options) : DbContext(options)
+public sealed class AeroLinkDbContext : DbContext
 {
+    public AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> options) : base(options)
+    {
+        // Externally supplied connections can already be open, so an Opened interceptor alone misses them.
+        ProblemReportSourceIdentityConnectionInterceptor.Register(Database.GetDbConnection());
+    }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        => optionsBuilder.AddInterceptors(ProblemReportSourceIdentityConnectionInterceptor.Instance);
+
     /// <summary>
     /// A materializer can supply its governed actor while preparing a first controlled record. API paths normally
     /// carry an actor on their aggregate; this fallback is reserved for explicitly trusted infrastructure seeds.
@@ -609,7 +618,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ProblemReportImportBatch>(b =>
         {
-            b.ToTable("problem_report_import_batches");
+            b.ToTable("problem_report_import_batches", t => t.HasCheckConstraint("CK_pr_import_operation_receipt",
+                "(\"OperationId\" IS NULL AND \"ActorId\" IS NULL AND \"RequestHash\" IS NULL AND \"ReceiptJson\" IS NULL) OR (\"OperationId\" IS NOT NULL AND \"ActorId\" IS NOT NULL AND \"OperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"ActorId\" <> '00000000-0000-0000-0000-000000000000' AND \"RequestHash\" IS NOT NULL AND \"ReceiptJson\" IS NOT NULL AND length(\"RequestHash\") = 64 AND length(\"ReceiptJson\") > 0)"));
             b.HasKey(x => x.Id);
             b.HasIndex(x => x.ProjectId);
             b.Property(x => x.SourceSystem).HasMaxLength(200);
@@ -617,6 +627,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.SourceHash).HasMaxLength(64);
             b.Property(x => x.PreviewHash).HasMaxLength(64);
             b.Property(x => x.ImportedBy).HasMaxLength(200);
+            b.Property(x => x.RequestHash).HasMaxLength(64);
+            b.HasIndex(x => new { x.ProjectId, x.ActorId, x.OperationId }).IsUnique()
+                .HasDatabaseName("ux_pr_import_operation").HasFilter("\"OperationId\" IS NOT NULL");
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<IntegrityImportBatch>(b =>
@@ -1971,7 +1984,20 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ProblemReport>(b =>
         {
-            b.ToTable("problem_reports"); b.HasKey(x => x.Id);
+            var sqlite = Database.IsSqlite();
+            var systemKey = sqlite ? "aerolink_source_identity_v1(CAST(\"SourceSystem\" AS BLOB),0,CAST('A' AS BLOB))"
+                : "aerolink_source_identity_v1(\"SourceSystem\",false)";
+            var sourceKey = sqlite ? "aerolink_source_identity_v1(CAST(\"SourceKey\" AS BLOB),1,CAST('A' AS BLOB))"
+                : "aerolink_source_identity_v1(\"SourceKey\",true)";
+            var trimmed = sqlite ? "aerolink_source_trimmed_v1(CAST(\"SourceSystem\" AS BLOB),CAST('A' AS BLOB)) = 1 AND aerolink_source_trimmed_v1(CAST(\"SourceKey\" AS BLOB),CAST('A' AS BLOB)) = 1"
+                : "char_length(\"SourceSystem\") * 4 = octet_length(\"SourceSystemIdentityV1\") AND char_length(\"SourceKey\") * 4 = octet_length(\"SourceKeyIdentityV1\")";
+            b.ToTable("problem_reports", t => t.HasCheckConstraint("CK_pr_source_identity_shape",
+                "(\"SourceSystem\" IS NULL AND \"SourceKey\" IS NULL) OR (\"SourceSystem\" IS NOT NULL AND \"SourceKey\" IS NOT NULL AND length(\"SourceSystemIdentityV1\") > 0 AND length(\"SourceKeyIdentityV1\") > 0 AND " + trimmed + ")"));
+            b.HasKey(x => x.Id);
+            b.Property<byte[]>("SourceSystemIdentityV1").HasComputedColumnSql(systemKey, stored: !sqlite);
+            b.Property<byte[]>("SourceKeyIdentityV1").HasComputedColumnSql(sourceKey, stored: !sqlite);
+            b.HasIndex("ProjectId", "SourceSystemIdentityV1", "SourceKeyIdentityV1").IsUnique()
+                .HasDatabaseName("ux_pr_source_identity").HasFilter("\"SourceKeyIdentityV1\" IS NOT NULL");
             b.Property(x => x.SourceSystem).HasMaxLength(200); b.Property(x => x.SourceKey).HasMaxLength(200);
             b.Property(x => x.SourceReportedBy).HasMaxLength(300); b.Property(x => x.SourceState).HasMaxLength(200);
             b.HasIndex(x => new { x.ProjectId, x.SourceSystem, x.SourceKey }); b.Property(x => x.ReportNumber).HasMaxLength(80).IsRequired();
@@ -2352,6 +2378,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         PendingLadderSeals.Clear();
         try
         {
+            ValidateSourceIdentityRuntime();
+            if (ChangeTracker.Entries<ProblemReportImportBatch>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+                throw new DomainException("Problem Report import receipts are immutable.");
             if (ChangeTracker.Entries().Any(x => x.Entity is IntegrityImportBatch or IntegrityReportSource
                 && x.State is EntityState.Modified or EntityState.Deleted))
                 throw new DomainException("Integrity import acceptances and source identities are immutable.");
@@ -2391,6 +2420,15 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             PendingLadderSeals.Clear();
             throw;
         }
+    }
+
+    private void ValidateSourceIdentityRuntime()
+    {
+        if (ChangeTracker.Entries<ProblemReport>().Any(x =>
+            (x.State == EntityState.Added && (x.Entity.SourceSystem is not null || x.Entity.SourceKey is not null))
+            || (x.State == EntityState.Modified && (x.Property(nameof(ProblemReport.SourceSystem)).IsModified
+                || x.Property(nameof(ProblemReport.SourceKey)).IsModified))))
+            ProblemReportSourceIdentityKey.EnsureCompatible();
     }
 
     /// <summary>

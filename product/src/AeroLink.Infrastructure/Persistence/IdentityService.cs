@@ -13,14 +13,16 @@ public sealed record LoginResult(AuthenticatedUser User, string Token, DateTimeO
 public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvider? dataProtection = null)
 {
     private const string ProtectedMfaPrefix = "dp:v1:";
+    private const int NewPasswordIterations = 600_000;
     private readonly IDataProtector _mfaProtector = (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1");
     public const string CookieName = "aerolink_session";
     public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
     {
         if (password.Length < 10) throw new ArgumentException("Password must contain at least 10 characters.");
-        var salt = RandomNumberGenerator.GetBytes(16); var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 310_000, HashAlgorithmName.SHA256, 32);
-        return $"pbkdf2-sha256$310000${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
+        var salt = RandomNumberGenerator.GetBytes(16);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, NewPasswordIterations, HashAlgorithmName.SHA256, 32);
+        return $"pbkdf2-sha256${NewPasswordIterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
     }
     public static bool VerifyPassword(string password, string encoded)
     {

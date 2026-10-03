@@ -84,8 +84,8 @@ test('the rotor speeds are the class values: about 395 rpm, the tail fan about n
 // Cesium's decoded-file promise and GPU readiness are separate public lifecycle boundaries (#1443).
 // The stand-in deliberately throws on early node access, independently of the adapter implementation.
 function pendingAircraft() {
-  const main = { originalMatrix: Matrix4.IDENTITY, matrix: Matrix4.IDENTITY }
-  const tail = { originalMatrix: Matrix4.IDENTITY, matrix: Matrix4.IDENTITY }
+  const main = { originalMatrix: Matrix4.fromTranslation(new Cartesian3(2, -3, 1.55)), matrix: Matrix4.IDENTITY }
+  const tail = { originalMatrix: Matrix4.fromTranslation(new Cartesian3(-6.55, 4, 0.55)), matrix: Matrix4.IDENTITY }
   const model = {
     ready: false, readyEvent: new Event(), errorEvent: new Event(), show: false,
     modelMatrix: Matrix4.IDENTITY, destroyed: false,
@@ -135,6 +135,24 @@ test('a decoded helicopter keeps its fallback and accepts Chase placement until 
   state.aircraft.update(placement, 0.5, true)
   expect(state.main.matrix).not.toBe(Matrix4.IDENTITY)
   expect(state.tail.matrix).not.toBe(Matrix4.IDENTITY)
+  const point = (matrix: Matrix4, local: [number, number, number], expected: [number, number, number]) => {
+    const actual = Matrix4.multiplyByPoint(matrix, new Cartesian3(...local), new Cartesian3())
+    for (const [index, value] of [actual.x, actual.y, actual.z].entries()) expect(value).toBeCloseTo(expected[index], 12)
+  }
+  // Independent hub and axis oracle: updates take absolute angles, with the tail fan's class speed ratio.
+  for (const angle of [0.5, 1.25]) {
+    state.aircraft.update(placement, angle, true)
+    const c = Math.cos(angle), s = Math.sin(angle), fan = angle * (3580 / 395)
+    const tc = Math.cos(fan), ts = Math.sin(fan)
+    point(state.main.matrix, [0, 0, 0], [2, -3, 1.55])
+    point(state.main.matrix, [1, 0, 0], [2 + c, -3 + s, 1.55])
+    point(state.main.matrix, [0, 1, 0], [2 - s, -3 + c, 1.55])
+    point(state.main.matrix, [0, 0, 1], [2, -3, 2.55])
+    point(state.tail.matrix, [0, 0, 0], [-6.55, 4, 0.55])
+    point(state.tail.matrix, [1, 0, 0], [-6.55 + tc, 4, 0.55 - ts])
+    point(state.tail.matrix, [0, 1, 0], [-6.55, 5, 0.55])
+    point(state.tail.matrix, [0, 0, 1], [-6.55 + ts, 4, 0.55 + tc])
+  }
   expect(state.counts().renders).toBeGreaterThanOrEqual(2)
   state.aircraft.destroy()
 })

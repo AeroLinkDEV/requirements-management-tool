@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type HTMLAttributes, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type HTMLAttributes, type ReactNode } from "react";
 import { ALERTS } from "./alerts";
 import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAP_RANGES } from "./flight";
@@ -7,7 +7,7 @@ import { aircraftData, fmsOutputs } from "./efis";
 import { Nd, Pfd } from "./FmsEfis";
 import FmsMap from "./FmsMap";
 import FmsGpsTab from "./FmsGpsTab";
-import FmsOutTheWindow, { groundImagery, type Ground, type HudModes } from "./FmsOutTheWindow";
+import FmsOutTheWindow, { FmsOutTheWindowHeader, groundImagery, type Ground, type HudModes } from "./FmsOutTheWindow";
 import type { ImagerySource } from "./groundImagery";
 import { TERRAIN_COLOURINGS, type TerrainColouring } from "./terrainAwareness";
 import { relayImagery, relayTerrain } from "./terrainRelay";
@@ -138,7 +138,6 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const cockpitAway = Boolean(station.windows.cockpit);
   const instructorAway = Boolean(station.windows.instructor);
   const iosVisible = !cockpitView || iosOpen || cockpitAway || instructorAway;
-  const iosReservesOutside = cockpitView && iosOpen && !outsideAway && !cockpitAway && !instructorAway;
   const iosButton = useRef<HTMLButtonElement>(null);
   const iosPanel = useRef<HTMLDivElement>(null);
   const closeIos = () => { station.returnSurface("instructor"); setIosOpen(false); iosButton.current?.focus(); };
@@ -247,6 +246,16 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     try { window.localStorage.setItem(SVS_KEY, on ? "on" : "off"); } catch { /* a remembered choice is a convenience only */ }
   };
   const [outside, setOutside] = useState<WindowChoice>(storedWindow);
+  const outsideToggle = useRef<HTMLButtonElement>(null);
+  const outsideToggleFocus = useRef<Document | null>(null);
+  useLayoutEffect(() => {
+    const destination = outsideToggleFocus.current;
+    outsideToggleFocus.current = null;
+    const button = outsideToggle.current;
+    // Showing/hiding remounts the toolbar. Only hand back the focused user's toggle; an external
+    // preset change or a document transfer must not focus an unrelated or stale destination.
+    if (destination && button?.isConnected && button.ownerDocument === destination) button.focus();
+  }, [outside.shown]);
   const variant = variantById(variantId);
 
   // Time moves in ticks (scenario.ts): while flying, each callback runs `rate` ticks, each advancing the clock, the
@@ -375,50 +384,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         </label>
   </>);
 
-  return (
-    // A <main>, as every workspace page is: the shell frames and densifies pages by that element.
-    <main className={`fmsBench${cockpitView ? " fmsBenchCockpitView" : ""}${focused ? " fmsBenchFocused" : ""}`} aria-label="FMS Test Bench" onKeyDown={event => {
-      if (cockpitView && iosOpen && !cockpitAway && !instructorAway && event.key === "Escape"
-        && (event.target as HTMLElement).ownerDocument === event.currentTarget.ownerDocument) { event.preventDefault(); closeIos(); }
-    }}>
-      <div className="fmsBenchViewBar fmsBenchActions">
-        <button type="button" onClick={() => chooseCockpitView(!cockpitView)}>
-          {cockpitView ? "Engineering view" : "Cockpit view"}
-        </button>
-        {cockpitView ? <>
-          <button type="button" ref={iosButton} aria-expanded={iosVisible} aria-controls={instructorAway ? undefined : "fms-instructor"}
-            onClick={() => instructorAway ? station.openSurface("instructor") : cockpitAway ? iosPanel.current?.focus() : iosOpen ? closeIos() : setIosOpen(true)}>Instructor station</button>
-          <button type="button" onClick={() => setFocused(value => !value)}>{focused ? "Show navigation" : "Focus bench"}</button>
-          <FmsStationDock arrangement={arrangement} onArrangement={chooseArrangement} windows={station.windows} opening={station.opening}
-            errors={station.errors} onOpen={openStationSurface} onReturn={station.returnSurface} onReturnAll={station.returnAll} />
-          <span className="fmsBenchHint">Scripted simulation · EFIS / AFCS: FMS {system.guidanceSide} · Inspected: CDU {cduSide}</span>
-          {recording ? <strong className="fmsBenchHint" role="status">Recording CDU 1 only; CDU 2 input is not recorded.</strong> : null}
-        </> : null}
-      </div>
-      <header className="fmsBenchHeader">
-        <div>
-          <span className="fmsBenchEyebrow">TEST BENCH</span>
-          <h1>CMA-9000 FMS control display unit</h1>
-          <p>
-            A photorealistic, touchable CDU running a <strong>scripted simulation</strong>: key behaviour follows the
-            CMA-9000 Operator's Manual, and courses and distances come from a small demonstration navigation
-            database. It is not a navigation computer, and it is built so the real operational program can drive it
-            later.
-          </p>
-          <p className="fmsBenchProfile" data-testid="fms-bench-profile">
-            Aircraft profile: <strong>{backend.aircraftProfile.title}</strong> ({backend.aircraftProfile.id} v{backend.aircraftProfile.version}, {profileFingerprint(backend.aircraftProfile)}).
-            Declared as data; parameters not yet flown by the simulation are marked for later stages.
-          </p>
-        </div>
-        {!cockpitView ? setupControls : null}
-      </header>
-
-      <div className={`fmsBenchUpper${cockpitView && iosOpen && iosExpanded ? " fmsBenchIosExpanded" : ""}${iosReservesOutside ? " fmsBenchIosReservesOutside" : ""}${outsideAway ? " fmsBenchOutsideAway" : ""}${cockpitAway ? " fmsBenchCockpitAway" : ""}`}>
-      {outsideAway ? <FmsStationPlaceholder id="outside" onReturn={() => station.returnSurface("outside")} /> : null}
-      <FmsStationSurface targetWindow={station.windows.outside} className={`${cockpitView ? "fmsBenchCockpitView " : ""}fmsStationSurfaceOutside`}>
-      <section className="fmsBenchCard fmsBenchWindow" aria-label="Out-the-window view">
-        <div className="fmsBenchMapHead">
-          <h2>Out the window</h2>
+  const windowControls = (
           <div className="fmsBenchDisplayControls">
             {outside.shown ? (
               <>
@@ -457,15 +423,62 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                 </div>
               </>
             ) : null}
-            <button type="button" aria-expanded={outside.shown} onClick={() => chooseWindow({ shown: !outside.shown })}>
+            <button type="button" ref={outsideToggle} aria-expanded={outside.shown} onClick={event => {
+              outsideToggleFocus.current = event.currentTarget.ownerDocument.activeElement === event.currentTarget ? event.currentTarget.ownerDocument : null;
+              chooseWindow({ shown: !outside.shown });
+            }}>
               {outside.shown ? "Hide the view" : "Show the view"}
             </button>
           </div>
+  );
+
+  return (
+    // A <main>, as every workspace page is: the shell frames and densifies pages by that element.
+    <main className={`fmsBench${cockpitView ? " fmsBenchCockpitView" : ""}${focused ? " fmsBenchFocused" : ""}`} aria-label="FMS Test Bench" onKeyDown={event => {
+      if (cockpitView && iosOpen && !cockpitAway && !instructorAway && event.key === "Escape"
+        && (event.target as HTMLElement).ownerDocument === event.currentTarget.ownerDocument) { event.preventDefault(); closeIos(); }
+    }}>
+      <div className="fmsBenchViewBar fmsBenchActions">
+        <button type="button" onClick={() => chooseCockpitView(!cockpitView)}>
+          {cockpitView ? "Engineering view" : "Cockpit view"}
+        </button>
+        {!cockpitView ? <span className="fmsBenchHint">For separate browser windows, switch to Cockpit view.</span> : null}
+        {cockpitView ? <>
+          <button type="button" ref={iosButton} aria-expanded={iosVisible} aria-controls={instructorAway ? undefined : "fms-instructor"}
+            onClick={() => instructorAway ? station.openSurface("instructor") : cockpitAway ? iosPanel.current?.focus() : iosOpen ? closeIos() : setIosOpen(true)}>Instructor station</button>
+          <button type="button" onClick={() => setFocused(value => !value)}>{focused ? "Show navigation" : "Focus bench"}</button>
+          <FmsStationDock arrangement={arrangement} onArrangement={chooseArrangement} windows={station.windows} opening={station.opening}
+            errors={station.errors} onOpen={openStationSurface} onReturn={station.returnSurface} onReturnAll={station.returnAll} />
+          <span className="fmsBenchHint">Scripted simulation · EFIS / AFCS: FMS {system.guidanceSide} · Inspected: CDU {cduSide}</span>
+          {recording ? <strong className="fmsBenchHint" role="status">Recording CDU 1 only; CDU 2 input is not recorded.</strong> : null}
+        </> : null}
+      </div>
+      <header className="fmsBenchHeader">
+        <div>
+          <span className="fmsBenchEyebrow">TEST BENCH</span>
+          <h1>CMA-9000 FMS control display unit</h1>
+          <p>
+            A photorealistic, touchable CDU running a <strong>scripted simulation</strong>: key behaviour follows the
+            CMA-9000 Operator's Manual, and courses and distances come from a small demonstration navigation
+            database. It is not a navigation computer, and it is built so the real operational program can drive it
+            later.
+          </p>
+          <p className="fmsBenchProfile" data-testid="fms-bench-profile">
+            Aircraft profile: <strong>{backend.aircraftProfile.title}</strong> ({backend.aircraftProfile.id} v{backend.aircraftProfile.version}, {profileFingerprint(backend.aircraftProfile)}).
+            Declared as data; parameters not yet flown by the simulation are marked for later stages.
+          </p>
         </div>
+        {!cockpitView ? setupControls : null}
+      </header>
+
+      <div className={`fmsBenchUpper${cockpitView && iosOpen && iosExpanded ? " fmsBenchIosExpanded" : ""}${iosReservesOutside ? " fmsBenchIosReservesOutside" : ""}${outsideAway ? " fmsBenchOutsideAway" : ""}${cockpitAway ? " fmsBenchCockpitAway" : ""}`}>
+      {outsideAway ? <FmsStationPlaceholder id="outside" onReturn={() => station.returnSurface("outside")} /> : null}
+      <FmsStationSurface targetWindow={station.windows.outside} className={`${cockpitView ? "fmsBenchCockpitView " : ""}fmsStationSurfaceOutside`}>
+      <section className="fmsBenchCard fmsBenchWindow" aria-label="Out-the-window view">
         {outside.shown
           ? <FmsOutTheWindow air={air} route={bus.activeRoute} modes={modes} layout={outside.layout} view={outside.view} tiles={tiles}
-            ground={outside.ground} colouring={outside.colouring} imagery={photos} />
-          : <p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p>}
+            ground={outside.ground} colouring={outside.colouring} imagery={photos} controls={windowControls} />
+          : <><FmsOutTheWindowHeader controls={windowControls} /><p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p></>}
       </section>
       </FmsStationSurface>
       {cockpitAway ? <FmsStationPlaceholder id="cockpit" onReturn={() => station.returnSurface("cockpit")} /> : null}
@@ -602,7 +615,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </form>
           {sim.advisory ? (
             // The helicopter profile: the crew flies the vertical axis and the speed; the FMS constraints are advisories.
-            <form className="fmsBenchAutopilot" aria-label="Vertical and speed selections" onSubmit={event => event.preventDefault()}>
+            <form className="fmsBenchAutopilot fmsBenchVerticalSelections" aria-label="Vertical and speed selections" onSubmit={event => event.preventDefault()}>
               <label>
                 <span>ALT SEL</span>
                 <input inputMode="numeric" value={altInput} placeholder={String(sim.selectedAltitude)} maxLength={5} aria-label="Preselected altitude"
@@ -674,7 +687,6 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           {!cockpitAway && !instructorAway ? <button type="button" aria-pressed={iosExpanded} onClick={() => setIosExpanded(value => !value)}>{iosExpanded ? "Compact instructor" : "More instructor room"}</button> : null}
           {!cockpitAway || instructorAway ? <button type="button" onClick={closeIos}>Close instructor station</button> : null}
           {iosReservesOutside && outside.shown ? <span className="fmsBenchHint fmsBenchOtwCoveredHint">At this width the instructor drawer covers part or all of the outside view. Close the drawer to see the whole view.</span> : null}
-          {outsideAway && !cockpitAway && !instructorAway ? <span className="fmsBenchHint">The instructor drawer covers part of the cockpit while open.</span> : null}</div> : null}
         <div className="fmsBenchTabs" role="tablist" aria-label="Bench tools">
           {visibleTabs.map(item => (
             <button key={item.id} type="button" role="tab" id={`fms-bench-tabbutton-${item.id}`} aria-controls={`fms-bench-tab-${item.id}`}
