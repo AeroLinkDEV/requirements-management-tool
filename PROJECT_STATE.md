@@ -633,6 +633,12 @@ authoritatively documented in [product/docs/CHANGE_REQUEST_LOADS.md](product/doc
 
 Operational backup retention keeps at most one complete restore point per database per local day for 15 days. Ordinary repository CSV exports have a seven-day download lifetime and automatic file cleanup; controlled publications and engineering history retain their existing lifecycle. Disposable browser tests own separate database and evidence storage.
 
+Supported backup and canonical or explicitly associated retention operations share the production installation
+transition lease, acquired before PostgreSQL/helper work and held through backup-root lock release. A competing
+transition refuses before teardown or source advancement; authenticated upgrade descendants join the parent's
+lease. Unassociated external archive retention retains its existing root lock without claiming installation-wide
+exclusion. Pending interrupted production recovery is not discharged by backup or retention.
+
 The repository provides stable Windows root launchers for development, production-style local operation, shared/remote demo modes, backup, restore validation, diagnostics, and related operator actions.
 
 Those root launchers are intentionally treated as compatibility surfaces; their real logic generally delegates into `product/scripts`.

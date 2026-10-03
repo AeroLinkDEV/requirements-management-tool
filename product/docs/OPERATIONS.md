@@ -350,6 +350,11 @@ the expected executable and exact start time, rejecting stale PIDs. Ngrok's full
 must match; extra URL/config/policy overrides are not treated as the configured tunnel.
 
 One installation lease coordinates production Start, remote-demo Start/Stop, and source reconciliation.
+Supported backups take that same lease before PostgreSQL/helper work and hold it through archive creation,
+verification, retention and backup-root lock release. Canonical backup retention also takes it; a contending
+transition refuses before teardown or source advancement. Authenticated upgrade descendants join their existing
+parent lease without changing its policy. A pending interrupted transition must be recovered before standalone
+backup or associated retention work; these operations cannot discharge the restoration obligation.
 The OS file handle is held by the outer authority for the whole attempt, and the delegate and its continuation
 hold it only as descendants with the matching per-run capability and live owner creation identity. Contending
 invocations fail promptly with a retry diagnosis. A competing transition is refused while the previous attempt
@@ -1076,6 +1081,16 @@ nonzero exit, and copy archives to separately protected storage. A 24-hour backu
 organization-approved RPO/RTO.
 
 For an existing backup tree, preview the same policy with `Remove-AeroLinkSurplusBackups.ps1 -BackupRoot <absolute-path>`. Add `-Apply` to execute the reviewed policy. The tool refuses links, archive drift, corrupt survivors, and removal of a database's last current recovery point. It includes nested checkpoint archives and removes matching checksum sidecars. Backup and retention operations share an exclusive root lock.
+
+Retention automatically joins the installation lease only when the normalized requested root exactly matches
+this checkout's resolved installation `Backups` path. Other archive roots retain their existing root-lock-only
+behavior. To associate an external archive tree explicitly, add `-InstallationRoot <existing-absolute-directory>`;
+the tool never infers an installation from an archive parent or initializes a missing explicit installation.
+An unavailable automatic association is reported separately, and a known intended canonical or explicit binding
+fails closed. Once associated, lease contention or pending recovery never falls back to root-only operation.
+The backup-root lock releases before the installation lease, including error cleanup. Scheduled-backup frequency,
+retention policy and reconciliation/request policy are unchanged; refusal does not assert source currency or a
+successful deployment.
 
 Ordinary repository CSV exports expire after seven days; completed job metadata remains attributable and the download returns `410 export_expired` after expiry. The worker reclaims files from the dedicated temporary-export namespace every ten minutes. Controlled publications, signed packages, uploaded documents, legacy job outputs and their exact historical files are retained. Browser harnesses use owned temporary database/evidence storage, including across a restart-recovery run, and release it after the run.
 

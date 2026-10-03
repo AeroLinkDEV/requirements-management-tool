@@ -19,13 +19,14 @@ $driver = Join-Path $root 'driver.ps1'
 param($Controller, $CasePath, $Events)
 $ErrorActionPreference = 'Stop'
 $case = Get-Content -LiteralPath $CasePath -Raw | ConvertFrom-Json
+if ($case.LeaseModule) { Import-Module $case.LeaseModule }
 $script:started = $false
 function Event($Name) {
     Add-Content -LiteralPath $Events -Value $Name
     if ($case.Failure -eq $Name) { throw "Injected $Name failure" }
 }
 function Get-AeroLinkInstallationPaths {
-    $local = Join-Path (Split-Path $CasePath -Parent) 'local'
+    $local = if ($case.InstallationRoot) { $case.InstallationRoot } else { Join-Path (Split-Path $CasePath -Parent) 'local' }
     [pscustomobject]@{ InstallationRoot=$local; Logs=(Join-Path $local 'logs'); BootstrapState=(Join-Path $local 'bootstrap') }
 }
 function Get-AeroLinkProtectedGitLabDescriptor {
@@ -37,8 +38,19 @@ function Get-AeroLinkProtectedGitLabDescriptor {
     }
 }
 function Assert-AeroLinkRunningFromProductionSource { [pscustomobject]@{ DelegateTo=$null } }
-function Enter-AeroLinkTransition { Event 'Lease'; [pscustomobject]@{ Owner=$true; Policy='Preserve' } }
-function Exit-AeroLinkTransition { Event 'ReleaseLease' }
+function Enter-AeroLinkTransition {
+    param($InstallationRoot, $Policy)
+    Event 'Lease'
+    if ($case.LeaseModule) {
+        return AeroLinkTransition\Enter-AeroLinkTransition -InstallationRoot $InstallationRoot -Policy Preserve
+    }
+    [pscustomobject]@{ Owner=$true; Policy='Preserve' }
+}
+function Exit-AeroLinkTransition {
+    param($Lease)
+    if ($case.LeaseModule) { AeroLinkTransition\Exit-AeroLinkTransition -Lease $Lease }
+    Event 'ReleaseLease'
+}
 function Get-AeroLinkRemoteDemoConfigPath { $CasePath }
 function Get-AeroLinkRemoteDemoConfig { [pscustomobject]@{ PublicUrl='https://example.invalid'; LocalApiBaseUri='http://127.0.0.1:5080' } }
 function New-AeroLinkProductionObligation {
@@ -152,6 +164,78 @@ try {
         if ($case.Tunnel -and $events -contains 'ApiStart' -and -not $case.Failure -and
             [array]::IndexOf($events,'OriginProof') -gt [array]::IndexOf($events,'TunnelRestore')) { $failures.Add("$description restored before new-process origin proof") }
     }
+    # Real public Backup admission, real OS lease and the existing controller adapters. The held
+    # dependency is harmless: it signals PostgreSQL-start admission, then fails without starting it.
+    $backupScripts = Join-Path $root 'backup-contract\product\scripts'
+    New-Item -ItemType Directory -Path $backupScripts -Force | Out-Null
+    foreach ($name in @('Backup-AeroLink.ps1', 'AeroLinkInstallation.psm1', 'AeroLinkTransition.psm1', 'AeroLinkBackupRetention.psm1')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $backupScripts
+    }
+    'function Get-AeroLinkEvidenceRoot { Join-Path $env:AEROLINK_INSTALLATION_ROOT "evidence" }' |
+        Set-Content -LiteralPath (Join-Path $backupScripts 'AeroLinkEvidenceStore.psm1') -Encoding UTF8
+    '# No archive operation is reached in this admission contract.' |
+        Set-Content -LiteralPath (Join-Path $backupScripts 'AeroLinkBackupArchive.psm1') -Encoding UTF8
+    @'
+function Invoke-AeroLinkChildScript {
+    Set-Content -LiteralPath $env:AEROLINK_1478_READY -Value 'postgres-helper-admitted'
+    for ($i = 0; $i -lt 200 -and -not (Test-Path -LiteralPath $env:AEROLINK_1478_RELEASE); $i++) { Start-Sleep -Milliseconds 100 }
+    [pscustomobject]@{ ExitCode=1; Detail='Disposable held helper ended; no PostgreSQL was started.' }
+}
+'@ | Set-Content -LiteralPath (Join-Path $backupScripts 'AeroLinkNativeRunner.psm1') -Encoding UTF8
+    $backupDriver = Join-Path $root 'backup-driver.ps1'
+    @'
+param($Entry, $Installation, $Ready, $Release)
+$ErrorActionPreference = 'Stop'
+$env:AEROLINK_INSTALLATION_ROOT = $Installation
+$env:AEROLINK_TRANSITION_LEASE = $null
+$env:AEROLINK_TRANSITION_JOURNAL = $null
+$env:AEROLINK_1478_READY = $Ready
+$env:AEROLINK_1478_RELEASE = $Release
+& $Entry
+'@ | Set-Content -LiteralPath $backupDriver -Encoding UTF8
+    $installationRoot = Join-Path $root 'backup-installation'
+    New-Item -ItemType Directory -Path $installationRoot | Out-Null
+    $ready = Join-Path $root 'backup-ready'
+    $release = Join-Path $root 'backup-release'
+    $backupChild = $null
+    try {
+        $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $backupEntry = Join-Path $backupScripts 'Backup-AeroLink.ps1'
+        $backupChild = Start-Process -FilePath $powershell -WindowStyle Hidden -PassThru -ArgumentList (
+            '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Entry "{1}" -Installation "{2}" -Ready "{3}" -Release "{4}"' -f
+            $backupDriver, $backupEntry, $installationRoot, $ready, $release) `
+            -RedirectStandardOutput (Join-Path $root 'backup-held.stdout.log') -RedirectStandardError (Join-Path $root 'backup-held.stderr.log')
+        for ($i = 0; $i -lt 100 -and -not (Test-Path -LiteralPath $ready) -and -not $backupChild.HasExited; $i++) { Start-Sleep -Milliseconds 100 }
+        if (-not (Test-Path -LiteralPath $ready)) { $failures.Add('Backup admission fixture did not reach its held harmless helper.'); throw $failures[-1] }
+        $casePath = Join-Path $root 'backup-held-case.json'
+        $eventsPath = Join-Path $root 'backup-held-events.txt'
+        @{ Tunnel=$true; Runtime='RestartStale'; Advance=$true; Failure=''; PendingUpgrade=$true;
+            InstallationRoot=$installationRoot; LeaseModule=(Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') } |
+            ConvertTo-Json | Set-Content -LiteralPath $casePath -Encoding UTF8
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $powershell -NoProfile -ExecutionPolicy Bypass -File $driver -Controller $controller -CasePath $casePath -Events $eventsPath *> (Join-Path $root 'backup-held-controller.log')
+            $code = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousPreference }
+        $events = @(Get-Content -LiteralPath $eventsPath)
+        $refusal=Get-Content -LiteralPath (Join-Path $root 'backup-held-controller.log') -Raw
+        if ($code -eq 0 -or $refusal -notmatch 'Another HOME transition owns' -or
+            @($events | Where-Object { $_ -in @('ApiStop','TunnelStop','SourceAdvance','Postgres','Upgrade','Backup','RestoreClone','UpgradeClone','UpgradeReal') }).Count) {
+            $failures.Add('A held public backup must refuse a competing transition with zero teardown, source advance or migration events.')
+        }
+    } finally {
+        Set-Content -LiteralPath $release -Value 'release'
+        if ($backupChild) {
+            if (-not $backupChild.WaitForExit(10000)) { $failures.Add('Held backup helper did not finish after release.'); $backupChild.Kill(); $backupChild.WaitForExit() }
+            if ($backupChild.ExitCode -eq 0) { $failures.Add('Disposable failed backup helper unexpectedly completed a backup.') }
+            $backupChild.Dispose()
+        }
+    }
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1')
+    $releasedBackupLease=Enter-AeroLinkTransition -InstallationRoot $installationRoot -Policy Preserve
+    try { if (-not $releasedBackupLease.Owner) { $failures.Add('Failed backup did not release installation admission.') } }
+    finally { Exit-AeroLinkTransition $releasedBackupLease }
     if ($failures.Count) { $failures | ForEach-Object { Write-Host "FAIL: $_" }; throw "Production transition contracts failed. Evidence: $root" }
     Write-Host "Production transition controller contracts passed ($index disposable dependency scenarios)."
 }

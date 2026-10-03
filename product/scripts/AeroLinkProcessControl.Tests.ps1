@@ -157,6 +157,199 @@ try {
     $lease = Enter-AeroLinkTransition -InstallationRoot $root -Policy KeepReady
     Check ($lease.Owner -and $lease.Policy -eq 'KeepReady' -and -not $lease.Pending) 'A stale released lease must acquire fresh ownership and policy.'
 
+    # Supported backup/retention entry points against an owned installation. Real admission and
+    # archive locks; dependency adapters never start PostgreSQL or read an application's evidence.
+    $backupScripts = Join-Path $root 'backup-admission\product\scripts'
+    New-Item -ItemType Directory -Path $backupScripts -Force | Out-Null
+    foreach ($name in @('Backup-AeroLink.ps1','Remove-AeroLinkSurplusBackups.ps1','AeroLinkInstallation.psm1','AeroLinkTransition.psm1','AeroLinkBackupRetention.psm1')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $backupScripts
+    }
+    'function Get-AeroLinkEvidenceRoot { Join-Path $env:AEROLINK_INSTALLATION_ROOT "evidence" }' |
+        Set-Content -LiteralPath (Join-Path $backupScripts 'AeroLinkEvidenceStore.psm1') -Encoding UTF8
+    '# No archive operation is reached.' | Set-Content -LiteralPath (Join-Path $backupScripts 'AeroLinkBackupArchive.psm1') -Encoding UTF8
+    @'
+function Invoke-AeroLinkChildScript {
+    Set-Content -LiteralPath $env:AEROLINK_1478_HELPER -Value 'unexpected-helper'
+    [pscustomobject]@{ExitCode=1;Detail='Disposable helper; no PostgreSQL started.'}
+}
+'@ | Set-Content -LiteralPath (Join-Path $backupScripts 'AeroLinkNativeRunner.psm1') -Encoding UTF8
+    $entryDriver = Join-Path $root 'backup-entry-driver.ps1'
+    @'
+param($Entry, $Installation, $BackupRoot, $Helper, $WorkingDirectory, [switch]$Explicit, [switch]$JoinParent)
+$ErrorActionPreference = 'Stop'
+if ($WorkingDirectory) {
+    Set-Location -LiteralPath $WorkingDirectory
+    [Environment]::CurrentDirectory=$WorkingDirectory
+    if (-not (Test-Path -LiteralPath $Installation -PathType Container)) { throw 'Partial-path positive-control target is missing.' }
+    Write-Output 'Existing partial path target verified.'
+}
+$env:AEROLINK_INSTALLATION_ROOT = $Installation
+$env:AEROLINK_1478_HELPER = $Helper
+if (-not $JoinParent) { $env:AEROLINK_TRANSITION_LEASE=$null; $env:AEROLINK_TRANSITION_JOURNAL=$null }
+if ($BackupRoot) {
+    if ($Explicit) { & $Entry -BackupRoot $BackupRoot -InstallationRoot $Installation }
+    else { & $Entry -BackupRoot $BackupRoot }
+} else { & $Entry }
+'@ | Set-Content -LiteralPath $entryDriver -Encoding UTF8
+    $backupInstallation = Join-Path $root 'backup-admission-installation'
+    New-Item -ItemType Directory -Path $backupInstallation | Out-Null
+    $canonicalBackups = Join-Path $backupInstallation 'backups'
+    $externalBackups = Join-Path $root 'unassociated-archives'
+    $helperEvent = Join-Path $root 'backup-helper-event'
+    $backupAdmissionLease = $null
+    $retentionChild = $null
+    $retentionRelease = Join-Path $root 'retention-release'
+    $backupPriorObligation = $env:AEROLINK_PRODUCTION_OBLIGATION
+    try {
+        $backupAdmissionLease = Enter-AeroLinkTransition -InstallationRoot $backupInstallation -Policy KeepReady
+        foreach ($entry in @('Backup-AeroLink.ps1','Remove-AeroLinkSurplusBackups.ps1')) {
+            $entryPath = Join-Path $backupScripts $entry
+            $extra = if ($entry -eq 'Remove-AeroLinkSurplusBackups.ps1') { @('-BackupRoot',$canonicalBackups) } else { @() }
+            $entryPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $entryPath -Installation $backupInstallation -Helper $helperEvent @extra *> (Join-Path $root ($entry + '.refusal.log'))
+                $entryCode = $LASTEXITCODE
+            } finally { $ErrorActionPreference = $entryPreference }
+            $refusal=Get-Content -LiteralPath (Join-Path $root ($entry + '.refusal.log')) -Raw
+            Check ($entryCode -ne 0 -and $refusal -match 'Another HOME transition owns' -and -not (Test-Path -LiteralPath $helperEvent) -and -not (Test-Path -LiteralPath (Join-Path $canonicalBackups '.backup.lock'))) "$entry must refuse a held transition before helper/PostgreSQL or backup-root lock work."
+        }
+        $retentionEntry = Join-Path $backupScripts 'Remove-AeroLinkSurplusBackups.ps1'
+        & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $retentionEntry -Installation $backupInstallation -BackupRoot $externalBackups -Helper $helperEvent
+        Check ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $externalBackups '.backup.lock'))) 'Unassociated external archives retain their root-lock preview while this installation is busy.'
+        $entryPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $retentionEntry -Installation $backupInstallation -BackupRoot $externalBackups -Helper $helperEvent -Explicit *> (Join-Path $root 'explicit-retention-refusal.log')
+            $entryCode = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $entryPreference }
+        Check ($entryCode -ne 0 -and (Get-Content -LiteralPath (Join-Path $root 'explicit-retention-refusal.log') -Raw) -match 'Another HOME transition owns') 'Explicitly associated external archives must not downgrade a held installation lease to root-only.'
+
+        # A real authenticated retention child holds both locks during a disposable plan boundary.
+        # It must not deadlock, change the parent's policy or lose exclusion when the parent releases.
+        @'
+function Enter-AeroLinkBackupLock($BackupRoot) {
+    [void][IO.Directory]::CreateDirectory($BackupRoot)
+    [IO.File]::Open((Join-Path $BackupRoot '.backup.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+}
+function Get-AeroLinkBackupRetentionPlan {
+    Set-Content -LiteralPath $env:AEROLINK_1478_HELPER -Value 'retention-plan-admitted'
+    $release = Join-Path (Split-Path $env:AEROLINK_1478_HELPER -Parent) 'retention-release'
+    for ($i=0;$i -lt 200 -and -not(Test-Path -LiteralPath $release);$i++){Start-Sleep -Milliseconds 100}
+    @()
+}
+'@ | Set-Content -LiteralPath (Join-Path $backupScripts 'AeroLinkBackupRetention.psm1') -Encoding UTF8
+        $retentionChild = Start-Process -FilePath $powershell -WindowStyle Hidden -PassThru -ArgumentList (
+            '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Entry "{1}" -Installation "{2}" -BackupRoot "{3}" -Helper "{4}" -JoinParent' -f
+            $entryDriver,$retentionEntry,$backupInstallation,$canonicalBackups,$helperEvent) `
+            -RedirectStandardOutput (Join-Path $root 'retention-child.stdout.log') -RedirectStandardError (Join-Path $root 'retention-child.stderr.log')
+        # Hold the launched lifetime before polling; the established production helper uses
+        # this same native handle because PS5's polled Start-Process ExitCode can be unavailable.
+        $retentionChildHandle = $retentionChild.Handle
+        for ($i=0;$i -lt 100 -and -not(Test-Path -LiteralPath $helperEvent) -and -not $retentionChild.HasExited;$i++){Start-Sleep -Milliseconds 100}
+        Check (Test-Path -LiteralPath $helperEvent) 'Authenticated retention must reach its plan without deadlock.'
+        Check (@(Get-ChildItem -LiteralPath (Join-Path $backupInstallation 'bootstrap') -Filter '*.active').Count -eq 1) 'Supported retention must hold a descendant witness.'
+        Exit-AeroLinkTransition $backupAdmissionLease
+        $backupAdmissionLease=$null
+        Refuses { Enter-AeroLinkTransition -InstallationRoot $backupInstallation } 'A live retention child must exclude another transition after parent interruption.'
+        Set-Content -LiteralPath $retentionRelease -Value 'release'
+        if (-not $retentionChild.WaitForExit(10000)) { throw 'Owned retention child did not finish after release.' }
+        $retentionExit = [ordered]@{ processId=$retentionChild.Id; propertyBeforeRefresh=$null; propertyBeforeRefreshType=$null;
+            propertyBeforeRefreshError=$null; propertyAfterRefresh=$null; propertyAfterRefreshType=$null;
+            propertyAfterRefreshError=$null; nativeExit=$null; nativeError=$null }
+        try {
+            $retentionExit.propertyBeforeRefresh=$retentionChild.ExitCode
+            if ($null -ne $retentionExit.propertyBeforeRefresh) { $retentionExit.propertyBeforeRefreshType=$retentionExit.propertyBeforeRefresh.GetType().FullName }
+        } catch { $retentionExit.propertyBeforeRefreshError=$_.Exception.Message }
+        try { $retentionExit.nativeExit=[AeroLink.ProcessAccess]::ExitCode($retentionChildHandle) }
+        catch { $retentionExit.nativeError=$_.Exception.Message }
+        try {
+            $retentionChild.Refresh()
+            $retentionExit.propertyAfterRefresh=$retentionChild.ExitCode
+            if ($null -ne $retentionExit.propertyAfterRefresh) { $retentionExit.propertyAfterRefreshType=$retentionExit.propertyAfterRefresh.GetType().FullName }
+        } catch { $retentionExit.propertyAfterRefreshError=$_.Exception.Message }
+        Write-Host ('Retention child exit observation: ' + ($retentionExit | ConvertTo-Json -Compress))
+        Check ($null -ne $retentionExit.nativeExit -and $retentionExit.nativeExit -eq 0) 'Authenticated retention must complete normally.'
+        $backupAdmissionLease=Enter-AeroLinkTransition -InstallationRoot $backupInstallation -Policy Preserve
+        Check ($backupAdmissionLease.Owner) 'Installation admission must reopen after the retention child releases.'
+        $releasedRootLock=[IO.File]::Open((Join-Path $canonicalBackups '.backup.lock'),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        $releasedRootLock.Dispose()
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AeroLinkBackupRetention.psm1') -Destination $backupScripts -Force
+        Remove-Item -LiteralPath $helperEvent
+        Exit-AeroLinkTransition $backupAdmissionLease
+        $backupAdmissionLease=$null
+        $heldRootLock=[IO.File]::Open((Join-Path $canonicalBackups '.backup.lock'),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        try {
+            $entryPreference=$ErrorActionPreference
+            try {
+                $ErrorActionPreference='Continue'
+                & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $retentionEntry -Installation $backupInstallation -BackupRoot $canonicalBackups -Helper $helperEvent *> (Join-Path $root 'retention-root-lock-failure.log')
+                $entryCode=$LASTEXITCODE
+            } finally { $ErrorActionPreference=$entryPreference }
+            Check ($entryCode -ne 0 -and (Get-Content -LiteralPath (Join-Path $root 'retention-root-lock-failure.log') -Raw) -match 'Another backup or retention operation owns') 'A held archive-root lock must retain its existing refusal.'
+            $backupAdmissionLease=Enter-AeroLinkTransition -InstallationRoot $backupInstallation -Policy Preserve
+            Check ($backupAdmissionLease.Owner) 'Root-lock acquisition failure must release installation admission.'
+        } finally { $heldRootLock.Dispose() }
+        Save-AeroLinkProductionObligation -Obligation ([pscustomobject]@{SourceRoot=$root;PriorTunnel=$true;Stage='Quiesced';Discharged=$false})
+        Exit-AeroLinkTransition $backupAdmissionLease
+        $backupAdmissionLease=$null
+        $pendingJournal=Join-Path $backupInstallation 'bootstrap\home-transition-intent.json'
+        $pendingBefore=[IO.File]::ReadAllBytes($pendingJournal)
+        foreach ($entry in @('Backup-AeroLink.ps1','Remove-AeroLinkSurplusBackups.ps1')) {
+            $extra = if ($entry -eq 'Remove-AeroLinkSurplusBackups.ps1') { @('-BackupRoot',$canonicalBackups) } else { @() }
+            $entryPreference=$ErrorActionPreference
+            try {
+                $ErrorActionPreference='Continue'
+                & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry (Join-Path $backupScripts $entry) -Installation $backupInstallation -Helper $helperEvent @extra *> (Join-Path $root ($entry + '.pending.log'))
+                $entryCode=$LASTEXITCODE
+            } finally { $ErrorActionPreference=$entryPreference }
+            Check ($entryCode -ne 0 -and (Get-Content -LiteralPath (Join-Path $root ($entry + '.pending.log')) -Raw) -match 'requires recovery' -and -not(Test-Path -LiteralPath $helperEvent)) "$entry must not perform backup/retention work over pending recovery."
+            Check ([Convert]::ToBase64String([IO.File]::ReadAllBytes($pendingJournal)) -eq [Convert]::ToBase64String($pendingBefore)) "$entry must preserve the pending recovery journal."
+        }
+        $missingInstallation=Join-Path $root 'not-an-installation'
+        $entryPreference=$ErrorActionPreference
+        try {
+            $ErrorActionPreference='Continue'
+            & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $retentionEntry -Installation $missingInstallation -BackupRoot $externalBackups -Helper $helperEvent -Explicit *> (Join-Path $root 'invalid-explicit-retention.log')
+            $entryCode=$LASTEXITCODE
+        } finally { $ErrorActionPreference=$entryPreference }
+        Check ($entryCode -ne 0 -and (Get-Content -LiteralPath (Join-Path $root 'invalid-explicit-retention.log') -Raw) -match 'explicit InstallationRoot must name an existing absolute' -and -not(Test-Path -LiteralPath $missingInstallation)) 'An invalid explicit association must refuse without initializing an installation.'
+        $partialInstallations=@(($backupInstallation.Substring(0,2)+(Split-Path $backupInstallation -Leaf)),$backupInstallation.Substring(2))
+        for ($partialIndex=0; $partialIndex -lt $partialInstallations.Count; $partialIndex++) {
+            $partialLog=Join-Path $root ('partial-explicit-retention-'+$partialIndex+'.log')
+            $entryPreference=$ErrorActionPreference
+            try {
+                $ErrorActionPreference='Continue'
+                & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $retentionEntry -Installation $partialInstallations[$partialIndex] -WorkingDirectory $root -BackupRoot $externalBackups -Helper $helperEvent -Explicit *> $partialLog
+                $entryCode=$LASTEXITCODE
+            } finally { $ErrorActionPreference=$entryPreference }
+            $partialOutput=Get-Content -LiteralPath $partialLog -Raw
+            Check ($entryCode -ne 0 -and $partialOutput -match 'Existing partial path target verified' -and $partialOutput -match 'explicit InstallationRoot must name an existing absolute') 'Drive-relative and root-relative existing targets must refuse explicit association before installation lookup.'
+            Check ([Convert]::ToBase64String([IO.File]::ReadAllBytes($pendingJournal)) -eq [Convert]::ToBase64String($pendingBefore)) 'Partial explicit association must not touch the existing installation journal.'
+        }
+        & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $retentionEntry -Installation $missingInstallation -BackupRoot $externalBackups -Helper $helperEvent *> (Join-Path $root 'unavailable-unassociated-retention.log')
+        Check ($LASTEXITCODE -eq 0 -and -not(Test-Path -LiteralPath $missingInstallation)) 'Unrelated retention must not require a usable source installation or guess one.'
+        $entryPreference=$ErrorActionPreference
+        try {
+            $ErrorActionPreference='Continue'
+            & $powershell -NoProfile -ExecutionPolicy Bypass -File $entryDriver -Entry $retentionEntry -Installation $missingInstallation -BackupRoot (Join-Path $missingInstallation 'backups') -Helper $helperEvent *> (Join-Path $root 'unavailable-canonical-retention.log')
+            $entryCode=$LASTEXITCODE
+        } finally { $ErrorActionPreference=$entryPreference }
+        Check ($entryCode -ne 0 -and -not(Test-Path -LiteralPath $missingInstallation)) 'A failed intended canonical lookup must not downgrade or initialize another installation.'
+    } finally {
+        Set-Content -LiteralPath $retentionRelease -Value 'release'
+        foreach ($streamName in @('stdout','stderr')) {
+            $childLog=Join-Path $root ("retention-child.$streamName.log")
+            if (Test-Path -LiteralPath $childLog) {
+                try { Write-Host ("Retention child $streamName log: " + [IO.File]::ReadAllText($childLog)) }
+                catch { Write-Host "Retention child $streamName log unavailable: $($_.Exception.Message)"; Check $false "Retention child $streamName log must be retained." }
+            }
+        }
+        if ($retentionChild) { if (-not $retentionChild.HasExited) { $retentionChild.Kill(); $retentionChild.WaitForExit() }; $retentionChild.Dispose() }
+        Exit-AeroLinkTransition $backupAdmissionLease
+        $env:AEROLINK_PRODUCTION_OBLIGATION = $backupPriorObligation
+    }
+
     # Execute the real explicit Stop entry point with disposable service adapters. A failed
     # native/ownership stop must not reach PostgreSQL, and the installation lease always exits.
     $stopScripts = Join-Path $root 'stop-contract\product\scripts'
