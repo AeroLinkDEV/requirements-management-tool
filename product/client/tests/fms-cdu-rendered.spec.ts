@@ -1527,11 +1527,26 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   await page.getByRole('button', { name: 'Show the view', exact: true }).click()
   const outsideScene = page.locator('.fmsBenchWindow .fmsOtw')
   const outsideFooter = page.locator('.fmsBenchWindow .fmsOtwCredits')
-  const outsideCard = page.getByRole('region', { name: 'Out-the-window view', exact: true })
-  const closedScene = await outsideScene.boundingBox()
-  const closedFooter = await outsideFooter.boundingBox()
-  const closedCard = await outsideCard.boundingBox()
-  const closedCockpit = await boxes()
+  // Read each natural footprint in one browser task: widget credits may initialize between IPC calls.
+  const outsideFootprint = () => page.evaluate(() => {
+    const rectangle = (selector: string) => {
+      const element = document.querySelector(selector)
+      if (!element) throw new Error(`Missing public geometry element: ${selector}`)
+      const { x, y, width, height } = element.getBoundingClientRect()
+      return { x, y, width, height }
+    }
+    return {
+      scene: rectangle('.fmsBenchWindow .fmsOtw'),
+      footer: rectangle('.fmsBenchWindow .fmsOtwCredits'),
+      card: rectangle('.fmsBenchWindow[aria-label="Out-the-window view"]'),
+      cockpit: {
+        cdu: rectangle('.fmsBenchCduStation .fmsCdu'),
+        pfd: rectangle('.efisPfd'),
+        nd: rectangle('.efisNd'),
+      },
+    }
+  })
+  const { scene: closedScene, footer: closedFooter, card: closedCard, cockpit: closedCockpit } = await outsideFootprint()
   expect(closedScene!.height).toBe(170)
   const clearOfInstructor = async (height: number) => {
     const scene = await outsideScene.boundingBox()
@@ -1546,9 +1561,7 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   }
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
   await clearOfInstructor(170)
-  const openedCockpit = await boxes()
-  const openedFooter = await outsideFooter.boundingBox()
-  const openedCard = await outsideCard.boundingBox()
+  const { cockpit: openedCockpit, footer: openedFooter, card: openedCard } = await outsideFootprint()
   expect(openedCockpit.cdu.x).toBe(closedCockpit.cdu.x)
   expect(openedCockpit.cdu.width).toBe(closedCockpit.cdu.width)
   expect(openedCockpit.cdu.height).toBe(closedCockpit.cdu.height)
