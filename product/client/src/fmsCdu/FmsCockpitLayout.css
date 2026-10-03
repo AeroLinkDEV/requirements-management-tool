@@ -68,9 +68,10 @@
 .fmsBenchIosHead { position: sticky; top: 0; z-index: 6; background: #f5f8fb; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; padding-block: 4px; }
 .fmsBenchIosHead button { min-height: 32px; }
 .fmsBenchOtwCoveredHint { flex-basis: 100%; }
-/* Reserve the whole scene and complete normal-flow credits without narrowing the toolbar or pilot panels. */
+/* Let the complete toolbar wrap beside the drawer with the scene and normal-flow credits. */
 /* Below this provisional floor, retain the overlay rather than leave a thin or empty scene. */
 @container fms-bench (min-width: 1040px) {
+  .fmsBenchCockpitView .fmsBenchIosReservesOutside .fmsBenchWindow .fmsBenchMapHead,
   .fmsBenchCockpitView .fmsBenchIosReservesOutside .fmsBenchWindow .fmsOtw,
   .fmsBenchCockpitView .fmsBenchIosReservesOutside .fmsBenchWindow .fmsOtwCredits {
     margin-inline-end: calc(var(--fms-ios-drawer-width) + 10px);

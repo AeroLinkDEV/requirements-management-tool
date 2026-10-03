@@ -1536,9 +1536,12 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
       return { x, y, width, height }
     }
     return {
+      header: rectangle('.fmsBenchWindow .fmsBenchMapHead'),
       scene: rectangle('.fmsBenchWindow .fmsOtw'),
       footer: rectangle('.fmsBenchWindow .fmsOtwCredits'),
       card: rectangle('.fmsBenchWindow[aria-label="Out-the-window view"]'),
+      pilot: rectangle('form[aria-label="Vertical and speed selections"]'),
+      scrollY: window.scrollY,
       cockpit: {
         cdu: rectangle('.fmsBenchCduStation .fmsCdu'),
         pfd: rectangle('.efisPfd'),
@@ -1546,11 +1549,13 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
       },
     }
   })
-  const { scene: closedScene, footer: closedFooter, card: closedCard, cockpit: closedCockpit } = await outsideFootprint()
+  const closedFootprint = await outsideFootprint()
+  const { header: closedHeader, scene: closedScene, footer: closedFooter, card: closedCard, cockpit: closedCockpit } = closedFootprint
   expect(closedScene!.height).toBe(170)
   const clearOfInstructor = async (height: number) => {
     const scene = await outsideScene.boundingBox()
     const footer = await outsideFooter.boundingBox()
+    const header = await page.locator('.fmsBenchWindow .fmsBenchMapHead').boundingBox()
     const drawer = await page.getByRole('region', { name: 'Instructor station', exact: true }).boundingBox()
     expect(scene!.width).toBeGreaterThan(0)
     expect(scene!.height).toBe(height)
@@ -1558,19 +1563,70 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
     expect(scene!.x + scene!.width).toBeLessThanOrEqual(drawer!.x)
     expect(footer!.width).toBeGreaterThan(0)
     expect(footer!.x + footer!.width).toBeLessThanOrEqual(drawer!.x)
+    expect(header!.width).toBeGreaterThan(0)
+    expect(header!.x + header!.width).toBeLessThanOrEqual(drawer!.x)
+    const clippedLabels = await page.locator('.fmsBenchWindow .fmsBenchMapHead').evaluate(head => {
+      const headerBox = head.getBoundingClientRect()
+      return [...head.querySelectorAll('.fmsBenchModes label')].flatMap(label => {
+        const box = label.getBoundingClientRect(), group = label.parentElement!.getBoundingClientRect()
+        return box.left < group.left || box.right > group.right || box.top < group.top || box.bottom > group.bottom
+          || box.left < headerBox.left || box.right > headerBox.right || box.top < headerBox.top || box.bottom > headerBox.bottom
+          ? [label.textContent?.trim()] : []
+      })
+    })
+    expect(clippedLabels).toEqual([])
   }
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
   await clearOfInstructor(170)
-  const { cockpit: openedCockpit, footer: openedFooter, card: openedCard } = await outsideFootprint()
+  const openedFootprint = await outsideFootprint()
+  const { cockpit: openedCockpit, header: openedHeader, footer: openedFooter, card: openedCard } = openedFootprint
+  await testInfo.attach('instructor-toolbar-footprints', { body: JSON.stringify({ closedFootprint, openedFootprint }), contentType: 'application/json' })
   expect(openedCockpit.cdu.x).toBe(closedCockpit.cdu.x)
   expect(openedCockpit.cdu.width).toBe(closedCockpit.cdu.width)
   expect(openedCockpit.cdu.height).toBe(closedCockpit.cdu.height)
-  // Only the measured natural footer/card growth may move the unchanged cockpit down.
+  // Only measured natural header/footer growth may move the unchanged cockpit down.
   const cardGrowth = openedCard!.height - closedCard!.height
+  const headerGrowth = openedHeader!.height - closedHeader!.height
   const footerGrowth = openedFooter!.height - closedFooter!.height
   expect(cardGrowth).toBeGreaterThanOrEqual(-1)
-  expect(Math.abs(cardGrowth - footerGrowth)).toBeLessThanOrEqual(1)
+  expect(Math.abs(cardGrowth - headerGrowth - footerGrowth)).toBeLessThanOrEqual(1)
   expect(Math.abs(openedCockpit.cdu.y - closedCockpit.cdu.y - cardGrowth)).toBeLessThanOrEqual(1)
+  const ground = page.getByRole('radiogroup', { name: 'Window ground', exact: true })
+  for (const [label, value] of [['Relief', 'relief'], ['Imagery', 'imagery']] as const) {
+    await ground.getByText(label, { exact: true }).click()
+    await expect(outsideScene).toHaveAttribute('data-ground', value)
+    await clearOfInstructor(170)
+  }
+  // The open drawer may grow the page: verify normal scrolling and keyboard access, not an invented 900px fit.
+  const pilotTargets = page.getByRole('form', { name: 'Vertical and speed selections' })
+    .locator('input:enabled, select:enabled, button:enabled')
+  expect(await pilotTargets.count()).toBeGreaterThan(0)
+  const reachedTargets: Array<{ label: string | null; x: number; y: number; width: number; height: number; scrollY: number }> = []
+  for (let index = 0; index < await pilotTargets.count(); index++) {
+    const target = pilotTargets.nth(index)
+    if (index === 0) await target.focus()
+    else await page.keyboard.press('Tab')
+    await expect(target).toBeFocused()
+    await target.scrollIntoViewIfNeeded()
+    const observation = await target.evaluate(element => {
+      const { x, y, width, height } = element.getBoundingClientRect()
+      return { label: element.getAttribute('aria-label') ?? (element as HTMLInputElement).labels?.[0]?.textContent?.trim() ?? element.textContent?.trim() ?? null,
+        x, y, width, height, scrollY: window.scrollY, viewportHeight: window.innerHeight, viewportWidth: document.documentElement.clientWidth }
+    })
+    expect(observation.width).toBeGreaterThan(0)
+    expect(observation.height).toBeGreaterThan(0)
+    expect(observation.x).toBeGreaterThanOrEqual(0)
+    expect(observation.x + observation.width).toBeLessThanOrEqual(observation.viewportWidth)
+    expect(observation.y).toBeGreaterThanOrEqual(0)
+    expect(observation.y + observation.height).toBeLessThanOrEqual(observation.viewportHeight)
+    reachedTargets.push(observation)
+  }
+  await testInfo.attach('open-instructor-pilot-targets', { body: JSON.stringify(reachedTargets), contentType: 'application/json' })
+  // Reachability inspection scrolls the page; restore the measured baseline before viewport-relative geometry checks.
+  expect(await page.evaluate(scrollY => {
+    window.scrollTo({ top: scrollY, behavior: 'instant' })
+    return window.scrollY
+  }, closedFootprint.scrollY)).toBe(closedFootprint.scrollY)
   await page.getByRole('button', { name: 'More instructor room', exact: true }).click()
   await clearOfInstructor(520)
   await page.getByRole('button', { name: 'Compact instructor', exact: true }).click()
