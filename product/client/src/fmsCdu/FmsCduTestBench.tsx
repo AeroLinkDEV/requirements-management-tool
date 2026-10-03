@@ -442,6 +442,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         <button type="button" onClick={() => chooseCockpitView(!cockpitView)}>
           {cockpitView ? "Engineering view" : "Cockpit view"}
         </button>
+        {!cockpitView ? <span className="fmsBenchHint">For separate browser windows, switch to Cockpit view.</span> : null}
         {cockpitView ? <>
           <button type="button" ref={iosButton} aria-expanded={iosVisible} aria-controls={instructorAway ? undefined : "fms-instructor"}
             onClick={() => instructorAway ? station.openSurface("instructor") : cockpitAway ? iosPanel.current?.focus() : iosOpen ? closeIos() : setIosOpen(true)}>Instructor station</button>

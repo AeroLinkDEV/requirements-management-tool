@@ -4,6 +4,9 @@ export type StationArrangement = { preset: "single" | "two" | "three"; instructo
 const STATION_LABELS: Record<StationSurfaceId, string> = {
   outside: "Out the window", cockpit: "Cockpit", instructor: "Instructor station",
 };
+const STATION_OPEN_LABELS: Record<StationSurfaceId, string> = {
+  outside: "Open outside view in a window", cockpit: "Open cockpit in a window", instructor: "Open instructor station in a window",
+};
 
 type Props = {
   arrangement: StationArrangement;
@@ -27,7 +30,7 @@ export function FmsStationDock({ arrangement, onArrangement, windows, opening, e
   const next = requested.find(id => !windows[id]);
   const count = surfaces.filter(id => windows[id]).length;
   return <details className="fmsStationDock">
-    <summary data-fms-station-return-focus>Station arrangement{count ? ` · ${count} open` : ""}</summary>
+    <summary data-fms-station-return-focus>Station windows{count ? ` · ${count} open` : ""}</summary>
     <section className="fmsStationDockPanel" aria-label="Station arrangement">
       <label>Fixed arrangement <select aria-label="Fixed station arrangement" value={arrangement.preset}
         onChange={event => onArrangement({ ...arrangement, preset: event.target.value as StationArrangement["preset"] })}>
@@ -37,11 +40,11 @@ export function FmsStationDock({ arrangement, onArrangement, windows, opening, e
         onChange={event => onArrangement({ ...arrangement, instructorApart: event.target.checked })} />Instructor apart</label>
       <div className="fmsBenchActions">
         <button type="button" disabled={!next || opening.length > 0} onClick={() => { if (next) onOpen(next); }}>
-          {opening.length ? "Opening station window…" : next ? `Restore station — open ${STATION_LABELS[next]}` : "Arrangement ready"}
+          {opening.length ? "Opening station window…" : next ? STATION_OPEN_LABELS[next] : "Arrangement ready"}
         </button>
         <button type="button" disabled={count === 0 && opening.length === 0} onClick={onReturnAll}>Return all panels</button>
       </div>
-      <p className="fmsBenchHint">Each click opens one window. Move windows to your screens manually; use your browser's full-screen control.</p>
+      <p className="fmsBenchHint">Choose an arrangement, then open each requested window. Move windows to your screens manually; use your browser's full-screen control.</p>
       <ul className="fmsStationDockList" aria-label="Live station dock">
         {surfaces.map(id => <li key={id}>
           <strong>{STATION_LABELS[id]}</strong>
