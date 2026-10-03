@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -42,6 +43,9 @@ public sealed record ProblemReportImportPreview(string SourceHash, string Previe
     IReadOnlyDictionary<string, IReadOnlyList<string>> DistinctValues, IReadOnlyList<ProblemReportImportRow> Rows,
     int Create, int Skip);
 
+public sealed class ProblemReportImportConflict(string message) : Exception(message);
+public sealed class ProblemReportImportAuthorityChanged() : Exception("Import authority, session or project features changed. Review again.");
+
 /// <summary>
 /// Brings Problem Reports in from another tool's CSV/XLSX export (#1114). Preview and commit run the same
 /// reconciliation, so every source row ends as exactly one Create or Skip-with-reason and nothing is dropped
@@ -73,6 +77,7 @@ public sealed class ProblemReportImportService(AeroLinkDbContext db)
     public async Task<ProblemReportImportPreview> PreviewAsync(Guid projectId, byte[] bytes, string fileName,
         ProblemReportImportMapping mapping, string importer, CancellationToken ct)
     {
+        ProblemReportSourceIdentityKey.EnsureCompatible();
         mapping = mapping.Normalized();
         var table = ReadTable(bytes, fileName);
         var headers = table[0].Select(x => x.Trim()).ToArray();
@@ -170,14 +175,31 @@ public sealed class ProblemReportImportService(AeroLinkDbContext db)
         return new(sourceHash, previewHash, headers, distinct, rows, rows.Count(x => x.Action == "Create"), rows.Count(x => x.Action == "Skip"));
     }
 
-    /// <summary>Creates the previewed reports in one transaction and records the import ledger.</summary>
-    public async Task<(ProblemReportImportBatch Batch, IReadOnlyList<ProblemReport> Reports)> CommitAsync(Guid projectId,
-        byte[] bytes, string fileName, ProblemReportImportMapping mapping, string expectedPreviewHash, string importer,
-        string importerDisplayName, DateTimeOffset now, CancellationToken ct)
+    /// <summary>Publishes reports, ledger, original receipt and signature under one project write scope.</summary>
+    public async Task<ProblemReportImportReceipt> CommitAsync(Guid projectId, Guid operationId,
+        byte[] bytes, string fileName, ProblemReportImportMapping mapping, string expectedPreviewHash,
+        AuthenticatedUser actor, string remoteAddress, Func<ProjectControlledWriteScope, Task<bool>> authorized,
+        CancellationToken ct)
     {
+        if (operationId == Guid.Empty) throw new DomainException("An import operation identity is required.");
+        // Bind submitted content before live normalization; receipt recovery remains available under runtime drift.
+        var requestHash = Sha256(JsonSerializer.SerializeToUtf8Bytes(new { contract = 1, projectId, actorId = actor.Id,
+            sourceHash = Sha256(bytes), fileName, mapping = OperationMapping(mapping), expectedPreviewHash = expectedPreviewHash.ToLowerInvariant() }));
+        await using var write = await ProjectControlledWriteScope.AcquireAsync(db, projectId, ct);
+        if (!await authorized(write)) throw new ProblemReportImportAuthorityChanged();
+        var prior = await db.ProblemReportImportBatches.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == projectId
+            && x.ActorId == actor.Id && x.OperationId == operationId, ct);
+        if (prior is not null)
+        {
+            if (!string.Equals(prior.RequestHash, requestHash, StringComparison.Ordinal))
+                throw new ProblemReportImportConflict("This import operation identity already belongs to different content. Review a new operation.");
+            if (string.IsNullOrEmpty(prior.ReceiptJson))
+                throw new ProblemReportImportConflict("The stored import has no original receipt. Investigate its recorded state before continuing.");
+            return JsonSerializer.Deserialize<ProblemReportImportReceipt>(prior.ReceiptJson, ReceiptJson)
+                ?? throw new ProblemReportImportConflict("The recorded import receipt is unavailable.");
+        }
         mapping = mapping.Normalized();
-        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
-        var preview = await PreviewAsync(projectId, bytes, fileName, mapping, importer, ct);
+        var preview = await PreviewAsync(projectId, bytes, fileName, mapping, actor.UserName, ct);
         if (!string.Equals(preview.PreviewHash, expectedPreviewHash, StringComparison.OrdinalIgnoreCase))
             throw new DomainException("The file or mapping changed since the preview. Preview again before importing.");
         if (preview.Create == 0) throw new DomainException("Nothing in this preview would be created.");
@@ -190,7 +212,9 @@ public sealed class ProblemReportImportService(AeroLinkDbContext db)
             return index >= 0 && index < row.Length ? row[index].Trim() : "";
         }
         var batch = new ProblemReportImportBatch(projectId, mapping.SourceSystem, Path.GetFileName(fileName), preview.SourceHash,
-            JsonSerializer.Serialize(Canonical(mapping)), preview.PreviewHash, preview.Create, preview.Skip, importer, now);
+            JsonSerializer.Serialize(Canonical(mapping)), preview.PreviewHash, preview.Create, preview.Skip, actor.UserName,
+            DateTimeOffset.UtcNow, operationId, actor.Id, requestHash);
+        var now = batch.ImportedAt;
         db.ProblemReportImportBatches.Add(batch);
         var reports = new List<ProblemReport>();
         foreach (var plan in preview.Rows.Where(x => x.Action == "Create"))
@@ -214,17 +238,26 @@ public sealed class ProblemReportImportService(AeroLinkDbContext db)
             db.ProblemReports.Add(report);
             if (target is not null)
                 db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(report.Id, "Release", target.Value,
-                    ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, importer, now));
+                    ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, actor.UserName, now));
             var evidence = await ProblemReportAttachmentEvidence.SnapshotAsync(db, report, ct);
-            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "ImportedFromSource", importer,
+            db.ProblemReportRevisions.Add(new ProblemReportRevision(report.Id, report.Revision, "ImportedFromSource", actor.UserName,
                 evidence.Hash, evidence.Json, now, detail: $"Imported from {mapping.SourceSystem.Trim()} {plan.SourceKey} (batch {batch.Id:D})",
-                toState: report.State.ToString(), actorDisplayName: importerDisplayName));
+                toState: report.State.ToString(), actorDisplayName: actor.DisplayName));
             reports.Add(report);
         }
+        var receipt = new ProblemReportImportReceipt(batch.Id, batch.Created, batch.Skipped,
+            reports.Select(x => new ProblemReportImportCreatedReport(x.Id, x.DisplayNumber, x.SourceKey!)).ToArray());
+        batch.RecordReceipt(JsonSerializer.Serialize(receipt, ReceiptJson));
+        var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync(ct);
+        db.ElectronicSignatures.Add(new ElectronicSignature(actor.Id, actor.UserName, actor.DisplayName, programId,
+            "ProblemReportImportBatch", batch.Id, batch.FileName, "ImportProblemReports",
+            "Accepted the source provenance and mapping of this import", batch.PreviewHash, remoteAddress, now));
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        return (batch, reports);
+        await write.CommitAsync(ct);
+        return receipt;
     }
+
+    private static readonly JsonSerializerOptions ReceiptJson = new(JsonSerializerDefaults.Web);
 
     private static bool TryEnum<T>(string value, Dictionary<string, string> map, T fallback, out T result) where T : struct, Enum
     {
@@ -237,6 +270,14 @@ public sealed class ProblemReportImportService(AeroLinkDbContext db)
     private static string Canonical(string landing) =>
         Enum.TryParse<ProblemReportState>(landing, true, out var state) ? state.ToString() : landing;
 
+    private static object OperationMapping(ProblemReportImportMapping mapping)
+    {
+        static object[] Submitted(Dictionary<string, string>? values) => (values ?? [])
+            .OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (object)new { key = x.Key, value = x.Value }).ToArray();
+        return new { sourceSystem = mapping.SourceSystem, columns = Submitted(mapping.Columns),
+            statuses = Submitted(mapping.Statuses), severities = Submitted(mapping.Severities), priorities = Submitted(mapping.Priorities),
+            categories = Submitted(mapping.Categories), people = Submitted(mapping.People), builds = Submitted(mapping.Builds) };
+    }
     private static object Canonical(ProblemReportImportMapping mapping)
     {
         static SortedDictionary<string, string> Sorted(Dictionary<string, string> values) =>

@@ -40,34 +40,41 @@ public static class ProblemReportImportEndpoints
             var actor = http.UserAccount();
             if (!await identity.ConfirmPasswordAsync(actor.Id, form.Password, ct))
                 return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+            if (form.OperationId == Guid.Empty)
+                return Results.BadRequest(new { error = "An import operation identity is required." });
             try
             {
-                var now = DateTimeOffset.UtcNow;
-                var (batch, reports) = await service.CommitAsync(form.ProjectId, form.Bytes, form.FileName, form.Mapping,
-                    form.PreviewHash, actor.UserName, actor.DisplayName, now, ct);
-                var programId = await db.Projects.Where(x => x.Id == form.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
-                db.ElectronicSignatures.Add(new ElectronicSignature(actor.Id, actor.UserName, actor.DisplayName, programId,
-                    "ProblemReportImportBatch", batch.Id, batch.FileName, "ImportProblemReports",
-                    "Accepted the source provenance and mapping of this import", batch.PreviewHash,
-                    http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
-                await db.SaveChangesAsync(ct);
-                return Results.Ok(new { batchId = batch.Id, batch.Created, batch.Skipped, reports = reports.Select(x => new { x.Id, x.DisplayNumber, x.SourceKey }) });
+                return Results.Ok(await service.CommitAsync(form.ProjectId, form.OperationId, form.Bytes, form.FileName,
+                    form.Mapping, form.PreviewHash, actor, http.Connection.RemoteIpAddress?.ToString() ?? "local",
+                    async scope => await http.HasFreshProjectRoleAsync(db, identity, scope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator)
+                        && (await ProjectFeatureService.EffectiveAsync(db, form.ProjectId, ct)).HasFlag(ProjectFeature.ProblemReports), ct));
             }
-            catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
-            catch (DbUpdateException) { return Results.Conflict(new { error = "Problem Reports changed during the import. Preview again and retry." }); }
+            catch (ProblemReportImportAuthorityChanged ex)
+            { return Results.Json(new { error = ex.Message }, statusCode: 403); }
+            catch (ProblemReportImportConflict ex)
+            { return Results.Conflict(new { error = ex.Message, code = "problem_report_import_operation_conflict" }); }
+            catch (Exception ex) when (IsRetryableImportConflict(ex))
+            { return Results.Conflict(new { error = "The database refused this import because of a serialization or source/operation uniqueness conflict. Retry the same operation to recover or complete its result.", code = "problem_report_import_concurrency", retryable = true }); }
+            catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }).DisableAntiforgery();
 
-        app.MapGet("/api/problem-reports/import/batches", async (Guid projectId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/problem-reports/import/batches", async (Guid projectId, bool? unsignedOnly, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-            var batches = (await db.ProblemReportImportBatches.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct))
-                .OrderByDescending(x => x.ImportedAt).Select(x => new { x.Id, x.SourceSystem, x.FileName, x.SourceHash, x.Created, x.Skipped, x.ImportedBy, x.ImportedAt });
-            return Results.Ok(batches);
+            var query = db.ProblemReportImportBatches.AsNoTracking().Where(x => x.ProjectId == projectId);
+            if (unsignedOnly == true) query = query.Where(x => !db.ElectronicSignatures.Any(s =>
+                s.ArtifactType == "ProblemReportImportBatch" && s.ArtifactId == x.Id && s.Action == "ImportProblemReports"));
+            var batches = await query.Select(x => new { x.Id, x.SourceSystem,
+                x.FileName, x.SourceHash, x.Created, x.Skipped, x.ImportedBy, x.ImportedAt,
+                hasImportSignature = db.ElectronicSignatures.Any(s => s.ArtifactType == "ProblemReportImportBatch"
+                    && s.ArtifactId == x.Id && s.Action == "ImportProblemReports") }).ToListAsync(ct);
+            return Results.Ok(batches.OrderByDescending(x => x.ImportedAt));
         });
     }
 
     private sealed record ImportForm(Guid ProjectId, byte[] Bytes, string FileName, ProblemReportImportMapping Mapping,
-        string PreviewHash, string Password, IResult? Refusal);
+        string PreviewHash, string Password, IResult? Refusal, Guid OperationId = default);
 
     private static async Task<ImportForm> ReadAsync(HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
@@ -88,6 +95,14 @@ public static class ProblemReportImportEndpoints
         catch (JsonException) { return Refuse(Results.BadRequest(new { error = "The mapping is not valid." })); }
         using var buffer = new MemoryStream();
         await file.CopyToAsync(buffer, ct);
-        return new(projectId, buffer.ToArray(), file.FileName, mapping, form["previewHash"].ToString(), form["password"].ToString(), null);
+        Guid.TryParse(form["operationId"], out var operationId);
+        return new(projectId, buffer.ToArray(), file.FileName, mapping, form["previewHash"].ToString(), form["password"].ToString(), null, operationId);
     }
+
+    private static bool IsRetryableImportConflict(Exception failure) => failure.GetBaseException() switch
+    {
+        Npgsql.PostgresException { SqlState: "40001" } => true,
+        Npgsql.PostgresException { SqlState: "23505", ConstraintName: "ux_pr_import_operation" or "ux_pr_source_identity" } => true,
+        _ => false,
+    };
 }

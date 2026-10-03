@@ -142,6 +142,7 @@ await using (var scope = app.Services.CreateAsyncScope())
     {
         await db.Database.EnsureCreatedAsync();
         await ReleasePickerSqliteGuard.EnsureInstalledAsync(db);
+        await ProblemReportImportSqliteGuard.EnsureInstalledAsync(db);
     }
     if (!restoreValidationReadOnly && db.Database.IsNpgsql())
     {

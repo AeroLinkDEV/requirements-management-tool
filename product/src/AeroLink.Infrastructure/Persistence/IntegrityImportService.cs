@@ -38,6 +38,7 @@ public sealed class IntegrityImportService(AeroLinkDbContext db, EvidenceFileSto
     public async Task<IntegrityImportPreview> PreviewAsync(Guid projectId, IntegritySourcePackage package,
         ProblemReportImportMapping mapping, string actor, CancellationToken ct)
     {
+        ProblemReportSourceIdentityKey.EnsureCompatible();
         ValidateMapping(mapping);
         var accounts = await db.UserAccounts.AsNoTracking().Select(x => x.UserName).ToListAsync(ct);
         var builds = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).Select(x => new { x.Id, x.Version }).ToListAsync(ct);

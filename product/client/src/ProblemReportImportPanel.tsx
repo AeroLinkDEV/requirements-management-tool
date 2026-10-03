@@ -1,10 +1,23 @@
-import { useState } from "react";
-import { apiRequest, operationError } from "./apiClient";
+import { useRef, useState } from "react";
+import { ApiError, apiRequest, operationError } from "./apiClient";
 import { useCategoryVocabulary } from "./problemReportCategories";
 import "./ProblemReportImportPanel.css";
 
 type Row = { row: number; sourceKey: string; title: string; action: string; reason?: string | null; landingState?: string | null; severity?: string | null; responsibleEngineer?: string | null };
 type Preview = { sourceHash: string; previewHash: string; headers: string[]; distinctValues: Record<string, string[]>; rows: Row[]; create: number; skip: number };
+type Receipt = { batchId: string; created: number; skipped: number; reports: { id: string; displayNumber: string; sourceKey: string }[] };
+
+function isReceipt(value: unknown): value is Receipt {
+  const guid = (item: unknown) => typeof item === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item)
+    && item !== "00000000-0000-0000-0000-000000000000";
+  if (!value || typeof value !== "object") return false;
+  const receipt = value as Partial<Receipt>;
+  return guid(receipt.batchId) && Number.isInteger(receipt.created) && receipt.created! > 0
+    && Number.isInteger(receipt.skipped) && receipt.skipped! >= 0 && Array.isArray(receipt.reports)
+    && receipt.reports.length === receipt.created && receipt.reports.every(report => report && guid(report.id)
+      && typeof report.displayNumber === "string" && report.displayNumber.length > 0
+      && typeof report.sourceKey === "string" && report.sourceKey.length > 0);
+}
 type Mapping = {
   sourceSystem: string;
   columns: Record<string, string>;
@@ -59,6 +72,9 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
+  // A transport error may follow publication. Keep this identity until the user changes import intent.
+  const operation = useRef<string | undefined>(undefined);
+  const [uncertain, setUncertain] = useState(false);
 
   const request = async (path: string, extra: Record<string, string>, next: Mapping) => {
     const form = new FormData();
@@ -94,19 +110,30 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
       setBusy(false);
     }
   };
-  const update = (next: Mapping) => { setMapping(next); setPreview((current) => current && { ...current, previewHash: "" }); };
+  const update = (next: Mapping) => {
+    operation.current = undefined; setUncertain(false);
+    setMapping(next); setPreview((current) => current && { ...current, previewHash: "" });
+  };
   const setValue = (group: keyof Omit<Mapping, "sourceSystem" | "columns">, key: string, value: string) =>
     update({ ...mapping, [group]: { ...mapping[group], [key]: value } });
   const commit = async () => {
     if (!preview) return;
     setBusy(true); setError("");
     try {
-      const result = await request("commit", { previewHash: preview.previewHash, password }, mapping);
+      operation.current ??= crypto.randomUUID();
+      const result = await request("commit", { operationId: operation.current, previewHash: preview.previewHash, password }, mapping);
+      if (!isReceipt(result)) throw new Error("The import receipt could not be interpreted.");
       setDone(`Imported ${String(result.created)} Problem Reports; ${String(result.skipped)} rows were skipped with their reasons.`);
       setPassword("");
+      setUncertain(false);
       onImported();
     } catch (failure) {
-      setError(operationError(failure, "The import was refused."));
+      const unconfirmed = !(failure instanceof ApiError)
+        || failure.status === 0 || failure.status >= 500 || failure.code === "problem_report_import_concurrency";
+      setUncertain(current => current || unconfirmed);
+      setError(unconfirmed
+        ? `The result of this import could not be confirmed.${failure instanceof ApiError && failure.status ? ` AeroLink reported HTTP ${failure.status}.` : ""}`
+        : operationError(failure, "The import was refused."));
     } finally {
       setBusy(false);
     }
@@ -127,21 +154,21 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
           <h2>Import Problem Reports</h2>
           <p>Bring reports in from another tool's CSV or Excel export. Every row is previewed before anything is written. The source key, reporter, date and status are kept as source facts; a report the source had closed arrives read-only as Closed in source, with no AeroLink SQA closure.</p>
         </div>
-        <button type="button" onClick={onClose}>Close</button>
+        <button type="button" disabled={busy} onClick={onClose}>Close</button>
       </header>
       {done ? <p className="prImportDone" role="status">{done}</p> : <>
         <div className="prImportStep">
-          <label>Source system<input value={mapping.sourceSystem} placeholder="e.g. Jira" onChange={(event) => update({ ...mapping, sourceSystem: event.target.value })} /></label>
-          <label>Export file (.csv or .xlsx)<input type="file" accept=".csv,.xlsx" onChange={(event) => { setFile(event.target.files?.[0]); setPreview(undefined); update({ ...mapping, columns: {} }); }} /></label>
-          <button type="button" disabled={!file || busy} onClick={() => void runPreview()}>{preview ? "Preview again" : "Read the file"}</button>
+          <label>Source system<input disabled={busy} value={mapping.sourceSystem} placeholder="e.g. Jira" onChange={(event) => update({ ...mapping, sourceSystem: event.target.value })} /></label>
+          <label>Export file (.csv or .xlsx)<input disabled={busy} type="file" accept=".csv,.xlsx" onChange={(event) => { setFile(event.target.files?.[0]); setPreview(undefined); update({ ...mapping, columns: {} }); }} /></label>
+          <button type="button" disabled={!file || busy || uncertain} onClick={() => void runPreview()}>{preview ? "Preview again" : "Read the file"}</button>
         </div>
 
         {preview && <>
-          <fieldset className="prImportColumns">
+          <fieldset disabled={busy} className="prImportColumns">
             <legend>Columns</legend>
             {fields.map((field) => (
               <label key={field.id}>{field.label}{field.required ? " *" : ""}
-                <select value={mapping.columns[field.id] ?? ""} onChange={(event) => update({ ...mapping, columns: { ...mapping.columns, [field.id]: event.target.value } })}>
+                <select disabled={busy} value={mapping.columns[field.id] ?? ""} onChange={(event) => update({ ...mapping, columns: { ...mapping.columns, [field.id]: event.target.value } })}>
                   <option value="">Not in this file</option>
                   {preview.headers.map((header) => <option key={header} value={header}>{header}</option>)}
                 </select>
@@ -149,7 +176,7 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
             ))}
           </fieldset>
 
-          <fieldset className="prImportValues">
+          <fieldset disabled={busy} className="prImportValues">
             <legend>Values</legend>
             {distinct("status").map((value) => <label key={`status-${value}`}>Status “{value}”{valueSelect("statuses", value, landingStates as [string, string][])}</label>)}
             {distinct("severity").filter((value) => !severities.some((name) => name.toLowerCase() === value.toLowerCase())).map((value) =>
@@ -180,7 +207,7 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
           </table>
 
           <div className="prImportCommit">
-            <label>Confirm with your password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <label>Confirm with your password<input disabled={busy} type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
             <button type="button" disabled={busy || stale || preview.create === 0 || !password} onClick={() => void commit()}>
               Sign and import {preview.create} Problem Report{preview.create === 1 ? "" : "s"}
             </button>
@@ -188,6 +215,7 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
         </>}
       </>}
       {error && <p className="prImportError" role="alert">{error}</p>}
+      {uncertain && <p className="prImportNote">Retry this same import to retrieve its recorded result or complete it. The selected file and mapping are retained. Changing the file or mapping starts a new operation; first confirm what this attempt recorded.</p>}
     </section>
   );
 }
