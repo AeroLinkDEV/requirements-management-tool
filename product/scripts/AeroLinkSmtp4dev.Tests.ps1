@@ -44,7 +44,69 @@ Assert-True ($emailDemo -match 'Notifications__Smtp__Host=127\.0\.0\.1') 'Email 
 Assert-True ($emailDemo -match 'NotificationBaseUrl "http://127\.0\.0\.1:5080"') 'Email demo must give mail the exact loopback public origin.'
 Assert-True ($emailDemo -match 'NotificationBaseUrl "http://127\.0\.0\.1:5080" %\*') 'Email demo must forward -Shared to the production launcher.'
 $productionLauncher = [IO.File]::ReadAllText((Join-Path $root 'product\scripts\Start-AeroLinkProduction.ps1'))
-Assert-True ($productionLauncher -match '\$effectiveNotificationBaseUrl = "http://\$\{lan\}:5080"') 'Shared production mode must replace the local email-demo origin with its LAN origin.'
+# Exercise only the actual shared-origin condition and value. The launcher itself owns processes,
+# network and persistent state, so never invoke it here. Reject executable AST nodes before evaluation.
+function Get-SharedNotificationOrigin([string]$Source, [string]$Lan, [int]$ApiPort) {
+    $tokens = $null; $parseErrors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseInput($Source, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0) { throw 'The production launcher must parse before its shared origin can be checked.' }
+    $candidates = @($ast.FindAll({ param($node)
+        $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+        $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+        $node.Left.VariablePath.UserPath -eq 'effectiveNotificationBaseUrl'
+    }, $true) | ForEach-Object {
+        $assignment = $_; $parent = $_.Parent
+        while ($parent -and $parent -isnot [Management.Automation.Language.IfStatementAst]) { $parent = $parent.Parent }
+        if ($parent) {
+            foreach ($clause in $parent.Clauses) {
+                $contained = @($clause.Item2.FindAll({ param($node) $node -eq $assignment }, $true))
+                $shared = @($clause.Item1.FindAll({ param($node)
+                    $node -is [Management.Automation.Language.VariableExpressionAst] -and $node.VariablePath.UserPath -eq 'Shared'
+                }, $true))
+                if ($contained.Count -eq 1 -and $shared.Count -gt 0) {
+                    [pscustomobject]@{ Condition = $clause.Item1; Value = $assignment.Right }
+                }
+            }
+        }
+    })
+    if ($candidates.Count -ne 1) { throw 'Expected one notification-origin assignment in the shared production branch.' }
+    $candidate = $candidates[0]
+    $allowedNodes = @('PipelineAst', 'CommandExpressionAst', 'VariableExpressionAst', 'ExpandableStringExpressionAst',
+        'StringConstantExpressionAst', 'ConstantExpressionAst', 'SubExpressionAst', 'StatementBlockAst',
+        'MemberExpressionAst', 'ParenExpressionAst', 'BinaryExpressionAst', 'UnaryExpressionAst')
+    foreach ($expression in @($candidate.Condition, $candidate.Value)) {
+        foreach ($node in $expression.FindAll({ param($node) $true }, $true)) {
+            if ($node.GetType().Name -notin $allowedNodes) { throw "Unsafe shared-origin expression node: $($node.GetType().Name)." }
+            if ($node -is [Management.Automation.Language.VariableExpressionAst] -and
+                (-not $node.VariablePath.IsUnqualified -or $node.VariablePath.UserPath -notin @('Shared', 'lan', 'endpoints', 'NotificationBaseUrl', 'true', 'false', 'null'))) {
+                throw 'The shared-origin expression must use only the supplied fixture values.'
+            }
+            if ($node -is [Management.Automation.Language.MemberExpressionAst] -and
+                ($node.Static -or $node.Expression -isnot [Management.Automation.Language.VariableExpressionAst] -or
+                $node.Expression.VariablePath.UserPath -ne 'endpoints' -or
+                $node.Member -isnot [Management.Automation.Language.StringConstantExpressionAst] -or $node.Member.Value -ne 'ApiPort')) {
+                throw 'The shared-origin expression may only read the resolved API port.'
+            }
+        }
+    }
+    $Shared = $true
+    $endpoints = [pscustomobject]@{ ApiPort = $ApiPort }
+    $NotificationBaseUrl = 'http://127.0.0.1:5080'
+    if (& ([scriptblock]::Create($candidate.Condition.Extent.Text))) {
+        return & ([scriptblock]::Create($candidate.Value.Extent.Text))
+    }
+    return $NotificationBaseUrl
+}
+try {
+    foreach ($case in @(
+        @{ ApiPort = 5080; Expected = 'http://192.0.2.44:5080' },
+        @{ ApiPort = 55181; Expected = 'http://192.0.2.44:55181' }
+    )) {
+        $sharedOrigin = Get-SharedNotificationOrigin $productionLauncher '192.0.2.44' $case.ApiPort
+        Assert-True ($sharedOrigin -ceq $case.Expected) "Shared production mode must replace the local email-demo origin with the LAN host and resolved API port $($case.ApiPort)."
+    }
+}
+catch { Assert-True $false "Shared notification origin could not be checked safely: $($_.Exception.Message)" }
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
