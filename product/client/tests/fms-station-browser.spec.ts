@@ -35,6 +35,22 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await disclosure.click()
   const controls = page.getByRole('region', { name: 'Station arrangement', exact: true })
   await controls.getByLabel('Fixed station arrangement').selectOption('two')
+  // The full warning and station controls must fit the visible viewport, not just the wider body.
+  await page.setViewportSize({ width: 900, height: 900 })
+  const visibleWidth = await page.evaluate(() => document.documentElement.clientWidth)
+  for (const [name, element] of [
+    ['station panel', controls],
+    ['complete owner warning', controls.locator('.fmsStationOwnerNotice')],
+    ['fixed arrangement selection', controls.getByLabel('Fixed station arrangement')],
+    ['open outside action', controls.getByRole('button', { name: 'Open outside view in a window', exact: true })],
+  ] as const) {
+    await expect(element).toBeVisible()
+    const box = await element.boundingBox()
+    expect(box, `${name} has a visible rectangle`).not.toBeNull()
+    expect(box!.x, `${name} starts inside the viewport`).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width, `${name} ends inside the viewport`).toBeLessThanOrEqual(visibleWidth)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
   const twoOpened = page.waitForEvent('popup')
   await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   const outsideTwo = await twoOpened

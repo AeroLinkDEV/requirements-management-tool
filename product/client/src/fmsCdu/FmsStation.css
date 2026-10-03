@@ -41,6 +41,13 @@ body[data-fms-station-child] { min-width: 0; }
 .fmsStationSurfaceOutside[data-location="child"] .fmsOtw { height: auto; min-height: 170px; flex: 1; }
 .fmsStationSurfaceInstructor[data-location="child"] .fmsBenchTools { position: static; width: 100%; max-height: none; box-shadow: none; }
 .fmsStationSurfaceInstructor[data-location="child"] .fmsBenchTools[hidden] { display: none; }
+/* The tablet shell keeps its 230px rail while the body retains a wider readable-panel floor. */
+@media (min-width: 761px) and (max-width: 959px) {
+  .fmsBenchCockpitView .fmsStationDockPanel { left: 0; right: auto; }
+  .workspaceView > .fmsBenchCockpitView:not(.fmsBenchFocused) .fmsStationDockPanel {
+    width: min(620px, 100%, calc(100vw - 230px - var(--page-pad-inline, 44px) - var(--page-pad-inline, 44px)));
+  }
+}
 @media (max-width: 600px) {
   .fmsStationDockPanel > label { flex-wrap: wrap; }
   .fmsStationDockList li > strong { min-width: 0; }
