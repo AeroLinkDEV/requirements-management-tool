@@ -121,6 +121,19 @@ states before beginning another logical unit of work.
 
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
+Problem Report CSV/XLSX import publishes its reports, immutable revisions, build links, ledger, original result
+receipt and electronic signature under one `ProjectControlledWriteScope`. The project/actor/operation identity
+binds the source bytes, parsing filename, lossless submitted mapping in ordinal key order and expected preview hash. A replay checks current
+authority and password and returns the frozen original receipt before re-previewing existing source keys.
+The signature retains DEC-139's existing file/mapping meaning. Database-generated binary source identities
+enforce exact trimmed SourceSystem and ordinal-ignore-case trimmed SourceKey equality, including the Integrity
+writer. Their immutable v1 function/table is frozen from the qualified .NET comparer; writes and identity-dependent
+previews fail closed if the runtime comparer or Trim rules drift. Frozen historical reads remain available.
+PostgreSQL requires UTF-8 server encoding and receives stored generated keys through its additive migration;
+SQLite's disposable/local path uses virtual generated keys and connection functions that decode the database's
+UTF-8 or UTF-16 encoding. Already-open supplied SQLite connections receive the same functions. Neither path
+rewrites source facts, old receipts, signatures or revisions to install the backstop.
+
 ### Recoverable project creation and source inception
 
 New-project creation is a durable, typed setup draft rather than a browser-only wizard. An AeroLink administrator
