@@ -138,6 +138,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const cockpitAway = Boolean(station.windows.cockpit);
   const instructorAway = Boolean(station.windows.instructor);
   const iosVisible = !cockpitView || iosOpen || cockpitAway || instructorAway;
+  const iosReservesOutside = cockpitView && iosOpen && !outsideAway && !cockpitAway && !instructorAway;
   const iosButton = useRef<HTMLButtonElement>(null);
   const iosPanel = useRef<HTMLDivElement>(null);
   const closeIos = () => { station.returnSurface("instructor"); setIosOpen(false); iosButton.current?.focus(); };
@@ -687,6 +688,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           {!cockpitAway && !instructorAway ? <button type="button" aria-pressed={iosExpanded} onClick={() => setIosExpanded(value => !value)}>{iosExpanded ? "Compact instructor" : "More instructor room"}</button> : null}
           {!cockpitAway || instructorAway ? <button type="button" onClick={closeIos}>Close instructor station</button> : null}
           {iosReservesOutside && outside.shown ? <span className="fmsBenchHint fmsBenchOtwCoveredHint">At this width the instructor drawer covers part or all of the outside view. Close the drawer to see the whole view.</span> : null}
+          {outsideAway && !cockpitAway && !instructorAway ? <span className="fmsBenchHint">The instructor drawer covers part of the cockpit while open.</span> : null}</div> : null}
         <div className="fmsBenchTabs" role="tablist" aria-label="Bench tools">
           {visibleTabs.map(item => (
             <button key={item.id} type="button" role="tab" id={`fms-bench-tabbutton-${item.id}`} aria-controls={`fms-bench-tab-${item.id}`}
