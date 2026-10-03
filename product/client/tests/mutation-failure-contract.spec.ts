@@ -41,7 +41,7 @@ test('upload, job, identity, and conflict failures stay visible without false su
   }))
   const createJob = page.getByRole('button', { name: 'Generate controlled export' })
   await createJob.click()
-  await expect(page.getByRole('alert')).toContainText('No success was recorded')
+  await expect(page.getByRole('alert')).toContainText('could not confirm the outcome')
   await expect(createJob).toBeEnabled()
   await expect(page.getByRole('status')).toHaveCount(0)
   await page.unroute('**/api/enterprise-hardening/jobs')
@@ -58,8 +58,10 @@ test('upload, job, identity, and conflict failures stay visible without false su
   await page.route('**/api/enterprise-hardening/attachments**', route => route.abort('connectionfailed'))
   const upload = page.getByRole('button', { name: 'Upload controlled version' })
   await upload.click()
-  await expect(page.getByRole('alert')).toContainText('Your input has been preserved')
+  await expect(page.getByRole('alert')).toContainText('did not receive a response')
   await expect(page.getByLabel('Document label')).toHaveValue('Failure-preservation attachment')
+  expect(await page.getByLabel('Select file').evaluate((input: HTMLInputElement) =>
+    Array.from(input.files ?? [], file => file.name))).toEqual(['failure-preservation.txt'])
   await expect(upload).toBeEnabled()
   await page.unroute('**/api/enterprise-hardening/attachments**')
 

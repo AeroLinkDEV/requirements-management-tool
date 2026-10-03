@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "logic": [
+    "api-client-outcomes.spec.ts",
     "bootstrap-retry.spec.ts",
     "project-navigation-contract.spec.ts",
     "repository-configuration-contract.spec.ts",

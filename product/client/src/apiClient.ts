@@ -26,7 +26,7 @@ const safeFallback = (status: number) => {
   if (status === 409) return 'This record changed in another session. Review the current version and try again.'
   if (status === 413) return 'The submitted content is larger than this installation allows.'
   if (status === 429) return 'AeroLink is receiving too many requests. Wait briefly and try again.'
-  if (status >= 500) return 'AeroLink could not complete the operation. No success was recorded.'
+  if (status >= 500) return 'AeroLink could not confirm the outcome of this request.'
   return 'AeroLink could not complete the operation.'
 }
 
@@ -46,7 +46,7 @@ export async function apiRequest<T = undefined>(
     response = await fetch(input, init)
   } catch {
     throw new ApiError(
-      'AeroLink could not reach its local service. Your input has been preserved; try again when the connection is restored.',
+      'AeroLink did not receive a response. The outcome of this request could not be confirmed.',
     )
   }
 
