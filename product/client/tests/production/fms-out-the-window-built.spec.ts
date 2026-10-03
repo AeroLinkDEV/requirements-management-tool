@@ -92,10 +92,10 @@ test('the out-the-window view and synthetic vision start under the production po
     (window as unknown as { violations?: string[] }).violations ??= []
     ;(window as unknown as { violations: string[] }).violations.push(`${event.violatedDirective} ${event.blockedURI}`)
   }))
-  await page.getByText('Station arrangement', { exact: true }).click()
+  await page.getByText('Station windows', { exact: true }).click()
   await page.getByRole('combobox', { name: 'Fixed station arrangement' }).selectOption('three')
   const outsideOpened = context.waitForEvent('page')
-  await page.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
+  await page.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   const outside = await outsideOpened
   await outside.setViewportSize({ width: 1000, height: 700 })
   await expect(page.getByRole('region', { name: 'Out the window dock' })).toBeVisible()
@@ -168,7 +168,7 @@ test('the out-the-window view and synthetic vision start under the production po
 
   // Complete the fixed three-screen arrangement and instructor-apart option with the built shell's CSS/assets.
   const cockpitOpened = context.waitForEvent('page')
-  await page.getByRole('button', { name: 'Restore station — open Cockpit', exact: true }).click()
+  await page.getByRole('button', { name: 'Open cockpit in a window', exact: true }).click()
   const cockpit = await cockpitOpened
   await cockpit.setViewportSize({ width: 1440, height: 900 })
   await expect(cockpit.locator('.fmsBenchCduStation .fmsCdu')).toHaveCount(2)
@@ -189,7 +189,7 @@ test('the out-the-window view and synthetic vision start under the production po
 
   await page.getByRole('checkbox', { name: 'Instructor apart' }).check()
   const instructorOpened = context.waitForEvent('page')
-  await page.getByRole('button', { name: 'Restore station — open Instructor station', exact: true }).click()
+  await page.getByRole('button', { name: 'Open instructor station in a window', exact: true }).click()
   const instructor = await instructorOpened
   const childInstructor = instructor.getByRole('region', { name: 'Instructor station', exact: true })
   await childInstructor.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
@@ -198,7 +198,7 @@ test('the out-the-window view and synthetic vision start under the production po
   await instructor.screenshot({ path: test.info().outputPath('station-built-instructor.png'), fullPage: false })
   expect(await instructor.evaluate(() => (window as unknown as { violations?: string[] }).violations ?? []), 'instructor child policy violations').toEqual([])
   // Dismiss the arrangement disclosure before using the bench dock beneath its overlay.
-  await page.getByText(/^Station arrangement(?: · \d+ open)?$/).click()
+  await page.getByText(/^Station windows(?: · \d+ open)?$/).click()
   await expect(page.getByRole('region', { name: 'Station arrangement', exact: true })).toBeHidden()
   await instructor.getByRole('button', { name: 'Return to bench', exact: true }).click()
   await expect.poll(() => instructor.isClosed()).toBe(true)
