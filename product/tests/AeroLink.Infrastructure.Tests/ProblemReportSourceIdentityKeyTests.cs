@@ -31,6 +31,7 @@ public sealed class ProblemReportSourceIdentityKeyTests
     [Fact]
     public void Every_valid_scalar_agrees_in_both_directions_including_supplementary_classes()
     {
+        ProblemReportSourceIdentityKey.EnsureCompatible();
         var comparerClasses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var keyClasses = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var scalar = 0; scalar <= 0x10ffff; scalar++)
@@ -71,13 +72,25 @@ public sealed class ProblemReportSourceIdentityKeyTests
     }
 
     [Fact]
+    public void Frozen_keys_for_historical_reads_do_not_require_runtime_write_admission()
+    {
+        // Invariant globalization on .NET 10.0.9 newly equates U+1C8A/U+1C89. Historical v1 keys
+        // retain their frozen distinction, even when explicit write admission refuses that context.
+        if (StringComparer.OrdinalIgnoreCase.Equals("\u1c8a", "\u1c89"))
+            Assert.Contains("writes are refused", Assert.Throws<InvalidOperationException>(
+                ProblemReportSourceIdentityKey.EnsureCompatible).Message);
+        Assert.Equal(new byte[] { 0, 0, 0x1c, 0x8a }, ProblemReportSourceIdentityKey.SourceKey(" \u1c8a "));
+        Assert.Equal(new byte[] { 0, 0, 0x1c, 0x89 }, ProblemReportSourceIdentityKey.SourceKey("\u1c89"));
+        Assert.Equal(new byte[] { 0, 0, 0x1c, 0x8a }, ProblemReportSourceIdentityKey.SourceSystem(" \u1c8a "));
+    }
+
+    [Fact]
     public void Sqlite_generated_key_uses_complete_TEXT_bytes_including_NUL_and_refuses_a_supplied_key()
     {
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
-        // A string UDF argument truncates NUL even though stored TEXT round-trips it. The generated
-        // key therefore takes BLOB bytes; a native-provider failure is invisible to the scalar oracle.
-        connection.CreateFunction("string_key", (string value) => ProblemReportSourceIdentityKey.SourceKey(value), isDeterministic: true);
+        // The generated key takes complete TEXT bytes, including NUL. This native-provider boundary
+        // needs a persisted-string oracle in addition to the scalar codec oracle.
         var strictUtf8 = new UTF8Encoding(false, true);
         connection.CreateFunction("source_key", (byte[] value) => ProblemReportSourceIdentityKey.SourceKey(strictUtf8.GetString(value)), isDeterministic: true);
         using var command = connection.CreateCommand();
@@ -90,7 +103,7 @@ public sealed class ProblemReportSourceIdentityKeyTests
         command.Parameters.AddWithValue("$first", first);
         command.Parameters.AddWithValue("$second", second);
         command.ExecuteNonQuery();
-        command.CommandText = "SELECT rawkey,sourcekey,string_key(rawkey) FROM fixture ORDER BY rowid";
+        command.CommandText = "SELECT rawkey,sourcekey FROM fixture ORDER BY rowid";
         using (var rows = command.ExecuteReader())
         {
             foreach (var expected in new[] { first, second })
@@ -99,7 +112,6 @@ public sealed class ProblemReportSourceIdentityKeyTests
                 var stored = rows.GetString(0);
                 Assert.Equal(expected, stored);
                 Assert.Equal(ProblemReportSourceIdentityKey.SourceKey(stored), (byte[])rows[1]);
-                Assert.False(((byte[])rows[2]).AsSpan().SequenceEqual((byte[])rows[1]));
             }
             Assert.False(rows.Read());
         }

@@ -6,11 +6,12 @@ namespace AeroLink.Infrastructure.Persistence;
 
 /// <summary>
 /// A collision-free database key for the existing imported-source identity rule. Original source fields
-/// remain source facts. Frozen comparer classes are checked against the active runtime before use;
-/// changing runtime/globalization semantics must never silently reinterpret historical identities.
+/// remain source facts. Key computation uses frozen comparer and Trim classes, including for historical
+/// reads. Write admission must explicitly check compatibility with the active runtime before publication.
 /// </summary>
 internal static class ProblemReportSourceIdentityKey
 {
+    private static readonly HashSet<int> FrozenTrim = ProblemReportSourceIdentityTableV1.TrimCharacters.ToHashSet();
     private static readonly Lazy<bool> Compatible = new(() =>
     {
         ValidateCompatibility(ProblemReportSourceIdentityTableV1.Version,
@@ -25,8 +26,11 @@ internal static class ProblemReportSourceIdentityKey
     private static byte[] Encode(string value, bool foldCase)
     {
         ArgumentNullException.ThrowIfNull(value);
-        EnsureCompatible();
-        var text = value.Trim();
+        var first = 0;
+        var last = value.Length;
+        while (first < last && FrozenTrim.Contains(value[first])) first++;
+        while (last > first && FrozenTrim.Contains(value[last - 1])) last--;
+        var text = value.AsSpan(first, last - first);
         // Four bytes per scalar (or preserved unpaired UTF-16 code unit), never a digest or process hash.
         var bytes = new byte[text.Length * sizeof(int)];
         var written = 0;
