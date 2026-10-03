@@ -22,7 +22,7 @@ test('the view draws the terrain it is given, flies with the simulation, and rem
   await expect(page.getByRole('status', { name: 'Head-up flight modes' })).toContainText(await page.locator('.fmsBenchFma .engaged').first().innerText())
   await expect(view.locator('.fmsOtwPathMarker')).toBeVisible()
   await view.screenshot({ path: testInfo.outputPath('head-up.png') })
-  await expect(view).toContainText('Terrain: Mapzen Terrain Tiles on AWS Open Data')
+  await expect(page.getByRole('region', { name: 'Out-the-window view', exact: true })).toContainText('Terrain: Mapzen Terrain Tiles on AWS Open Data')
 
   // The panel layout: a glareshield and no head-up symbology.
   await page.getByRole('radiogroup', { name: 'Window layout' }).getByText('Panel', { exact: true }).click()

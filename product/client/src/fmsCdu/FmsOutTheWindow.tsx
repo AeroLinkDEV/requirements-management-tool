@@ -66,6 +66,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   const detailsButton = useRef<HTMLButtonElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const credits = useRef<HTMLDivElement>(null);
+  const creditViewport = useRef<HTMLDivElement>(null);
   const pathMarker = useRef<HTMLDivElement>(null);
   const scene = useRef<SceneHandle | null>(null);
   const [sceneEpoch, setSceneEpoch] = useState(0);
@@ -137,7 +138,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
       setFailure(error instanceof Error ? error.message : String(error));
       setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
     };
-    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed,
+    startScene(host.current!, credits.current!, creditViewport.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed,
       next => { if (!disposed) setProgress({ ...next, destination: renderingDocument, tiles, imagery }); })
       .then(created => {
         if (disposed) { created.destroy(); return; }
@@ -203,16 +204,18 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
       </div>
       {hud ? <Hud air={air} modes={modes} /> : null}
       {fatal ? <p className="fmsOtwNote" role="status">{fatal}</p> : null}
-      <div className="fmsOtwCredits">
-        <div ref={credits} />
-        <span>
-          Terrain: Mapzen Terrain Tiles on AWS Open Data (SRTM, GMTED2010, USGS NED and others).
-          {ground === "imagery" ? " Imagery: USGS The National Map, USDA NAIP (public domain)." : null}
-          {ground === "imagery" && esriImagery ? " Imagery outside the United States: Esri, Maxar, Earthstar Geographics, and the GIS User Community. Powered by Esri." : null}
-          {" "}Route fixes are invented.
-        </span>
-      </div>
     </div>
+    <div className="fmsOtwCredits">
+      <div ref={credits} />
+      <span>
+        Terrain: Mapzen Terrain Tiles on AWS Open Data (SRTM, GMTED2010, USGS NED and others).
+        {ground === "imagery" ? " Imagery: USGS The National Map, USDA NAIP (public domain)." : null}
+        {ground === "imagery" && esriImagery ? " Imagery outside the United States: Esri, Maxar, Earthstar Geographics, and the GIS User Community. Powered by Esri." : null}
+        {" "}Route fixes are invented.
+      </span>
+    </div>
+    <div className="fmsOtwCreditViewport" ref={creditViewport}
+      onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }} />
     <dialog className="fmsOtwDetails" ref={details} aria-label="View status and sources"
       onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }}
       onCancel={event => { event.preventDefault(); event.stopPropagation(); closeDetails(); }}>
@@ -278,7 +281,7 @@ function Hud({ air, modes }: { air: AircraftData; modes: HudModes }) {
 const canvas = (owner: Document, size = TILE_PIXELS) => Object.assign(owner.createElement("canvas"), { width: size, height: size });
 
 async function startScene(
-  container: HTMLElement, creditContainer: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
+  container: HTMLElement, creditContainer: HTMLElement, creditViewport: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
   tiles: TerrainTiles, imagery: GroundImagery<ImageBitmap>,
   renderingDocument: Document, disposed: () => boolean, onFailure: (error: unknown) => void,
   onProgress: (progress: SceneProgress) => void,
@@ -364,7 +367,7 @@ async function startScene(
   // Throws when the browser has no WebGL; the component says so rather than failing the page.
   let widget: InstanceType<typeof Cesium.CesiumWidget>;
   try { widget = new Cesium.CesiumWidget(container, {
-    baseLayer: false, terrainProvider: tiles.status === "off" ? flatTerrainProvider : terrainProvider, creditContainer,
+    baseLayer: false, terrainProvider: tiles.status === "off" ? flatTerrainProvider : terrainProvider, creditContainer, creditViewport,
     skyBox: false, showRenderLoopErrors: false, targetFrameRate: 30, useBrowserRecommendedResolution: true, msaaSamples: 4,
     // Cesium's default loop closes over the importing owner's global RAF. A portal does not change that realm.
     useDefaultRenderLoop: false,

@@ -16,13 +16,18 @@ test('the ground is aerial imagery where there is some, relief where there is no
   await expect(view).toHaveAttribute('data-imagery', 'live', { timeout: 60_000 })
   await drawn(page)
   expect((await shares(page)).imagery, 'imagery on the ground').toBeGreaterThan(0.25)
-  await expect(view.locator('.fmsOtwCredits')).toContainText('Imagery: USGS The National Map, USDA NAIP (public domain)')
+  const credits = page.getByRole('region', { name: 'Out-the-window view', exact: true }).locator('.fmsOtwCredits')
+  await expect(credits).toContainText('Imagery: USGS The National Map, USDA NAIP (public domain)')
+  await expect(credits).toBeVisible()
+  const sceneBox = (await view.boundingBox())!
+  const creditBox = (await credits.boundingBox())!
+  expect(creditBox.y, 'complete attribution has its own space below the scene').toBeGreaterThanOrEqual(sceneBox.y + sceneBox.height - 1)
 
   await choose(page, 'Window ground', 'Relief')
   await expect(view).toHaveAttribute('data-ground', 'relief')
   await drawn(page)
   expect((await shares(page)).imagery, 'relief only').toBeLessThan(0.03)
-  await expect(view.locator('.fmsOtwCredits')).not.toContainText('Imagery:')
+  await expect(credits).not.toContainText('Imagery:')
   await page.reload()
   await expect(page.locator('.fmsOtw')).toHaveAttribute('data-ground', 'relief')
 })

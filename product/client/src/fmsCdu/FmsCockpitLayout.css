@@ -137,10 +137,20 @@
 @container fms-bench (min-width: 720px) {
   .fmsBenchCockpitView .fmsBenchCockpit { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "left right" "displays displays" "flight flight"; }
 }
-@container fms-bench (min-width: 1320px) {
+@container fms-bench (min-width: 1328px) {
   .fmsBenchCockpitView .fmsBenchCockpit {
-    grid-template-columns: minmax(360px, 1fr) minmax(560px, 1.65fr) minmax(360px, 1fr);
+    grid-template-columns: minmax(360px, 1fr) minmax(588px, 1.65fr) minmax(360px, 1fr);
     grid-template-areas: "left displays right" "left flight right";
+  }
+  /* The focused pilot strip keeps full-size controls together beneath their captions. */
+  .fmsBenchCockpitView.fmsBenchFocused .fmsBenchFlight > .fmsBenchVerticalSelections {
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .fmsBenchCockpitView.fmsBenchFocused .fmsBenchVerticalSelections > label {
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.25;
   }
 }
 /* Explicit focus mode has a persistent exit button; it does not alter application navigation state. */

@@ -615,7 +615,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </form>
           {sim.advisory ? (
             // The helicopter profile: the crew flies the vertical axis and the speed; the FMS constraints are advisories.
-            <form className="fmsBenchAutopilot" aria-label="Vertical and speed selections" onSubmit={event => event.preventDefault()}>
+            <form className="fmsBenchAutopilot fmsBenchVerticalSelections" aria-label="Vertical and speed selections" onSubmit={event => event.preventDefault()}>
               <label>
                 <span>ALT SEL</span>
                 <input inputMode="numeric" value={altInput} placeholder={String(sim.selectedAltitude)} maxLength={5} aria-label="Preselected altitude"
