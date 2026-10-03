@@ -1526,7 +1526,6 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Show the view', exact: true }).click()
   const outsideScene = page.locator('.fmsBenchWindow .fmsOtw')
-  const outsideFooter = page.locator('.fmsBenchWindow .fmsOtwCredits')
   // Read each natural footprint in one browser task: widget credits may initialize between IPC calls.
   const outsideFootprint = () => page.evaluate(() => {
     const rectangle = (selector: string) => {
@@ -1553,10 +1552,27 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   const { header: closedHeader, scene: closedScene, footer: closedFooter, card: closedCard, cockpit: closedCockpit } = closedFootprint
   expect(closedScene!.height).toBe(170)
   const clearOfInstructor = async (height: number) => {
-    const scene = await outsideScene.boundingBox()
-    const footer = await outsideFooter.boundingBox()
-    const header = await page.locator('.fmsBenchWindow .fmsBenchMapHead').boundingBox()
-    const drawer = await page.getByRole('region', { name: 'Instructor station', exact: true }).boundingBox()
+    const { scene, footer, header, drawer, clippedLabels } = await page.locator('.fmsBenchWindow .fmsBenchMapHead').evaluate(head => {
+      const rectangle = (selector: string) => {
+        const element = head.ownerDocument.querySelector(selector)
+        if (!element) throw new Error(`Missing public geometry element: ${selector}`)
+        const { x, y, width, height } = element.getBoundingClientRect()
+        return { x, y, width, height }
+      }
+      const headerBox = head.getBoundingClientRect()
+      return {
+        scene: rectangle('.fmsBenchWindow .fmsOtw'),
+        footer: rectangle('.fmsBenchWindow .fmsOtwCredits'),
+        header: { x: headerBox.x, y: headerBox.y, width: headerBox.width, height: headerBox.height },
+        drawer: rectangle('[role="region"][aria-label="Instructor station"]'),
+        clippedLabels: [...head.querySelectorAll('.fmsBenchModes label')].flatMap(label => {
+          const box = label.getBoundingClientRect(), group = label.parentElement!.getBoundingClientRect()
+          return box.left < group.left || box.right > group.right || box.top < group.top || box.bottom > group.bottom
+            || box.left < headerBox.left || box.right > headerBox.right || box.top < headerBox.top || box.bottom > headerBox.bottom
+            ? [label.textContent?.trim()] : []
+        }),
+      }
+    })
     expect(scene!.width).toBeGreaterThan(0)
     expect(scene!.height).toBe(height)
     // Public occupied rectangles are independent of the reservation's CSS width and breakpoint.
@@ -1565,15 +1581,6 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
     expect(footer!.x + footer!.width).toBeLessThanOrEqual(drawer!.x)
     expect(header!.width).toBeGreaterThan(0)
     expect(header!.x + header!.width).toBeLessThanOrEqual(drawer!.x)
-    const clippedLabels = await page.locator('.fmsBenchWindow .fmsBenchMapHead').evaluate(head => {
-      const headerBox = head.getBoundingClientRect()
-      return [...head.querySelectorAll('.fmsBenchModes label')].flatMap(label => {
-        const box = label.getBoundingClientRect(), group = label.parentElement!.getBoundingClientRect()
-        return box.left < group.left || box.right > group.right || box.top < group.top || box.bottom > group.bottom
-          || box.left < headerBox.left || box.right > headerBox.right || box.top < headerBox.top || box.bottom > headerBox.bottom
-          ? [label.textContent?.trim()] : []
-      })
-    })
     expect(clippedLabels).toEqual([])
   }
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
@@ -1600,9 +1607,10 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   // The open drawer may grow the page: verify normal scrolling and keyboard access, not an invented 900px fit.
   const pilotTargets = page.getByRole('form', { name: 'Vertical and speed selections' })
     .locator('input:enabled, select:enabled, button:enabled')
-  expect(await pilotTargets.count()).toBeGreaterThan(0)
+  const pilotTargetCount = await pilotTargets.count()
+  expect(pilotTargetCount).toBeGreaterThan(0)
   const reachedTargets: Array<{ label: string | null; x: number; y: number; width: number; height: number; scrollY: number }> = []
-  for (let index = 0; index < await pilotTargets.count(); index++) {
+  for (let index = 0; index < pilotTargetCount; index++) {
     const target = pilotTargets.nth(index)
     if (index === 0) await target.focus()
     else await page.keyboard.press('Tab')
@@ -1621,6 +1629,9 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
     expect(observation.y + observation.height).toBeLessThanOrEqual(observation.viewportHeight)
     reachedTargets.push(observation)
   }
+  const pilotTargetCountAfter = await pilotTargets.count()
+  expect(pilotTargetCountAfter).toBe(pilotTargetCount)
+  await testInfo.attach('pilot-target-cardinality', { body: JSON.stringify({ before: pilotTargetCount, after: pilotTargetCountAfter }), contentType: 'application/json' })
   await testInfo.attach('open-instructor-pilot-targets', { body: JSON.stringify(reachedTargets), contentType: 'application/json' })
   // Reachability inspection scrolls the page; restore the measured baseline before viewport-relative geometry checks.
   expect(await page.evaluate(scrollY => {
