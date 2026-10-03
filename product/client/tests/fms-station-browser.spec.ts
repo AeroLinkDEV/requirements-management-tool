@@ -57,10 +57,15 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
   await expect(ios.getByLabel('Recording name')).toHaveValue('Keep across station windows')
   await page.keyboard.press('Escape')
-  await outsideTwo.getByRole('button', { name: 'Return to bench', exact: true }).click()
+  // The modal makes its child header inert; the owner's live dock can still return this surface.
+  await outsideTwo.getByRole('button', { name: 'View status and sources', exact: true }).click()
+  await expect(outsideTwo.getByRole('dialog', { name: 'View status and sources', exact: true })).toBeVisible()
+  await page.getByRole('region', { name: 'Out the window dock', exact: true }).getByRole('button', { name: 'Return Out the window', exact: true }).click()
   await expect.poll(() => outsideTwo.isClosed()).toBe(true)
   await expect(page.getByRole('region', { name: 'Out-the-window view' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Out the window dock' })).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: 'View status and sources', exact: true })).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'View status and sources', exact: true })).not.toBeFocused()
 
   await disclosure.click()
   // Ignoring extension metadata must not admit an ordinary foreign application stylesheet.
@@ -153,6 +158,8 @@ test('fixed station presets move one shared cockpit and instructor draft, return
   await controls.getByRole('button', { name: 'Restore station — open Out the window', exact: true }).click()
   const leavingChild = await leavingOpened
   await expect(page.getByRole('region', { name: 'Out the window dock' })).toBeVisible()
+  await leavingChild.getByRole('button', { name: 'View status and sources', exact: true }).click()
+  await expect(leavingChild.getByRole('dialog', { name: 'View status and sources', exact: true })).toBeVisible()
   await page.goto('/tests/fixtures/fms-cdu.html')
   await expect.poll(() => leavingChild.isClosed()).toBe(true)
   await page.goto('/tests/fixtures/fms-station.html')

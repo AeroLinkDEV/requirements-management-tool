@@ -35,6 +35,64 @@
   pointer-events: none;
 }
 
+.fmsBenchWindow .fmsOtwHeaderTitleGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fmsBenchWindow .fmsOtwHeaderTitle { white-space: nowrap; }
+
+.fmsOtwHeaderNotice {
+  display: inline-flex;
+  align-items: center;
+}
+
+.fmsOtwSourceWarning { font-weight: 600; }
+
+.fmsOtwHeaderStatus {
+  margin: 0;
+  min-width: 0;
+  color: #775c24;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Keep the Details control beside the heading; the group wraps naturally with the status text. */
+.fmsBenchWindow .fmsOtwHeaderTitleGroup .fmsOtwDetailsButton {
+  position: relative;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fmsOtwDetailsButton::after { content: ""; position: absolute; inset: -7px -6px; }
+.fmsOtwDetailsButton:focus-visible { outline: 2px solid #167a9b; outline-offset: 3px; }
+
+.fmsOtwDetails {
+  box-sizing: border-box;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid #687989;
+  border-radius: 8px;
+  color: #14212e;
+  background: #f5f8fb;
+}
+.fmsOtwDetails::backdrop { background: #08152180; }
+.fmsOtwDetails h2 { margin-top: 0; }
+.fmsOtwDetails h3 { margin-bottom: 4px; }
+.fmsOtwDetails p { margin-top: 4px; line-height: 1.5; }
+
 .fmsOtwNote {
   position: absolute;
   top: 12px;
@@ -50,17 +108,6 @@
   line-height: 1.4;
   text-align: center;
   pointer-events: none;
-}
-
-/* Brief progress sits at the edge; source-policy and failure notices retain their existing layout. */
-.fmsOtwProgress {
-  top: 6px;
-  left: 8px;
-  max-width: calc(100% - 16px);
-  padding: 4px 8px;
-  transform: none;
-  font-size: 12px;
-  text-align: left;
 }
 
 .layout-hud.view-cockpit .fmsOtwNote {

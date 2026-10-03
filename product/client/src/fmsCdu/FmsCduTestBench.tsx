@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type HTMLAttributes, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type HTMLAttributes, type ReactNode } from "react";
 import { ALERTS } from "./alerts";
 import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAP_RANGES } from "./flight";
@@ -7,7 +7,7 @@ import { aircraftData, fmsOutputs } from "./efis";
 import { Nd, Pfd } from "./FmsEfis";
 import FmsMap from "./FmsMap";
 import FmsGpsTab from "./FmsGpsTab";
-import FmsOutTheWindow, { groundImagery, type Ground, type HudModes } from "./FmsOutTheWindow";
+import FmsOutTheWindow, { FmsOutTheWindowHeader, groundImagery, type Ground, type HudModes } from "./FmsOutTheWindow";
 import type { ImagerySource } from "./groundImagery";
 import { TERRAIN_COLOURINGS, type TerrainColouring } from "./terrainAwareness";
 import { relayImagery, relayTerrain } from "./terrainRelay";
@@ -246,6 +246,16 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     try { window.localStorage.setItem(SVS_KEY, on ? "on" : "off"); } catch { /* a remembered choice is a convenience only */ }
   };
   const [outside, setOutside] = useState<WindowChoice>(storedWindow);
+  const outsideToggle = useRef<HTMLButtonElement>(null);
+  const outsideToggleFocus = useRef<Document | null>(null);
+  useLayoutEffect(() => {
+    const destination = outsideToggleFocus.current;
+    outsideToggleFocus.current = null;
+    const button = outsideToggle.current;
+    // Showing/hiding remounts the toolbar. Only hand back the focused user's toggle; an external
+    // preset change or a document transfer must not focus an unrelated or stale destination.
+    if (destination && button?.isConnected && button.ownerDocument === destination) button.focus();
+  }, [outside.shown]);
   const variant = variantById(variantId);
 
   // Time moves in ticks (scenario.ts): while flying, each callback runs `rate` ticks, each advancing the clock, the
@@ -374,6 +384,54 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         </label>
   </>);
 
+  const windowControls = (
+          <div className="fmsBenchDisplayControls">
+            {outside.shown ? (
+              <>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Window layout">
+                  {WINDOW_LAYOUTS.map(([id, label]) => (
+                    <label key={id} className={outside.layout === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchWindowLayout" value={id} checked={outside.layout === id} onChange={() => chooseWindow({ layout: id })} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Window view">
+                  {WINDOW_VIEWS.map(([id, label]) => (
+                    <label key={id} className={outside.view === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchWindowView" value={id} checked={outside.view === id} onChange={() => chooseWindow({ view: id })} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Window ground" title="Aerial imagery where there is some (the United States), relief elsewhere; or relief only">
+                  {WINDOW_GROUNDS.map(([id, label]) => (
+                    <label key={id} className={outside.ground === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchWindowGround" value={id} checked={outside.ground === id} onChange={() => chooseWindow({ ground: id })} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Terrain colouring"
+                  title="Relative: red at or above 100 ft below the aircraft, amber within 500 ft. Absolute: height bands. Both with a contour every 500 ft">
+                  {TERRAIN_COLOURINGS.map(id => (
+                    <label key={id} className={outside.colouring === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchTerrainColouring" value={id} checked={outside.colouring === id} onChange={() => chooseWindow({ colouring: id })} />
+                      {COLOURING_LABELS[id]}
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            <button type="button" ref={outsideToggle} aria-expanded={outside.shown} onClick={event => {
+              outsideToggleFocus.current = event.currentTarget.ownerDocument.activeElement === event.currentTarget ? event.currentTarget.ownerDocument : null;
+              chooseWindow({ shown: !outside.shown });
+            }}>
+              {outside.shown ? "Hide the view" : "Show the view"}
+            </button>
+          </div>
+  );
+
   return (
     // A <main>, as every workspace page is: the shell frames and densifies pages by that element.
     <main className={`fmsBench${cockpitView ? " fmsBenchCockpitView" : ""}${focused ? " fmsBenchFocused" : ""}`} aria-label="FMS Test Bench" onKeyDown={event => {
@@ -416,55 +474,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
       {outsideAway ? <FmsStationPlaceholder id="outside" onReturn={() => station.returnSurface("outside")} /> : null}
       <FmsStationSurface targetWindow={station.windows.outside} className={`${cockpitView ? "fmsBenchCockpitView " : ""}fmsStationSurfaceOutside`}>
       <section className="fmsBenchCard fmsBenchWindow" aria-label="Out-the-window view">
-        <div className="fmsBenchMapHead">
-          <h2>Out the window</h2>
-          <div className="fmsBenchDisplayControls">
-            {outside.shown ? (
-              <>
-                <div className="fmsBenchModes" role="radiogroup" aria-label="Window layout">
-                  {WINDOW_LAYOUTS.map(([id, label]) => (
-                    <label key={id} className={outside.layout === id ? "selected" : undefined}>
-                      <input type="radio" name="fmsBenchWindowLayout" value={id} checked={outside.layout === id} onChange={() => chooseWindow({ layout: id })} />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-                <div className="fmsBenchModes" role="radiogroup" aria-label="Window view">
-                  {WINDOW_VIEWS.map(([id, label]) => (
-                    <label key={id} className={outside.view === id ? "selected" : undefined}>
-                      <input type="radio" name="fmsBenchWindowView" value={id} checked={outside.view === id} onChange={() => chooseWindow({ view: id })} />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-                <div className="fmsBenchModes" role="radiogroup" aria-label="Window ground" title="Aerial imagery where there is some (the United States), relief elsewhere; or relief only">
-                  {WINDOW_GROUNDS.map(([id, label]) => (
-                    <label key={id} className={outside.ground === id ? "selected" : undefined}>
-                      <input type="radio" name="fmsBenchWindowGround" value={id} checked={outside.ground === id} onChange={() => chooseWindow({ ground: id })} />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-                <div className="fmsBenchModes" role="radiogroup" aria-label="Terrain colouring"
-                  title="Relative: red at or above 100 ft below the aircraft, amber within 500 ft. Absolute: height bands. Both with a contour every 500 ft">
-                  {TERRAIN_COLOURINGS.map(id => (
-                    <label key={id} className={outside.colouring === id ? "selected" : undefined}>
-                      <input type="radio" name="fmsBenchTerrainColouring" value={id} checked={outside.colouring === id} onChange={() => chooseWindow({ colouring: id })} />
-                      {COLOURING_LABELS[id]}
-                    </label>
-                  ))}
-                </div>
-              </>
-            ) : null}
-            <button type="button" aria-expanded={outside.shown} onClick={() => chooseWindow({ shown: !outside.shown })}>
-              {outside.shown ? "Hide the view" : "Show the view"}
-            </button>
-          </div>
-        </div>
         {outside.shown
           ? <FmsOutTheWindow air={air} route={bus.activeRoute} modes={modes} layout={outside.layout} view={outside.view} tiles={tiles}
-            ground={outside.ground} colouring={outside.colouring} imagery={photos} />
-          : <p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p>}
+            ground={outside.ground} colouring={outside.colouring} imagery={photos} controls={windowControls} />
+          : <><FmsOutTheWindowHeader controls={windowControls} /><p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p></>}
       </section>
       </FmsStationSurface>
       {cockpitAway ? <FmsStationPlaceholder id="cockpit" onReturn={() => station.returnSurface("cockpit")} /> : null}
