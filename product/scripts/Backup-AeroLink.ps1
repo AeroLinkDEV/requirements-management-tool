@@ -18,6 +18,13 @@ $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
+$transitionLease = $null
+$backupLock = $null
+$operationError = $null
+try {
+$transitionLease = Enter-AeroLinkTransition -InstallationRoot $installation.InstallationRoot -Policy Preserve
+if ($transitionLease.Pending) { throw 'An interrupted production transition requires recovery before this installation can be backed up.' }
 if (-not $BackupRoot) { $BackupRoot = $installation.Backups }
 $backupRoot = [IO.Path]::GetFullPath($BackupRoot)
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -43,7 +50,6 @@ if (-not $PostgresAlreadyRunning) {
 }
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupRetention.psm1') -Force
 $backupLock = Enter-AeroLinkBackupLock -BackupRoot $backupRoot
-try {
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 try {
@@ -110,4 +116,20 @@ Write-Host "SHA-256: $archiveHash"
     BackupRoot = $backupRoot
     Database   = $Database
 }
-} finally { $backupLock.Dispose() }
+} catch {
+    $operationError = $_
+    throw
+} finally {
+    try {
+        if ($backupLock) { $backupLock.Dispose() }
+    } catch {
+        if ($operationError) { Write-Warning "Backup-root lock cleanup also failed: $($_.Exception.Message)" -WarningAction Continue }
+        else { $operationError = $_; throw }
+    } finally {
+        try { Exit-AeroLinkTransition -Lease $transitionLease }
+        catch {
+            if ($operationError) { Write-Warning "Installation lease cleanup also failed: $($_.Exception.Message)" -WarningAction Continue }
+            else { throw }
+        }
+    }
+}
