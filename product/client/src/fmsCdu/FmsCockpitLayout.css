@@ -142,6 +142,16 @@
     grid-template-columns: minmax(360px, 1fr) minmax(560px, 1.65fr) minmax(360px, 1fr);
     grid-template-areas: "left displays right" "left flight right";
   }
+  /* The focused pilot strip keeps full-size controls together beneath their captions. */
+  .fmsBenchCockpitView.fmsBenchFocused .fmsBenchFlight > .fmsBenchVerticalSelections {
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .fmsBenchCockpitView.fmsBenchFocused .fmsBenchVerticalSelections > label {
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.25;
+  }
 }
 /* Explicit focus mode has a persistent exit button; it does not alter application navigation state. */
 .shell:has(.fmsBenchFocused) { grid-template-columns: minmax(0, 1fr); }
