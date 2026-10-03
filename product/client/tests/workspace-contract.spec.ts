@@ -11,9 +11,11 @@ const workspace = { program, projects: [{ project, releases: [release] }] };
 
 test("workspace projection accepts nullable predecessor and preserves exact IDs and release flags", () => {
   expect(decodeWorkspaces([workspace])).toEqual([workspace]);
-  const successor = { ...release, id: "next", isReleased: true, predecessorReleaseId: "build" };
-  expect(decodeWorkspaces([{ ...workspace, projects: [{ project, releases: [release, successor] }] }])[0].projects[0].releases)
-    .toEqual([release, successor]);
+  for (const releasedWithoutReadiness of [true, false]) {
+    const successor = { ...release, id: "next", isReleased: true, predecessorReleaseId: "build", releasedWithoutReadiness };
+    expect(decodeWorkspaces([{ ...workspace, projects: [{ project, releases: [release, successor] }] }])[0].projects[0].releases)
+      .toEqual([release, successor]);
+  }
   expect(decodeWorkspaces([])).toEqual([]);
   expect(decodeWorkspaces([{ ...workspace, projects: [] }])).toEqual([{ ...workspace, projects: [] }]);
 });
@@ -27,7 +29,9 @@ test("malformed workspace payloads never become a partially accepted context", (
     [{ ...workspace, projects: [{ project: { ...project, softwareProduct: null }, releases: [] }] }],
     ...[{ ...release, id: undefined }, { ...release, id: 12 }, { ...release, id: " " },
       { ...release, version: null }, { ...release, isReleased: "false" },
-      { ...release, predecessorReleaseId: {} }].map(item => [{ ...workspace, projects: [{ project, releases: [item] }] }]),
+      { ...release, predecessorReleaseId: {} },
+      ...[null, "true", "false", 0, 1, {}, []].map(releasedWithoutReadiness => ({ ...release, releasedWithoutReadiness }))]
+      .map(item => [{ ...workspace, projects: [{ project, releases: [item] }] }]),
   ];
   for (const payload of invalid) expect(() => decodeWorkspaces(payload)).toThrow("Workspace response is invalid.");
   expect(() => decodeWorkspaces([workspace, null])).toThrow();

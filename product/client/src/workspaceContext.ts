@@ -73,9 +73,11 @@ export function decodeWorkspaces(value: unknown): Workspace[] {
           releases: releases.map(release => {
             if (!isRecord(release) || !isIdentifier(release.id) || typeof release.version !== "string"
               || typeof release.isReleased !== "boolean"
+              || ("releasedWithoutReadiness" in release && typeof release.releasedWithoutReadiness !== "boolean")
               || (release.predecessorReleaseId != null && !isIdentifier(release.predecessorReleaseId))) return invalidWorkspace();
             return { id: release.id, version: release.version, isReleased: release.isReleased,
-              predecessorReleaseId: release.predecessorReleaseId };
+              predecessorReleaseId: release.predecessorReleaseId,
+              ...(typeof release.releasedWithoutReadiness === "boolean" ? { releasedWithoutReadiness: release.releasedWithoutReadiness } : {}) };
           }),
         };
       }),
