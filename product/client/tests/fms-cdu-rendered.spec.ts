@@ -1524,6 +1524,60 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   expect(ios!.y + ios!.height).toBeLessThanOrEqual(wide.cdu.y)
   await page.screenshot({ path: testInfo.outputPath('instructor-gps.png'), fullPage: true })
   await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Show the view', exact: true }).click()
+  const outsideScene = page.locator('.fmsBenchWindow .fmsOtw')
+  const outsideFooter = page.locator('.fmsBenchWindow .fmsOtwCredits')
+  // Read each natural footprint in one browser task: widget credits may initialize between IPC calls.
+  const outsideFootprint = () => page.evaluate(() => {
+    const rectangle = (selector: string) => {
+      const element = document.querySelector(selector)
+      if (!element) throw new Error(`Missing public geometry element: ${selector}`)
+      const { x, y, width, height } = element.getBoundingClientRect()
+      return { x, y, width, height }
+    }
+    return {
+      scene: rectangle('.fmsBenchWindow .fmsOtw'),
+      footer: rectangle('.fmsBenchWindow .fmsOtwCredits'),
+      card: rectangle('.fmsBenchWindow[aria-label="Out-the-window view"]'),
+      cockpit: {
+        cdu: rectangle('.fmsBenchCduStation .fmsCdu'),
+        pfd: rectangle('.efisPfd'),
+        nd: rectangle('.efisNd'),
+      },
+    }
+  })
+  const { scene: closedScene, footer: closedFooter, card: closedCard, cockpit: closedCockpit } = await outsideFootprint()
+  expect(closedScene!.height).toBe(170)
+  const clearOfInstructor = async (height: number) => {
+    const scene = await outsideScene.boundingBox()
+    const footer = await outsideFooter.boundingBox()
+    const drawer = await page.getByRole('region', { name: 'Instructor station', exact: true }).boundingBox()
+    expect(scene!.width).toBeGreaterThan(0)
+    expect(scene!.height).toBe(height)
+    // Public occupied rectangles are independent of the reservation's CSS width and breakpoint.
+    expect(scene!.x + scene!.width).toBeLessThanOrEqual(drawer!.x)
+    expect(footer!.width).toBeGreaterThan(0)
+    expect(footer!.x + footer!.width).toBeLessThanOrEqual(drawer!.x)
+  }
+  await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
+  await clearOfInstructor(170)
+  const { cockpit: openedCockpit, footer: openedFooter, card: openedCard } = await outsideFootprint()
+  expect(openedCockpit.cdu.x).toBe(closedCockpit.cdu.x)
+  expect(openedCockpit.cdu.width).toBe(closedCockpit.cdu.width)
+  expect(openedCockpit.cdu.height).toBe(closedCockpit.cdu.height)
+  // Only the measured natural footer/card growth may move the unchanged cockpit down.
+  const cardGrowth = openedCard!.height - closedCard!.height
+  const footerGrowth = openedFooter!.height - closedFooter!.height
+  expect(cardGrowth).toBeGreaterThanOrEqual(-1)
+  expect(Math.abs(cardGrowth - footerGrowth)).toBeLessThanOrEqual(1)
+  expect(Math.abs(openedCockpit.cdu.y - closedCockpit.cdu.y - cardGrowth)).toBeLessThanOrEqual(1)
+  await page.getByRole('button', { name: 'More instructor room', exact: true }).click()
+  await clearOfInstructor(520)
+  await page.getByRole('button', { name: 'Compact instructor', exact: true }).click()
+  await clearOfInstructor(170)
+  await page.keyboard.press('Escape')
+  expect(await outsideScene.boundingBox()).toEqual(closedScene)
+  await page.getByRole('button', { name: 'Hide the view', exact: true }).click()
   await page.setViewportSize({ width: 800, height: 900 })
   const narrow = await boxes()
   await centredKeys()
