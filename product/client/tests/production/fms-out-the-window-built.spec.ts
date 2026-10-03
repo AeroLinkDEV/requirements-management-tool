@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { apiLogin, login, selectProgram } from '../auth'
 import { observeFmsNodeWorker } from '../../test-support/fms-node-worker-telemetry'
+import { observeFmsPublicHeartbeat } from '../../test-support/fms-public-browser-heartbeat'
 
 /**
  * The FMS Test Bench's out-the-window view, against the build and under the document's real Content Security Policy.
@@ -18,7 +19,9 @@ test('the out-the-window view and synthetic vision start under the production po
   test.setTimeout(180_000)
   const telemetry = observeFmsNodeWorker(test.info())
   let ownerBodyThrew = false
+  let heartbeat: Awaited<ReturnType<typeof observeFmsPublicHeartbeat>> | undefined
   try {
+  heartbeat = await observeFmsPublicHeartbeat(context, test.info())
   const origin = new URL(baseURL!).origin
   const offOrigin: string[] = [], missing: string[] = [], problems: string[] = []
   // Context listeners include the station child's first stylesheet/worker request, before its Page is delivered.
@@ -223,5 +226,10 @@ test('the out-the-window view and synthetic vision start under the production po
   expect(missing, 'files the build should have served').toEqual([])
   expect(problems, 'errors in the page').toEqual([])
   } catch (error) { ownerBodyThrew = true; throw error }
-  finally { try { telemetry.finish(ownerBodyThrew) } catch (error) { if (!ownerBodyThrew) throw error } }
+  finally {
+    let observationError: unknown
+    try { heartbeat?.finish(ownerBodyThrew) } catch (error) { observationError = error }
+    try { telemetry.finish(ownerBodyThrew) } catch (error) { observationError ??= error }
+    if (!ownerBodyThrew && observationError) throw observationError
+  }
 })
