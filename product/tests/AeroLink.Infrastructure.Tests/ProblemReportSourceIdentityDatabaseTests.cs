@@ -14,7 +14,7 @@ public sealed class ProblemReportSourceIdentityDatabaseTests
 {
     internal static readonly (string A, string B)[] Pairs = [
         ("Nav", "NAV"), ("longſ", "LONGS"), ("ı", "I"), ("İ", "i"), ("K", "K"), ("ß", "SS"),
-        ("é", "e\u0301"), ("\u2000 x \u3000", "x"), ("Σ", "ς"),
+        ("é", "e\u0301"), ("é", "É"), ("ж", "Ж"), ("ａ", "Ａ"), ("\u2000 x \u3000", "x"), ("Σ", "ς"),
         (char.ConvertFromUtf32(0x10400), char.ConvertFromUtf32(0x10428)),
         (char.ConvertFromUtf32(0x10D50), char.ConvertFromUtf32(0x10D70)),
         ("A\0B", "a\0b"), ("A\0B", "a\0c"),
