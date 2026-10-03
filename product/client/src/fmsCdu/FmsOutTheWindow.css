@@ -1,4 +1,4 @@
-/* The out-the-window view. The scene fills the frame; everything else is laid over it. */
+/* The scene fills the frame; attribution has its own row below the frame. */
 .fmsOtw {
   position: relative;
   height: clamp(320px, 58vh, 620px);
@@ -116,28 +116,48 @@
 }
 
 .fmsOtwCredits {
-  position: absolute;
-  right: 8px;
-  bottom: 6px;
-  left: 8px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 4px 10px;
+  padding: 6px 8px;
+  border-radius: 0 0 10px 10px;
+  background: #0b1a26;
   color: #c3d0d9;
+  font-family: var(--font-body);
   font-size: 12px;
   text-shadow: 0 1px 2px #000;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
-.layout-panel.view-cockpit .fmsOtwCredits {
-  bottom: 36px;
+.fmsOtwCredits .cesium-widget-credits {
+  position: static;
+  font-size: inherit;
 }
 
 .fmsOtwCredits img {
   max-height: 18px;
   vertical-align: middle;
+}
+
+.fmsOtwCredits a,
+.fmsOtwCredits a:visited { color: #d8e3ea; }
+.fmsOtwCredits a:focus-visible { outline: 2px solid #5dff9b; outline-offset: 2px; }
+
+/* The engine owns its attribution dialog and focus. Only an open overlay takes pointer input. */
+.fmsOtwCreditViewport {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+.fmsOtwCreditViewport .cesium-credit-lightbox-overlay {
+  overflow: auto;
+  pointer-events: auto;
 }
 
 /* Head-up symbology: collimated green, drawn over the scene. */
