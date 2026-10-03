@@ -193,7 +193,9 @@ and does not satisfy source mapping, reconciliation, or source-acceptance gates.
 
 ## Security boundary
 
-Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SRCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires TLS, enterprise identity federation/provisioning, configurable policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
+Identity now comes from a revocable authenticated server session. Passwords use salted PBKDF2 derivation, opaque session tokens are stored only as digests, material API actions derive the actor from the authenticated principal, Program memberships and roles constrain access, and SRCR/release approvals require password-confirmed immutable electronic signatures. Production deployment still requires deployment-specific TLS, policy enforcement, privileged-access governance, audit export, and independent security review as defined in [SECURITY_AND_IDENTITY_MODEL.md](../../SECURITY_AND_IDENTITY_MODEL.md).
+
+The current identity boundary uses local accounts. External-directory federation and provisioning remain deferred under [DEC-051](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-051---identity-federation-is-deferred-until-an-organization-commits-to-deploying-it), including its 2026-08-01 disposition. Their implementation resumes only after a real organization/provider deployment commitment; local provider administration is not evidence of working federation. An organization requiring corporate-directory authentication therefore needs that separate deployment contract and qualification before AeroLink can support it.
 
 ## Enterprise hardening boundary
 
