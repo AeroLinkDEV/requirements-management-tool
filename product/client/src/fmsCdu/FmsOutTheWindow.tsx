@@ -553,6 +553,8 @@ async function startScene(
   });
 
   const ahead = new Cesium.Cartesian3();
+  const aircraftPosition = new Cesium.Cartesian3();
+  const aircraftPlacement = new Cesium.Matrix4();
   const followCamera = aircraftCamera(Cesium, camera);
   let frame: { state: Live; air: AircraftSample; height: number } | null = null;
   const updateCamera = () => {
@@ -575,7 +577,7 @@ async function startScene(
     const { state, air, height } = frame;
     if (colouringChoice === "relative") relative.uniforms.aircraft = air.altitude * FT;
     obstacles.update(air.altitude, colouringChoice);
-    const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
+    const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT, undefined, aircraftPosition);
     ownship.show = state.view === "map";
     ownship.position = at;
     ownship.rotation = -Cesium.Math.toRadians(air.heading);
@@ -586,7 +588,7 @@ async function startScene(
       orientation.heading = Cesium.Math.toRadians(air.heading - 90);
       orientation.pitch = Cesium.Math.toRadians(air.pitch);
       orientation.roll = Cesium.Math.toRadians(air.bank);
-      const placed = Cesium.Transforms.headingPitchRollToFixedFrame(at, orientation);
+      const placed = Cesium.Transforms.headingPitchRollToFixedFrame(at, orientation, undefined, undefined, aircraftPlacement);
       for (const model of models) model.modelMatrix = placed;
       helicopter.update(placed, (performance.now() / 1000) * MAIN_ROTOR_RAD_S, true);
     } else helicopter.update(undefined, 0, false);
