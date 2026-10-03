@@ -1652,8 +1652,8 @@ test('the cockpit pilot selections remain keyboard reachable while the docked in
     if (index === 0) await target.focus()
     else await page.keyboard.press('Tab')
     await expect(target).toBeFocused()
-    await target.scrollIntoViewIfNeeded()
     const observation = await target.evaluate(element => {
+      element.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
       const { x, y, width, height } = element.getBoundingClientRect()
       return { label: element.getAttribute('aria-label') ?? (element as HTMLInputElement).labels?.[0]?.textContent?.trim() ?? element.textContent?.trim() ?? null,
         x, y, width, height, scrollY: window.scrollY, viewportHeight: window.innerHeight, viewportWidth: document.documentElement.clientWidth }
