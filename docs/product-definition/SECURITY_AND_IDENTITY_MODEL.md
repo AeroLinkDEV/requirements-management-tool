@@ -10,7 +10,7 @@ AeroLink decisions must be attributable to authenticated people, not browser-sup
 
 - Accounts are local and on-premises in the current implementation. A future enterprise connector may federate Active Directory or another approved identity provider without changing artifact history.
 - Usernames are normalized, unique, and retained after an account is disabled so historic authorship remains resolvable.
-- Passwords are stored only as salted PBKDF2-SHA-256 derivations with 310,000 iterations. Plaintext passwords are never persisted.
+- Newly created, changed, and reset passwords are stored only as salted PBKDF2-SHA-256 derivations with 600,000 iterations. Existing hashes continue to verify at their encoded iteration count until an ordinary password change or reset; login and password confirmation do not rewrite them. Plaintext passwords are never persisted.
 - Eight consecutive failures lock an account. Successful authentication resets the failure counter.
 - The browser receives a random opaque session token in an HTTP-only cookie. Only its SHA-256 digest is stored. Sessions expire after 12 hours and can be explicitly revoked.
 - Account Security identifies the current session, lists retained session history, and permits a user to revoke
