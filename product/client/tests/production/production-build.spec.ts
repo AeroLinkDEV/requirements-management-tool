@@ -359,6 +359,12 @@ test('verification mutation failures retain the engineer input and only confirme
 })
 
 function productionDesignReport() {
+  // Station portals adopt existing nodes into another document, preserving their original prototypes.
+  // Namespaces and capabilities identify SVG across that boundary; child-realm instanceof does not.
+  const svgGraphics = (element: Element): element is SVGGraphicsElement =>
+    element.namespaceURI === 'http://www.w3.org/2000/svg' &&
+    typeof (element as SVGGraphicsElement).getScreenCTM === 'function'
+  const svgText = (element: Element) => element.namespaceURI === 'http://www.w3.org/2000/svg' && element.localName === 'text'
   const visible = (element: Element) => {
     if (!element.checkVisibility({ visibilityProperty: true })) return false
     const box = element.getBoundingClientRect()
@@ -375,7 +381,7 @@ function productionDesignReport() {
   }
   const fontPixels = (element: Element) => {
     const size = parseFloat(getComputedStyle(element).fontSize)
-    if (element instanceof SVGGraphicsElement) {
+    if (svgGraphics(element)) {
       // Includes responsive viewBox sizing, SVG transforms and CSS transforms on layout ancestors.
       const matrix = element.getScreenCTM()
       return matrix ? size * minimumScale(matrix) : 0
@@ -386,18 +392,18 @@ function productionDesignReport() {
   // audited, as does every other surface. Physical CDU key legends retain their #1444 fit owner.
   const leaves = [...document.querySelectorAll('main *, body > div > *')].filter(element =>
     visible(element) &&
-    (!element.children.length || (element instanceof SVGTextElement &&
+    (!element.children.length || (svgText(element) &&
       [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()))) &&
     (element.textContent || '').trim().length > 0 &&
     !element.closest('.dtCanvasScene') && !element.closest('.fmsCduKey .legend'),
   )
-  const label = (element: Element) => element instanceof SVGTextElement && element.children.length
+  const label = (element: Element) => svgText(element) && element.children.length
     ? [...element.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim()
     : (element.textContent || '').trim()
   const fonts = leaves.map(element => ({
     text: label(element), authoredPixels: parseFloat(getComputedStyle(element).fontSize),
     effectivePixels: fontPixels(element),
-    svg: element instanceof SVGGraphicsElement,
+    svg: svgGraphics(element),
     element: element.tagName.toLowerCase(),
     testId: element.getAttribute('data-testid'),
     box: element.getBoundingClientRect().toJSON(),
@@ -505,7 +511,41 @@ test('every workspace chunk arrives and keeps the design contract in both densit
           await page.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-resized-${density}-${width}.png`) })
           await page.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-resized-${density}-${width}.png`) })
         }
-
+        // A station portal moves the same instruments into another document without remounting.
+        // Resize the child independently after establishing a wide instrument, then return the same nodes.
+        // A size observer left in the owner realm can keep a stale font floor in the child.
+        await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
+        await page.getByText('Station windows', { exact: true }).click()
+        await page.getByRole('combobox', { name: 'Fixed station arrangement' }).selectOption('three')
+        const outsideOpened = page.context().waitForEvent('page')
+        await page.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
+        const outside = await outsideOpened
+        const cockpitOpened = page.context().waitForEvent('page')
+        await page.getByRole('button', { name: 'Open cockpit in a window', exact: true }).click()
+        const cockpit = await cockpitOpened
+        await cockpit.locator('.efisPfd').waitFor()
+        await cockpit.setViewportSize({ width: 1280, height: 900 })
+        // This owner transition establishes the wide child before the independent shrink. Without
+        // destination rebinding it is also the only event that can wake the misplaced size observer.
+        await page.setViewportSize({ width: 1280, height: 900 })
+        for (const [step, width] of [1280, 1440, 960, 1440].entries()) {
+          await cockpit.setViewportSize({ width, height: 900 })
+          await cockpit.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-child-${density}-${step}-${width}.png`) })
+          await cockpit.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-child-${density}-${step}-${width}.png`) })
+          const childReport = await cockpit.evaluate(productionDesignReport)
+          await test.info().attach(`child-readability-${density}-${step}-${width}`, { body: JSON.stringify(childReport.fonts), contentType: 'application/json' })
+          await expect.poll(async () => (await cockpit.evaluate(productionDesignReport)).tiny,
+            { message: `EFIS child readability after resizing to ${width}px [${density}]` }).toEqual([])
+          inventory.push({ route: `${route}#cockpit-child`, density, width, fonts: (await cockpit.evaluate(productionDesignReport)).fonts })
+        }
+        await cockpit.getByRole('button', { name: 'Return to bench', exact: true }).click()
+        await outside.getByRole('button', { name: 'Return to bench', exact: true }).click()
+        await page.getByRole('button', { name: 'Engineering view', exact: true }).click()
+        await page.setViewportSize({ width: 1440, height: 900 })
+        await expect.poll(async () => (await page.evaluate(productionDesignReport)).tiny,
+          { message: `EFIS readability after the child returns [${density}]` }).toEqual([])
+        await page.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-child-returned-${density}.png`) })
+        await page.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-child-returned-${density}.png`) })
       }
     }
   }

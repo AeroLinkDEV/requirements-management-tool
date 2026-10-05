@@ -3,6 +3,7 @@ import { VELOCITY_VECTOR_MAX_KT, VELOCITY_VECTOR_PX_PER_KT, type AircraftData, t
 import { toLocal, type LatLon } from "./fmsModel";
 import { ACTIVE_PROFILE } from "./profile";
 import { SyntheticVisionLayer } from "./FmsSyntheticVision";
+import { useFmsStationDocument } from "./FmsStationSurface";
 import { SVS_ZOOM } from "./syntheticVision";
 import type { TerrainTiles } from "./terrainTiles";
 import "./FmsEfis.css";
@@ -24,6 +25,8 @@ const MAGENTA = "#ff5ad9", GREEN = "#43e37c", CYAN = "#48d4ff", WHITE = "#f2f4f7
 const readableFont = (authored: number) => `max(${authored}px, var(--efis-readable-font-floor, 12px))`;
 function useReadableInstrument() {
   const ref = useRef<SVGSVGElement>(null);
+  const destinationDocument = useFmsStationDocument();
+  const destinationWindow = destinationDocument.defaultView ?? window;
   useLayoutEffect(() => {
     const svg = ref.current;
     if (!svg) return;
@@ -40,10 +43,13 @@ function useReadableInstrument() {
       if (scale > 0) svg.style.setProperty("--efis-readable-font-floor", `${12.01 / scale}px`);
     };
     update();
-    const observer = new ResizeObserver(update);
+    // Station portals adopt these same nodes without remounting. Observe in their displayed document
+    // so a child-only resize is delivered, and reconnect when the instruments return to the owner.
+    const Observer = (destinationWindow as Window & typeof globalThis).ResizeObserver;
+    const observer = new Observer(update);
     observer.observe(svg);
     return () => observer.disconnect();
-  }, []);
+  }, [destinationDocument, destinationWindow]);
   return ref;
 }
 
