@@ -101,11 +101,26 @@ jobs:
           # check-run POSTs are deliberately not retried, so a retry can never duplicate either.
           # A failed read reports its status and GitHub's rate-limit headers, so a refusal (403) says whether the
           # repository's API budget was spent (#1318) instead of only "curl: (22)".
+          # A spent budget is transient, but GitHub answers it with 403 (or 429) and x-ratelimit-remaining: 0, or
+          # with retry-after for a secondary limit, and curl's retry set has no 403. One spent window used to fail
+          # every waiting requester at once (#1318), so such a refusal waits for the reset GitHub names, at most
+          # 15 minutes a time and three reads in all, then reads again. Any other refusal fails at once, as before.
           read_api() {
-            curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error --dump-header "$RUNNER_TEMP/read-api-headers" "${headers[@]}" "$@" && return 0
-            local failed=$?
-            echo "::warning::GitHub API read failed: $(grep -iE '^(HTTP/|x-ratelimit-(limit|remaining|used|reset|resource):|retry-after:)' "$RUNNER_TEMP/read-api-headers" 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
-            return "$failed"
+            local attempt failed pause reset
+            for attempt in 1 2 3; do
+              curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error --dump-header "$RUNNER_TEMP/read-api-headers" "${headers[@]}" "$@" && return 0
+              failed=$?
+              echo "::warning::GitHub API read failed: $(grep -iE '^(HTTP/|x-ratelimit-(limit|remaining|used|reset|resource):|retry-after:)' "$RUNNER_TEMP/read-api-headers" 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
+              pause="$({ grep -iE '^retry-after:' "$RUNNER_TEMP/read-api-headers" 2>/dev/null || true; } | tail -n 1 | tr -dc '0-9')"
+              if [ -z "$pause" ] && grep -qiE '^x-ratelimit-remaining: *0[[:space:]]*$' "$RUNNER_TEMP/read-api-headers" 2>/dev/null; then
+                reset="$({ grep -iE '^x-ratelimit-reset:' "$RUNNER_TEMP/read-api-headers" || true; } | tail -n 1 | tr -dc '0-9')"
+                pause=$(( ${reset:-0} - $(date +%s) + 5 ))
+              fi
+              if [ -z "$pause" ] || [ "$attempt" -eq 3 ]; then return "$failed"; fi
+              if [ "$pause" -lt 5 ]; then pause=5; elif [ "$pause" -gt 900 ]; then pause=900; fi
+              echo "::notice::GitHub API budget spent; reading again in ${pause}s (#1318)."
+              sleep "$pause"
+            done
           }
 
           verify_live_pr() {
