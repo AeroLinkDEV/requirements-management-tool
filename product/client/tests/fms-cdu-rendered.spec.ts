@@ -1449,6 +1449,7 @@ test('cockpit CDU focus stays on its physical side and never selects aircraft gu
 })
 
 test('the cockpit preserves faceplate and display proportions and stacks below its readable width floor', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
   // The published faceplate geometry is the independent key-face oracle, not the overlay's CSS height (#1444).
   const geometry = JSON.parse(await readFile(new URL('../public/fms-cdu/layout.json', import.meta.url), 'utf8')) as {
     image: { w: number; h: number }; keys: Array<{ id: string; x: number; y: number; w: number; h: number }>
@@ -1623,6 +1624,57 @@ test('the cockpit preserves faceplate and display proportions and stacks below i
   expect(phone.pfd.y).toBeGreaterThan(phone.cdu.y)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(400)
   await page.screenshot({ path: testInfo.outputPath('narrow-cockpit.png'), fullPage: true })
+
+  // This layout owner also protects the real low-speed PFD data once responsive fonts grow.
+  // Cruise has no VX/VY or selected ground velocity, so its geometry misses these collisions.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await open(page)
+  await page.addStyleTag({ url: '/src/Density.css' })
+  const scenarios = page.getByRole('region', { name: 'Scenarios' })
+  const groundSpeed = {
+    id: 'pfd-readable-gspd', title: 'PFD selected ground velocity layout', objective: 'Separate actual, selected and height data',
+    start: '87n-offshore-sar', maxSeconds: 240,
+    steps: [
+      { when: { kind: 'start' }, action: { kind: 'autopilot', hold: true, heading: 230, speed: 25 } },
+      { when: { kind: 'time', seconds: 120 }, action: { kind: 'autopilot', hover: true } },
+      { when: { kind: 'time', seconds: 160 }, action: { kind: 'autopilot', groundSpeed: 10 } },
+      { when: { kind: 'time', seconds: 220 }, action: { kind: 'expectAfcs', collective: 'RHT', pitch: 'GSPD', roll: 'LVL' } },
+    ],
+  }
+  await scenarios.getByLabel('Scenario file').setInputFiles({ name: 'pfd-readable-gspd.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(groundSpeed)) })
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(scenarios.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  // A completed scenario stops the simulation itself.
+  const pfd = page.locator('.efisPfd')
+  await expect(pfd.getByTestId('pfd-selected-velocity')).toContainText('+10.0')
+  await expect(pfd.getByTestId('pfd-hover-data')).toContainText('VX +10.0')
+  const hoverGeometry = async () => pfd.evaluate(svg => {
+    const actual = [...svg.querySelectorAll<SVGTextElement>('[data-testid="pfd-hover-data"] > text')]
+    const selected = [...svg.querySelectorAll<SVGTextElement>('[data-testid="pfd-selected-velocity"] > text')]
+    const data = [...actual, ...selected, svg.querySelector<SVGTextElement>('[data-testid="pfd-ra"]')!,
+      svg.querySelector<SVGTextElement>('[data-testid="pfd-hover-height"]')!]
+    const rectangles = data.map(node => ({ text: node.textContent, box: node.getBoundingClientRect().toJSON() }))
+    const collisions = rectangles.flatMap((first, i) => rectangles.slice(i + 1).flatMap(second =>
+      Math.min(first.box.right, second.box.right) > Math.max(first.box.left, second.box.left) &&
+      Math.min(first.box.bottom, second.box.bottom) > Math.max(first.box.top, second.box.top)
+        ? [`${first.text} overlaps ${second.text}`] : []))
+    return { width: svg.getBoundingClientRect().width, rectangles, collisions }
+  })
+  for (const density of ['comfortable', 'compact']) {
+    await page.evaluate(value => { document.documentElement.dataset.density = value }, density)
+    for (const width of [1440, 960]) {
+      await page.setViewportSize({ width, height: 900 })
+      // The isolated bench has no workspace sidebar. Replay the native instrument footprints
+      // recorded by the production owner, rather than accepting its wider fixture-only PFD.
+      const instrumentWidth = density === 'comfortable' ? (width === 1440 ? 291 : 299) : (width === 1440 ? 302 : 317)
+      await pfd.evaluate((svg, pixels) => { svg.style.width = `${pixels}px` }, instrumentWidth)
+      await expect.poll(async () => (await hoverGeometry()).collisions, { message: `PFD hover data at ${width}px [${density}]` }).toEqual([])
+      await testInfo.attach(`hover-layout-${density}-${width}`, { body: JSON.stringify(await hoverGeometry()), contentType: 'application/json' })
+      await pfd.scrollIntoViewIfNeeded()
+      await pfd.screenshot({ path: testInfo.outputPath(`hover-gspd-${density}-${width}.png`) })
+    }
+  }
 })
 
 test('the cockpit pilot selections remain keyboard reachable while the docked instructor is open', async ({ page }, testInfo) => {

@@ -13,7 +13,11 @@ import { observeFmsPublicHeartbeat } from '../../test-support/fms-public-browser
  */
 
 // The view draws with WebGL; headless Chromium has no GPU here and only uses its software renderer when told to.
-test.use({ launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'] } })
+// Omit the automatic filmstrip; focused/manual and failure images remain alongside DOM and request traces.
+test.use({
+  launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'] },
+  trace: { mode: 'retain-on-failure', screenshots: false, snapshots: true, sources: true, attachments: true },
+})
 
 test('the out-the-window view and synthetic vision start under the production policy, from this server only, with terrain off', async ({ page, request, baseURL, context }) => {
   test.setTimeout(180_000)

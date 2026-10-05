@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { VELOCITY_VECTOR_MAX_KT, VELOCITY_VECTOR_PX_PER_KT, type AircraftData, type FmsOutputs, type RoutePoint } from "./efis";
 import { toLocal, type LatLon } from "./fmsModel";
 import { ACTIVE_PROFILE } from "./profile";
 import { SyntheticVisionLayer } from "./FmsSyntheticVision";
+import { useFmsStationDocument } from "./FmsStationSurface";
 import { SVS_ZOOM } from "./syntheticVision";
 import type { TerrainTiles } from "./terrainTiles";
 import "./FmsEfis.css";
@@ -19,6 +20,39 @@ const COORDINATED_BELOW = ACTIVE_PROFILE.parameters.coordinatedLeaveBelow.value;
 
 const MAGENTA = "#ff5ad9", GREEN = "#43e37c", CYAN = "#48d4ff", WHITE = "#f2f4f7", AMBER = "#ffb020";
 
+// SVG presentation sizes are scene units, so the responsive layout must compensate when it shrinks
+// the instruments. Keep larger authored type and enforce the same 12 screen-pixel floor as the workspace.
+const readableFont = (authored: number) => `max(${authored}px, var(--efis-readable-font-floor, 12px))`;
+function useReadableInstrument() {
+  const ref = useRef<SVGSVGElement>(null);
+  const destinationDocument = useFmsStationDocument();
+  const destinationWindow = destinationDocument.defaultView ?? window;
+  useLayoutEffect(() => {
+    const svg = ref.current;
+    if (!svg) return;
+    const update = () => {
+      const matrix = svg.getScreenCTM();
+      if (!matrix) return;
+      const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+      // Avoid discriminant cancellation for a uniform scale or rotation.
+      const maximum = (Math.hypot(matrix.a + matrix.d, matrix.b - matrix.c) +
+        Math.hypot(matrix.a - matrix.d, matrix.b + matrix.c)) / 2;
+      const scale = maximum ? Math.abs(determinant) / maximum : 0;
+      // A hidden station has no readable size. ResizeObserver measures it again when it becomes visible.
+      // A small upward rounding margin survives CSS font-size serialization without lowering the floor.
+      if (scale > 0) svg.style.setProperty("--efis-readable-font-floor", `${12.01 / scale}px`);
+    };
+    update();
+    // Station portals adopt these same nodes without remounting. Observe in their displayed document
+    // so a child-only resize is delivered, and reconnect when the instruments return to the owner.
+    const Observer = (destinationWindow as Window & typeof globalThis).ResizeObserver;
+    const observer = new Observer(update);
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, [destinationDocument, destinationWindow]);
+  return ref;
+}
+
 const three = (deg: number) => String(Math.round(((deg % 360) + 360) % 360) || 360).padStart(3, "0");
 // On FMS failure, independent aircraft heading remains available as explicitly TRUE. Wind is always TRUE.
 const reference = (bus: FmsOutputs) => bus.failed ? "TRUE" : bus.angleReference;
@@ -34,7 +68,7 @@ function Rmi({ bus, air }: { bus: FmsOutputs; air: AircraftData }) {
   const cx = 88, cy = 279, radius = 43;
   const heading = air.heading - variation(bus);
   // The routed bench scales the ND; keep the RMI readable at its supported density widths.
-  return <g data-testid="nd-rmi" fontSize="18" textAnchor="middle">
+  return <g data-testid="nd-rmi" fontSize={readableFont(18)} textAnchor="middle">
     <rect x="10" y="204" width="156" height="191" rx="6" fill="#05070a" stroke="#6a7384" />
     <text x={cx} y="225" fill={WHITE}>RMI (BENCH)</text>
     <circle cx={cx} cy={cy} r={radius} fill="none" stroke={WHITE} />
@@ -85,6 +119,7 @@ function useModeChangeBoxes(modes: Record<string, string>, now: number) {
 
 /** The primary flight display. The bench places it and the navigation display beside the CDU. */
 export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: AircraftData; now: number; svs?: TerrainTiles | null }) {
+  const instrument = useReadableInstrument();
   // Synthetic vision replaces the sky and ground only while terrain is arriving; chosen but without terrain, the PFD
   // keeps its conventional attitude and flags SVS in amber, as a real SVS is removed and flagged when it loses its data.
   const subscribe = useCallback((listener: () => void) => (svs ? svs.subscribe(listener) : () => undefined), [svs]);
@@ -116,13 +151,13 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
     : bus.targetAltitude.status === "NORMAL" ? clamp((bus.targetAltitude.value! - air.altitude) / 150 - air.pitch, -6, 6) : null;
   const approachLabel = bus.approach.type && bus.approach.state !== "OFF" ? bus.approach.type : null;
   return (
-    <svg className="efisPfd" viewBox="0 0 420 400" role="img" aria-label={`Primary flight display: ${bus.lateralMode} ${bus.verticalMode ?? ""}${bus.failed ? ", FMS failed" : ""}`}>
+    <svg ref={instrument} fontSize="var(--efis-readable-font-floor, 12px)" className="efisPfd" viewBox="0 0 420 400" role="img" aria-label={`Primary flight display: ${bus.lateralMode} ${bus.verticalMode ?? ""}${bus.failed ? ", FMS failed" : ""}`}>
       <rect width="420" height="400" fill="#05070a" />
       {/* Flight mode annunciator. The helicopter profile: the autopilot's axes, collective, pitch and roll/yaw (AW189
           layout, AAIB-27585); captured green, boxed when new; below each, the modes armed on it in white and a mode a
           failure just took away in amber (B4.1, B3.4). Otherwise: speed, lateral and vertical columns. */}
       {heli ? (
-        <g className="efisFma" fontSize="15" fontFamily="inherit" textAnchor="middle" data-testid="fma-axes">
+        <g className="efisFma" fontSize={readableFont(15)} fontFamily="inherit" textAnchor="middle" data-testid="fma-axes">
           <line x1="140" y1="4" x2="140" y2="44" stroke="#3a4250" />
           <line x1="280" y1="4" x2="280" y2="44" stroke="#3a4250" />
           <text x="70" y="22" fill={GREEN} data-testid="fma-collective">{heli.axes.collective}</text>
@@ -135,7 +170,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
             // The FMS's own armed approach level (LPV, LNAV/VNAV) belongs with the collective, which flies the vertical.
             const armed = axis === "collective" ? [...heli.armed.collective, ...bus.verticalArmed] : heli.armed[axis];
             return (
-              <text key={axis} x={70 + column * 140} y="40" fontSize="12" data-testid={`fma-${axis}-second`}>
+              <text key={axis} x={70 + column * 140} y="40" fontSize={readableFont(12)} data-testid={`fma-${axis}-second`}>
                 <tspan fill={WHITE} data-testid={`fma-${axis}-armed`}>{armed.join(" ")}</tspan>
                 {heli.degraded[axis].length ? <tspan fill={AMBER} dx={armed.length ? 6 : 0} data-testid={`fma-${axis}-degraded`}>{heli.degraded[axis].join(" ")}</tspan> : null}
               </text>
@@ -143,16 +178,16 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           })}
         </g>
       ) : (
-      <g className="efisFma" fontSize="15" fontFamily="inherit" textAnchor="middle">
+      <g className="efisFma" fontSize={readableFont(15)} fontFamily="inherit" textAnchor="middle">
         <line x1="140" y1="4" x2="140" y2="44" stroke="#3a4250" />
         <line x1="280" y1="4" x2="280" y2="44" stroke="#3a4250" />
         <text x="70" y="22" fill={bus.targetSpeed.status === "NORMAL" ? GREEN : AMBER}>{bus.targetSpeed.status === "NORMAL" ? "FMS SPD" : "SPD"}</text>
         <text x="210" y="22" fill={GREEN} data-testid="fma-lateral">{bus.lateralMode}</text>
         {boxed.lateral ? <rect x="160" y="7" width="100" height="20" fill="none" stroke={GREEN} /> : null}
-        <text x="210" y="40" fill={WHITE} fontSize="12">{bus.lateralArmed.join(" ")}</text>
+        <text x="210" y="40" fill={WHITE} fontSize={readableFont(12)}>{bus.lateralArmed.join(" ")}</text>
         <text x="350" y="22" fill={GREEN} data-testid="fma-vertical">{bus.verticalMode ?? ""}</text>
         {boxed.vertical ? <rect x="298" y="7" width="104" height="20" fill="none" stroke={GREEN} /> : null}
-        <text x="350" y="40" fill={WHITE} fontSize="12">{bus.verticalArmed.join(" ")}</text>
+        <text x="350" y="40" fill={WHITE} fontSize={readableFont(12)}>{bus.verticalArmed.join(" ")}</text>
       </g>
       )}
       {/* Attitude: sky and ground move with pitch and bank; the aircraft symbol is fixed. */}
@@ -176,7 +211,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           {[-20, -10, -5, 5, 10, 20].map(p => (
             <g key={p}>
               <line x1={cx - (Math.abs(p) % 10 === 0 ? 30 : 15)} y1={cy - p * pitchPx} x2={cx + (Math.abs(p) % 10 === 0 ? 30 : 15)} y2={cy - p * pitchPx} stroke={WHITE} strokeWidth="1.5" />
-              {Math.abs(p) % 10 === 0 ? <text x={cx + 38} y={cy - p * pitchPx + 4} fill={WHITE} fontSize="12">{Math.abs(p)}</text> : null}
+              {Math.abs(p) % 10 === 0 ? <text x={cx + 38} y={cy - p * pitchPx + 4} fill={WHITE} fontSize={readableFont(12)}>{Math.abs(p)}</text> : null}
             </g>
           ))}
         </g>
@@ -198,9 +233,9 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         <polyline points={`${cx + 60},${cy} ${cx + 20},${cy} ${cx + 12},${cy + 8}`} />
         <rect x={cx - 3} y={cy - 3} width="6" height="6" fill="#ffd23a" />
       </g>
-      {svsFlag ? <text x="308" y="80" fontSize="14" fill={AMBER} textAnchor="end" data-testid="pfd-svs-flag">SVS</text> : null}
+      {svsFlag ? <text x="308" y="80" fontSize={readableFont(14)} fill={AMBER} textAnchor="end" data-testid="pfd-svs-flag">SVS</text> : null}
       {heli ? (
-        <g fontSize="13" data-testid="pfd-heli">
+        <g fontSize={readableFont(13)} data-testid="pfd-heli">
           {/* Radio height: the readout, or an amber flag when failed; nothing above range or off the declared surface. */}
           {heli.radioHeight.status === "NORMAL" ? <text x={cx} y="290" textAnchor="middle" fill={WHITE} data-testid="pfd-ra">{`RA ${Math.round(heli.radioHeight.value!)}`}</text>
             : heli.radioHeight.status === "FAIL" ? <text x={cx} y="290" textAnchor="middle" fill={AMBER} data-testid="pfd-ra">RA</text> : null}
@@ -209,25 +244,26 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           {/* Hover data: ground velocity in aircraft axes and the wind, where airspeed stops meaning much. */}
           {heli.hoverData ? (
             <g fill={WHITE} data-testid="pfd-hover-data">
-              <text x="112" y="256">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
-              <text x="112" y="272">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
-              <text x="112" y="290">{`${three(air.wind.direction)}T/${Math.round(air.wind.speed)}`}</text>
+              {/* Separate rows and columns remain distinguishable at the responsive 12px floor. */}
+              <text x="112" y="218">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
+              <text x="112" y="242">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
+              <text x="112" y="266">{`${three(air.wind.direction)}T/${Math.round(air.wind.speed)}`}</text>
               {heli.selectedVelocity ? (
-                <g fill={CYAN} data-testid="pfd-selected-velocity">
-                  <text x="178" y="256">{signed(heli.selectedVelocity.vx)}</text>
-                  <text x="178" y="272">{signed(heli.selectedVelocity.vy)}</text>
+                <g fill={CYAN} textAnchor="end" data-testid="pfd-selected-velocity">
+                  <text x="318" y="218">{signed(heli.selectedVelocity.vx)}</text>
+                  <text x="318" y="242">{signed(heli.selectedVelocity.vy)}</text>
                 </g>
               ) : null}
             </g>
           ) : null}
         </g>
       ) : null}
-      {approachLabel ? <text x="112" y="80" fontSize="14" fill={bus.approach.state === "CAPTURED" ? GREEN : WHITE} data-testid="pfd-approach">{approachLabel}</text> : null}
+      {approachLabel ? <text x="112" y="80" fontSize={readableFont(14)} fill={bus.approach.state === "CAPTURED" ? GREEN : WHITE} data-testid="pfd-approach">{approachLabel}</text> : null}
       {/* Speed tape with the FMS target speed bug (magenta). */}
       <g>
         <clipPath id="efisSpd"><rect x="16" y="60" width="70" height="240" /></clipPath>
         <rect x="16" y="60" width="70" height="240" fill="#2a2f38" />
-        <g clipPath="url(#efisSpd)" fontSize="12" fill={WHITE}>
+        <g clipPath="url(#efisSpd)" fontSize={readableFont(12)} fill={WHITE}>
           {speedTicks.map(v => (
             <g key={v}>
               <line x1="72" y1={cy - (v - shownSpeed) * speedScale} x2="86" y2={cy - (v - shownSpeed) * speedScale} stroke={WHITE} />
@@ -239,14 +275,14 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           ) : null}
         </g>
         <rect x="18" y={cy - 14} width="62" height="28" fill="#000" stroke={WHITE} />
-        <text x="72" y={cy + 6} textAnchor="end" fontSize="17" fill={WHITE} data-testid="pfd-speed">{heli && air.ias === null ? "---" : Math.round(shownSpeed)}</text>
-        <text x="51" y="54" textAnchor="middle" fontSize="13" fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : air.selectedSpeed !== null ? CYAN : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : air.selectedSpeed !== null ? air.selectedSpeed : "---"}</text>
+        <text x="72" y={cy + 6} textAnchor="end" fontSize={readableFont(17)} fill={WHITE} data-testid="pfd-speed">{heli && air.ias === null ? "---" : Math.round(shownSpeed)}</text>
+        <text x="51" y="54" textAnchor="middle" fontSize={readableFont(13)} fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : air.selectedSpeed !== null ? CYAN : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : air.selectedSpeed !== null ? air.selectedSpeed : "---"}</text>
       </g>
       {/* Altitude tape: the FMS target altitude (magenta), or the latched altitude hold reference (cyan). */}
       <g>
         <clipPath id="efisAlt"><rect x="336" y="60" width="66" height="240" /></clipPath>
         <rect x="336" y="60" width="66" height="240" fill="#2a2f38" />
-        <g clipPath="url(#efisAlt)" fontSize="12" fill={WHITE}>
+        <g clipPath="url(#efisAlt)" fontSize={readableFont(12)} fill={WHITE}>
           {altTicks.map(v => (
             <g key={v}>
               <line x1="336" y1={cy - (v - air.altitude) * altScale} x2="346" y2={cy - (v - air.altitude) * altScale} stroke={WHITE} />
@@ -260,22 +296,22 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           ) : null}
         </g>
         <rect x="338" y={cy - 14} width="64" height="28" fill="#000" stroke={WHITE} />
-        <text x="398" y={cy + 6} textAnchor="end" fontSize="16" fill={WHITE}>{Math.round(air.altitude)}</text>
-        <text x="369" y="54" textAnchor="middle" fontSize="13" fill={bus.targetAltitude.status === "NORMAL" ? MAGENTA : CYAN}>
+        <text x="398" y={cy + 6} textAnchor="end" fontSize={readableFont(16)} fill={WHITE}>{Math.round(air.altitude)}</text>
+        <text x="369" y="54" textAnchor="middle" fontSize={readableFont(13)} fill={bus.targetAltitude.status === "NORMAL" ? MAGENTA : CYAN}>
           {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : air.selectedAltitude !== null ? air.selectedAltitude : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
         </text>
         {/* The crew's altimeter setting (cyan, a crew selection): STD, or QNH and hPa (B1.1, baro.ts). */}
-        <text x="369" y="316" textAnchor="middle" fontSize="12" fill={CYAN} data-testid="pfd-baro">{air.baroSetting}</text>
+        <text x="369" y="316" textAnchor="middle" fontSize={readableFont(12)} fill={CYAN} data-testid="pfd-baro">{air.baroSetting}</text>
       </g>
       {/* The missed approach altitude the selected altitude does not meet (helicopter profile): shown, never flown. */}
       {air.missedAltitudeConflict ? (
-        <text x="369" y="318" textAnchor="middle" fontSize="12" fill={AMBER} data-testid="pfd-missed-altitude">{`MA ${air.missedAltitudeConflict}`}</text>
+        <text x="369" y="318" textAnchor="middle" fontSize={readableFont(12)} fill={AMBER} data-testid="pfd-missed-altitude">{`MA ${air.missedAltitudeConflict}`}</text>
       ) : null}
       {/* Vertical speed. */}
       <g>
         <rect x="404" y="90" width="14" height="180" fill="#2a2f38" />
         <line x1="404" y1={cy} x2="418" y2={clamp(cy - air.verticalSpeed / 20, 92, 268)} stroke={WHITE} strokeWidth="2" />
-        <text x="411" y="84" textAnchor="middle" fontSize="12" fill={WHITE}>{Math.round(air.verticalSpeed / 50) * 50}</text>
+        <text x="411" y="84" textAnchor="middle" fontSize={readableFont(12)} fill={WHITE}>{Math.round(air.verticalSpeed / 50) * 50}</text>
       </g>
       {/* Vertical deviation (label 117): filled diamond when the path is flown, hollow when only advisory. */}
       {verticalDots !== null ? (
@@ -284,9 +320,9 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           <line x1="319" y1={cy} x2="333" y2={cy} stroke={WHITE} />
           <polygon points={`326,${cy + verticalDots * 80 - 8} 333,${cy + verticalDots * 80} 326,${cy + verticalDots * 80 + 8} 319,${cy + verticalDots * 80}`}
             fill={bus.verticalCoupled ? MAGENTA : "none"} stroke={MAGENTA} strokeWidth="2" />
-          <text x="326" y={cy - 92} textAnchor="middle" fontSize="12" fill={WHITE}>{bus.verticalSource === "APPR" ? "GP" : "VPTH"}</text>
+          <text x="326" y={cy - 92} textAnchor="middle" fontSize={readableFont(12)} fill={WHITE}>{bus.verticalSource === "APPR" ? "GP" : "VPTH"}</text>
         </g>
-      ) : bus.verticalDeviation.status === "FAIL" ? <text x="326" y={cy} textAnchor="middle" fontSize="12" fill={AMBER}>V</text> : null}
+      ) : bus.verticalDeviation.status === "FAIL" ? <text x="326" y={cy} textAnchor="middle" fontSize={readableFont(12)} fill={AMBER}>V</text> : null}
       {/* Lateral deviation (label 116), full scale for the phase, and the navigation source annunciation: GPS while the
           lateral steers the selected receiver's 116 on an RNAV final (lateralSource), so a reversion to the route shows. */}
       <g>
@@ -295,14 +331,14 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         {lateralDots !== null ? (
           <polygon data-testid="ldev" points={`${cx + lateralDots * 90 - 8},318 ${cx + lateralDots * 90},311 ${cx + lateralDots * 90 + 8},318 ${cx + lateralDots * 90},325`} fill={MAGENTA} />
         ) : null}
-        <text x="104" y="308" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}${bus.lateralSource === "GPS" ? " GPS" : ""}`}</text>
-        <text x="316" y="308" fontSize="12" fill={WHITE} textAnchor="end">{lateralDots !== null ? `${Number(bus.lateralFullScaleNm.toFixed(2))}NM` : ""}</text>
+        <text x="104" y="308" fontSize={readableFont(12)} fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}${bus.lateralSource === "GPS" ? " GPS" : ""}`}</text>
+        <text x="316" y="308" fontSize={readableFont(12)} fill={WHITE} textAnchor="end">{lateralDots !== null ? `${Number(bus.lateralFullScaleNm.toFixed(2))}NM` : ""}</text>
       </g>
       {/* Heading: current heading, the desired track (magenta) and a crew-selected heading (cyan). */}
       <g>
         <clipPath id="efisHdg"><rect x="100" y="334" width="220" height="60" /></clipPath>
         <rect x="100" y="334" width="220" height="60" fill="#2a2f38" />
-        <g clipPath="url(#efisHdg)" fontSize="12" fill={WHITE}>
+        <g clipPath="url(#efisHdg)" fontSize={readableFont(12)} fill={WHITE}>
           {Array.from({ length: 25 }, (_, i) => Math.round(headingReference / 5) * 5 + (i - 12) * 5).map(h => {
             const x = cx + (((h - headingReference + 540) % 360) - 180) * 4;
             return (
@@ -323,16 +359,17 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         })()}
         <polygon points={`${cx},334 ${cx - 6},326 ${cx + 6},326`} fill={WHITE} />
         <rect x={cx - 24} y="366" width="48" height="22" fill="#000" stroke={WHITE} />
-        <text x={cx} y="382" textAnchor="middle" fontSize="15" fill={WHITE}>{angular(bus, air.heading)}</text>
-        <text x="316" y="382" textAnchor="end" fontSize="12" fill={CYAN} data-testid="pfd-selected-heading-value">{`HDG ${angular(bus, air.selectedHeading)}`}</text>
+        <text x={cx} y="382" textAnchor="middle" fontSize={readableFont(15)} fill={WHITE}>{angular(bus, air.heading)}</text>
+        <text x="316" y="382" textAnchor="end" fontSize={readableFont(12)} fill={CYAN} data-testid="pfd-selected-heading-value">{`HDG ${angular(bus, air.selectedHeading)}`}</text>
       </g>
-      {bus.failed ? <text x={cx} y="120" textAnchor="middle" fontSize="16" fill={AMBER} data-testid="pfd-fms-flag">FMS FAIL</text> : null}
+      {bus.failed ? <text x={cx} y="120" textAnchor="middle" fontSize={readableFont(16)} fill={AMBER} data-testid="pfd-fms-flag">FMS FAIL</text> : null}
     </svg>
   );
 }
 
 /** The navigation display (MAP mode, track-up). */
 export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; range: number }) {
+  const instrument = useReadableInstrument();
   const cx = 210, cy = 360, radius = 300;
   const trackReference = air.track - variation(bus);
   const px = radius / range;
@@ -366,11 +403,11 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
   const lowSpeed = air.helicopter?.lowSpeed === true;
   const velocityLength = Math.min(air.groundSpeed, VELOCITY_VECTOR_MAX_KT) * VELOCITY_VECTOR_PX_PER_KT;
   return (
-    <svg className="efisNd" viewBox="0 0 420 420" role="img" aria-label={`Navigation display, ${range} NM range${bus.failed ? ", map failed" : ""}`}>
+    <svg ref={instrument} fontSize="var(--efis-readable-font-floor, 12px)" className="efisNd" viewBox="0 0 420 420" role="img" aria-label={`Navigation display, ${range} NM range${bus.failed ? ", map failed" : ""}`}>
       <rect width="420" height="420" fill="#05070a" />
       <defs><clipPath id="efisMap"><circle cx={cx} cy={cy} r={radius} /></clipPath></defs>
       {/* Compass arc: the present track at the top, heading pointer beside it. */}
-      <g stroke={WHITE} fill={WHITE} fontSize="12">
+      <g stroke={WHITE} fill={WHITE} fontSize={readableFont(12)}>
         <path d={`M ${cx - radius * Math.sin(Math.PI / 3)} ${cy - radius * Math.cos(Math.PI / 3)} A ${radius} ${radius} 0 0 1 ${cx + radius * Math.sin(Math.PI / 3)} ${cy - radius * Math.cos(Math.PI / 3)}`} fill="none" />
         {Array.from({ length: 25 }, (_, i) => Math.round(trackReference / 5) * 5 + (i - 12) * 5).map(h => {
           const off = ((h - trackReference + 540) % 360) - 180;
@@ -386,13 +423,13 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
         })}
         <polygon points={`${cx + (radius + 2) * Math.sin((headingOffset * Math.PI) / 180)},${cy - (radius + 2) * Math.cos((headingOffset * Math.PI) / 180)} ${cx + (radius + 12) * Math.sin(((headingOffset - 2) * Math.PI) / 180)},${cy - (radius + 12) * Math.cos(((headingOffset - 2) * Math.PI) / 180)} ${cx + (radius + 12) * Math.sin(((headingOffset + 2) * Math.PI) / 180)},${cy - (radius + 12) * Math.cos(((headingOffset + 2) * Math.PI) / 180)}`} fill={WHITE} />
         <rect x={cx - 26} y={cy - radius - 34} width="52" height="20" fill="#000" />
-        <text x={cx} y={cy - radius - 19} textAnchor="middle" stroke="none" fontSize="14">{angular(bus, air.track)} TRK</text>
+        <text x={cx} y={cy - radius - 19} textAnchor="middle" stroke="none" fontSize={readableFont(14)}>{angular(bus, air.track)} TRK</text>
       </g>
       {/* Half-range arc and track line. */}
       <path d={`M ${cx - radius / 2} ${cy} A ${radius / 2} ${radius / 2} 0 0 1 ${cx + radius / 2} ${cy}`} fill="none" stroke="#6a7384" strokeDasharray="3 6" />
-      <text x={cx - radius / 2 - 4} y={cy - 6} fontSize="12" fill={WHITE} textAnchor="end">{range / 2}</text>
+      <text x={cx - radius / 2 - 4} y={cy - 6} fontSize={readableFont(12)} fill={WHITE} textAnchor="end">{range / 2}</text>
       <line x1={cx} y1={cy} x2={cx} y2={cy - radius} stroke="#6a7384" />
-      <g clipPath="url(#efisMap)" fontSize="12">
+      <g clipPath="url(#efisMap)" fontSize={readableFont(12)}>
         {/* Modified route: dashed white; offset: dashed magenta; active route: solid magenta. */}
         {bus.modifiedRoute ? <polyline points={polyline(route(bus.modifiedRoute))} fill="none" stroke={WHITE} strokeWidth="2" strokeDasharray="8 6" data-testid="nd-mod-route" /> : null}
         {bus.offsetTrack ? <polyline points={polyline(bus.offsetTrack)} fill="none" stroke={MAGENTA} strokeWidth="2" strokeDasharray="8 6" /> : null}
@@ -404,7 +441,7 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
             <g key={point.ident} data-testid={point.active ? "nd-active-wpt" : undefined}>
               <polygon points={`${q.x},${q.y - 7} ${q.x + 2},${q.y - 2} ${q.x + 7},${q.y} ${q.x + 2},${q.y + 2} ${q.x},${q.y + 7} ${q.x - 2},${q.y + 2} ${q.x - 7},${q.y} ${q.x - 2},${q.y - 2}`} fill="none" stroke={colour} />
               <text x={q.x + 9} y={q.y - 4} fill={colour}>{point.ident}</text>
-              {point.constraint ? <text x={q.x + 9} y={q.y + 10} fill={colour} fontSize="12">{point.constraint}</text> : null}
+              {point.constraint ? <text x={q.x + 9} y={q.y + 10} fill={colour} fontSize={readableFont(12)}>{point.constraint}</text> : null}
             </g>
           );
         })}
@@ -421,8 +458,8 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
           <g data-testid="nd-ground-velocity" stroke={GREEN} fill={GREEN}>
             <line x1={cx} y1={cy} x2={cx} y2={cy - velocityLength} strokeWidth="2.5" />
             {velocityLength > 6 ? <polygon points={`${cx},${cy - velocityLength - 8} ${cx - 5},${cy - velocityLength} ${cx + 5},${cy - velocityLength}`} stroke="none" /> : null}
-            <text x={cx + 10} y={cy - velocityLength - 2} stroke="none" fontSize="12">{Math.round(air.groundSpeed)} KT</text>
-            <text x={cx + 12} y={cy + 24} stroke="none" fontSize="10">GND VEL (BENCH)</text>
+            <text x={cx + 10} y={cy - velocityLength - 2} stroke="none" fontSize={readableFont(12)}>{Math.round(air.groundSpeed)} KT</text>
+            <text x={cx + 12} y={cy + 24} stroke="none" fontSize={readableFont(10)}>GND VEL (BENCH)</text>
           </g>
         ) : (
           <polyline data-testid="nd-trend" points={[{ x: cx, y: cy }, ...trend].map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="none" stroke={WHITE} strokeWidth="1.5" strokeDasharray="10 5" />
@@ -431,21 +468,21 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
       {/* Aircraft symbol. */}
       <polygon points={`${cx},${cy - 12} ${cx - 9},${cy + 10} ${cx},${cy + 5} ${cx + 9},${cy + 10}`} fill="none" stroke={WHITE} strokeWidth="2" />
       {/* Data corners: ground speed, true airspeed and wind; the active waypoint, its distance and ETA. */}
-      <g fontSize="13" fill={WHITE}>
-        <text x="10" y="20">GS <tspan fontSize="16">{Math.round(air.groundSpeed)}</tspan>  TAS <tspan fontSize="16">{Math.round(air.airspeed)}</tspan></text>
+      <g fontSize={readableFont(13)} fill={WHITE}>
+        <text x="10" y="20">GS <tspan fontSize={readableFont(16)}>{Math.round(air.groundSpeed)}</tspan>  TAS <tspan fontSize={readableFont(16)}>{Math.round(air.airspeed)}</tspan></text>
         <text x="10" y="38">{three(air.wind.direction)}T/{Math.round(air.wind.speed)}</text>
         {bus.toWaypoint.status === "NORMAL" ? (
           <g textAnchor="end" data-testid="nd-to-wpt">
-            <text x="410" y="20" fill={MAGENTA} fontSize="15">{bus.toWaypoint.value}</text>
+            <text x="410" y="20" fill={MAGENTA} fontSize={readableFont(15)}>{bus.toWaypoint.value}</text>
             <text x="410" y="38">{bus.distanceToGo.status === "NORMAL" ? `${bus.distanceToGo.value!.toFixed(1)} NM` : ""}</text>
             <text x="410" y="56">{bus.eta.status === "NORMAL" ? utc(bus.eta.value!) : ""}</text>
           </g>
         ) : null}
-        <text x="10" y="408" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nd-source">{bus.failed ? "MAP" : `${bus.source} ${bus.navMode}`}</text>
-        {!bus.failed ? <text x="410" y="408" fontSize="12" textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp === null ? "----" : bus.anp.toFixed(2)}</text> : null}
+        <text x="10" y="408" fontSize={readableFont(12)} fill={bus.failed ? AMBER : GREEN} data-testid="nd-source">{bus.failed ? "MAP" : `${bus.source} ${bus.navMode}`}</text>
+        {!bus.failed ? <text x="410" y="408" fontSize={readableFont(12)} textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp === null ? "----" : bus.anp.toFixed(2)}</text> : null}
       </g>
       <Rmi bus={bus} air={air} />
-      {bus.failed ? <text x={cx} y="200" textAnchor="middle" fontSize="18" fill={AMBER} data-testid="nd-map-flag">MAP</text> : null}
+      {bus.failed ? <text x={cx} y="200" textAnchor="middle" fontSize={readableFont(18)} fill={AMBER} data-testid="nd-map-flag">MAP</text> : null}
     </svg>
   );
 }

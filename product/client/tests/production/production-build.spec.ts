@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 import type { Page } from '@playwright/test'
 import { apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from '../auth'
 
@@ -357,9 +358,92 @@ test('verification mutation failures retain the engineer input and only confirme
   ])
 })
 
+function productionDesignReport() {
+  // Station portals adopt existing nodes into another document, preserving their original prototypes.
+  // Namespaces and capabilities identify SVG across that boundary; child-realm instanceof does not.
+  const svgGraphics = (element: Element): element is SVGGraphicsElement =>
+    element.namespaceURI === 'http://www.w3.org/2000/svg' &&
+    typeof (element as SVGGraphicsElement).getScreenCTM === 'function'
+  const svgText = (element: Element) => element.namespaceURI === 'http://www.w3.org/2000/svg' && element.localName === 'text'
+  const visible = (element: Element) => {
+    if (!element.checkVisibility({ visibilityProperty: true })) return false
+    const box = element.getBoundingClientRect()
+    return box.width > 0 && box.height > 0
+  }
+  // Smallest singular value of the rendered affine transform. Column lengths alone miss skew and
+  // rotated nonuniform scaling; this measures the most compressed direction without penalizing rotation.
+  const minimumScale = (matrix: DOMMatrix) => {
+    const determinant = matrix.a * matrix.d - matrix.b * matrix.c
+    // This equivalent hypot form avoids discriminant cancellation for an unscaled rotation at 12px.
+    const maximum = (Math.hypot(matrix.a + matrix.d, matrix.b - matrix.c) +
+      Math.hypot(matrix.a - matrix.d, matrix.b + matrix.c)) / 2
+    return maximum ? Math.abs(determinant) / maximum : 0
+  }
+  const fontPixels = (element: Element) => {
+    const size = parseFloat(getComputedStyle(element).fontSize)
+    if (svgGraphics(element)) {
+      // Includes responsive viewBox sizing, SVG transforms and CSS transforms on layout ancestors.
+      const matrix = element.getScreenCTM()
+      return matrix ? size * minimumScale(matrix) : 0
+    }
+    return size
+  }
+  // DEC-117 owns legibility inside the reader-zoomed Digital Thread canvas. Its surrounding UI remains
+  // audited, as does every other surface. Physical CDU key legends retain their #1444 fit owner.
+  const leaves = [...document.querySelectorAll('main *, body > div > *')].filter(element =>
+    visible(element) &&
+    (!element.children.length || (svgText(element) &&
+      [...element.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()))) &&
+    (element.textContent || '').trim().length > 0 &&
+    !element.closest('.dtCanvasScene') && !element.closest('.fmsCduKey .legend'),
+  )
+  const label = (element: Element) => svgText(element) && element.children.length
+    ? [...element.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join('').trim()
+    : (element.textContent || '').trim()
+  const fonts = leaves.map(element => ({
+    text: label(element), authoredPixels: parseFloat(getComputedStyle(element).fontSize),
+    effectivePixels: fontPixels(element),
+    svg: svgGraphics(element),
+    element: element.tagName.toLowerCase(),
+    testId: element.getAttribute('data-testid'),
+    box: element.getBoundingClientRect().toJSON(),
+  }))
+  return {
+    heading: [...document.querySelectorAll('h1, h2, h3')].some(visible),
+    // A labelled main is the Digital Thread's readiness signal (#880), which intentionally has no H1.
+    landmark: !!document.querySelector('main[aria-label]'),
+    text: (document.querySelector('main')?.textContent || document.body.textContent || '').trim().length,
+    boundary: /went wrong|failed to load|Something broke/i.test(document.body.textContent || ''),
+    // Ignore only affine floating-point roundoff at the unchanged 12px boundary.
+    tiny: [...new Set(fonts.filter(font => font.effectivePixels < 12 - 1e-8)
+      .map(font => `${font.text.slice(0, 24)} @ ${font.effectivePixels.toFixed(2)}px`))],
+    fonts: fonts.filter(font => font.svg || font.effectivePixels < 12 - 1e-8),
+    unstyled: [...new Set([...document.querySelectorAll('button')]
+      .filter(element => visible(element) && getComputedStyle(element).backgroundColor === 'rgb(239, 239, 239)')
+      .map(element => (element.textContent || '').trim().slice(0, 24)))],
+    overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+  }
+}
+
 test('every workspace chunk arrives and keeps the design contract in both densities', async ({ page, request }) => {
   test.setTimeout(600_000)
   await page.setViewportSize({ width: 1440, height: 900 })
+
+  // One owner, exercised against deliberately small rendered labels before auditing the real build.
+  // Authored sizes all meet 12px; only the browser's viewBox and composed transforms reveal the defect.
+  await page.setContent(`<main><h1>Readability controls</h1>
+    <svg width="100" height="60" viewBox="0 0 200 120"><text x="8" y="30" font-size="16">viewBox control</text></svg>
+    <svg width="240" height="100"><g transform="translate(40 40) rotate(30) scale(2 .5)"><text font-size="16">rotated control</text></g></svg>
+    <svg width="240" height="100"><g transform="translate(20 40) skewX(60)"><text font-size="16">skew control</text></g></svg>
+    <div style="width:240px; transform:rotate(30deg); transform-origin:top left"><svg width="240" height="100" style="transform:scale(2, .5); transform-origin:top left"><text x="8" y="30" font-size="16">layout control</text></svg></div>
+    <svg width="240" height="100"><g transform="translate(20 40) rotate(30)"><text font-size="12">readable control</text></g></svg>
+    <svg width="240" height="100"><g transform="translate(20 40) rotate(6)"><text font-size="12">rotation boundary control</text></g></svg>
+    <div style="width:240px; transform:rotate(30deg); transform-origin:top left"><svg width="240" height="100"><text x="8" y="30" font-size="12">layout readable control</text></svg></div>
+  </main>`)
+  const controlReport = await page.evaluate(productionDesignReport)
+  expect(controlReport.tiny.map(label => label.split(' @ ')[0])).toEqual([
+    'viewBox control', 'rotated control', 'skew control', 'layout control',
+  ])
 
   const chunks = new Set<string>()
   page.on('request', request => {
@@ -374,6 +458,7 @@ test('every workspace chunk arrives and keeps the design contract in both densit
   expect(routes.length, 'the navigation should offer the workspaces').toBeGreaterThan(4)
 
   const failures: string[] = []
+  const inventory: { route: string; density: string; width: number; fonts: ReturnType<typeof productionDesignReport>['fonts'] }[] = []
 
   for (const density of ['comfortable', 'compact'] as const) {
     await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
@@ -398,60 +483,11 @@ test('every workspace chunk arrives and keeps the design contract in both densit
       await page.locator('main h1, main h2, main h3').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
       const where = `${route.replace(/^.*\/releases\/[^/]+/, '')} [${density}]`
 
-      const report = await page.evaluate(() => {
-        const visible = (element: Element) => {
-          const box = element.getBoundingClientRect()
-          return box.width > 0 && box.height > 0
-        }
-        const fontPixels = (element: Element) => {
-          const size = parseFloat(getComputedStyle(element).fontSize)
-          // The bench RMI lives inside a responsive SVG: its authored font can meet the CSS floor while
-          // the screen transform makes the text too small. Measure this new surface at its displayed scale.
-          if (!element.closest('[data-testid="nd-rmi"]') || !(element instanceof SVGGraphicsElement)) return size
-          const matrix = element.getScreenCTM()
-          return matrix ? size * Math.min(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d)) : 0
-        }
-        // The Digital Thread canvas is a scaled scene (#880 §10.1, DEC-117): text inside it is authored in
-        // scene units and drawn at the reader's zoom, so a CSS-pixel floor measures the wrong number there.
-        // Its legibility is asserted at default landing zoom by the Digital Thread specs instead. The floor
-        // still applies to that page's toolbar, table, panel and messages, and to every other surface.
-        const leaves = [...document.querySelectorAll('main *, body > div > *')].filter(
-          element =>
-            visible(element) &&
-            !element.children.length &&
-            (element.textContent || '').trim().length > 0 &&
-            !element.closest('.dtCanvasScene'),
-        )
-        return {
-          heading: [...document.querySelectorAll('h1, h2, h3')].some(visible),
-          // A page is allowed to have no heading. #880 §4.2 reclaimed the Digital Thread header deliberately —
-          // the canvas is the page, and the shell breadcrumb above it carries the context an H1 used to. What
-          // this check is really asking is whether the chunk arrived and rendered, so a labelled main landmark
-          // answers it just as well; the text-length floor below still catches an empty one.
-          landmark: !!document.querySelector('main[aria-label]'),
-          // A chunk that fails to load leaves the surface empty. Dev cannot have this failure because dev
-          // never chunks; the error boundary is the other thing that would show here.
-          text: (document.querySelector('main')?.textContent || document.body.textContent || '').trim().length,
-          boundary: /went wrong|failed to load|Something broke/i.test(document.body.textContent || ''),
-          tiny: [
-            ...new Set(
-              leaves
-                // Physical CDU key lettering scales to its faceplate (#1444), with fit/centering owned by
-                // fms-cdu-rendered. Its display, lamps and every surrounding control keep the 12px floor.
-                .filter(element => !element.closest('.fmsCduKey .legend') && fontPixels(element) < 12)
-                .map(element => `${(element.textContent || '').trim().slice(0, 24)} @ ${fontPixels(element).toFixed(2)}px`),
-            ),
-          ],
-          unstyled: [
-            ...new Set(
-              [...document.querySelectorAll('button')]
-                .filter(element => visible(element) && getComputedStyle(element).backgroundColor === 'rgb(239, 239, 239)')
-                .map(element => (element.textContent || '').trim().slice(0, 24)),
-            ),
-          ],
-          overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
-        }
-      })
+      const report = await page.evaluate(productionDesignReport)
+      inventory.push({ route, density, width: 1440, fonts: report.fonts })
+      if (report.fonts.some(font => font.svg)) {
+        await page.screenshot({ path: test.info().outputPath(`svg-surface-${density}-${inventory.length}.png`), fullPage: true })
+      }
 
       if (report.boundary) failures.push(`${where}: the workspace rendered its error boundary`)
       else if ((!report.heading && !report.landmark) || report.text < 120) failures.push(`${where}: rendered nothing substantial — the chunk did not arrive`)
@@ -461,11 +497,64 @@ test('every workspace chunk arrives and keeps the design contract in both densit
       if (report.unstyled.length) failures.push(`${where}: ${report.unstyled.length} unstyled button(s) — ${report.unstyled.slice(0, 3).join('; ')}`)
       if (report.overflow) failures.push(`${where}: the document scrolls horizontally at 1440px`)
       if (await page.getByTestId('nd-rmi').isVisible()) {
+        await page.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-production-${density}.png`) })
         await page.getByTestId('nd-rmi').screenshot({ path: test.info().outputPath(`rmi-production-${density}.png`) })
         await page.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-rmi-production-${density}.png`) })
+        // A mount-only font correction goes stale when the same instrument becomes smaller. Exercise
+        // the real responsive layout in this owner; the ResizeObserver must update before it is readable.
+        for (const width of [1280, 960, 1440]) {
+          await page.setViewportSize({ width, height: 900 })
+          await expect.poll(async () => (await page.evaluate(productionDesignReport)).tiny,
+            { message: `EFIS readability after resizing to ${width}px [${density}]` }).toEqual([])
+          const resized = await page.evaluate(productionDesignReport)
+          inventory.push({ route, density, width, fonts: resized.fonts })
+          await page.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-resized-${density}-${width}.png`) })
+          await page.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-resized-${density}-${width}.png`) })
+        }
+        // A station portal moves the same instruments into another document without remounting.
+        // Resize the child independently after establishing a wide instrument, then return the same nodes.
+        // A size observer left in the owner realm can keep a stale font floor in the child.
+        await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
+        await page.getByText('Station windows', { exact: true }).click()
+        await page.getByRole('combobox', { name: 'Fixed station arrangement' }).selectOption('three')
+        const outsideOpened = page.context().waitForEvent('page')
+        await page.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
+        const outside = await outsideOpened
+        const cockpitOpened = page.context().waitForEvent('page')
+        await page.getByRole('button', { name: 'Open cockpit in a window', exact: true }).click()
+        const cockpit = await cockpitOpened
+        await cockpit.locator('.efisPfd').waitFor()
+        await cockpit.setViewportSize({ width: 1280, height: 900 })
+        // This owner transition establishes the wide child before the independent shrink. Without
+        // destination rebinding it is also the only event that can wake the misplaced size observer.
+        await page.setViewportSize({ width: 1280, height: 900 })
+        for (const [step, width] of [1280, 1440, 960, 1440].entries()) {
+          await cockpit.setViewportSize({ width, height: 900 })
+          await cockpit.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-child-${density}-${step}-${width}.png`) })
+          await cockpit.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-child-${density}-${step}-${width}.png`) })
+          const childReport = await cockpit.evaluate(productionDesignReport)
+          await test.info().attach(`child-readability-${density}-${step}-${width}`, { body: JSON.stringify(childReport.fonts), contentType: 'application/json' })
+          await expect.poll(async () => (await cockpit.evaluate(productionDesignReport)).tiny,
+            { message: `EFIS child readability after resizing to ${width}px [${density}]` }).toEqual([])
+          inventory.push({ route: `${route}#cockpit-child`, density, width, fonts: (await cockpit.evaluate(productionDesignReport)).fonts })
+        }
+        await cockpit.getByRole('button', { name: 'Return to bench', exact: true }).click()
+        await outside.getByRole('button', { name: 'Return to bench', exact: true }).click()
+        await page.getByRole('button', { name: 'Engineering view', exact: true }).click()
+        await page.setViewportSize({ width: 1440, height: 900 })
+        await expect.poll(async () => (await page.evaluate(productionDesignReport)).tiny,
+          { message: `EFIS readability after the child returns [${density}]` }).toEqual([])
+        await page.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-child-returned-${density}.png`) })
+        await page.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-child-returned-${density}.png`) })
       }
     }
   }
+
+  const inventoryPath = test.info().outputPath('rendered-readability-inventory.json')
+  await writeFile(inventoryPath, JSON.stringify(inventory, null, 2))
+  await test.info().attach('rendered-readability-inventory', {
+    path: inventoryPath, contentType: 'application/json',
+  })
 
   // Proves the workspaces really are separate chunks in the built artifact, not merely intended to be. If the
   // split silently regressed into one bundle this is the only assertion that would notice.
