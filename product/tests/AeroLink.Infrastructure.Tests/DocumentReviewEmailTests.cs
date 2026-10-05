@@ -1,85 +1,100 @@
-using AeroLink.Infrastructure.Notifications;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Documents;
+using AeroLink.Domain.Notifications;
+using AeroLink.Domain.Requirements;
+using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Tests;
 
-/// <summary>
-/// The document review request. Both forms are asserted separately from the change request ones rather than
-/// assumed to follow, because they share a shell but not a subject: the fact rows differ, and one paragraph
-/// exists only here.
-/// </summary>
+// #1482 test-audit: old rich title/person/five-day template comparisons are retired with their unused
+// production templates. Retain the separate document obligation boundary: immutable round/step identity
+// and frozen approval kind must survive current workflow changes. Capture MIME privacy/no-attachment
+// is owned by NotificationOutboxTests; actual external TLS transport is independently owned.
 public sealed class DocumentReviewEmailTests
 {
-    private static DocumentReviewEmailFacts Facts(string title = "System Requirements Document — FMS 1.6 candidate",
-        ReviewStageKind stageKind = ReviewStageKind.Review) =>
-        new("SYSRD-0004.03", title, "Independent technical review · step 1 of 2", stageKind, "Systems Engineering Lead",
-            "Maya Patel", "Daniel Reyes", new DateTimeOffset(2026, 8, 14, 9, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2026, 8, 20, 9, 0, 0, TimeSpan.Zero));
-
     [Fact]
-    public void The_subject_leads_with_the_identifier_and_the_ask()
+    public async Task A_document_notice_preserves_the_exact_frozen_approval_step_and_identifier()
     {
-        Assert.Equal("SYSRD-0004.03 is ready for your review — AeroLink", DocumentReviewEmailTemplate.Subject(Facts()));
-    }
-
-    [Fact]
-    public void A_frozen_document_approval_stage_is_not_described_as_review()
-    {
-        var facts = Facts(stageKind: ReviewStageKind.Approval);
-
-        Assert.Equal("SYSRD-0004.03 is ready for your approval — AeroLink", DocumentReviewEmailTemplate.Subject(facts));
-        Assert.Contains("Open the document approval", DocumentReviewEmailTemplate.PlainText(facts, "https://aerolink.example.test/open/managed-document/x", null));
-        Assert.Contains("APPROVAL REQUESTED", DocumentReviewEmailTemplate.Html(facts, "https://aerolink.example.test/open/managed-document/x", null));
-    }
-
-    [Fact]
-    public void Both_forms_say_the_document_is_not_attached()
-    {
-        const string link = "https://aerolink.example.test/open/managed-document/4b2e10c9";
-        var html = DocumentReviewEmailTemplate.Html(Facts(), link, null);
-        var text = DocumentReviewEmailTemplate.PlainText(Facts(), link, null);
-
-        // The reason a reviewer must open the record rather than read a copy: a mailed attachment is a
-        // second artifact that can drift from the controlled one.
-        Assert.Contains("No attachment is sent", html);
-        Assert.Contains("No attachment is sent", text);
-        Assert.Contains("The file stays in AeroLink", html);
-    }
-
-    [Fact]
-    public void The_facts_a_document_reviewer_needs_reach_both_forms()
-    {
-        const string link = "https://aerolink.example.test/open/managed-document/4b2e10c9";
-        var html = DocumentReviewEmailTemplate.Html(Facts(), link, null);
-        var text = DocumentReviewEmailTemplate.PlainText(Facts(), link, null);
-
-        foreach (var fact in new[] { "SYSRD-0004.03", "Independent technical review", "Systems Engineering Lead", "Daniel Reyes" })
+        using var fixture = await NotificationInfrastructureFixture.CreateAsync();
+        NotificationContext context;
+        await using (var db = fixture.NewDb())
         {
-            Assert.Contains(fact, html);
-            Assert.Contains(fact, text);
+            var document = new ManagedDocument(fixture.ProjectId, "SDP-000001", "SDP", "Plan",
+                "Private delivery plan title", "owner.user", DateTimeOffset.UtcNow);
+            var revision = new ManagedDocumentRevision(document.Id, 0, "owner.user", "Initial issue.", DateTimeOffset.UtcNow);
+            revision.RecordCheckIn(Guid.NewGuid(), DateTimeOffset.UtcNow);
+            revision.SubmitForReview("owner.user", new string('a', 64),
+                [new("technical.user", "Technical User", "Technical review"),
+                 new("approver.user", "Approver User", "Release approval", Kind: ReviewStageKind.Approval)], DateTimeOffset.UtcNow);
+            revision.Approve("technical.user", "Technically complete.", DateTimeOffset.UtcNow);
+            var step = Assert.Single(revision.ReviewSteps.Where(x => x.State == ManagedDocumentReviewStepState.Active));
+            var notice = new UserNotification(fixture.ProjectId, "approver.user", "DocumentApprovalActivated",
+                "Private document title", "Private release approval detail", $"managed-document:{document.Id}",
+                document.Id, DateTimeOffset.UtcNow);
+            notice.BindContext(NotificationContext.DocumentStep(notice, document, revision, step));
+            context = notice.Context!;
+            db.AddRange(document, revision, notice);
+            await db.SaveChangesAsync();
         }
-        Assert.Contains(link, html);
-        Assert.Contains(link, text);
+        Assert.Equal("SDP-000001.00", context.Identifier);
+        Assert.Equal("Approval", context.Stage);
+        Assert.Equal(NotificationSourceFamily.DocStep, context.SourceFamily);
+        Assert.Equal(context.SourceId, context.DocumentStepId);
+        Assert.Equal(1, context.Cycle);
+        Assert.True((await fixture.EligibleAsync(context)).Eligible);
+        await using var asserted = fixture.NewDb();
+        Assert.Equal(context.SourceId, (await asserted.NotificationContexts.SingleAsync()).SourceId);
     }
 
     [Fact]
-    public void A_document_title_cannot_break_out_of_the_html_it_is_rendered_into()
+    public async Task A_returned_document_round_cannot_be_replaced_by_a_later_round_for_the_same_reviewer()
     {
-        var html = DocumentReviewEmailTemplate.Html(Facts("Requirements <script>alert(1)</script> & scope"), null, null);
-
-        Assert.DoesNotContain("<script>", html);
-        Assert.Contains("&lt;script&gt;", html);
-        Assert.Contains("&amp; scope", html);
+        using var fixture = await NotificationInfrastructureFixture.CreateAsync();
+        NotificationContext original;
+        NotificationContext later;
+        await using (var db = fixture.NewDb())
+        {
+            var document = new ManagedDocument(fixture.ProjectId, "SDP-000002", "SDP", "Plan",
+                "Private returned plan", "owner.user", DateTimeOffset.UtcNow);
+            var revision = new ManagedDocumentRevision(document.Id, 0, "owner.user", "Initial issue.", DateTimeOffset.UtcNow);
+            revision.RecordCheckIn(Guid.NewGuid(), DateTimeOffset.UtcNow);
+            revision.SubmitForReview("owner.user", new string('b', 64),
+                [new("approver.user", "Approver User", "Technical review"),
+                 new("final.user", "Final User", "Release approval", Kind: ReviewStageKind.Approval)], DateTimeOffset.UtcNow);
+            var firstStep = Assert.Single(revision.ReviewSteps.Where(x => x.State == ManagedDocumentReviewStepState.Active));
+            var notice = Notice(fixture.ProjectId, document, revision, firstStep);
+            original = notice.Context!;
+            db.AddRange(document, revision, notice);
+            await db.SaveChangesAsync();
+            Assert.True((await fixture.EligibleAsync(original)).Eligible);
+            revision.Return("approver.user", "Revise the document.", DateTimeOffset.UtcNow);
+            revision.RecordCheckIn(Guid.NewGuid(), DateTimeOffset.UtcNow);
+            revision.SubmitForReview("owner.user", new string('c', 64),
+                [new("approver.user", "Approver User", "Technical review"),
+                 new("final.user", "Final User", "Release approval", Kind: ReviewStageKind.Approval)], DateTimeOffset.UtcNow);
+            // Match the production submit endpoint: persisted revisions explicitly add their new round.
+            db.ManagedDocumentReviewSteps.AddRange(revision.ReviewSteps.Where(x => x.Cycle == revision.CurrentReviewCycle));
+            var nextStep = Assert.Single(revision.ReviewSteps.Where(x => x.Cycle == revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active));
+            var nextNotice = Notice(fixture.ProjectId, document, revision, nextStep);
+            later = nextNotice.Context!;
+            db.UserNotifications.Add(nextNotice);
+            await db.SaveChangesAsync();
+        }
+        var ended = await fixture.EligibleAsync(original);
+        Assert.False(ended.Eligible);
+        Assert.Equal("OriginalObligationEnded", ended.SafeCode);
+        Assert.True((await fixture.EligibleAsync(later)).Eligible);
+        Assert.NotEqual(original.DocumentStepId, later.DocumentStepId);
+        Assert.Equal(1, original.Cycle);
+        Assert.Equal(2, later.Cycle);
     }
 
-    [Fact]
-    public void With_no_public_address_neither_form_prints_a_broken_link()
+    private static UserNotification Notice(Guid projectId, ManagedDocument document, ManagedDocumentRevision revision,
+        ManagedDocumentReviewStep step)
     {
-        var html = DocumentReviewEmailTemplate.Html(Facts(), null, null);
-        var text = DocumentReviewEmailTemplate.PlainText(Facts(), null, null);
-
-        Assert.DoesNotContain("<a href", html);
-        Assert.Contains("Sign in to AeroLink", html);
-        Assert.Contains("Sign in to AeroLink", text);
+        var notice = new UserNotification(projectId, step.ApproverId, "DocumentReviewActivated",
+            "Private document title", "Private review prose", $"managed-document:{document.Id}", document.Id, DateTimeOffset.UtcNow);
+        notice.BindContext(NotificationContext.DocumentStep(notice, document, revision, step));
+        return notice;
     }
 }

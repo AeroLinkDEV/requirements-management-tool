@@ -53,6 +53,14 @@ var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreVal
 var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
 if (restoreValidationReadOnly && restoreValidationToken.Length < 32)
     throw new InvalidOperationException("Read-only restore validation requires a one-use token of at least 32 characters.");
+// Capability-bearing URLs must not be copied into request-start diagnostic logs.
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Services.AddAntiforgery(options =>
+{
+    options.Cookie.Name = "AeroLink.PreferenceConfirmation";
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.HttpOnly = true;
+});
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));

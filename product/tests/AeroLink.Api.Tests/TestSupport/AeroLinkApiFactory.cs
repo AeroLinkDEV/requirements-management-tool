@@ -36,6 +36,24 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
     [CallerFilePath] string? callerFile = null,
     [CallerMemberName] string? callerMember = null) : WebApplicationFactory<Program>
 {
+    static AeroLinkApiFactory()
+    {
+        // One process-owned authority boundary before any hosted API starts. Individual notification
+        // fixtures own unique installation GUID files; no test switches this environment while hosts run.
+        // Retain a child-runner supplied root, which belongs to that runner, not this fixture.
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_NOTIFICATION_AUTHORITY_ROOT"))) return;
+        var ownedRoot = Path.Combine(Path.GetTempPath(), $"aerolink-api-notification-authority-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(ownedRoot);
+        Environment.SetEnvironmentVariable("AEROLINK_NOTIFICATION_AUTHORITY_ROOT", ownedRoot);
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            // Never recurse: an unexpected remaining file is evidence, not disposable by this callback.
+            try { Directory.Delete(ownedRoot, recursive: false); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        };
+    }
+
     public const string BootstrapSecret = "test-bootstrap-secret-0123456789-abcdef";
     public const string AdministratorPassword = "Bootstrap-Admin!2026";
     public const string MemberPassword = "Program-Member!2026";

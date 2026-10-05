@@ -1113,7 +1113,7 @@ public static class ChangeRequestEndpoints
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,
                         step.ApproverId, step.StageKind, scr.DisplayNumber, scr.Title,
-                        $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
+                        $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now, record: scr, cycle: cycle, step: step));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -1193,7 +1193,7 @@ public static class ChangeRequestEndpoints
                 foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
                     db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,
                         step.ApproverId, step.StageKind, scr.DisplayNumber, scr.Title,
-                        $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now));
+                        $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now, record: scr, cycle: cycle, step: step));
                 await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -1303,15 +1303,15 @@ public static class ChangeRequestEndpoints
                 // this frozen obligation, never a re-resolution against today's workflow or roster.
                 var snapshotHash = cycle.SnapshotHash;
                 var activeBefore = cycle.Steps.Where(x => x.State == ApprovalStepState.Active)
-                    .Select(x => x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    .Select(x => x.Id).ToHashSet();
                 scr.ApproveActiveStage(actor.UserName, now, request.Rationale);
                 var activated = scr.ActiveReviewCycle?.Steps
-                    .Where(x => x.State == ApprovalStepState.Active && !activeBefore.Contains(x.ApproverId)).ToList() ?? [];
+                    .Where(x => x.State == ApprovalStepState.Active && !activeBefore.Contains(x.Id)).ToList() ?? [];
                 foreach (var step in activated)
                     db.UserNotifications.Add(ReviewNotificationFactory.ForChangeRequest(scr.ProjectId,
                         step.ApproverId, step.StageKind, scr.DisplayNumber, scr.Title,
                         $"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}", scr.Id, now,
-                        priorStageComplete: true));
+                        priorStageComplete: true, record: scr, cycle: cycle, step: step));
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
                     "SCR", scr.Id, scr.DisplayNumber, activeStep.StageKind.ToString(), request.Meaning,
                     snapshotHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
@@ -1345,7 +1345,15 @@ public static class ChangeRequestEndpoints
                 if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct))
                     return Results.Forbid();
             }
-            try { var now=DateTimeOffset.UtcNow;scr.RequestChanges(actor.UserName, request.Reason, now);db.UserNotifications.Add(new(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now)); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr)); }
+            try { var now=DateTimeOffset.UtcNow;
+                var originalCycle = scr.ActiveReviewCycle ?? throw new DomainException("There is no active review cycle to return.");
+                var originalStep = originalCycle.Steps.SingleOrDefault(x => x.State == ApprovalStepState.Active && string.Equals(x.ApproverId, actor.UserName, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new DomainException("Only the selected active reviewer can return this request.");
+                scr.RequestChanges(actor.UserName, request.Reason, now);
+                var returned = scr.AuditEvents.Last();
+                var notice = new UserNotification(scr.ProjectId,scr.AuthorId,"ReviewChangesRequested",$"Changes requested for {scr.DisplayNumber}",request.Reason,$"{(scr.Type == ChangeRequestType.Software ? "swcr" : "scr")}:{scr.Id}",scr.Id,now);
+                notice.BindContext(AeroLink.Domain.Notifications.NotificationContext.ChangesRequested(notice,scr,originalCycle,originalStep,returned));
+                db.UserNotifications.Add(notice); await repository.SaveAsync(ct); return Results.Ok(ApiMap.ChangeRequestDetail(scr)); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 

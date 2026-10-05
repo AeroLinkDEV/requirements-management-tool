@@ -175,6 +175,14 @@ public sealed class AeroLinkDbContext : DbContext
     public DbSet<JiraConnection> JiraConnections => Set<JiraConnection>();
     public DbSet<JiraIssueLink> JiraIssueLinks => Set<JiraIssueLink>();
     public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
+    public DbSet<NotificationContext> NotificationContexts => Set<NotificationContext>();
+    public DbSet<NotificationSettingsRevision> NotificationSettingsRevisions => Set<NotificationSettingsRevision>();
+    public DbSet<NotificationInstallationState> NotificationInstallationStates => Set<NotificationInstallationState>();
+    public DbSet<NotificationAdmissionEpoch> NotificationAdmissionEpochs => Set<NotificationAdmissionEpoch>();
+    public DbSet<NotificationDeliveryGeneration> NotificationDeliveryGenerations => Set<NotificationDeliveryGeneration>();
+    public DbSet<NotificationPhysicalAttempt> NotificationPhysicalAttempts => Set<NotificationPhysicalAttempt>();
+    public DbSet<NotificationOperation> NotificationOperations => Set<NotificationOperation>();
+    public DbSet<NotificationPreferenceConfirmation> NotificationPreferenceConfirmations => Set<NotificationPreferenceConfirmation>();
     public DbSet<NotificationPreference> NotificationPreferences => Set<NotificationPreference>();
     public DbSet<RequirementImportMapping> RequirementImportMappings => Set<RequirementImportMapping>();
     public DbSet<DocumentTemplate> DocumentTemplates => Set<DocumentTemplate>();
@@ -1929,6 +1937,7 @@ public sealed class AeroLinkDbContext : DbContext
             b.Property(x => x.RequiredAuthorityKind).HasConversion<string>().HasMaxLength(20);
             b.HasIndex(x => new { x.WorkflowId, x.Position }).IsUnique();
         });
+        NotificationModelConfiguration.Apply(modelBuilder);
         modelBuilder.Entity<NotificationDelivery>(b =>
         {
             b.ToTable("notification_deliveries"); b.HasKey(x => x.Id);

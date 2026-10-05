@@ -99,7 +99,7 @@ public sealed class TestChangeReviewWorkflowService(
         foreach (var step in cycle.Steps.Where(x => x.State == ApprovalStepState.Active))
             db.UserNotifications.Add(ReviewNotificationFactory.ForTestChangeRequest(review.ProjectId,
                 step.ApproverId, step.StageKind, review.DisplayNumber, actor.DisplayName,
-                $"test-change-request:{review.Id}", review.Id, now));
+                $"test-change-request:{review.Id}", review.Id, now, record: review, cycle: cycle, step: step));
         await db.SaveChangesAsync(ct);
         return new(review.Id, review.State, cycle.Id, cycle.Sequence, cycle.Steps.Count);
     }
@@ -129,15 +129,15 @@ public sealed class TestChangeReviewWorkflowService(
         var now = DateTimeOffset.UtcNow;
         var snapshotHash = cycle.SnapshotHash;
         var activeBefore = cycle.Steps.Where(x => x.State == ApprovalStepState.Active)
-            .Select(x => x.ApproverId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Select(x => x.Id).ToHashSet();
         review.ApproveActiveStage(actor.UserName, command.Rationale, now);
         var activated = review.ActiveReviewCycle?.Steps
-            .Where(x => x.State == ApprovalStepState.Active && !activeBefore.Contains(x.ApproverId))
+            .Where(x => x.State == ApprovalStepState.Active && !activeBefore.Contains(x.Id))
             .ToList() ?? [];
         foreach (var step in activated)
             db.UserNotifications.Add(ReviewNotificationFactory.ForTestChangeRequest(review.ProjectId,
                 step.ApproverId, step.StageKind, review.DisplayNumber, actor.DisplayName,
-                $"test-change-request:{review.Id}", review.Id, now, priorStageComplete: true));
+                $"test-change-request:{review.Id}", review.Id, now, priorStageComplete: true, record: review, cycle: cycle, step: step));
         db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId,
             "TestChangeRequest", review.Id, review.DisplayNumber, activeStep.StageKind.ToString(),
             command.Meaning.Trim(), snapshotHash, remoteIp, now,

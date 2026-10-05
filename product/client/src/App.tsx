@@ -1,3 +1,4 @@
+import { NotificationLanding } from "./NotificationLanding";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType } from "react";
 import { useWorkspaceRoute } from "./useWorkspaceRoute";
@@ -530,6 +531,8 @@ function App() {
     return <div className="appBoot"><div className="bootMark">▲</div><div><p>AEROLINK CONTROLLED WORKSPACE</p><h1>Establishing your secure session</h1><span>Confirming identity, authority, and active program context…</span><i><b/></i></div></div>;
   if (user === null) return <LoginPage api={API} onLogin={setUser} />;
   if (user.mustChangePassword) return <RequiredPasswordChange api={API} onComplete={()=>setUser(null)} />;
+  const notificationId = /^\/notifications\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(location.pathname)?.[1];
+  if (notificationId) return <NotificationLanding api={API} id={notificationId} onSignOut={signOut} />;
   const openProjectSetup = (id?: string) => {
     writeHistory("pushState", projectSetupPath(id));
   };

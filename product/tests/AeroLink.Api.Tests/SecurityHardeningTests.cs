@@ -2,6 +2,13 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using AeroLink.Infrastructure.Notifications;
+using AeroLink.Infrastructure.Persistence;
 
 namespace AeroLink.Api.Tests;
 
@@ -47,6 +54,47 @@ public sealed class SecurityHardeningTests
 
         Assert.Equal(HttpStatusCode.OK, forged.StatusCode);
         Assert.Equal(await forged.Content.ReadAsStringAsync(), await absent.Content.ReadAsStringAsync());
+    }
+
+    // Primary preference-confirmation contract: pre-fix valid GET mutates/audits immediately. Existing
+    // forged-link fixtures never exercise a valid capability, scanner HEAD, explicit confirmation or replay.
+    [Fact]
+    public async Task Valid_preference_links_are_read_only_until_a_protected_same_origin_confirmation_and_replay_is_idempotent()
+    {
+        using var original = new AeroLinkApiFactory();
+        using var factory = original.WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configuration) =>
+            configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Notifications:UnsubscribeSecret"] = new string('s', 48) })));
+        using var client = factory.CreateClient();
+        string token;
+        using (var scope = factory.Services.CreateScope()) token = scope.ServiceProvider.GetRequiredService<UnsubscribeTokenService>().Issue("admin")!;
+        var path = $"/api/notifications/unsubscribe?recipient=admin&token={token}";
+        using var get = await client.GetAsync(path); Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+        var html = await get.Content.ReadAsStringAsync();
+        using var head = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, path)); Assert.Equal(HttpStatusCode.OK, head.StatusCode);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.Empty(await db.NotificationPreferences.ToListAsync());
+            Assert.Empty(await db.SecurityAuditEvents.Where(x => x.EventType == "NotificationEmailDisabled").ToListAsync());
+        }
+        var values = Regex.Matches(html, "name=\"([^\"]+)\" value=\"([^\"]*)\"")
+            .ToDictionary(x => WebUtility.HtmlDecode(x.Groups[1].Value), x => WebUtility.HtmlDecode(x.Groups[2].Value));
+        async Task<HttpResponseMessage> Submit(string origin, Dictionary<string, string> fields)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/notifications/unsubscribe") { Content = new FormUrlEncodedContent(fields) };
+            request.Headers.Add("Origin", origin); return await client.SendAsync(request);
+        }
+        using var crossOrigin = await Submit("https://other.example.test", values);
+        using var noAnti = await Submit("http://localhost", new() { ["recipient"] = "admin", ["token"] = token, ["challenge"] = values["challenge"] });
+        using (var scope = factory.Services.CreateScope()) Assert.Empty(await scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().NotificationPreferences.ToListAsync());
+        using var confirmation = await Submit("http://localhost", values); Assert.Equal(HttpStatusCode.OK, confirmation.StatusCode);
+        using var replay = await Submit("http://localhost", values); Assert.Equal(await confirmation.Content.ReadAsStringAsync(), await replay.Content.ReadAsStringAsync());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            Assert.False((await db.NotificationPreferences.SingleAsync()).EmailEnabled);
+            Assert.Single(await db.SecurityAuditEvents.Where(x => x.EventType == "NotificationEmailDisabled").ToListAsync());
+        }
     }
 
     /// <summary>

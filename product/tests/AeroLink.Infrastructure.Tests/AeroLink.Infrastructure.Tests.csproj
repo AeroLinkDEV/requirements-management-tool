@@ -27,6 +27,10 @@
     <ProjectReference Include="..\..\src\AeroLink.Domain\AeroLink.Domain.csproj" />
     <ProjectReference Include="..\..\src\AeroLink.Infrastructure\AeroLink.Infrastructure.csproj" />
     <ProjectReference Include="..\..\tools\AeroLink.Scale\AeroLink.Scale.csproj" />
+    <ProjectReference Include="../../scripts/test-support/AeroLink.NotificationQualificationHost/AeroLink.NotificationQualificationHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../scripts/test-support/NotificationTlsRelay.py" Link="TestSupport/NotificationTlsRelay.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

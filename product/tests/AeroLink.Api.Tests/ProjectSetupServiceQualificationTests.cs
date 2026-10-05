@@ -4,10 +4,10 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Notifications;
 using AeroLink.Infrastructure.Persistence;
 using AeroLink.Infrastructure.Notifications;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -157,21 +157,21 @@ public sealed class ProjectSetupServiceQualificationTests
 
         foreach (var signer in new[] { reviewer, approver })
         {
-            // Exercise the real outbox while this stage is active. Capture transport locally; never send
-            // mail to a service or confuse a recording sender with live relay qualification.
+            // #1482 retains this hosted workflow/binding owner. TLS/Capture transport has its own
+            // infrastructure owners; default Disabled admission must preserve this exact request held.
             using (var deliveryScope = factory.Services.CreateScope())
             {
                 var db = deliveryScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-                var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Notifications:BaseUrl"] = "https://aerolink.example.test",
-                    ["Notifications:UnsubscribeSecret"] = "isolated-1037-notification-test-secret-0123456789",
-                }).Build();
-                var sender = new SetupRecordingSender();
-                await new NotificationOutbox(db).DispatchPendingAsync(sender, new NotificationLinkBuilder(configuration),
-                    new UnsubscribeTokenService(configuration), 50, 5, DateTimeOffset.UtcNow, default);
-                Assert.Contains(sender.Sent, x => x.To == signer.Email
-                    && x.PlainTextBody.Contains($"https://aerolink.example.test/open/scr/{changeId}", StringComparison.Ordinal));
+                var notice = await db.UserNotifications.SingleAsync(x => x.ArtifactId == changeId && x.Recipient == signer.UserName);
+                var original = await db.NotificationContexts.SingleAsync(x => x.NotificationId == notice.Id);
+                var root = await db.NotificationDeliveries.SingleAsync(x => x.NotificationId == notice.Id);
+                Assert.Equal(NotificationSourceFamily.CRStep, original.SourceFamily);
+                Assert.Equal(changeId, original.ChangeRequestId);
+                Assert.Equal(signer.UserName, original.Recipient);
+                Assert.True((await deliveryScope.ServiceProvider.GetRequiredService<NotificationEligibility>()
+                    .EvaluateAsync(original, default)).Eligible);
+                Assert.Equal(NotificationDeliveryState.HeldAdmission, root.State);
+                Assert.Null(root.AdmissionEpochId);
             }
             using var signerClient = factory.CreateClient();
             await LoginAsync(signerClient, signer.UserName);
@@ -239,14 +239,4 @@ public sealed class ProjectSetupServiceQualificationTests
         using (response) { await SuccessAsync(response); return await response.Content.ReadFromJsonAsync<JsonElement>(); }
     }
 
-    private sealed class SetupRecordingSender : IEmailSender
-    {
-        public bool IsConfigured => true;
-        public List<EmailMessage> Sent { get; } = [];
-        public Task SendAsync(EmailMessage message, CancellationToken ct)
-        {
-            Sent.Add(message);
-            return Task.CompletedTask;
-        }
-    }
 }
