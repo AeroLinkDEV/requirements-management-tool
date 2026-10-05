@@ -367,9 +367,10 @@ function productionDesignReport() {
   // Smallest singular value of the rendered affine transform. Column lengths alone miss skew and
   // rotated nonuniform scaling; this measures the most compressed direction without penalizing rotation.
   const minimumScale = (matrix: DOMMatrix) => {
-    const sum = matrix.a ** 2 + matrix.b ** 2 + matrix.c ** 2 + matrix.d ** 2
     const determinant = matrix.a * matrix.d - matrix.b * matrix.c
-    const maximum = Math.sqrt((sum + Math.sqrt(Math.max(0, sum ** 2 - 4 * determinant ** 2))) / 2)
+    // This equivalent hypot form avoids discriminant cancellation for an unscaled rotation at 12px.
+    const maximum = (Math.hypot(matrix.a + matrix.d, matrix.b - matrix.c) +
+      Math.hypot(matrix.a - matrix.d, matrix.b + matrix.c)) / 2
     return maximum ? Math.abs(determinant) / maximum : 0
   }
   const fontPixels = (element: Element) => {
@@ -430,6 +431,7 @@ test('every workspace chunk arrives and keeps the design contract in both densit
     <svg width="240" height="100"><g transform="translate(20 40) skewX(60)"><text font-size="16">skew control</text></g></svg>
     <div style="width:240px; transform:rotate(30deg); transform-origin:top left"><svg width="240" height="100" style="transform:scale(2, .5); transform-origin:top left"><text x="8" y="30" font-size="16">layout control</text></svg></div>
     <svg width="240" height="100"><g transform="translate(20 40) rotate(30)"><text font-size="12">readable control</text></g></svg>
+    <svg width="240" height="100"><g transform="translate(20 40) rotate(6)"><text font-size="12">rotation boundary control</text></g></svg>
     <div style="width:240px; transform:rotate(30deg); transform-origin:top left"><svg width="240" height="100"><text x="8" y="30" font-size="12">layout readable control</text></svg></div>
   </main>`)
   const controlReport = await page.evaluate(productionDesignReport)

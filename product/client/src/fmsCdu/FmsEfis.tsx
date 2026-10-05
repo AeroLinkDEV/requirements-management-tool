@@ -30,9 +30,10 @@ function useReadableInstrument() {
     const update = () => {
       const matrix = svg.getScreenCTM();
       if (!matrix) return;
-      const sum = matrix.a ** 2 + matrix.b ** 2 + matrix.c ** 2 + matrix.d ** 2;
       const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
-      const maximum = Math.sqrt((sum + Math.sqrt(Math.max(0, sum ** 2 - 4 * determinant ** 2))) / 2);
+      // Avoid discriminant cancellation for a uniform scale or rotation.
+      const maximum = (Math.hypot(matrix.a + matrix.d, matrix.b - matrix.c) +
+        Math.hypot(matrix.a - matrix.d, matrix.b + matrix.c)) / 2;
       const scale = maximum ? Math.abs(determinant) / maximum : 0;
       // A hidden station has no readable size. ResizeObserver measures it again when it becomes visible.
       // A small upward rounding margin survives CSS font-size serialization without lowering the floor.
