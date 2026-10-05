@@ -180,21 +180,54 @@ test('every read the requester makes retries transient errors, and no write is e
   const helper = step.match(/          read_api\(\) \{\n([\s\S]*?)\n          \}/)
   assert.ok(helper, 'reads go through one helper')
   assert.match(helper[1], /curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error --dump-header "\$RUNNER_TEMP\/read-api-headers" "\$\{headers\[@\]\}" "\$@" && return 0/)
-  // #1318: a failed read keeps curl's failure and reports the status and rate-limit headers it was refused with.
-  // Run the workflow's own helper with curl intercepted: it writes a refused response's headers and fails.
-  const scratch = mkdtempSync(join(tmpdir(), 'aerolink-read-api-'))
-  try {
-    const refused = 'HTTP/2 403\\r\\nx-ratelimit-limit: 1000\\r\\nx-ratelimit-remaining: 0\\r\\nx-ratelimit-reset: 1790000000\\r\\nx-ratelimit-resource: core\\r\\ncontent-type: application/json\\r\\n'
-    const script = `set -euo pipefail\nRUNNER_TEMP='${scratch.replace(/\\/g, '/')}'\nheaders=()\ncurl() { printf '${refused}' > "$RUNNER_TEMP/read-api-headers"; return 22; }\n${helper[0].replace(/^          /gm, '')}\nif read_api https://invalid.example; then echo PASSED; else echo "FAILED $?"; fi`
-    const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], { encoding: 'utf8', timeout: 10_000 })
-    assert.ifError(result.error)
-    assert.equal(result.status, 0, result.stderr)
-    assert.match(result.stdout, /::warning::GitHub API read failed: HTTP\/2 403 x-ratelimit-limit: 1000 x-ratelimit-remaining: 0 x-ratelimit-reset: 1790000000 x-ratelimit-resource: core/)
-    assert.doesNotMatch(result.stdout, /content-type/)
-    assert.match(result.stdout, /FAILED 22$/m)
-  } finally {
-    rmSync(scratch, { recursive: true, force: true })
+  // #1318: a failed read keeps curl's failure and reports the status and rate-limit headers it was refused with,
+  // and a spent API budget waits for its reset instead of failing every waiting requester at once.
+  // Run the workflow's own helper with curl, sleep and the clock intercepted: curl answers each read in turn with
+  // the given response headers (a status line of 200 succeeds), sleep records its pause, and the clock is fixed.
+  const runHelper = (responses) => {
+    const scratch = mkdtempSync(join(tmpdir(), 'aerolink-read-api-'))
+    try {
+      const answers = responses.map((headers, index) => `    ${index + 1}) printf '${headers}' > "$RUNNER_TEMP/read-api-headers"; ${headers.startsWith('HTTP/2 200') ? 'return 0' : 'return 22'} ;;`).join('\n')
+      const script = [
+        'set -euo pipefail',
+        `RUNNER_TEMP='${scratch.replace(/\\/g, '/')}'`,
+        'headers=()',
+        'reads=0',
+        `curl() {\n  reads=$((reads + 1))\n  case "$reads" in\n${answers}\n    *) echo "unexpected read $reads"; return 99 ;;\n  esac\n}`,
+        'sleep() { echo "SLEPT $1"; }',
+        'date() { echo 1790000000; }',
+        helper[0].replace(/^          /gm, ''),
+        'if read_api https://invalid.example; then echo "PASSED after $reads"; else echo "FAILED $? after $reads"; fi',
+      ].join('\n')
+      const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], { encoding: 'utf8', timeout: 10_000 })
+      assert.ifError(result.error)
+      assert.equal(result.status, 0, result.stderr)
+      return result.stdout
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
   }
+  const spent = (reset) => `HTTP/2 403\\r\\nx-ratelimit-limit: 1000\\r\\nx-ratelimit-remaining: 0\\r\\nx-ratelimit-reset: ${reset}\\r\\nx-ratelimit-resource: core\\r\\ncontent-type: application/json\\r\\n`
+  const ok = 'HTTP/2 200\\r\\nx-ratelimit-remaining: 999\\r\\n'
+
+  // A spent budget waits until five seconds after the reset GitHub names, then reads again.
+  let output = runHelper([spent(1790000060), ok])
+  assert.match(output, /::warning::GitHub API read failed: HTTP\/2 403 x-ratelimit-limit: 1000 x-ratelimit-remaining: 0 x-ratelimit-reset: 1790000060 x-ratelimit-resource: core/)
+  assert.doesNotMatch(output, /content-type/)
+  assert.match(output, /::notice::GitHub API budget spent; reading again in 65s/)
+  assert.match(output, /^SLEPT 65$/m)
+  assert.match(output, /^PASSED after 2$/m)
+  // A secondary limit's retry-after is the wait; a reset already past still waits a little.
+  assert.match(runHelper(['HTTP/2 403\\r\\nretry-after: 30\\r\\n', ok]), /^SLEPT 30$[\s\S]*^PASSED after 2$/m)
+  assert.match(runHelper([spent(1789999000), ok]), /^SLEPT 5$[\s\S]*^PASSED after 2$/m)
+  // A budget that stays spent waits at most 15 minutes a time, reads three times in all, and keeps curl's failure.
+  output = runHelper([spent(1790009999), spent(1790009999), spent(1790009999)])
+  assert.deepEqual(output.match(/^SLEPT \d+$/gm), ['SLEPT 900', 'SLEPT 900'])
+  assert.match(output, /^FAILED 22 after 3$/m)
+  // Any other refusal fails at once, without waiting: a 403 with budget left is a real refusal.
+  output = runHelper(['HTTP/2 403\\r\\nx-ratelimit-remaining: 512\\r\\n'])
+  assert.doesNotMatch(output, /SLEPT|::notice::/)
+  assert.match(output, /^FAILED 22 after 1$/m)
   // Every other curl in the step is a write, and none of them retries: a retried dispatch could start a second
   // Full run, and a retried check-run publication could publish twice.
   const others = [...step.matchAll(/^ *curl (?:[^\n]*\\\n)*[^\n]*/gm)].map(match => match[0]).filter(call => !call.includes('--retry 4'))
