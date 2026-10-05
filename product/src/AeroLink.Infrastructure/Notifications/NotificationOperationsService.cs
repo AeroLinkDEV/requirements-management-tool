@@ -128,8 +128,8 @@ public sealed class NotificationOperationsService(AeroLinkDbContext db, Notifica
                     old.Hold("OperatorDisposition", NotificationGenerationState.Suppressed);
                 operation.Record(JsonSerializer.Serialize(new { state = "Suppressed", generationId = old.Id, version = state.Version }, Json), generationId: old.Id); return;
             }
-            if (old.State is NotificationGenerationState.Captured or NotificationGenerationState.TestAccepted)
-                throw new DomainException("Terminal capture and controlled-test generations cannot be promoted or replayed.");
+            if (request.Family != "Reissue" && old.State is NotificationGenerationState.Captured or NotificationGenerationState.TestAccepted)
+                throw new DomainException("Terminal capture and controlled-test generations cannot be promoted or replayed; reissue creates distinct mail.");
             var currentEpoch = await CurrentEpochAsync(state, settings, ct);
             var bound = await (from root in db.NotificationDeliveries.AsNoTracking() join context in db.NotificationContexts.AsNoTracking()
                                on root.NotificationId equals context.NotificationId where root.Id == old.DeliveryId select context).SingleAsync(ct);
@@ -145,7 +145,7 @@ public sealed class NotificationOperationsService(AeroLinkDbContext db, Notifica
             }
             else if (request.Family == "Readmit")
             {
-                if (old.Mode != settings.Mode || old.MessageConfigurationHash != NotificationDispatcher.MessageConfigurationHash(settings)) throw new DomainException("Changed concrete mail requires linked reissue.");
+                if (old.Mode != settings.Mode || old.ProtectedMime.Length > 0 && old.MessageConfigurationHash != NotificationDispatcher.MessageConfigurationHash(settings)) throw new DomainException("Changed concrete mail requires linked reissue.");
                 old.Readmit(currentEpoch.Id, settings.SendGeneration, now, bound.SourceFamily == NotificationSourceFamily.DiagnosticOperation);
             }
             else
@@ -210,7 +210,7 @@ public sealed class NotificationOperationsService(AeroLinkDbContext db, Notifica
             existing = await db.NotificationOperations.AsNoTracking().SingleOrDefaultAsync(x => x.InstallationId == authority.InstallationId
                 && x.Actor == actor && x.Family == family && x.OperationKey == key, ct);
             if (existing is not null) { await transaction.CommitAsync(ct); return Existing(existing, hash); }
-            var operation = new NotificationOperation(authority.InstallationId, actor, family, key, hash, DateTimeOffset.UtcNow);
+            var operation = new NotificationOperation(authority.InstallationId, actor, family, key, protection.Protect(hash), DateTimeOffset.UtcNow);
             await command(operation); db.NotificationOperations.Add(operation); await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct); return Receipt(operation);
         }
@@ -222,9 +222,9 @@ public sealed class NotificationOperationsService(AeroLinkDbContext db, Notifica
             if (existing is not null) return Existing(existing, hash); throw;
         }
     }
-    private static NotificationOperationReceipt Existing(NotificationOperation operation, string hash)
+    private NotificationOperationReceipt Existing(NotificationOperation operation, string hash)
     {
-        if (operation.PayloadHash != hash) throw new NotificationOperationConflictException("The operation key is already bound to a different semantic request.");
+        if (protection.Unprotect(operation.PayloadHash) != hash) throw new NotificationOperationConflictException("The operation key is already bound to a different semantic request.");
         return Receipt(operation);
     }
     private static NotificationOperationReceipt Receipt(NotificationOperation operation)

@@ -154,6 +154,7 @@ type NotificationGeneration = {
   id: string; deliveryId: string; notificationId: string; contextIdentifier: string; mode: NotificationMode;
   state: string; version: number; messageId: string; bodyHash: string; intendedDestination: string;
   effectiveDestination: string; attempts: number; dueAt?: string; deadlineAt?: string; safeCode?: string; createdAt: string;
+  requiresDuplicateRiskAcknowledgement: boolean;
 };
 type NotificationAttempt = {
   id: string; startedAt: string; completedAt?: string; outcome: string; phase: string;
@@ -165,6 +166,8 @@ type NotificationOperations = {
   links: { configured: boolean; valid: boolean; baseUrl?: string };
   totals: { pending: number; sent: number; failed: number; suppressed: number };
   deliveries: { id: string; recipient: string; address: string; state: string; attempts: number; detail?: string; createdAt: string; completedAt?: string }[];
+  heldDeliveries: { id: string; notificationId: string; contextIdentifier?: string; state: string; createdAt: string }[];
+  heldPage: number; heldTotal: number; heldPageSize: number;
   installation: { id: string; label: string; database: string; version: string | number };
   settings: NotificationSettings;
   locks: { relay: boolean; sender: boolean; baseUrl: boolean; credentials: boolean; externalModes: boolean; diagnosticTarget: boolean };
@@ -259,6 +262,7 @@ export default function EnterpriseControlCenter({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [notificationPage, setNotificationPage] = useState(1);
+  const [heldNotificationPage, setHeldNotificationPage] = useState(1);
   const [notificationDraft, setNotificationDraft] = useState<NotificationSettings>();
   const [notificationUserName, setNotificationUserName] = useState("");
   const [clearNotificationUserName, setClearNotificationUserName] = useState(false);
@@ -318,7 +322,7 @@ export default function EnterpriseControlCenter({
   const loadNotificationOperations = useCallback(async () => {
     const sequence = ++notificationReadSequence.current;
     try {
-      const response = await fetch(`${api}/api/operations/notifications?page=${notificationPage}&pageSize=25`);
+      const response = await fetch(`${api}/api/operations/notifications?page=${notificationPage}&pageSize=25&heldPage=${heldNotificationPage}&heldPageSize=25`);
       if (sequence !== notificationReadSequence.current) return;
       if (response.ok) {
         const operations = await response.json() as NotificationOperations;
@@ -337,7 +341,7 @@ export default function EnterpriseControlCenter({
       setNotificationOperations(undefined);
       setError("Notification delivery operations could not be loaded. Refresh to try again.");
     }
-  }, [api, notificationPage]);
+  }, [api, notificationPage, heldNotificationPage]);
   useEffect(() => {
     if (notificationOperations && !notificationDraft) setNotificationDraft({ ...notificationOperations.settings });
   }, [notificationOperations, notificationDraft]);
@@ -445,7 +449,7 @@ export default function EnterpriseControlCenter({
   const notificationCommand = (family: NotificationFamily, generation?: NotificationGeneration) => {
     newNotificationIntent({ family, mode: family === "Activate" || family === "Resume" ? notificationOperations?.settings.mode : undefined,
       generationId: generation?.id, expectedGenerationVersion: generation?.version,
-      acknowledgeDuplicateRisk: family === "Replay" ? duplicateRiskAcknowledged : undefined });
+      acknowledgeDuplicateRisk: generation ? duplicateRiskAcknowledged : undefined });
   };
   const loadNotificationAttempts = async (generationId: string) => {
     try {
@@ -837,17 +841,20 @@ export default function EnterpriseControlCenter({
               <section><div className="sectionTitle"><div><h3>Queue health and recovery</h3><p>Actions follow server authority and preserved attempt evidence.</p></div></div>
                 {notificationOperations.health.map(health => <article className="signalRow" key={health.state}><i className={health.count ? "attention" : "ok"}>{health.count ? "!" : "✓"}</i><div><b>{stateLabel(health.state)} · {health.count}</b><span>{health.action}</span></div></article>)}
                 <p>AcceptanceUnknown requires reconciliation and trusted worker quiescence. Lease expiry alone does not prove a stopped SMTP connection.</p>
-                <label><input type="checkbox" checked={duplicateRiskAcknowledged} onChange={event => setDuplicateRiskAcknowledged(event.target.checked)} /> I acknowledge that replaying unknown acceptance may produce a duplicate email.</label>
+                <label><input type="checkbox" checked={duplicateRiskAcknowledged} onChange={event => setDuplicateRiskAcknowledged(event.target.checked)} /> I acknowledge that another send after unknown acceptance may produce a duplicate email.</label>
                 <p>Quiescence is established by the server; it cannot be declared by this checkbox.</p>
                 <p>Historical Sent entries are SMTP submission evidence. Credentials and message content are never read back.</p>
               </section>
             </div>
-            {notificationOperations.deliveries.some(delivery => delivery.state === "HeldAdmission" || delivery.state === "LegacyUnbound") && <section className="activeSessions" aria-label="Held notification deliveries">
+            {notificationOperations.heldTotal > 0 && <section className="activeSessions" aria-label="Held notification deliveries">
               <h3>Held delivery backlog</h3><p>Each held delivery requires explicit selection. Ambiguous historical notices remain held.</p>
-              {notificationOperations.deliveries.filter(delivery => delivery.state === "HeldAdmission" || delivery.state === "LegacyUnbound").map(delivery => <div className="signalRow" key={delivery.id}><div>
-                <b>{stateLabel(delivery.state)} · delivery {delivery.id}</b><span>{delivery.recipient} · {delivery.address} · {delivery.detail}</span>
+              <p>Server page {notificationOperations.heldPage} · {notificationOperations.heldTotal} held deliveries · at most {notificationOperations.heldPageSize} per page</p>
+              {notificationOperations.heldDeliveries.map(delivery => <div className="signalRow" key={delivery.id}><div>
+                <b>{stateLabel(delivery.state)} · {delivery.contextIdentifier || delivery.id}</b><span>Delivery {delivery.id} · created {new Date(delivery.createdAt).toLocaleString()}</span>
                 {delivery.state === "HeldAdmission" && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => newNotificationIntent({ family: "Readmit", deliveryId: delivery.id })}>Readmit selected held delivery</button>}
               </div></div>)}
+              <p><button disabled={busy || notificationOperations.heldPage <= 1} onClick={() => setHeldNotificationPage(notificationOperations.heldPage - 1)}>Previous held page</button>{" "}
+                <button disabled={busy || notificationOperations.heldPage * notificationOperations.heldPageSize >= notificationOperations.heldTotal} onClick={() => setHeldNotificationPage(notificationOperations.heldPage + 1)}>Next held page</button></p>
             </section>}
             <section className="activeSessions" aria-label="Notification generation history">
               <div className="sectionTitle"><div><h3>Recent delivery state</h3><p>Server page {notificationOperations.page} · {notificationOperations.total} generations · at most {notificationOperations.pageSize} per page</p></div></div>
@@ -860,10 +867,10 @@ export default function EnterpriseControlCenter({
                     <details><summary>Message identity</summary><p style={{ overflowWrap: "anywhere" }}>Message-ID {generation.messageId}<br />Body hash {generation.bodyHash}</p></details>
                     <div>
                       <button disabled={busy} onClick={() => void loadNotificationAttempts(generation.id)}>View attempts</button>{" "}
-                      {["RetryExhausted", "ConfigBlocked", "HeldAdmission"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => notificationCommand("Readmit", generation)}>Readmit generation</button>}{" "}
+                      {["RetryExhausted", "ConfigBlocked", "HeldAdmission"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey || (generation.requiresDuplicateRiskAcknowledgement && !duplicateRiskAcknowledged)} onClick={() => notificationCommand("Readmit", generation)}>Readmit generation</button>}{" "}
                       {generation.state === "AcceptanceUnknown" && <button disabled={busy || !!notificationIntent || !notificationStorageKey || !duplicateRiskAcknowledged} onClick={() => notificationCommand("Replay", generation)}>Request replay after quiescence</button>}{" "}
-                      {["SmtpAccepted", "Captured", "TestAccepted", "Suppressed", "PermanentFailed"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => notificationCommand("Reissue", generation)}>Request new generation</button>}{" "}
-                      {!["SmtpAccepted", "Captured", "TestAccepted", "Suppressed"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => notificationCommand("Suppress", generation)}>Suppress generation</button>}
+                      {["SmtpAccepted", "Captured", "TestAccepted", "Suppressed", "PermanentFailed", "AcceptanceUnknown", "ConfigBlocked", "HeldAdmission", "RetryExhausted"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey || (generation.requiresDuplicateRiskAcknowledgement && !duplicateRiskAcknowledged)} onClick={() => notificationCommand("Reissue", generation)}>Request new generation</button>}{" "}
+                      {!["SmtpAccepted", "Captured", "TestAccepted", "Suppressed", "PermanentFailed"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey || (generation.requiresDuplicateRiskAcknowledgement && !duplicateRiskAcknowledged)} onClick={() => notificationCommand("Suppress", generation)}>Suppress generation</button>}
                     </div>
                   </div>
                 </div>

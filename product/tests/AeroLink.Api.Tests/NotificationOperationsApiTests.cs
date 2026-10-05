@@ -159,13 +159,17 @@ public sealed class NotificationOperationsApiTests
         const string credential = "credential-not-for-json-sentinel";
         const string username = "username-not-for-json-sentinel";
         var original = new SettingsRequest(Guid.NewGuid(), await VersionAsync(admin), UserName: username, Credential: credential);
-        await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/settings", original));
+        var originalReceipt = await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/settings", original));
         var current = await OverviewAsync(admin);
         Assert.False(current.GetProperty("locks").GetProperty("credentials").GetBoolean());
         Assert.DoesNotContain(credential, current.GetRawText()); Assert.DoesNotContain(username, current.GetRawText());
         Assert.True(current.GetProperty("settings").GetProperty("credentialConfigured").GetBoolean());
         var next = new SettingsRequest(Guid.NewGuid(), await VersionAsync(admin), DisplayName: "Changed display name");
         await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/settings", next));
+        var recovered = await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/settings", original));
+        Assert.Equal(originalReceipt.GetRawText(), recovered.GetRawText());
+        using var changedSecret = await admin.PostAsJsonAsync("/api/operations/notifications/settings", original with { Credential = "different-credential-sentinel" });
+        Assert.Equal(HttpStatusCode.Conflict, changedSecret.StatusCode);
         using var stale = await admin.PostAsJsonAsync("/api/operations/notifications/settings", next with { OperationKey = Guid.NewGuid(), DisplayName = "Stale edit" });
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
         await using (var scope = host.Factory.Services.CreateAsyncScope())
@@ -177,6 +181,11 @@ public sealed class NotificationOperationsApiTests
             Assert.Empty(await db.NotificationAdmissionEpochs.ToListAsync()); Assert.Empty(await db.NotificationDeliveryGenerations.ToListAsync());
             Assert.DoesNotContain(credential, JsonSerializer.Serialize(await db.NotificationSettingsRevisions.ToListAsync()));
             Assert.Empty(await db.NotificationOperations.Where(x => x.OperationKey == original.OperationKey && x.ResultJson.Contains(credential)).ToListAsync());
+            var operation = await db.NotificationOperations.SingleAsync(x => x.OperationKey == original.OperationKey);
+            var comparison = scope.ServiceProvider.GetRequiredService<NotificationContentProtection>().Unprotect(operation.PayloadHash);
+            Assert.Matches("^[A-Fa-f0-9]{64}$", comparison);
+            Assert.NotEqual(comparison, operation.PayloadHash);
+            Assert.DoesNotContain(credential, comparison);
         }
         var clear = new SettingsRequest(Guid.NewGuid(), await VersionAsync(admin), ClearCredential: true);
         await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/settings", clear));
@@ -334,5 +343,138 @@ public sealed class NotificationOperationsApiTests
         await using var after = host.Factory.Services.CreateAsyncScope();
         var final = await after.ServiceProvider.GetRequiredService<AeroLinkDbContext>().NotificationDeliveryGenerations.SingleAsync();
         Assert.Equal(NotificationGenerationState.Pending, final.State); Assert.Equal(messageId, final.MessageId); Assert.Equal(bodyHash, final.BodyHash);
+    }
+
+    // Review regression: a generation-only total made the 26th ungenerated held root unreachable.
+    // This primary HTTP owner proves real bounded pages and excludes roots already readmitted. Client
+    // response fixtures separately own replacing each rendered page; they cannot prove this server query.
+    [Fact]
+    public async Task Held_roots_have_independent_bounded_pages_and_generated_roots_leave_the_selectable_backlog()
+    {
+        using var host = new Host(); using var admin = host.Factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(admin);
+        var workspace = await WorkspaceAsync(admin); await CaptureAsync(admin);
+        for (var index = 0; index < 26; index++)
+            await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/transport-test", new
+            { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), projectId = workspace.ProjectId }));
+        var first = await ReadOverviewAsync(admin, "/api/operations/notifications?page=1&pageSize=25&heldPage=1&heldPageSize=25");
+        Assert.Equal(0, first.GetProperty("total").GetInt32()); Assert.Empty(first.GetProperty("generations").EnumerateArray());
+        Assert.Equal(26, first.GetProperty("heldTotal").GetInt32()); Assert.Equal(1, first.GetProperty("heldPage").GetInt32());
+        var firstIds = first.GetProperty("heldDeliveries").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray();
+        Assert.Equal(25, firstIds.Length);
+        var second = await ReadOverviewAsync(admin, "/api/operations/notifications?page=1&pageSize=25&heldPage=2&heldPageSize=25");
+        Assert.Equal(2, second.GetProperty("heldPage").GetInt32()); Assert.Equal(26, second.GetProperty("heldTotal").GetInt32());
+        var last = Assert.Single(second.GetProperty("heldDeliveries").EnumerateArray()).GetProperty("id").GetGuid();
+        Assert.DoesNotContain(last, firstIds);
+        await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Readmit", deliveryId = last }));
+        var after = await ReadOverviewAsync(admin, "/api/operations/notifications?page=1&pageSize=25&heldPage=1&heldPageSize=25");
+        Assert.Equal(25, after.GetProperty("heldTotal").GetInt32()); Assert.Equal(1, after.GetProperty("total").GetInt32());
+        Assert.DoesNotContain(after.GetProperty("heldDeliveries").EnumerateArray(), x => x.GetProperty("id").GetGuid() == last);
+        Assert.Equal(last, Assert.Single(after.GetProperty("generations").EnumerateArray()).GetProperty("deliveryId").GetGuid());
+    }
+
+    // HTTP command guard owners. Terminal/frozen input state is seeded through public domain methods;
+    // these are no SMTP/quiescence claims. Existing Capture/TLS/process owners qualify physical evidence.
+    // The former unconditional terminal guard refused an authorized distinct Live reissue.
+    [Fact]
+    public async Task A_terminal_capture_can_be_explicitly_reissued_into_a_valid_live_epoch_without_promoting_the_original()
+    {
+        using var host = new Host(editableCredentials: true); using var admin = host.Factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(admin);
+        var workspace = await WorkspaceAsync(admin); await CaptureAsync(admin);
+        var target = await DiagnosticGenerationAsync(host, admin, workspace.ProjectId);
+        long generationVersion; string originalMessage;
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var generation = await db.NotificationDeliveryGenerations.SingleAsync(x => x.Id == target.GenerationId);
+            generation.Hold("TerminalCaptureFixture", NotificationGenerationState.Captured);
+            await db.SaveChangesAsync(); generationVersion = generation.Version; originalMessage = generation.MessageId;
+        }
+        await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/settings", new SettingsRequest(Guid.NewGuid(),
+            await VersionAsync(admin), Mode: "Live", Host: "relay.example.test")));
+        await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Activate", mode = "Live" }));
+        using var replay = await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Replay", generationId = target.GenerationId, expectedGenerationVersion = generationVersion, acknowledgeDuplicateRisk = true });
+        Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
+        Assert.Contains("Terminal capture", await replay.Content.ReadAsStringAsync());
+        var receipt = await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Reissue", generationId = target.GenerationId, expectedGenerationVersion = generationVersion }));
+        Assert.Equal("Reissued", receipt.GetProperty("result").GetProperty("state").GetString());
+        var replacementId = receipt.GetProperty("result").GetProperty("generationId").GetGuid();
+        await using var after = host.Factory.Services.CreateAsyncScope();
+        var rows = await after.ServiceProvider.GetRequiredService<AeroLinkDbContext>().NotificationDeliveryGenerations.AsNoTracking().ToListAsync();
+        Assert.Equal(2, rows.Count);
+        var original = Assert.Single(rows, x => x.Id == target.GenerationId); var replacement = Assert.Single(rows, x => x.Id == replacementId);
+        Assert.Equal(NotificationGenerationState.Captured, original.State); Assert.Equal(originalMessage, original.MessageId);
+        Assert.Equal(target.GenerationId, replacement.PredecessorId); Assert.Equal(NotificationMode.Live, replacement.Mode);
+        Assert.Equal(NotificationGenerationState.Pending, replacement.State); Assert.NotEqual(originalMessage, replacement.MessageId);
+        Assert.Equal(original.DeliveryId, replacement.DeliveryId);
+    }
+
+    // An empty pre-MIME hash is not evidence that immutable message semantics changed. Conversely,
+    // once concrete MIME exists, a changed sender/display/base origin must require distinct reissue.
+    [Fact]
+    public async Task Pre_mime_blocked_work_can_be_readmitted_but_frozen_mail_with_changed_semantics_requires_reissue()
+    {
+        using var host = new Host(); using var admin = host.Factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(admin);
+        var workspace = await WorkspaceAsync(admin); await CaptureAsync(admin);
+        var target = await DiagnosticGenerationAsync(host, admin, workspace.ProjectId);
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            (await db.NotificationDeliveryGenerations.SingleAsync(x => x.Id == target.GenerationId)).Hold("FixtureBlockedBeforeMime");
+            await db.SaveChangesAsync();
+        }
+        await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Activate", mode = "Capture" }));
+        // Hosted fixtures disable background workers. Run the public worker boundary once so the
+        // actual epoch fence persists older blocked work as HeldAdmission before any SMTP attempt.
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+        {
+            var dispatched = await scope.ServiceProvider.GetRequiredService<NotificationDispatcher>().DispatchAsync(25, default);
+            Assert.Equal(0, dispatched.Sent);
+            Assert.Empty(await scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().NotificationPhysicalAttempts.ToListAsync());
+        }
+        long generationVersion; string originalMessage;
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var generation = await db.NotificationDeliveryGenerations.AsNoTracking().SingleAsync(x => x.Id == target.GenerationId);
+            Assert.Equal(NotificationGenerationState.HeldAdmission, generation.State); Assert.Equal("", generation.ProtectedMime);
+            generationVersion = generation.Version; originalMessage = generation.MessageId;
+        }
+        var readmitted = await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Readmit", generationId = target.GenerationId, expectedGenerationVersion = generationVersion }));
+        Assert.Equal("Readmitted", readmitted.GetProperty("result").GetProperty("state").GetString());
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var generation = await db.NotificationDeliveryGenerations.SingleAsync(x => x.Id == target.GenerationId);
+            var settings = await scope.ServiceProvider.GetRequiredService<NotificationSettingsResolver>().ResolveAsync(default);
+            Assert.Equal(NotificationGenerationState.Pending, generation.State); Assert.Equal(settings.AdmissionEpochId, generation.AdmissionEpochId);
+            Assert.Equal(originalMessage, generation.MessageId);
+            generation.FreezeMime(scope.ServiceProvider.GetRequiredService<NotificationContentProtection>().Protect("Frozen fixture MIME"),
+                "frozen-fixture-hash", NotificationDispatcher.MessageConfigurationHash(settings));
+            generation.Hold("FrozenFixtureBlocked"); await db.SaveChangesAsync();
+        }
+        await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/settings", new SettingsRequest(Guid.NewGuid(),
+            await VersionAsync(admin), DisplayName: "Changed concrete sender display")));
+        await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Activate", mode = "Capture" }));
+        await using (var scope = host.Factory.Services.CreateAsyncScope())
+            generationVersion = (await scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().NotificationDeliveryGenerations.AsNoTracking().SingleAsync(x => x.Id == target.GenerationId)).Version;
+        using var refused = await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Readmit", generationId = target.GenerationId, expectedGenerationVersion = generationVersion });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode); Assert.Contains("linked reissue", await refused.Content.ReadAsStringAsync());
+        var reissued = await OkAsync(await admin.PostAsJsonAsync("/api/operations/notifications/commands", new
+        { operationKey = Guid.NewGuid(), expectedVersion = await VersionAsync(admin), family = "Reissue", generationId = target.GenerationId, expectedGenerationVersion = generationVersion }));
+        var newId = reissued.GetProperty("result").GetProperty("generationId").GetGuid();
+        await using var asserted = host.Factory.Services.CreateAsyncScope();
+        var replacement = await asserted.ServiceProvider.GetRequiredService<AeroLinkDbContext>().NotificationDeliveryGenerations.AsNoTracking().SingleAsync(x => x.Id == newId);
+        Assert.Equal(target.GenerationId, replacement.PredecessorId); Assert.NotEqual(originalMessage, replacement.MessageId);
     }
 }

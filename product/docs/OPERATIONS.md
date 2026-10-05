@@ -591,6 +591,43 @@ permission. Provision both files deliberately under restrictive service/operator
 installation's authority or choose a generation from an old backup. Missing/corrupt/mismatched authority,
 wrong installation/host or read-only restore validation permits no external submission.
 
+Stop and prove all dispatcher processes quiescent before provisioning or rotating authority. Under the
+approved Windows runtime identity, prepare a private JSON file outside the checkout and backup archive.
+Its permitted fields are `relayHosts`, `senders`, `recipientDomains`, `recipientAddresses`,
+`diagnosticTarget`, `baseUrl`, `allowManagedCredentials` (a JSON boolean), and `trustAnchorsPem` (optional
+approved CA PEM strings). For example, an uncommissioned input can contain:
+
+```json
+{
+  "relayHosts": ["relay.internal.example"],
+  "senders": ["aerolink@example.test"],
+  "recipientDomains": ["example.test"],
+  "recipientAddresses": [],
+  "diagnosticTarget": "diagnostic@example.test",
+  "baseUrl": "https://aerolink.internal.example",
+  "allowManagedCredentials": false,
+  "trustAnchorsPem": []
+}
+```
+
+Keep real installation values private. Neither credentials nor installation/send-generation identities
+are accepted input fields. In Windows PowerShell 5 or PowerShell 7, provision initially with the safe default:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Provision-AeroLinkNotificationAuthority.ps1 -ProductRoot product -PolicyFile D:\secure\notification-policy.json
+```
+
+For a later rotation, supply the current independently inspected witness GUID using
+`-ExpectedSendGeneration '<current-witness-guid>'`. An absent, corrupt or different witness refuses that
+expectation. The command always creates a fresh generation, writes the witness first, and defaults to
+Disabled; it cannot revive a generation from its input. After commissioning approval, explicitly specify
+`-MaximumMode ControlledTest` or `-MaximumMode Live` with the expected current witness. The command reports
+only the new generation and permitted maximum, and still requires separate product activation. Live origins
+must be HTTPS roots and cannot be localhost/loopback; internal reachability remains an operator qualification.
+Authority files receive protected DACLs for the executing runtime SID, SYSTEM and Administrators, with exact
+access-rule readback. A different service identity requires its deliberately approved runtime ACL and
+qualification before activation. Do not put the private input, authority, key ring or credentials in GitHub.
+
 `Restore-AeroLink.ps1` calls `Revoke-AeroLinkNotificationSendGeneration` after archive verification and before
 business database replacement. It durably advances the independent witness first, then writes a Disabled
 policy for the new generation. Interrupted restore, database rollback, restoring old configuration again or
@@ -599,6 +636,9 @@ the new policy generation and explicitly activate future work; backlog remains h
 selected. Ordinary restart preserves admission, generation, concrete MIME, destination, due time and deadline.
 
 Protected settings and retained message evidence use the existing ASP.NET Data Protection framework.
+Credential-bearing command comparison digests and effective-attempt fingerprints are also protected at rest;
+decryption and semantic comparison occur only in the running process. Database readers receive no raw
+password-derived SHA-256 verifier. Missing comparison keys require operator recovery rather than a new send.
 `DataProtection__KeyRingPath` optionally selects a deployment-owned persistent ring. Keep that ring and its
 service identity recoverable, restrict its ACLs and treat backups as secrets. Changing/missing/corrupt keys
 can block protected delivery evidence and credentials; it does not fail unrelated business saves and does
@@ -611,7 +651,12 @@ minute delays with bounded stable jitter, at most 14 known transient failures an
 compatible configuration does not reset that horizon or repeatedly attempt unchanged bad authentication.
 Diagnostic operations allow one physical attempt. Explicit readmission creates a bounded new window; unknown
 replay preserves the original message and requires duplicate-risk acknowledgement. Reissue creates a linked
-new message for a changed destination/mode/content policy. Every linked started attempt must have a durable
+new message for a changed destination/mode/content policy. Capture/ControlledTest terminal evidence remains
+immutable; an explicit linked Live reissue of still-eligible work has a distinct Message-ID and generation.
+The installation gate permits one physical SMTP connection at a time across all processes and roots, spaces
+connection starts by at least one second, and pauses the same destination for thirty seconds after a known
+transient or configuration refusal. This cooldown is separate from each message's longer retry schedule.
+Every linked started attempt must have a durable
 socket-disposal fact or exact local process creation-identity exit proof before another socket may start.
 A PID, missed heartbeat or expired lease alone is not quiescence. Acceptance is recorded before QUIT;
 post-acceptance persistence recovery retries the factual receipt only, never SMTP. A crash before that durable

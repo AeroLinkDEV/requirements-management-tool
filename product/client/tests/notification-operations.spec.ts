@@ -118,19 +118,22 @@ test('notification settings recover the original receipt after reload and keep e
   const firstGeneration = '10000000-0000-0000-0000-000000000001'
   const secondGeneration = '10000000-0000-0000-0000-000000000002'
   const settings = { version: 7, mode: 'Capture', host: 'fixture.invalid', port: 25, sender: 'fixture@example.invalid', displayName: 'Fixture', baseUrl: 'https://fixture.invalid', userNameConfigured: true, credentialConfigured: true }
-  type Intent = { operationKey: string; family: string; expectedVersion: number; credential?: string; userName?: string; clearCredential?: boolean; mode?: string }
+  type Intent = { operationKey: string; family: string; expectedVersion: number; credential?: string; userName?: string; clearCredential?: boolean; mode?: string; acknowledgeDuplicateRisk?: boolean; generationId?: string }
   type Receipt = { id: string; operationKey: string; family: string; createdAt: string; result: { state: string; version?: number } }
   const receipts = new Map<string, Receipt>()
   const submissions: Intent[] = []
   const receiptReads: string[] = []
   const pages: number[] = []
-  const generation = (id: string, contextIdentifier: string, state: string) => ({ id, deliveryId: id, notificationId: id, contextIdentifier, mode: 'Capture', state, version: 3, messageId: `<${id}@fixture.invalid>`, bodyHash: 'a'.repeat(64), intendedDestination: 'protected', effectiveDestination: 'protected', attempts: 1, createdAt: '2026-01-01T00:00:00Z' })
+  const heldPages: number[] = []
+  const generation = (id: string, contextIdentifier: string, state: string) => ({ id, deliveryId: id, notificationId: id, contextIdentifier, mode: 'Capture', state, version: 3, messageId: `<${id}@fixture.invalid>`, bodyHash: 'a'.repeat(64), intendedDestination: 'protected', effectiveDestination: 'protected', attempts: 1, createdAt: '2026-01-01T00:00:00Z', requiresDuplicateRiskAcknowledgement: state === 'AcceptanceUnknown' || id === secondGeneration })
   await page.route('**/api/operations/notifications**', async route => {
     const request = route.request()
     const url = new URL(request.url())
     if (request.method() === 'GET' && url.pathname === '/api/operations/notifications') {
       const requestedPage = Number(url.searchParams.get('page') ?? 1)
+      const heldPage = Number(url.searchParams.get('heldPage') ?? 1)
       pages.push(requestedPage)
+      heldPages.push(heldPage)
       await route.fulfill({ json: {
         generatedAt: '2026-01-01T00:00:00Z', smtp: { configured: true }, links: { configured: true, valid: true },
         totals: { pending: 1, sent: 0, failed: 0, suppressed: 0 }, deliveries: [],
@@ -140,6 +143,9 @@ test('notification settings recover the original receipt after reload and keep e
         health: [{ state: 'AcceptanceUnknown', count: 1, oldestAt: '2026-01-01T00:00:00Z', action: 'Reconcile and confirm worker quiescence.' }, { state: 'RetryExhausted', count: 1, action: 'Readmit after correction.' }],
         generations: requestedPage === 1 ? [generation(firstGeneration, 'REQ-FIXTURE-A', 'AcceptanceUnknown')] : [generation(secondGeneration, 'REQ-FIXTURE-B', 'RetryExhausted')],
         page: requestedPage, total: 26, pageSize: 25,
+        heldDeliveries: heldPage === 1 ? Array.from({ length: 25 }, (_, index) => ({ id: `held-${index + 1}`, notificationId: `held-notice-${index + 1}`, state: 'HeldAdmission', contextIdentifier: `HELD-FIXTURE-${String(index + 1).padStart(3, '0')}`, createdAt: '2026-01-01T00:00:00Z' }))
+          : [{ id: 'held-26', notificationId: 'held-notice-26', state: 'HeldAdmission', contextIdentifier: 'HELD-FIXTURE-026', createdAt: '2026-01-01T00:00:00Z' }],
+        heldPage, heldTotal: 26, heldPageSize: 25,
       } })
       return
     }
@@ -157,7 +163,7 @@ test('notification settings recover the original receipt after reload and keep e
     if (request.method() === 'POST') {
       const submitted = request.postDataJSON() as Intent
       submissions.push(submitted)
-      const receipt = { id: `receipt-${submissions.length}`, operationKey: submitted.operationKey, family: submitted.family, createdAt: '2026-01-01T00:00:00Z', result: { state: submitted.family === 'Settings' ? 'SettingsSaved' : submitted.family === 'Activate' ? 'ActivatedFutureEvents' : 'Queued', version: settings.version + 1 } }
+      const receipt = { id: `receipt-${submissions.length}`, operationKey: submitted.operationKey, family: submitted.family, createdAt: '2026-01-01T00:00:00Z', result: { state: submitted.family === 'Settings' ? 'SettingsSaved' : submitted.family === 'Activate' ? 'ActivatedFutureEvents' : submitted.family === 'Reissue' ? 'Reissued' : submitted.family === 'Suppress' ? 'Suppressed' : 'Queued', version: settings.version + 1 } }
       receipts.set(submitted.operationKey, receipt)
       if (submitted.family === 'Settings' && submissions.length === 1) {
         settings.version = 9 // A later settings edit must not alter recovery of revision 7's committed intent.
@@ -175,13 +181,28 @@ test('notification settings recover the original receipt after reload and keep e
   await expect(page.getByLabel('Delivery mode')).toHaveValue('Capture')
   const replay = page.getByRole('button', { name: 'Request replay after quiescence' })
   await expect(replay).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Request new generation' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Suppress generation' })).toBeDisabled()
   await page.getByRole('button', { name: 'View attempts' }).click()
   await expect(page.getByText(/quiescence unproven/)).toBeVisible()
   await expect(page.getByText('Quiescence is established by the server; it cannot be declared by this checkbox.')).toBeVisible()
   await page.getByRole('button', { name: 'Next page' }).click()
   await expect(page.getByText('Retry Exhausted · REQ-FIXTURE-B')).toBeVisible()
+  // A later state can still have an unknown predecessor; obey the server flag rather than infer from state.
+  await expect(page.getByRole('button', { name: 'Readmit generation' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Request new generation' })).toBeDisabled()
   await expect(page.getByText(/REQ-FIXTURE-A/, { exact: false })).toHaveCount(0)
   expect(pages).toContain(2)
+  // Independent bounded backlog paging: it replaces the held page while preserving the generation page.
+  const backlog = page.getByRole('region', { name: 'Held notification deliveries' })
+  await expect(backlog.getByRole('button', { name: 'Readmit selected held delivery' })).toHaveCount(25)
+  await backlog.getByRole('button', { name: 'Next held page' }).click()
+  await expect(backlog).toContainText('HELD-FIXTURE-026')
+  await expect(backlog.getByRole('button', { name: 'Readmit selected held delivery' })).toHaveCount(1)
+  await expect(backlog.getByText('HELD-FIXTURE-001', { exact: false })).toHaveCount(0)
+  await expect(backlog.getByRole('button', { name: 'Next held page' })).toBeDisabled()
+  expect(heldPages).toContain(2)
+  await expect(page.getByText('Retry Exhausted · REQ-FIXTURE-B')).toBeVisible()
 
   const secret = 'fixture-credential-not-for-storage'
   await page.getByLabel('New SMTP credential').fill(secret)
@@ -214,4 +235,12 @@ test('notification settings recover the original receipt after reload and keep e
   await page.getByRole('button', { name: 'Send my transport test' }).click()
   await expect(page.getByRole('region', { name: 'Notification operation receipt' })).toContainText('TransportTest · Queued')
   expect(submissions[2].operationKey).not.toBe(submissions[1].operationKey)
+  await page.getByLabel('I acknowledge that another send after unknown acceptance may produce a duplicate email.').check()
+  await page.getByRole('button', { name: 'Request new generation' }).click()
+  await expect(page.getByRole('region', { name: 'Notification operation receipt' })).toContainText('Reissue · Reissued')
+  expect(submissions[3]).toMatchObject({ family: 'Reissue', generationId: firstGeneration, acknowledgeDuplicateRisk: true })
+  await page.getByRole('button', { name: 'Suppress generation' }).click()
+  await expect(page.getByRole('region', { name: 'Notification operation receipt' })).toContainText('Suppress · Suppressed')
+  expect(submissions[4]).toMatchObject({ family: 'Suppress', generationId: firstGeneration, acknowledgeDuplicateRisk: true })
+  expect(submissions[4].operationKey).not.toBe(submissions[3].operationKey)
 })

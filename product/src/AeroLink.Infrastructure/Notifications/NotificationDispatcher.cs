@@ -41,9 +41,18 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
         if (!settings.CanSend || !settings.AdmissionEnabled || settings.SettingsId == Guid.Empty) return new(0, 0, 0);
         await CreateAdmittedGenerationsAsync(settings, Math.Clamp(batchSize, 1, 50), ct);
         var effectiveHash = EffectiveSettingsHash(settings);
+        var blocked = await db.NotificationDeliveryGenerations.AsNoTracking().Where(x => x.State == NotificationGenerationState.ConfigBlocked
+            && x.AdmissionEpochId == settings.AdmissionEpochId && x.Mode == settings.Mode)
+            .Select(x => new { x.Id, x.BlockedEffectiveSettingsHash }).ToListAsync(ct);
+        var unchangedBlocked = new List<Guid>();
+        foreach (var row in blocked)
+        {
+            try { if (protection.Unprotect(row.BlockedEffectiveSettingsHash) == effectiveHash) unchangedBlocked.Add(row.Id); }
+            catch { unchangedBlocked.Add(row.Id); } // Unreadable evidence is attention, not permission to submit.
+        }
         var due = await db.NotificationDeliveryGenerations.AsNoTracking()
             .Where(x => (x.State == NotificationGenerationState.Pending || x.State == NotificationGenerationState.RetryDue || x.State == NotificationGenerationState.ConfigBlocked
-                    && x.BlockedEffectiveSettingsHash != effectiveHash && x.SafeCode != "RecipientAddressChanged" && x.SafeCode != "MessageSettingsChangedReissueRequired")
+                    && !unchangedBlocked.Contains(x.Id) && x.SafeCode != "RecipientAddressChanged" && x.SafeCode != "MessageSettingsChangedReissueRequired")
                 && x.AdmissionEpochId == settings.AdmissionEpochId && x.Mode == settings.Mode && x.DueTicks <= now.UtcTicks)
             .OrderBy(x => x.DueTicks).Take(Math.Clamp(batchSize, 1, 50)).ToListAsync(ct);
         var sent = 0; var suppressed = 0; var failed = 0;
@@ -55,9 +64,6 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
             if (!settings.CanSend || !settings.AdmissionEnabled || settings.Mode != candidate.Mode || settings.SendGeneration != candidate.SendGeneration || settings.AdmissionEpochId != candidate.AdmissionEpochId) continue;
             if (candidate.DeadlineTicks <= now.UtcTicks || (candidate.TransientFailures >= candidate.MaximumAttempts || candidate.Attempts >= candidate.MaximumPhysicalAttempts))
             { await SetHeldAsync(candidate.Id, NotificationGenerationState.RetryExhausted, "RetryWindowExhausted", ct, settings); continue; }
-            if (candidate.State == NotificationGenerationState.ConfigBlocked && candidate.CurrentAttemptId is Guid blockedAttempt
-                && await db.NotificationPhysicalAttempts.AnyAsync(x => x.Id == blockedAttempt && x.SettingsRevisionId == settings.SettingsId
-                    && x.PolicyHash == settings.PolicyHash && x.EffectiveSettingsHash == EffectiveSettingsHash(settings) && x.Outcome == NotificationAttemptOutcome.ConfigBlocked, ct)) continue;
             if (!await PredecessorsQuiescentAsync(candidate, ct)) continue;
             var context = await (from root in db.NotificationDeliveries.AsNoTracking()
                                  join bound in db.NotificationContexts.AsNoTracking() on root.NotificationId equals bound.NotificationId
@@ -81,7 +87,7 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
             var claim = Guid.NewGuid();
             var attempt = new NotificationPhysicalAttempt(candidate.Id, claim, settings.SettingsId, settings.PolicyHash,
                 authority.HostIdentity, process.Id, process.StartTime.ToUniversalTime().Ticks, now,
-                protection.Protect(JsonSerializer.Serialize(settings)), EffectiveSettingsHash(settings));
+                protection.Protect(JsonSerializer.Serialize(settings)), protection.Protect(EffectiveSettingsHash(settings)));
             await using (var transaction = await db.Database.BeginTransactionAsync(ct))
             {
                 var won = await db.NotificationDeliveryGenerations.Where(x => x.Id == candidate.Id && x.Version == candidate.Version
@@ -105,11 +111,22 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
                 await db.SaveChangesAsync(ct);
             }
             var effective = await resolver.ResolveAsync(ct);
-            if (!effective.CanSend || !effective.AdmissionEnabled || EffectiveSettingsHash(effective) != attempt.EffectiveSettingsHash || effective.SettingsId != settings.SettingsId || effective.PolicyHash != settings.PolicyHash
+            if (!effective.CanSend || !effective.AdmissionEnabled || EffectiveSettingsHash(effective) != protection.Unprotect(attempt.EffectiveSettingsHash) || effective.SettingsId != settings.SettingsId || effective.PolicyHash != settings.PolicyHash
                 || effective.SendGeneration != generation.SendGeneration || effective.Mode != generation.Mode)
             { await SetHeldAsync(generation.Id, NotificationGenerationState.ConfigBlocked, "PreparedPolicyChanged", ct, settings); continue; }
             var started = await StartGateAsync(generation, attempt.Id, claim, effective, ct);
-            if (!started) continue;
+            if (!started)
+            {
+                // A shared destination bound or concurrent policy change refused this preparation.
+                // Release only our pre-socket claim; no physical attempt budget was consumed.
+                var later = DateTimeOffset.UtcNow.AddSeconds(30).UtcTicks;
+                await db.NotificationDeliveryGenerations.Where(x => x.Id == generation.Id && x.State == NotificationGenerationState.Claimed
+                    && x.ClaimToken == claim && x.CurrentAttemptId == attempt.Id)
+                    .ExecuteUpdateAsync(x => x.SetProperty(p => p.State, NotificationGenerationState.Pending)
+                        .SetProperty(p => p.ClaimToken, (Guid?)null).SetProperty(p => p.DueTicks, later)
+                        .SetProperty(p => p.Version, p => p.Version + 1), ct);
+                continue;
+            }
             using var sending = CancellationTokenSource.CreateLinkedTokenSource(ct);
             using var heartbeatStop = new CancellationTokenSource();
             var heartbeat = HeartbeatAsync(generation.Id, claim, effective, sending, heartbeatStop.Token);
@@ -127,8 +144,6 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
             if (receipt.Outcome is NotificationAttemptOutcome.SmtpAccepted or NotificationAttemptOutcome.Captured or NotificationAttemptOutcome.TestAccepted) sent++;
             else failed++;
             db.ChangeTracker.Clear();
-            // Single-host V1 submission is bounded and serial, with one second between connections.
-            if (due.Count > 1) await Task.Delay(TimeSpan.FromSeconds(1), ct);
         }
         return new(sent, suppressed, failed);
     }
@@ -160,7 +175,7 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
             var generation = new NotificationDeliveryGeneration(root.Id, epoch.Id, settings.SettingsId, settings.Mode,
                 settings.SendGeneration, protection.Protect(address), NotificationContentProtection.AddressHash(address), root.CreatedAt,
                 diagnostic: diagnostic);
-            if (!settings.PermitsAddress(address, diagnostic)) generation.Hold("RecipientPolicyBlocked", blockedSettingsHash: EffectiveSettingsHash(settings));
+            if (!settings.PermitsAddress(address, diagnostic)) generation.Hold("RecipientPolicyBlocked", blockedSettingsHash: protection.Protect(EffectiveSettingsHash(settings)));
             db.NotificationDeliveryGenerations.Add(generation);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { db.ChangeTracker.Clear(); }
@@ -187,6 +202,32 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
         if (prior.Any(x => !NotificationQuiescence.IsConfirmed(x, authority.HostIdentity))) return false;
         if (prior.Any(x => x.Outcome is NotificationAttemptOutcome.InProgress or NotificationAttemptOutcome.AcceptanceUnknown)
             && !generation.DuplicateRiskAcknowledged) return false;
+        // V1 permits one physical SMTP connection per installation, across all roots and processes.
+        // Recent refusal cooldown is scoped to the actual host/port captured in protected evidence;
+        // changing a credential or settings row cannot bypass an unhealthy destination's cooldown.
+        var recentBoundary = DateTimeOffset.UtcNow.AddSeconds(-30);
+        // SQLite's LINQ provider cannot order DateTimeOffset; both supported providers accept
+        // the typed UTC parameters in this bounded evidence query.
+        var recentOrUndisposed = db.NotificationPhysicalAttempts.FromSqlInterpolated($"""
+            SELECT * FROM notification_physical_attempts WHERE "TransmissionStartedAt" IS NOT NULL
+            AND (NOT "TransportDisposed" OR "TransmissionStartedAt" > {recentBoundary} OR "CompletedAt" > {recentBoundary})
+            """).AsNoTracking();
+        var installationAttempts = await (from physical in recentOrUndisposed
+                                          join revision in db.NotificationSettingsRevisions.AsNoTracking() on physical.SettingsRevisionId equals revision.Id
+                                          where revision.InstallationId == settings.InstallationId && physical.Id != attemptId
+                                          select physical).ToListAsync(ct);
+        if (installationAttempts.Any(x => !NotificationQuiescence.IsConfirmed(x, authority.HostIdentity))) return false;
+        var connectionBoundary = DateTimeOffset.UtcNow.AddSeconds(-1);
+        if (installationAttempts.Any(x => x.TransmissionStartedAt > connectionBoundary)) return false;
+        foreach (var previous in installationAttempts.Where(x => x.CompletedAt > recentBoundary
+                     && x.Outcome is NotificationAttemptOutcome.TransientRefused or NotificationAttemptOutcome.ConfigBlocked))
+        {
+            ResolvedNotificationSettings? previousSettings;
+            try { previousSettings = JsonSerializer.Deserialize<ResolvedNotificationSettings>(protection.Unprotect(previous.ProtectedSettingsSnapshot)); }
+            catch { return false; } // Unreadable protected evidence cannot grant a connection.
+            if (previousSettings is null || previousSettings.Port == settings.Port
+                && string.Equals(previousSettings.Host, settings.Host, StringComparison.OrdinalIgnoreCase)) return false;
+        }
         var gateTicks = DateTimeOffset.UtcNow.UtcTicks;
         var gate = await db.NotificationDeliveryGenerations.Where(x => x.Id == generation.Id && x.State == NotificationGenerationState.Claimed
             && x.ClaimToken == claim && x.CurrentAttemptId == attemptId && x.LeaseUntilTicks > gateTicks)
@@ -290,7 +331,7 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
     private async Task<int> SetHeldAsync(Guid id, NotificationGenerationState state, string code, CancellationToken ct, ResolvedNotificationSettings settings)
     {
         var changed = await db.NotificationDeliveryGenerations.Where(x => x.Id == id && (x.State == NotificationGenerationState.Pending || x.State == NotificationGenerationState.RetryDue || x.State == NotificationGenerationState.ConfigBlocked || x.State == NotificationGenerationState.Claimed))
-            .ExecuteUpdateAsync(x => x.SetProperty(p => p.State, state).SetProperty(p => p.SafeCode, code).SetProperty(p => p.BlockedEffectiveSettingsHash, EffectiveSettingsHash(settings)).SetProperty(p => p.ClaimToken, (Guid?)null).SetProperty(p => p.Version, p => p.Version + 1), ct);
+            .ExecuteUpdateAsync(x => x.SetProperty(p => p.State, state).SetProperty(p => p.SafeCode, code).SetProperty(p => p.BlockedEffectiveSettingsHash, protection.Protect(EffectiveSettingsHash(settings))).SetProperty(p => p.ClaimToken, (Guid?)null).SetProperty(p => p.Version, p => p.Version + 1), ct);
         if (changed > 0) await CompleteFencedPreparationsAsync(ct);
         return changed;
     }

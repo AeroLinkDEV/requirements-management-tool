@@ -78,7 +78,7 @@ internal static class NotificationModelConfiguration
         {
             b.ToTable("notification_operations"); b.HasKey(x => x.Id);
             b.Property(x => x.InstallationId).HasMaxLength(100); b.Property(x => x.Actor).HasMaxLength(100);
-            b.Property(x => x.Family).HasMaxLength(40); b.Property(x => x.PayloadHash).HasMaxLength(64);
+            b.Property(x => x.Family).HasMaxLength(40); b.Property(x => x.PayloadHash).HasMaxLength(1024);
             b.HasIndex(x => new { x.InstallationId, x.Actor, x.Family, x.OperationKey }).IsUnique();
         });
         model.Entity<NotificationPreferenceConfirmation>(b =>

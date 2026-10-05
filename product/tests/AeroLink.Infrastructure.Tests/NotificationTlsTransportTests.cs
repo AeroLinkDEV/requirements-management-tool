@@ -20,6 +20,45 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class NotificationTlsTransportTests
 {
     [Fact]
+    public async Task Authentication_positive_control_precedes_actual_invalid_credential_refusal()
+    {
+        using var certificate = Certificate("localhost");
+        foreach (var reply in new[] { Reply.AuthAccept, Reply.AuthRefuse })
+        {
+            await using var relay = new TlsRelay(certificate, reply);
+            var settings = Settings(relay.Port, certificate) with { UserName = "synthetic-user", Credential = "synthetic-secret" };
+            var result = await new NotificationSmtpTransport().SendAsync(settings, Message(), default);
+            await relay.Completion;
+            Assert.True(relay.TlsStarted);
+            Assert.Equal(reply == Reply.AuthAccept ? NotificationAttemptOutcome.TestAccepted : NotificationAttemptOutcome.ConfigBlocked, result.Outcome);
+            Assert.Equal(reply == Reply.AuthAccept ? 1 : 0, relay.DataCount);
+            Assert.True(relay.HasFact("AuthAttempted"));
+            Assert.Equal(reply == Reply.AuthAccept, relay.HasFact("Authenticated"));
+        }
+    }
+
+    [Fact]
+    public async Task Relay_without_starttls_is_refused_before_authentication_or_data()
+    {
+        using var certificate = Certificate("localhost"); await using var relay = new TlsRelay(certificate, Reply.NoStartTls);
+        var result = await new NotificationSmtpTransport().SendAsync(Settings(relay.Port, certificate), Message(), default);
+        await relay.Completion;
+        Assert.Equal(NotificationAttemptOutcome.ConfigBlocked, result.Outcome); Assert.False(relay.TlsStarted);
+        Assert.True(relay.HasFact("GreetingAccepted")); Assert.False(relay.HasFact("AuthAttempted")); Assert.Equal(0, relay.DataCount);
+    }
+
+    [Fact]
+    public async Task Cancellation_while_final_data_reply_is_pending_is_unknown_and_disposes_transport()
+    {
+        using var certificate = Certificate("localhost"); await using var relay = new TlsRelay(certificate, Reply.PauseAfterData);
+        using var cancellation = new CancellationTokenSource();
+        var sending = new NotificationSmtpTransport().SendAsync(Settings(relay.Port, certificate), Message(), cancellation.Token);
+        await relay.WaitFactAsync("DataReceived"); cancellation.Cancel();
+        var receipt = await sending.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(NotificationAttemptOutcome.AcceptanceUnknown, receipt.Outcome); Assert.True(receipt.TransportDisposed);
+        Assert.False(relay.HasFact("FinalDataAccepted"));
+    }
+    [Fact]
     public async Task Trusted_tls_acceptance_is_latched_before_quit_and_wire_identity_is_stable()
     {
         using var certificate = Certificate("localhost"); var message = Message();
@@ -169,17 +208,28 @@ public sealed class NotificationTlsTransportTests
         return request.CreateSelfSigned(future ? now.AddDays(1) : now.AddDays(-2), expired ? now.AddDays(-1) : now.AddDays(2));
     }
 
-    public enum Reply { AcceptThenDropQuit, LoseFinalReply, Refuse451, Refuse550 }
+    public enum Reply { AcceptThenDropQuit, LoseFinalReply, Refuse451, Refuse550, AuthAccept, AuthRefuse, NoStartTls, PauseAfterData }
     private sealed class TlsRelay : IAsyncDisposable
     {
         private readonly string directory = Path.Combine(Path.GetTempPath(), "aerolink-owned-tls-" + Guid.NewGuid().ToString("N"));
         private readonly Process process;
+        private bool stoppedByOwner;
         internal readonly Task Completion;
         internal int Port { get; }
         internal bool TlsStarted;
         internal int DataCount;
         internal string Wire = "", Envelope = "";
         internal Action? OnQuit;
+        internal bool HasFact(string name)
+        {
+            var path = Path.Combine(directory, "events.jsonl"); if (!File.Exists(path)) return false;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream); var content = reader.ReadToEnd();
+            var complete = content.LastIndexOf('\n'); return complete >= 0 && content[..complete].Split('\n')
+                .Any(x => x.Length > 0 && JsonDocument.Parse(x).RootElement.GetProperty("event").GetString() == name);
+        }
+        internal async Task WaitFactAsync(string name)
+        { var until = DateTimeOffset.UtcNow.AddSeconds(15); while (!HasFact(name) && DateTimeOffset.UtcNow < until) await Task.Delay(25); Assert.True(HasFact(name)); }
         internal TlsRelay(X509Certificate2 certificate, Reply reply)
         {
             Directory.CreateDirectory(directory);
@@ -207,11 +257,11 @@ public sealed class NotificationTlsTransportTests
                 Wire = root.GetProperty("wire").GetString()!; Envelope = root.GetProperty("envelope").GetString()!;
             }
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(35));
-            Assert.Equal(0, process.ExitCode);
+            if (!stoppedByOwner) Assert.Equal(0, process.ExitCode);
         }
         public async ValueTask DisposeAsync()
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            if (!process.HasExited) { stoppedByOwner = true; process.Kill(entireProcessTree: true); }
             try { await Completion; } finally { process.Dispose(); Directory.Delete(directory, recursive: true); }
         }
 

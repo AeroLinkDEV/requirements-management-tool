@@ -103,6 +103,54 @@ function Assert-RevokedNotificationBacklog([string]$Phase) {
     $attempts = Invoke-QualificationSql 'aerolink' "SELECT count(*) FROM notification_physical_attempts WHERE `"GenerationId`"='$notificationGenerationId';"
     if ($state -ne 'HeldAdmission' -or [int]$attempts -ne 0) { throw "Revoked restored G1 is not held without SMTP attempts during $Phase (state=$state, attempts=$attempts)." }
 }
+function New-QualificationTlsCertificate([string]$Directory) {
+    # Modern .NET exports ephemeral PEM directly; never create an OS certificate-store/key-container entry.
+    $pwsh = Get-Command pwsh.exe -ErrorAction Stop
+    $generator = Join-Path $Directory 'generate-certificate.ps1'
+    @'
+param([string]$Directory)
+$ErrorActionPreference = 'Stop'
+$key = [Security.Cryptography.RSA]::Create(2048)
+try {
+    $request = [Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=localhost', $key,
+        [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $san = [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
+    $san.AddDnsName('localhost'); $request.CertificateExtensions.Add($san.Build())
+    $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($true,$false,0,$true))
+    $usage = [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature -bor
+        [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::KeyCertSign -bor [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::CrlSign
+    $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new($usage,$true))
+    $oids = [Security.Cryptography.OidCollection]::new(); [void]$oids.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.1'))
+    $request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($oids,$true))
+    $certificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-2),[DateTimeOffset]::UtcNow.AddDays(2))
+    try {
+        [IO.File]::WriteAllText((Join-Path $Directory 'certificate.pem'),$certificate.ExportCertificatePem())
+        [IO.File]::WriteAllText((Join-Path $Directory 'key.pem'),$key.ExportPkcs8PrivateKeyPem())
+    } finally { $certificate.Dispose() }
+} finally { $key.Dispose() }
+'@ | Set-Content -LiteralPath $generator -Encoding UTF8
+    Invoke-Checked $pwsh.Source @('-NoProfile','-File',$generator,'-Directory',$Directory)
+}
+function Start-QualificationTlsRelay([string]$Directory) {
+    $python = if ($env:AEROLINK_TEST_PYTHON) { $env:AEROLINK_TEST_PYTHON } else { (Get-Command python.exe -ErrorAction Stop).Source }
+    $relay = Join-Path $productRoot 'tests\AeroLink.Infrastructure.Tests\TestSupport\NotificationTlsRelay.py'
+    if (-not (Test-Path -LiteralPath $relay -PathType Leaf)) { throw 'The shared executable TLS relay fixture is missing.' }
+    $stdout = Join-Path $Directory 'relay.stdout.log'
+    $stderr = Join-Path $Directory 'relay.stderr.log'
+    $process = Start-Process -FilePath $python -ArgumentList @(('"'+$relay+'"'),('"'+$Directory+'"'),'AcceptThenDropQuit',"$smtpPort",'180') `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+    # Retain the process handle before a quick relay can exit; Windows PowerShell otherwise may lose
+    # the exit code when WaitForExit is first called after termination.
+    [void]$process.Handle
+    try {
+        for ($attempt=0;$attempt -lt 100;$attempt++) {
+            if ($process.HasExited) { break }
+            if ((Test-Path -LiteralPath $stdout) -and ((Get-Content -LiteralPath $stdout -TotalCount 1) -eq "$smtpPort")) { return $process }
+            Start-Sleep -Milliseconds 100
+        }
+        throw "Owned STARTTLS relay did not become ready. See $stderr."
+    } catch { if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }; throw }
+}
 
 $token = [Guid]::NewGuid().ToString('N')
 $shortToken = $token.Substring(0,8)
@@ -116,7 +164,7 @@ $apiExecutable = Join-Path $productRoot 'src\AeroLink.Api\bin\Release\net10.0\Ae
 if (-not (Test-Path -LiteralPath $apiExecutable -PathType Leaf)) { throw 'Restore qualification requires the current caller-built Release API executable; no binary fallback is permitted.' }
 $pgLog = Join-Path $root 'postgres.log'; $apiOut = Join-Path $root 'seed-api.stdout.log'; $apiErr = Join-Path $root 'seed-api.stderr.log'
 $pgPort = if ($ExistingPostgresPort) { $ExistingPostgresPort } else { Get-FreePort }; $seedApiPort = Get-FreePort; $smtpPort = Get-FreePort
-$api = $null; $dispatcherHost = $null; $smtpMonitor = $null; $postgresStarted = $false; $qualificationPassed = $false; $previous = @{}; $originalDatabases = @(); $databaseOwnershipEstablished = $false
+$api = $null; $dispatcherHost = $null; $smtpMonitor = $null; $tlsRelay = $null; $postgresStarted = $false; $qualificationPassed = $false; $previous = @{}; $originalDatabases = @(); $databaseOwnershipEstablished = $false
 $priorEvidenceRoot = Get-AeroLinkProcessEnvironmentSnapshot -Name @('Evidence__Root')
 $priorQualificationEnvironment = Get-AeroLinkProcessEnvironmentSnapshot -Name @('AEROLINK_INSTALLATION_ROOT','AEROLINK_NOTIFICATION_AUTHORITY_ROOT','DataProtection__KeyRingPath','Connector__SigningKeyPath')
 New-Item -ItemType Directory -Path $root,$sourceEvidence,$backupRoot,$oldEvidence,$installationRoot,$keyRing -Force | Out-Null
@@ -130,11 +178,25 @@ $authorityPath = Get-AeroLinkNotificationAuthorityPath -InstanceId $instanceId
 $instanceConfig = Join-Path $installationRoot 'instance.json'
 [ordered]@{instanceId=$instanceId;label='Disposable notification restore qualification';classification='LocalDemo'} | ConvertTo-Json | Set-Content -LiteralPath $instanceConfig -Encoding UTF8
 $savedInstanceConfig = [IO.File]::ReadAllBytes($instanceConfig)
-$g1Policy = [ordered]@{installationId=$instanceId;hostIdentity=[Environment]::MachineName;sendGeneration=$g1;policyRevision=[guid]::NewGuid().ToString('D');maximumMode=3;relayHosts=@('127.0.0.1');senders=@('restore-fixture@example.invalid');recipientDomains=@('example.invalid');recipientAddresses=@();diagnosticTarget='diagnostic@example.invalid';baseUrl='https://restore-fixture.invalid';allowManagedCredentials=$false;trustAnchorsPem=@()}
+$g1Policy = [ordered]@{installationId=$instanceId;hostIdentity=[Environment]::MachineName;sendGeneration=$g1;policyRevision=[guid]::NewGuid().ToString('D');maximumMode=3;relayHosts=@('localhost');senders=@('restore-fixture@example.invalid');recipientDomains=@('example.invalid');recipientAddresses=@();diagnosticTarget='diagnostic@example.invalid';baseUrl='https://restore-fixture.invalid';allowManagedCredentials=$false;trustAnchorsPem=@()}
 $g1Json = ConvertTo-Json -InputObject $g1Policy -Depth 6 -Compress
 [IO.File]::WriteAllText($authorityPath,$g1Json,[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText(($authorityPath+'.generation'),$g1,[Text.UTF8Encoding]::new($false))
 try {
+    $tlsRoot = Join-Path $root 'owned-starttls'
+    New-Item -ItemType Directory -Path $tlsRoot | Out-Null
+    New-QualificationTlsCertificate $tlsRoot
+    $g1Policy.trustAnchorsPem = @([IO.File]::ReadAllText((Join-Path $tlsRoot 'certificate.pem')))
+    $g1Json = ConvertTo-Json -InputObject $g1Policy -Depth 6 -Compress
+    [IO.File]::WriteAllText($authorityPath,$g1Json,[Text.UTF8Encoding]::new($false))
+    # Qualify repeatable OS-file revocation before expensive seeding. No database, admission or worker
+    # exists yet; restoring this artificial initial policy is fixture setup, never recovery of sent work.
+    for ($revocationProbe=0;$revocationProbe -lt 2;$revocationProbe++) {
+        $probeResult = Revoke-AeroLinkNotificationSendGeneration -ProductRoot $productRoot
+        if ($probeResult.State -ne 'DisabledRevoked' -or $probeResult.SendGeneration -eq $g1) { throw 'The repeated installation revocation preflight failed.' }
+    }
+    [IO.File]::WriteAllText(($authorityPath+'.generation'),$g1,[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($authorityPath,$g1Json,[Text.UTF8Encoding]::new($false))
     if (-not $ExistingPostgresPort) {
         Invoke-Checked (Join-Path $PostgresBin 'initdb.exe') @('-D',$data,'-U','postgres','-A','trust','--encoding=UTF8')
         Invoke-Checked (Join-Path $PostgresBin 'pg_ctl.exe') @('-D',$data,'-l',$pgLog,'-o',"-p $pgPort -h 127.0.0.1",'-w','start'); $postgresStarted = $true
@@ -164,7 +226,7 @@ try {
     if(-not $ready){throw "Disposable seed API did not become ready. See $apiErr"}
     # Primary executable owner: ordinary settings save and explicit G1 activation produce a real bound
     # Pending generation before backup. A future due time permits a restart control without TCP transport.
-    # Successful post-backup TLS DATA acceptance requires the separately owned TLS fixture; do not infer it.
+    # A shared actual STARTTLS relay below proves post-backup DATA acceptance and the durable receipt.
     $baseUrl = "http://127.0.0.1:$seedApiPort"; $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     [void](Invoke-RestMethod "$baseUrl/api/auth/login" -Method Post -ContentType 'application/json' -Body '{"userName":"admin","password":"AeroLink!2026"}' -WebSession $session)
     $csrf = Invoke-RestMethod "$baseUrl/api/auth/csrf" -WebSession $session
@@ -174,7 +236,7 @@ try {
     if (-not $workspace) { throw 'Notification restore fixture requires an actual seeded FMS Project.' }
     $notificationProject = [string]$workspace.projects[0].project.id
     $operations = Invoke-RestMethod "$baseUrl/api/operations/notifications" -WebSession $session
-    $save = @{operationKey=[guid]::NewGuid().ToString('D');expectedVersion=$operations.settings.version;mode='Live';host='127.0.0.1';port=$smtpPort;sender='restore-fixture@example.invalid';displayName='Restore fixture';baseUrl='https://restore-fixture.invalid'}
+    $save = @{operationKey=[guid]::NewGuid().ToString('D');expectedVersion=$operations.settings.version;mode='Live';host='localhost';port=$smtpPort;sender='restore-fixture@example.invalid';displayName='Restore fixture';baseUrl='https://restore-fixture.invalid'}
     [void](Invoke-RestMethod "$baseUrl/api/operations/notifications/settings" -Method Post -Headers $headers -ContentType 'application/json' -Body ($save|ConvertTo-Json) -WebSession $session)
     $operations = Invoke-RestMethod "$baseUrl/api/operations/notifications" -WebSession $session
     $activate = @{operationKey=[guid]::NewGuid().ToString('D');expectedVersion=$operations.settings.version;family='Activate';mode='Live'}
@@ -208,7 +270,31 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Disposable configured-root backup failed.' }
     $archive = (Get-ChildItem -LiteralPath $backupRoot -Filter 'aerolink-*.zip' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
     if (-not $archive) { throw 'Disposable backup archive was not produced.' }
+    # Decisive restore positive control: this exact G1 Pending generation is in the backup, then the
+    # normal independent API dispatcher sends it through real STARTTLS and records SMTP acceptance.
+    # The relay flushes its real final-DATA response evidence; neither side substitutes a producer flag.
+    $tlsRelay = Start-QualificationTlsRelay $tlsRoot
+    $dispatcherHost = Start-NotificationQualificationApi 'aerolink_source' $sourceEvidence 'post-backup-g1-sender'
+    $accepted = $false
+    for ($attempt=0;$attempt -lt 120;$attempt++) {
+        $sentState = Invoke-QualificationSql 'aerolink_source' "SELECT `"State`" FROM notification_delivery_generations WHERE `"Id`"='$notificationGenerationId';"
+        if ($sentState -eq 'SmtpAccepted') { $accepted=$true; break }
+        if ($sentState -in @('AcceptanceUnknown','PermanentFailed','HeldAdmission','ConfigBlocked','RetryExhausted')) { throw "Post-backup G1 did not reach SMTP acceptance: $sentState." }
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $accepted) { throw 'The actual post-backup G1 dispatcher never persisted SMTP acceptance.' }
+    $relayExited = $tlsRelay.WaitForExit(10000); $tlsRelay.Refresh()
+    if (-not $relayExited -or $tlsRelay.ExitCode -ne 0) { throw "The actual TLS relay did not complete successfully after accepted G1 (exited=$relayExited, code=$($tlsRelay.ExitCode))." }
+    $events = @(Get-Content -LiteralPath (Join-Path $tlsRoot 'events.jsonl') | ForEach-Object { ConvertFrom-Json $_ })
+    foreach ($event in 'TcpAccepted','TlsStarted','DataReceived','FinalDataAccepted') {
+        if (@($events | Where-Object event -eq $event).Count -ne 1) { throw "The actual post-backup relay did not prove exactly one $event." }
+    }
+    $physicalReceipt = Invoke-QualificationSql 'aerolink_source' "SELECT count(*) FROM notification_physical_attempts WHERE `"GenerationId`"='$notificationGenerationId' AND `"Outcome`"='SmtpAccepted' AND `"TransportDisposed`"=true;"
+    if ([int]$physicalReceipt -ne 1) { throw 'Post-backup G1 did not persist one accepted and disposed physical transport receipt.' }
+    $postBackupAcceptedGeneration = Invoke-QualificationSql 'aerolink_source' $notificationSnapshotSql
+    Stop-NotificationQualificationApi $dispatcherHost; $dispatcherHost=$null; $tlsRelay=$null
     $authorityBeforeValidation = [IO.File]::ReadAllText($authorityPath)
+    $witnessBeforeValidation = [IO.File]::ReadAllText($authorityPath+'.generation')
     $archiveUnpacked=Join-Path $root 'archive-negative';Expand-Archive -LiteralPath $archive -DestinationPath $archiveUnpacked
     $archiveInventory=ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $archiveUnpacked 'attachment-inventory.json') -Raw)
     $negativeInventory=@($archiveInventory|ForEach-Object{$_})
@@ -231,6 +317,7 @@ try {
         -EvidenceTarget $isolatedEvidence -PostgresPort $pgPort -PostgresBin $PostgresBin -ValidationApiPort (Get-FreePort)
     if ($LASTEXITCODE -ne 0) { throw 'Isolated restore and API-download validation failed.' }
     if ([IO.File]::ReadAllText($authorityPath) -ne $authorityBeforeValidation) { throw 'Read-only isolated restore validation changed send authority.' }
+    if ([IO.File]::ReadAllText($authorityPath+'.generation') -ne $witnessBeforeValidation) { throw 'Read-only isolated restore validation changed the independent send-generation witness.' }
     if ((Invoke-QualificationSql 'aerolink_restore_validation' $notificationSnapshotSql) -ne $backedUpGeneration) { throw 'Read-only validation mutated the backed-up Pending generation.' }
     $attachmentCount = (& (Join-Path $PostgresBin 'psql.exe') -h 127.0.0.1 -p $pgPort -U postgres -d aerolink_restore_validation -tA -c 'SELECT count(*) FROM controlled_attachments;').Trim()
     if ([int]$attachmentCount -lt 1) { throw 'The isolated restore qualified no controlled attachments.' }
@@ -322,13 +409,14 @@ try {
     [pscustomobject]@{Passed=$true;PersistentPortUntouched=($pgPort -ne 54329);PostgresPort=$pgPort;IsolatedAttachments=[int]$attachmentCount;ActivatedAttachments=[int]$activatedCount;FaultPhasesProved=$faults.Count;RollbackProved=$true;PriorDatabaseRetained=$true;PriorEvidenceRetained=$true;
         NotificationRevocationProved=$true;NotificationRollbackRevocationProved=$true;OldConfigurationCannotReviveG1=$true;IndependentWitnessProved=$true;
         RestoredDispatcherZeroSocketsProved=$true;RestoredG1HeldAdmissionProved=$true;G2FutureOnlyAdmissionProved=$true;OrdinaryRestartPreservedAdmissionAndDue=$true;
-        NotificationFullScenarioProved=$false;
-        PostBackupSmtpAcceptance='NotRun: requires the separately owned trusted TLS fixture';RealOperatorStopRestart='NotRun: DisposableQualification skips supported Stop/Start processes'}
+        NotificationFullScenarioProved=$true;PostBackupSmtpAcceptance='Proved: real STARTTLS final DATA acceptance and matching durable disposed SMTP receipt';
+        PostBackupAcceptedGeneration=$postBackupAcceptedGeneration;RealOperatorStopRestart='NotRun: DisposableQualification skips supported Stop/Start processes'}
     $qualificationPassed = $true
     $global:LASTEXITCODE=0
 }
 finally {
     Stop-NotificationQualificationApi $dispatcherHost
+    if ($tlsRelay -and -not $tlsRelay.HasExited) { Stop-Process -Id $tlsRelay.Id -Force; $tlsRelay.WaitForExit(10000)|Out-Null }
     if ($smtpMonitor) { $smtpMonitor.Stop() }
     if($api -and -not $api.HasExited){Stop-Process -Id $api.Id -Force -ErrorAction SilentlyContinue}
     if($previous.Count -gt 0){Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $previous}

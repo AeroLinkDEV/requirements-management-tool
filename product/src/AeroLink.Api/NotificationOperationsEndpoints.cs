@@ -46,10 +46,11 @@ internal static class NotificationOperationsEndpoints
     }
     private static async Task<IResult> OverviewAsync(HttpContext http, AeroLinkDbContext db, IConfiguration configuration,
         NotificationSettingsResolver resolver, NotificationInstallationAuthority authority, int page = 1, int pageSize = 25,
-        string? state = null, CancellationToken ct = default)
+        string? state = null, int heldPage = 1, int heldPageSize = 25, CancellationToken ct = default)
     {
         if (!http.UserAccount().IsAdministrator) return Results.Forbid();
-        page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
+        page = Math.Clamp(page, 1, 1_000_000); pageSize = Math.Clamp(pageSize, 1, 100);
+        heldPage = Math.Clamp(heldPage, 1, 1_000_000); heldPageSize = Math.Clamp(heldPageSize, 1, 100);
         var effective = await resolver.ResolveAsync(ct);
         var query = db.NotificationDeliveryGenerations.AsNoTracking();
         if (state is not null)
@@ -60,6 +61,11 @@ internal static class NotificationOperationsEndpoints
         var total = await query.CountAsync(ct);
         var generations = await query.OrderByDescending(x => x.DueTicks).ThenBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
         var rootIds = generations.Select(x => x.DeliveryId).ToList();
+        var uncertainRoots = await (from linked in db.NotificationDeliveryGenerations.AsNoTracking()
+                                    join attempt in db.NotificationPhysicalAttempts.AsNoTracking() on linked.Id equals attempt.GenerationId
+                                    where rootIds.Contains(linked.DeliveryId) && attempt.TransmissionStartedAt != null
+                                        && (attempt.Outcome == NotificationAttemptOutcome.InProgress || attempt.Outcome == NotificationAttemptOutcome.AcceptanceUnknown)
+                                    select linked.DeliveryId).Distinct().ToListAsync(ct);
         var roots = (await db.NotificationDeliveries.AsNoTracking().Where(x => rootIds.Contains(x.Id)).ToListAsync(ct)).ToDictionary(x => x.Id);
         var noticeIds = roots.Values.Select(x => x.NotificationId).ToList();
         var contexts = (await db.NotificationContexts.AsNoTracking().Where(x => noticeIds.Contains(x.NotificationId)).ToListAsync(ct)).ToDictionary(x => x.NotificationId);
@@ -67,6 +73,14 @@ internal static class NotificationOperationsEndpoints
             .Select(x => new { State = x.Key, Count = x.Count(), OldestTicks = x.Min(g => g.CreatedTicks) }).ToListAsync(ct);
         var historical = await db.NotificationDeliveries.AsNoTracking().GroupBy(x => x.State).Select(x => new { State = x.Key, Count = x.Count(), OldestTicks = x.Min(g => g.Sequence) }).ToListAsync(ct);
         var deliveryRows = await db.NotificationDeliveries.AsNoTracking().OrderByDescending(x => x.Sequence).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        var heldQuery = db.NotificationDeliveries.AsNoTracking().Where(x => x.State == NotificationDeliveryState.HeldAdmission
+            && x.BoundNotificationId != null && !db.NotificationDeliveryGenerations.Any(g => g.DeliveryId == x.Id));
+        var heldTotal = await heldQuery.CountAsync(ct);
+        var heldRows = await heldQuery.OrderBy(x => x.Sequence).ThenBy(x => x.Id)
+            .Skip((heldPage - 1) * heldPageSize).Take(heldPageSize).ToListAsync(ct);
+        var heldNoticeIds = heldRows.Select(x => x.NotificationId).ToList();
+        var heldContexts = await db.NotificationContexts.AsNoTracking().Where(x => heldNoticeIds.Contains(x.NotificationId))
+            .ToDictionaryAsync(x => x.NotificationId, x => x.Identifier, ct);
         var heldRoots = await db.NotificationDeliveries.AsNoTracking().CountAsync(x => x.State == NotificationDeliveryState.HeldAdmission
             && !db.NotificationDeliveryGenerations.Any(g => g.DeliveryId == x.Id), ct);
         var heldRootOldest = await db.NotificationDeliveries.AsNoTracking().Where(x => x.State == NotificationDeliveryState.HeldAdmission
@@ -100,9 +114,12 @@ internal static class NotificationOperationsEndpoints
             health,
             deliveries = deliveryRows.Select(x => new { x.Id, x.NotificationId, recipient = "[protected]", address = "[protected]", channel = x.Channel.ToString(),
                 state = x.State.ToString(), x.Attempts, detail = x.State == NotificationDeliveryState.Sent ? "Historical SMTP submission evidence." : x.State.ToString(), x.CreatedAt, x.UpdatedAt, x.CompletedAt }),
+            heldDeliveries = heldRows.Select(x => new { x.Id, x.NotificationId, contextIdentifier = heldContexts.GetValueOrDefault(x.NotificationId) ?? "Original request unavailable", state = x.State.ToString(), x.CreatedAt }),
+            heldTotal, heldPage, heldPageSize,
             generations = generations.Select(x => new { x.Id, x.DeliveryId, notificationId = roots[x.DeliveryId].NotificationId,
                 contextIdentifier = contexts.GetValueOrDefault(roots[x.DeliveryId].NotificationId)?.Identifier ?? "Legacy unresolved", mode = x.Mode.ToString(), state = x.State.ToString(),
                 x.Version, x.MessageId, x.BodyHash, intendedDestination = "[protected]", effectiveDestination = "[protected]", x.Attempts,
+                requiresDuplicateRiskAcknowledgement = uncertainRoots.Contains(x.DeliveryId),
                 dueAt = new DateTimeOffset(x.DueTicks, TimeSpan.Zero), deadlineAt = new DateTimeOffset(x.DeadlineTicks, TimeSpan.Zero), x.SafeCode, x.CreatedAt }), page, pageSize, total,
         });
         int Count(NotificationGenerationState value) => counts.SingleOrDefault(x => x.State == value)?.Count ?? 0;
@@ -114,7 +131,7 @@ internal static class NotificationOperationsEndpoints
         NotificationGenerationState.AcceptanceUnknown or NotificationGenerationState.TransmissionStarted => "Prove exact worker/socket quiescence and reconcile relay evidence before deliberate duplicate-risk replay.",
         NotificationGenerationState.RetryExhausted => "Select eligible work for explicit bounded readmission.",
         NotificationGenerationState.SmtpAccepted => "SMTP accepted submission; mailbox arrival is separate evidence.",
-        NotificationGenerationState.Captured or NotificationGenerationState.TestAccepted => "Test terminal evidence; cannot be promoted to Live.",
+        NotificationGenerationState.Captured or NotificationGenerationState.TestAccepted => "Immutable test evidence; eligible work needs an explicit distinct linked generation for Live delivery.",
         _ => "Inspect the original request and attempt history.",
     };
 }

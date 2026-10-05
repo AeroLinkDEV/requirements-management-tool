@@ -1,5 +1,30 @@
 Set-StrictMode -Version Latest
 
+function Set-AeroLinkNotificationAccessRules {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][Security.AccessControl.FileSecurity]$Security)
+    # Persist only the DACL, with fresh modification flags on every application. PowerShell 5
+    # Set-Acl can request audit sections when reusing an already-persisted security object.
+    # Authority maintenance neither reads nor writes a SACL and requires no audit privilege.
+    $access = [Security.AccessControl.AccessControlSections]::Access
+    $dacl = [Security.AccessControl.FileSecurity]::new()
+    $dacl.SetSecurityDescriptorSddlForm($Security.GetSecurityDescriptorSddlForm($access), $access)
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.File]::SetAccessControl($Path, $dacl) }
+    else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($Path), $dacl) }
+    $observed = Get-Acl -LiteralPath $Path
+    function AccessIdentity($descriptor) {
+        return @($descriptor.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {
+            '{0}|{1}|{2}|{3}|{4}|{5}' -f $_.IdentityReference.Value, [int]$_.FileSystemRights,
+                [int]$_.AccessControlType, [int]$_.InheritanceFlags, [int]$_.PropagationFlags, $_.IsInherited
+        } | Sort-Object) -join ';'
+    }
+    # Windows may add the AutoInherited bookkeeping flag while retaining a protected DACL.
+    # Compare the exact effective explicit rules, including flags and inherited status.
+    if (-not $observed.AreAccessRulesProtected -or (AccessIdentity $observed) -ne (AccessIdentity $Security)) {
+        throw 'Notification authority access-rule readback failed.'
+    }
+}
+
 function Get-AeroLinkNotificationAuthorityPath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$InstanceId)
@@ -61,10 +86,10 @@ function Revoke-AeroLinkNotificationSendGeneration {
         foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
             [void]$witnessSecurity.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow))
         }
-        Set-Acl -LiteralPath $witnessTemporary -AclObject $witnessSecurity
+        Set-AeroLinkNotificationAccessRules -Path $witnessTemporary -Security $witnessSecurity
         if (Test-Path -LiteralPath $witnessPath) { [IO.File]::Replace($witnessTemporary, $witnessPath, $witnessBackup) }
         else { [IO.File]::Move($witnessTemporary, $witnessPath) }
-        Set-Acl -LiteralPath $witnessPath -AclObject $witnessSecurity
+        Set-AeroLinkNotificationAccessRules -Path $witnessPath -Security $witnessSecurity
         if ([IO.File]::ReadAllText($witnessPath) -ne [string]$policy.sendGeneration) { throw 'Notification generation witness readback failed.' }
     }
     finally {
@@ -83,10 +108,10 @@ function Revoke-AeroLinkNotificationSendGeneration {
             $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)
             [void]$security.AddAccessRule($rule)
         }
-        Set-Acl -LiteralPath $temporary -AclObject $security
+        Set-AeroLinkNotificationAccessRules -Path $temporary -Security $security
         if (Test-Path -LiteralPath $path) { [IO.File]::Replace($temporary, $path, $policyBackup) }
         else { [IO.File]::Move($temporary, $path) }
-        Set-Acl -LiteralPath $path -AclObject $security
+        Set-AeroLinkNotificationAccessRules -Path $path -Security $security
         $readback = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
         if ([string]$readback.sendGeneration -ne [string]$policy.sendGeneration -or [int]$readback.maximumMode -ne 0) { throw 'Notification revocation readback failed.' }
         return [pscustomobject]@{ State = 'DisabledRevoked'; SendGeneration = [string]$policy.sendGeneration }
@@ -97,4 +122,4 @@ function Revoke-AeroLinkNotificationSendGeneration {
     }
 }
 
-Export-ModuleMember -Function Get-AeroLinkNotificationAuthorityPath, Revoke-AeroLinkNotificationSendGeneration
+Export-ModuleMember -Function Get-AeroLinkNotificationAuthorityPath, Revoke-AeroLinkNotificationSendGeneration, Set-AeroLinkNotificationAccessRules
