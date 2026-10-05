@@ -239,6 +239,11 @@ test('notification settings recover the original receipt after reload and keep e
   await page.getByRole('button', { name: 'Request new generation' }).click()
   await expect(page.getByRole('region', { name: 'Notification operation receipt' })).toContainText('Reissue · Reissued')
   expect(submissions[3]).toMatchObject({ family: 'Reissue', generationId: firstGeneration, acknowledgeDuplicateRisk: true })
+  // Each distinct disposition requires fresh deliberate acknowledgement, rather than carrying consent
+  // forward from the preceding command whose receipt has already been recorded.
+  await expect(page.getByLabel('I acknowledge that another send after unknown acceptance may produce a duplicate email.')).not.toBeChecked()
+  await expect(page.getByRole('button', { name: 'Suppress generation' })).toBeDisabled()
+  await page.getByLabel('I acknowledge that another send after unknown acceptance may produce a duplicate email.').check()
   await page.getByRole('button', { name: 'Suppress generation' }).click()
   await expect(page.getByRole('region', { name: 'Notification operation receipt' })).toContainText('Suppress · Suppressed')
   expect(submissions[4]).toMatchObject({ family: 'Suppress', generationId: firstGeneration, acknowledgeDuplicateRisk: true })
