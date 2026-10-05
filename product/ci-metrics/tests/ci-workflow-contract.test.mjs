@@ -48,7 +48,8 @@ test('scheduled proof uses bounded duration packing and cannot be cancelled by a
   assert.ok(group.includes('inputs.pull_request_number || github.event.pull_request.number || github.ref'))
   const full = jobBodies(workflowLines())['browser-full'].join('\n')
   assert.match(full, /timeout-minutes: 30/)
-  assert.match(full, /shard: \[1, 2, 3\]/)
+  // Six shards since #1340: three needed about 29 minutes of tests each by 2026-10-05.
+  assert.match(full, /shard: \[1, 2, 3, 4, 5, 6\]/)
   assert.match(full, /scripts\/plan-journey-shard\.mjs listed\.txt/)
   assert.match(full, /\[ "\$actual" != "\$expected" \]/)
   assert.doesNotMatch(full, /playwright test --shard/)

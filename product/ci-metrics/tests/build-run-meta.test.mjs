@@ -73,7 +73,7 @@ test('full pull-request topology has every product instance, exact gate needs, a
       'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke',
     ])
     assert.deepEqual(meta.skippedJobs.map((job) => job.instance), [
-      'browser-full-1', 'browser-full-2', 'browser-full-3', 'warm-chromium-cache',
+      'browser-full-1', 'browser-full-2', 'browser-full-3', 'browser-full-4', 'browser-full-5', 'browser-full-6', 'warm-chromium-cache',
     ])
     assert.equal(meta.provenance.mode, 'shadow')
   } finally {
@@ -160,8 +160,11 @@ test('schedule and default-branch dispatch select the full browser lanes and ski
     const { directory, result, meta } = build({ ...ALL_TRUE, GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/main' })
     try {
       assert.equal(result.status, 0, result.stderr)
-      assert.ok(instances(meta).includes('browser-full-1'))
-      assert.ok(instances(meta).includes('browser-full-3'))
+      // Every shard of the workflow's browser-full matrix, and no other (#1340).
+      const matrix = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+        .match(/\n  browser-full:\n[\s\S]*?\n        shard: \[([\d, ]+)\]/)[1].split(',').map((shard) => `browser-full-${shard.trim()}`)
+      assert.deepEqual(matrix, ['browser-full-1', 'browser-full-2', 'browser-full-3', 'browser-full-4', 'browser-full-5', 'browser-full-6'])
+      assert.deepEqual(instances(meta).filter((instance) => instance.startsWith('browser-full-')), matrix)
       assert.ok(meta.expectedJobs.find((job) => job.instance === 'gate').needs.includes('browser-full'),
         'scheduled critical path must wait for the full browser proof')
       assert.ok(instances(meta).includes('browser-production'))
