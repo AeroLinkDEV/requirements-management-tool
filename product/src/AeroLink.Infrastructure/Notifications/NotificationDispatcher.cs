@@ -85,10 +85,13 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
             if (candidate.ProtectedMime.Length > 0 && candidate.MessageConfigurationHash != semanticHash)
             { await SetHeldAsync(candidate.Id, NotificationGenerationState.ConfigBlocked, "MessageSettingsChangedReissueRequired", ct, settings); continue; }
             using var process = Process.GetCurrentProcess();
+            var processIdentity = NotificationProcessIdentity.CaptureCurrent();
+            if (processIdentity is null)
+            { await SetHeldAsync(candidate.Id, NotificationGenerationState.ConfigBlocked, "ProcessIdentityUnavailable", ct, settings); continue; }
             var claim = Guid.NewGuid();
             var attempt = new NotificationPhysicalAttempt(candidate.Id, claim, settings.SettingsId, settings.PolicyHash,
                 authority.HostIdentity, process.Id, process.StartTime.ToUniversalTime().Ticks, now,
-                protection.Protect(JsonSerializer.Serialize(settings)), protection.Protect(EffectiveSettingsHash(settings)));
+                protection.Protect(JsonSerializer.Serialize(settings)), protection.Protect(EffectiveSettingsHash(settings)), processIdentity);
             await using (var transaction = await db.Database.BeginTransactionAsync(ct))
             {
                 var won = await db.NotificationDeliveryGenerations.Where(x => x.Id == candidate.Id && x.Version == candidate.Version
@@ -401,6 +404,9 @@ public static class NotificationQuiescence
     {
         if (attempt.TransportDisposed && attempt.CompletedAt is not null) return true;
         if (attempt.HostIdentity != hostIdentity) return false;
+        if (OperatingSystem.IsLinux()) return NotificationProcessIdentity.IsLinuxInstanceGone(attempt.ProcessId, attempt.ProcessIdentity);
+        if (!OperatingSystem.IsWindows()) return false;
+        if (attempt.ProcessIdentity.Length > 0 && attempt.ProcessIdentity != "windows-v1:" + attempt.ProcessStartTicks) return false;
         try
         {
             using var process = Process.GetProcessById(attempt.ProcessId);

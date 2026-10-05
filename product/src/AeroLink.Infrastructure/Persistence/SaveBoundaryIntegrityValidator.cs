@@ -53,7 +53,7 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
                 if (entry.State == EntityState.Deleted) throw new DomainException("Physical notification attempts cannot be deleted.");
                 if (entry.State != EntityState.Modified) continue;
                 var terminal = (NotificationAttemptOutcome)entry.OriginalValues[nameof(NotificationPhysicalAttempt.Outcome)]! != NotificationAttemptOutcome.InProgress;
-                var immutable = new[] { "Id", "GenerationId", "ClaimToken", "SettingsRevisionId", "PolicyHash", "ProtectedSettingsSnapshot", "EffectiveSettingsHash", "HostIdentity", "ProcessId", "ProcessStartTicks", "ClaimedAt" };
+                var immutable = new[] { "Id", "GenerationId", "ClaimToken", "SettingsRevisionId", "PolicyHash", "ProtectedSettingsSnapshot", "EffectiveSettingsHash", "HostIdentity", "ProcessId", "ProcessStartTicks", "ProcessIdentity", "ClaimedAt" };
                 if (entry.Properties.Any(x => x.IsModified && (immutable.Contains(x.Metadata.Name)
                     || terminal && x.Metadata.Name is not ("TransportDisposed" or "DisposedAt" or "CleanupWarning"))))
                     throw new DomainException("Physical submission identity and a terminal SMTP outcome are immutable.");

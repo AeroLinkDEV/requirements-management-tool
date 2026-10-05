@@ -658,8 +658,14 @@ connection starts by at least one second, and pauses the same destination for th
 transient or configuration refusal. This cooldown is separate from each message's longer retry schedule.
 Every linked started attempt must have a durable
 socket-disposal fact or exact local process creation-identity exit proof before another socket may start.
-A PID, missed heartbeat or expired lease alone is not quiescence. Acceptance is recorded before QUIT;
-post-acceptance persistence recovery retries the factual receipt only, never SMTP. A crash before that durable
+A PID, missed heartbeat or expired lease alone is not quiescence.
+Windows uses the kernel process creation time. Linux uses immutable boot, PID namespace, time namespace
+and raw kernel process start evidence, without converting it to a wall-clock estimate. An unreadable or
+different namespace, unsupported OS, or legacy Linux attempt without native identity remains unproven;
+retain its hold until an independently established socket-disposal receipt is available. Migration preserves
+the original UTC metadata and leaves legacy native identity empty. Missing native capture blocks new sends.
+Acceptance is recorded before QUIT; post-acceptance persistence recovery retries the factual receipt only,
+never SMTP. A crash before that durable
 receipt leaves acceptance unknown for operator/relay reconciliation.
 
 Use `START_AEROLINK_EMAIL_DEMO.bat` for the local catcher path. It starts pinned smtp4dev 3.15.0 under

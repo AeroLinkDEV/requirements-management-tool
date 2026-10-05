@@ -112,15 +112,35 @@ public sealed class NotificationProcessQualificationTests
         using var worker = fixture.Worker();
         await fixture.WaitFactAsync("DataReceived");
         Suspend(worker);
+        NotificationPhysicalAttempt started;
+        Guid distinct;
         try
         {
             await using var db = fixture.Db();
-            var started = await db.NotificationPhysicalAttempts.SingleAsync();
+            started = await db.NotificationPhysicalAttempts.SingleAsync();
             Assert.NotNull(started.TransmissionStartedAt);
             Assert.Equal(worker.Id, started.ProcessId);
-            Assert.Equal(worker.StartTime.ToUniversalTime().Ticks, started.ProcessStartTicks);
+            Assert.NotEmpty(started.ProcessIdentity);
+            if (OperatingSystem.IsWindows()) Assert.Equal(worker.StartTime.ToUniversalTime().Ticks, started.ProcessStartTicks);
+            else
+            {
+                // Linux CI observed a 6,705-tick difference between two legitimate .NET boot-time
+                // estimates. An archived UTC-only record with that difference must fail closed.
+                var legacy = new NotificationPhysicalAttempt(started.GenerationId, started.ClaimToken, started.SettingsRevisionId,
+                    started.PolicyHash, started.HostIdentity, worker.Id, worker.StartTime.ToUniversalTime().Ticks + 6705, started.ClaimedAt);
+                Assert.False(NotificationQuiescence.IsConfirmed(legacy, started.HostIdentity));
+                using var native = JsonDocument.Parse(started.ProcessIdentity);
+                Assert.Equal(worker.Id, native.RootElement.GetProperty("Pid").GetInt32());
+                var stat = File.ReadAllText($"/proc/{worker.Id}/stat");
+                var fields = stat[(stat.LastIndexOf(')') + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                Assert.Equal(ulong.Parse(fields[19]), native.RootElement.GetProperty("Start").GetUInt64());
+            }
+            Assert.False(NotificationQuiescence.IsConfirmed(started, started.HostIdentity));
+            var identityRewrite = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE notification_physical_attempts SET \"ProcessIdentity\"={"replaced"} WHERE \"Id\"={started.Id}"));
+            Assert.Contains("immutable", identityRewrite.MessageText);
             await db.NotificationDeliveryGenerations.ExecuteUpdateAsync(x => x.SetProperty(p => p.LeaseUntilTicks, DateTimeOffset.UtcNow.AddMinutes(-1).UtcTicks));
-            await fixture.QueueAsync(); // A distinct legitimate source root must also respect the relay bound.
+            distinct = await fixture.QueueAsync(); // A distinct legitimate source root must also respect the relay bound.
             await fixture.RunWorkerAsync();
             var generation = await fixture.GenerationAsync(first);
             Assert.Equal(NotificationGenerationState.AcceptanceUnknown, generation.State);
@@ -137,6 +157,16 @@ public sealed class NotificationProcessQualificationTests
         Assert.Equal(1, fixture.FactCount("FinalDataAccepted"));
         // The late factual receipt wins over the earlier lease attention without a second DATA.
         Assert.Equal(1, fixture.FactCount("TcpAccepted"));
+        // This snapshot has no disposal receipt: native OS evidence must establish the exact exited
+        // process independently before another root may use the installation's relay admission.
+        Assert.False(started.TransportDisposed);
+        Assert.True(NotificationQuiescence.IsConfirmed(started, started.HostIdentity));
+        await using (var db = fixture.Db())
+            await db.NotificationDeliveryGenerations.Where(x => x.State == NotificationGenerationState.Pending)
+                .ExecuteUpdateAsync(x => x.SetProperty(p => p.DueTicks, DateTimeOffset.UtcNow.UtcTicks));
+        await fixture.RunWorkerAsync();
+        Assert.Equal(NotificationGenerationState.SmtpAccepted, (await fixture.GenerationAsync(distinct)).State);
+        Assert.Equal(2, fixture.FactCount("TcpAccepted")); Assert.Equal(2, fixture.FactCount("FinalDataAccepted"));
     }
 
     [DisposablePostgresFact]
@@ -371,7 +401,7 @@ public sealed class NotificationProcessQualificationTests
             var current = new DirectoryInfo(AppContext.BaseDirectory); while (current is not null && !File.Exists(Path.Combine(current.FullName, "AeroLink.slnx"))) current = current.Parent;
             if (current is null) throw new InvalidOperationException("Qualification solution root missing.");
             var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
-            var assembly = Path.Combine(current.FullName, "tests", "AeroLink.NotificationQualificationHost", "bin", configuration, "net10.0", "AeroLink.NotificationQualificationHost.dll");
+            var assembly = Path.Combine(current.FullName, "scripts", "test-support", "AeroLink.NotificationQualificationHost", "bin", configuration, "net10.0", "AeroLink.NotificationQualificationHost.dll");
             if (!File.Exists(assembly)) throw new InvalidOperationException("Required qualification host was not built by the infrastructure project.");
             var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
             start.ArgumentList.Add(assembly); start.ArgumentList.Add(ConfigPath); start.Environment["AEROLINK_NOTIFICATION_AUTHORITY_ROOT"] = AuthorityRoot;

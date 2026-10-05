@@ -139,7 +139,11 @@ public sealed class ProblemReportSourceIdentityPostgresTests
                 Assert.Equal(original, await OriginalInventory(db));
                 var stored = await db.ProblemReportImportBatches.SingleAsync();
                 Assert.Null(stored.OperationId); Assert.Null(stored.ActorId); Assert.Null(stored.RequestHash); Assert.Null(stored.ReceiptJson);
-                Assert.Equal(new[] { Predecessor, RecoveryMigration }, (await db.Database.GetAppliedMigrationsAsync()).TakeLast(2));
+                // Keep the exact historical upgrade boundary; later unrelated migrations may follow it.
+                var applied = (await db.Database.GetAppliedMigrationsAsync()).ToArray();
+                var predecessorIndex = Array.IndexOf(applied, Predecessor);
+                Assert.True(predecessorIndex >= 0, "The original source-history migration must remain applied.");
+                Assert.Equal(new[] { Predecessor, RecoveryMigration }, applied.Skip(predecessorIndex).Take(2));
                 Assert.Equal(new[] { signature.Id }, await db.ElectronicSignatures.Select(x => x.Id).ToArrayAsync());
             }
             else

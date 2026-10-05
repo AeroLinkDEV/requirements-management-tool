@@ -158,11 +158,11 @@ public sealed class NotificationPhysicalAttempt
 {
     private NotificationPhysicalAttempt() { }
     public NotificationPhysicalAttempt(Guid generationId, Guid claimToken, Guid settingsId, string policyHash,
-        string hostIdentity, int processId, long processStartTicks, DateTimeOffset now, string protectedSettingsSnapshot = "", string effectiveSettingsHash = "")
+        string hostIdentity, int processId, long processStartTicks, DateTimeOffset now, string protectedSettingsSnapshot = "", string effectiveSettingsHash = "", string processIdentity = "")
     {
         Id = Guid.NewGuid(); GenerationId = generationId; ClaimToken = claimToken; SettingsRevisionId = settingsId;
         PolicyHash = policyHash; HostIdentity = hostIdentity; ProcessId = processId; ProcessStartTicks = processStartTicks;
-        ClaimedAt = now; Outcome = NotificationAttemptOutcome.InProgress; ProtectedSettingsSnapshot = protectedSettingsSnapshot; EffectiveSettingsHash = effectiveSettingsHash;
+        ClaimedAt = now; Outcome = NotificationAttemptOutcome.InProgress; ProtectedSettingsSnapshot = protectedSettingsSnapshot; EffectiveSettingsHash = effectiveSettingsHash; ProcessIdentity = processIdentity;
     }
     public Guid Id { get; private set; }
     public Guid GenerationId { get; private set; }
@@ -174,6 +174,7 @@ public sealed class NotificationPhysicalAttempt
     public string HostIdentity { get; private set; } = "";
     public int ProcessId { get; private set; }
     public long ProcessStartTicks { get; private set; }
+    public string ProcessIdentity { get; private set; } = "";
     public DateTimeOffset ClaimedAt { get; private set; }
     public DateTimeOffset? TransmissionStartedAt { get; private set; }
     public NotificationAttemptOutcome Outcome { get; private set; }

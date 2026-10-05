@@ -27,7 +27,7 @@
     <ProjectReference Include="..\..\src\AeroLink.Domain\AeroLink.Domain.csproj" />
     <ProjectReference Include="..\..\src\AeroLink.Infrastructure\AeroLink.Infrastructure.csproj" />
     <ProjectReference Include="..\..\tools\AeroLink.Scale\AeroLink.Scale.csproj" />
-    <ProjectReference Include="../AeroLink.NotificationQualificationHost/AeroLink.NotificationQualificationHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../scripts/test-support/AeroLink.NotificationQualificationHost/AeroLink.NotificationQualificationHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

@@ -69,6 +69,7 @@ internal static class NotificationModelConfiguration
         model.Entity<NotificationPhysicalAttempt>(b =>
         {
             b.ToTable("notification_physical_attempts"); b.HasKey(x => x.Id);
+            b.Property(x => x.ProcessIdentity).HasMaxLength(1024);
             b.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(40); b.Property(x => x.SafeCode).HasMaxLength(60);
             b.HasIndex(x => x.ClaimToken).IsUnique(); b.HasIndex(x => x.GenerationId);
             b.HasOne<NotificationDeliveryGeneration>().WithMany().HasForeignKey(x => x.GenerationId).OnDelete(DeleteBehavior.Restrict);
