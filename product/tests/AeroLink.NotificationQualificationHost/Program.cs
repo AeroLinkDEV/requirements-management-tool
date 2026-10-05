@@ -9,7 +9,7 @@ using Npgsql;
 // Qualification-only executable. It calls the production dispatcher without a mock transport,
 // injected clock, fault hook or altered gate. Every input and output belongs to the parent fixture.
 if (args.Length != 1) throw new ArgumentException("An owned qualification configuration file is required.");
-var configuration = new ConfigurationBuilder().AddJsonFile(Path.GetFullPath(args[0])).Build();
+var configuration = new ConfigurationBuilder().AddJsonFile(Path.GetFullPath(args[0]), optional: false, reloadOnChange: true).Build();
 var connection = new NpgsqlConnectionStringBuilder(configuration.GetConnectionString("AeroLink"));
 if (!IPAddress.TryParse(connection.Host, out var address) || !IPAddress.IsLoopback(address)
     || connection.Port == 54329 || connection.Database is null || !connection.Database.StartsWith("notification_process_", StringComparison.Ordinal))

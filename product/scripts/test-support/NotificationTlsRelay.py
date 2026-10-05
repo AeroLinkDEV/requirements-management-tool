@@ -1,3 +1,4 @@
+# Shared disposable qualification peer for backend and supported restore owners; never a product relay.
 import ssl, socket, sys, json, os, time, threading
 root, reply = sys.argv[1:3]
 port = int(sys.argv[3]) if len(sys.argv) > 3 else 0
@@ -33,7 +34,7 @@ def session(raw):
         assert line(raw) == 'STARTTLS'; send(raw, '220 Ready\r\n'); tls = True; fact('TlsStarted')
         with context.wrap_socket(raw, server_side=True) as secure:
             assert line(secure).startswith('EHLO ')
-            send(secure, '250-owned fixture\r\n250 AUTH PLAIN LOGIN\r\n' if reply in ('AuthAccept', 'AuthRefuse') else '250 owned fixture\r\n')
+            send(secure, '250-owned fixture\r\n250 AUTH PLAIN\r\n' if reply in ('AuthAccept', 'AuthRefuse') else '250 owned fixture\r\n')
             while True:
                 command = line(secure)
                 if command.startswith('AUTH '):
@@ -45,6 +46,9 @@ def session(raw):
                     envelope += command + '\n'
                     send(secure, '451 Later\r\n' if reply == 'Refuse451' else '550 Refused\r\n' if reply == 'Refuse550' else '250 Recipient\r\n')
                 elif command == 'DATA':
+                    fact('DataCommandReceived')
+                    if reply == 'PauseBeforeDataReply':
+                        time.sleep(timeout); raise TimeoutError()
                     send(secure, '354 Send\r\n'); parts = []
                     while True:
                         content = line(secure)

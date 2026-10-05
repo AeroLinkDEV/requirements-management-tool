@@ -31,6 +31,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="TestSupport/NotificationTlsRelay.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../scripts/test-support/NotificationTlsRelay.py" Link="TestSupport/NotificationTlsRelay.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

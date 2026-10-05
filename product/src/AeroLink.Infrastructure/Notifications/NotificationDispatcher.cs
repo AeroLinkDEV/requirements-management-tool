@@ -53,7 +53,8 @@ public sealed class NotificationDispatcher(AeroLinkDbContext db, NotificationSet
         var due = await db.NotificationDeliveryGenerations.AsNoTracking()
             .Where(x => (x.State == NotificationGenerationState.Pending || x.State == NotificationGenerationState.RetryDue || x.State == NotificationGenerationState.ConfigBlocked
                     && !unchangedBlocked.Contains(x.Id) && x.SafeCode != "RecipientAddressChanged" && x.SafeCode != "MessageSettingsChangedReissueRequired")
-                && x.AdmissionEpochId == settings.AdmissionEpochId && x.Mode == settings.Mode && x.DueTicks <= now.UtcTicks)
+                && x.AdmissionEpochId == settings.AdmissionEpochId && x.Mode == settings.Mode
+                && (x.State == NotificationGenerationState.ConfigBlocked || x.DueTicks <= now.UtcTicks))
             .OrderBy(x => x.DueTicks).Take(Math.Clamp(batchSize, 1, 50)).ToListAsync(ct);
         var sent = 0; var suppressed = 0; var failed = 0;
         foreach (var candidate in due)

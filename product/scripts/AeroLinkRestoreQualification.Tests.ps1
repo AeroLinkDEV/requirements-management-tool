@@ -133,7 +133,7 @@ try {
 }
 function Start-QualificationTlsRelay([string]$Directory) {
     $python = if ($env:AEROLINK_TEST_PYTHON) { $env:AEROLINK_TEST_PYTHON } else { (Get-Command python.exe -ErrorAction Stop).Source }
-    $relay = Join-Path $productRoot 'tests\AeroLink.Infrastructure.Tests\TestSupport\NotificationTlsRelay.py'
+    $relay = Join-Path $PSScriptRoot 'test-support\NotificationTlsRelay.py'
     if (-not (Test-Path -LiteralPath $relay -PathType Leaf)) { throw 'The shared executable TLS relay fixture is missing.' }
     $stdout = Join-Path $Directory 'relay.stdout.log'
     $stderr = Join-Path $Directory 'relay.stderr.log'
@@ -354,7 +354,6 @@ try {
     if ([string]$revoked.sendGeneration -eq $g1 -or [int]$revoked.maximumMode -ne 0) { throw 'Successful supported restore did not revoke G1 before activating the restored database.' }
     [IO.File]::WriteAllBytes($instanceConfig,$savedInstanceConfig)
     if ((Get-Content -LiteralPath $authorityPath -Raw | ConvertFrom-Json).sendGeneration -ne $revoked.sendGeneration) { throw 'Restoring old instance configuration rewrote protected send authority.' }
-    $revokedPolicyJson = [IO.File]::ReadAllText($authorityPath)
     $revokedWitness = [IO.File]::ReadAllText($authorityPath+'.generation')
     if ($revokedWitness -ne [string]$revoked.sendGeneration) { throw 'Supported restore did not commit the independent revocation witness.' }
     $smtpMonitor = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$smtpPort); $smtpMonitor.Start()
@@ -371,14 +370,21 @@ try {
     $invalid = Get-QualificationOperations $dispatcherHost.BaseUrl
     if ($invalid.smtp.configured -or $invalid.policy.sendAuthority -ne 'blocked') { throw 'An archived G1 policy revived authority without the independent witness.' }
     Assert-RevokedNotificationBacklog 'archived G1 policy replacement'
+    # A valid replacement policy is the positive control for each single-field refusal. The original
+    # restored G1 work remains held even while G2 transport is permitted: no admission is inferred.
+    $g2Policy = ConvertFrom-Json $g1Json; $g2Policy.sendGeneration=[string]$revoked.sendGeneration; $g2Policy.policyRevision=[guid]::NewGuid().ToString('D')
+    $g2Json = ConvertTo-Json -InputObject $g2Policy -Depth 6 -Compress
     foreach ($invalidAuthority in 'Missing','Corrupt','CopiedHost','WrongInstallation','MissingWitness') {
-        [IO.File]::WriteAllText($authorityPath,$revokedPolicyJson,[Text.UTF8Encoding]::new($false))
-        [IO.File]::WriteAllText(($authorityPath+'.generation'),$revokedWitness,[Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($authorityPath,$g2Json,[Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText(($authorityPath+'.generation'),[string]$g2Policy.sendGeneration,[Text.UTF8Encoding]::new($false))
+        $permitted = Get-QualificationOperations $dispatcherHost.BaseUrl
+        if (-not $permitted.smtp.configured -or $permitted.policy.sendAuthority -ne 'current') { throw "Valid G2 authority positive control failed before $invalidAuthority." }
+        Assert-RevokedNotificationBacklog "valid G2 policy before $invalidAuthority"
         switch ($invalidAuthority) {
             'Missing' { Remove-Item -LiteralPath $authorityPath }
             'Corrupt' { [IO.File]::WriteAllText($authorityPath,'{broken',[Text.UTF8Encoding]::new($false)) }
-            'CopiedHost' { $bad=ConvertFrom-Json $revokedPolicyJson; $bad.hostIdentity='qualification-other-host'; $bad.maximumMode=3; $bad|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $authorityPath -Encoding UTF8 }
-            'WrongInstallation' { $bad=ConvertFrom-Json $revokedPolicyJson; $bad.installationId=[guid]::NewGuid().ToString('D'); $bad.maximumMode=3; $bad|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $authorityPath -Encoding UTF8 }
+            'CopiedHost' { $bad=ConvertFrom-Json $g2Json; $bad.hostIdentity='qualification-other-host'; $bad|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $authorityPath -Encoding UTF8 }
+            'WrongInstallation' { $bad=ConvertFrom-Json $g2Json; $bad.installationId=[guid]::NewGuid().ToString('D'); $bad|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $authorityPath -Encoding UTF8 }
             'MissingWitness' { Remove-Item -LiteralPath ($authorityPath+'.generation') }
         }
         $invalid = Get-QualificationOperations $dispatcherHost.BaseUrl
@@ -386,9 +392,8 @@ try {
         Assert-RevokedNotificationBacklog $invalidAuthority
     }
     # Explicit G2 commissioning/activation still admits only future events, not restored G1 backlog.
-    $g2Policy = ConvertFrom-Json $g1Json; $g2Policy.sendGeneration=[string]$revoked.sendGeneration; $g2Policy.policyRevision=[guid]::NewGuid().ToString('D')
     [IO.File]::WriteAllText(($authorityPath+'.generation'),[string]$g2Policy.sendGeneration,[Text.UTF8Encoding]::new($false))
-    $g2Policy | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $authorityPath -Encoding UTF8
+    [IO.File]::WriteAllText($authorityPath,$g2Json,[Text.UTF8Encoding]::new($false))
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     [void](Invoke-RestMethod "$($dispatcherHost.BaseUrl)/api/auth/login" -Method Post -ContentType 'application/json' -Body '{"userName":"admin","password":"AeroLink!2026"}' -WebSession $session)
     $csrf=Invoke-RestMethod "$($dispatcherHost.BaseUrl)/api/auth/csrf" -WebSession $session

@@ -20,6 +20,56 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class NotificationTlsTransportTests
 {
     [Fact]
+    public async Task Actual_async_data_command_wait_uses_two_minute_phase_bound()
+    {
+        using var certificate = Certificate("localhost"); await using var relay = new TlsRelay(certificate, Reply.PauseBeforeDataReply, timeoutSeconds: 160);
+        var sending = new NotificationSmtpTransport().SendAsync(Settings(relay.Port, certificate), Message(), default);
+        await relay.WaitFactAsync("DataCommandReceived"); var elapsed = Stopwatch.StartNew();
+        var result = await sending.WaitAsync(TimeSpan.FromSeconds(140));
+        Assert.InRange(elapsed.Elapsed.TotalSeconds, 115, 135);
+        Assert.Equal(NotificationAttemptOutcome.AcceptanceUnknown, result.Outcome); Assert.Equal("DataCommand", result.Phase);
+        Assert.True(result.TransportDisposed); Assert.False(relay.HasFact("DataReceived"));
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(0, false)]
+    public async Task Actual_intermediate_chain_enforces_ca_path_constraints_with_online_crl_positive_control(int rootPathLimit, bool permitted)
+    {
+        await using var rootCrl = new CrlServer(); await using var intermediateCrl = new CrlServer();
+        var now = DateTimeOffset.UtcNow;
+        using var rootKey = RSA.Create(2048);
+        var rootRequest = new CertificateRequest("CN=Owned path root " + Guid.NewGuid().ToString("N"), rootKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, rootPathLimit, true));
+        rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        rootRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(rootRequest.PublicKey, false));
+        using var root = rootRequest.CreateSelfSigned(now.AddDays(-2), now.AddDays(2));
+        using var intermediateKey = RSA.Create(2048);
+        var intermediateRequest = new CertificateRequest("CN=Owned intermediate " + Guid.NewGuid().ToString("N"), intermediateKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        intermediateRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+        intermediateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+        intermediateRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(intermediateRequest.PublicKey, false));
+        intermediateRequest.CertificateExtensions.Add(CertificateRevocationListBuilder.BuildCrlDistributionPointExtension([rootCrl.Url]));
+        using var intermediatePublic = intermediateRequest.Create(root, now.AddDays(-1), now.AddDays(1), RandomNumberGenerator.GetBytes(16));
+        using var intermediate = intermediatePublic.CopyWithPrivateKey(intermediateKey);
+        using var leafKey = RSA.Create(2048);
+        var leafRequest = new CertificateRequest("CN=localhost", leafKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var san = new SubjectAlternativeNameBuilder(); san.AddDnsName("localhost"); leafRequest.CertificateExtensions.Add(san.Build());
+        leafRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        leafRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+        leafRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
+        leafRequest.CertificateExtensions.Add(CertificateRevocationListBuilder.BuildCrlDistributionPointExtension([intermediateCrl.Url]));
+        using var leafPublic = leafRequest.Create(intermediate, now.AddHours(-1), now.AddHours(1), RandomNumberGenerator.GetBytes(16));
+        using var leaf = leafPublic.CopyWithPrivateKey(leafKey);
+        rootCrl.Content = new CertificateRevocationListBuilder().Build(root, 1, now.AddHours(1), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1, now.AddMinutes(-2));
+        intermediateCrl.Content = new CertificateRevocationListBuilder().Build(intermediate, 1, now.AddHours(1), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1, now.AddMinutes(-2));
+        await using var relay = new TlsRelay(leaf, Reply.AcceptThenDropQuit, intermediatePem: intermediate.ExportCertificatePem());
+        var result = await new NotificationSmtpTransport().SendAsync(Settings(relay.Port, root), Message(), default); await relay.Completion;
+        Assert.True(relay.TlsStarted); Assert.Equal(permitted ? NotificationAttemptOutcome.TestAccepted : NotificationAttemptOutcome.ConfigBlocked, result.Outcome);
+        Assert.Equal(permitted ? 1 : 0, relay.DataCount);
+        if (permitted) { Assert.True(rootCrl.Requests > 0); Assert.True(intermediateCrl.Requests > 0); }
+    }
+    [Fact]
     public async Task Authentication_positive_control_precedes_actual_invalid_credential_refusal()
     {
         using var certificate = Certificate("localhost");
@@ -208,7 +258,7 @@ public sealed class NotificationTlsTransportTests
         return request.CreateSelfSigned(future ? now.AddDays(1) : now.AddDays(-2), expired ? now.AddDays(-1) : now.AddDays(2));
     }
 
-    public enum Reply { AcceptThenDropQuit, LoseFinalReply, Refuse451, Refuse550, AuthAccept, AuthRefuse, NoStartTls, PauseAfterData }
+    public enum Reply { AcceptThenDropQuit, LoseFinalReply, Refuse451, Refuse550, AuthAccept, AuthRefuse, NoStartTls, PauseAfterData, PauseBeforeDataReply }
     private sealed class TlsRelay : IAsyncDisposable
     {
         private readonly string directory = Path.Combine(Path.GetTempPath(), "aerolink-owned-tls-" + Guid.NewGuid().ToString("N"));
@@ -230,10 +280,10 @@ public sealed class NotificationTlsTransportTests
         }
         internal async Task WaitFactAsync(string name)
         { var until = DateTimeOffset.UtcNow.AddSeconds(15); while (!HasFact(name) && DateTimeOffset.UtcNow < until) await Task.Delay(25); Assert.True(HasFact(name)); }
-        internal TlsRelay(X509Certificate2 certificate, Reply reply)
+        internal TlsRelay(X509Certificate2 certificate, Reply reply, int timeoutSeconds = 30, string? intermediatePem = null)
         {
             Directory.CreateDirectory(directory);
-            File.WriteAllText(Path.Combine(directory, "certificate.pem"), certificate.ExportCertificatePem());
+            File.WriteAllText(Path.Combine(directory, "certificate.pem"), certificate.ExportCertificatePem() + "\n" + intermediatePem);
             using var key = certificate.GetRSAPrivateKey()!;
             File.WriteAllText(Path.Combine(directory, "key.pem"), key.ExportPkcs8PrivateKeyPem());
             File.Copy(Path.Combine(AppContext.BaseDirectory, "TestSupport", "NotificationTlsRelay.py"), Path.Combine(directory, "relay.py"));
@@ -242,6 +292,7 @@ public sealed class NotificationTlsTransportTests
             var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("AEROLINK_TEST_PYTHON") ?? (OperatingSystem.IsWindows() ? "python" : "python3"))
             { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
             start.ArgumentList.Add(Path.Combine(directory, "relay.py")); start.ArgumentList.Add(directory); start.ArgumentList.Add(reply.ToString());
+            start.ArgumentList.Add("0"); start.ArgumentList.Add(timeoutSeconds.ToString());
             process = Process.Start(start) ?? throw new InvalidOperationException("Owned TLS relay could not start.");
             var first = process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
             if (!int.TryParse(first, out var port)) throw new InvalidOperationException("Owned TLS relay did not publish its port.");

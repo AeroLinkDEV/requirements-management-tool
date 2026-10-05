@@ -135,11 +135,12 @@ public sealed class NotificationDeliveryGeneration
     }
     public void Hold(string code, NotificationGenerationState state = NotificationGenerationState.ConfigBlocked, string blockedSettingsHash = "")
     { State = state; SafeCode = code; BlockedEffectiveSettingsHash = blockedSettingsHash; ClaimToken = null; Version++; }
-    public void Readmit(Guid epochId, Guid sendGeneration, DateTimeOffset now, bool diagnostic = false)
+    public void Readmit(Guid epochId, Guid sendGeneration, DateTimeOffset now, bool diagnostic = false, bool acknowledgeDuplicateRisk = false)
     {
         if (State is not (NotificationGenerationState.RetryExhausted or NotificationGenerationState.ConfigBlocked or NotificationGenerationState.HeldAdmission))
             throw new DomainException("Only held known-unsent work can be readmitted.");
         AdmissionEpochId = epochId; SendGeneration = sendGeneration;
+        DuplicateRiskAcknowledged |= acknowledgeDuplicateRisk;
         State = NotificationGenerationState.Pending; DeadlineTicks = now.AddHours(24).UtcTicks;
         DueTicks = now.UtcTicks; MaximumAttempts = TransientFailures + (diagnostic ? 1 : 14); MaximumPhysicalAttempts = diagnostic ? Attempts + 1 : int.MaxValue; SafeCode = ""; Version++;
     }

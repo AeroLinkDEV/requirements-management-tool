@@ -23,6 +23,68 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class NotificationProcessQualificationTests
 {
     [DisposablePostgresFact]
+    public async Task Readmitting_known_unsent_successor_retains_acknowledgement_of_an_actual_unknown_sibling()
+    {
+        await using var fixture = await Fixture.CreateAsync("AcceptThenDropQuit"); var notice = await fixture.QueueAsync(); await fixture.RunWorkerAsync();
+        var original = await fixture.GenerationAsync(notice); await fixture.ControlAsync("Reissue", original); await fixture.ControlAsync("Reissue", original);
+        await fixture.RestartRelayAsync("LoseFinalReply"); await Task.Delay(1100); await fixture.RunWorkerAsync();
+        await using var db = fixture.Db();
+        Assert.Single(await db.NotificationDeliveryGenerations.Where(x => x.State == NotificationGenerationState.AcceptanceUnknown).ToListAsync());
+        var unsent = await db.NotificationDeliveryGenerations.SingleAsync(x => x.PredecessorId == original.Id && x.State == NotificationGenerationState.Pending);
+        await fixture.ActivateAsync(); await fixture.RunWorkerAsync();
+        db.ChangeTracker.Clear(); unsent = await db.NotificationDeliveryGenerations.SingleAsync(x => x.Id == unsent.Id);
+        Assert.Equal(NotificationGenerationState.HeldAdmission, unsent.State);
+        await Assert.ThrowsAsync<DomainException>(() => fixture.ControlAsync("Readmit", unsent));
+        await fixture.ControlAsync("Readmit", unsent, true);
+        db.ChangeTracker.Clear(); unsent = await db.NotificationDeliveryGenerations.SingleAsync(x => x.Id == unsent.Id);
+        await fixture.RestartRelayAsync("AcceptThenDropQuit"); await Task.Delay(1100); await fixture.RunWorkerAsync();
+        db.ChangeTracker.Clear(); var accepted = await db.NotificationDeliveryGenerations.SingleAsync(x => x.Id == unsent.Id);
+        Assert.Equal(NotificationGenerationState.SmtpAccepted, accepted.State); Assert.True(accepted.DuplicateRiskAcknowledged);
+        Assert.Equal(3, fixture.FactCount("DataReceived"));
+    }
+    [DisposablePostgresFact]
+    public async Task Bootstrap_reload_while_prepared_cannot_cross_the_start_gate_and_original_snapshot_survives()
+    {
+        await using var fixture = await Fixture.CreateAsync("AcceptThenDropQuit"); var notice = await fixture.QueueAsync();
+        await using var locked = fixture.Db(); await using var transaction = await locked.Database.BeginTransactionAsync();
+        await locked.NotificationInstallationStates.ExecuteUpdateAsync(x => x.SetProperty(p => p.Version, p => p.Version));
+        using var worker = fixture.Worker();
+        await fixture.WaitPreparedAsync();
+        using var observer = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); observer.Start();
+        var changedPort = ((System.Net.IPEndPoint)observer.LocalEndpoint).Port;
+        fixture.Bootstrap("Notifications:Smtp:Port", changedPort.ToString()); await Task.Delay(1500);
+        await transaction.CommitAsync(); await Fixture.ExitedAsync(worker);
+        Assert.Equal(0, fixture.FactCount("TcpAccepted")); Assert.False(observer.Pending());
+        await using var asserted = fixture.Db(); var attempt = await asserted.NotificationPhysicalAttempts.SingleAsync();
+        Assert.Null(attempt.TransmissionStartedAt);
+        var original = JsonSerializer.Deserialize<ResolvedNotificationSettings>(fixture.Protection.Unprotect(attempt.ProtectedSettingsSnapshot))!;
+        Assert.Equal(fixture.Port, original.Port); Assert.NotEqual(changedPort, original.Port);
+        Assert.Equal(NotificationDispatcher.EffectiveSettingsHash(original), fixture.Protection.Unprotect(attempt.EffectiveSettingsHash));
+        Assert.NotEqual(NotificationDispatcher.EffectiveSettingsHash(original), attempt.EffectiveSettingsHash);
+        Assert.Equal(NotificationGenerationState.Pending, (await fixture.GenerationAsync(notice)).State);
+    }
+
+    [DisposablePostgresFact]
+    public async Task Credential_only_bootstrap_correction_rechecks_a_blocker_without_repeating_unchanged_bad_authentication()
+    {
+        await using var fixture = await Fixture.CreateAsync("AuthRefuse"); await fixture.CredentialAsync();
+        var notice = await fixture.QueueAssignmentAsync(); await fixture.RunWorkerAsync();
+        var blocked = await fixture.GenerationAsync(notice); Assert.Equal(NotificationGenerationState.ConfigBlocked, blocked.State);
+        Assert.Equal(1, fixture.FactCount("AuthAttempted")); await fixture.RunWorkerAsync(); Assert.Equal(1, fixture.FactCount("TcpAccepted"));
+        await using (var db = fixture.Db())
+        {
+            var attempt = await db.NotificationPhysicalAttempts.SingleAsync();
+            var snapshot = JsonSerializer.Deserialize<ResolvedNotificationSettings>(fixture.Protection.Unprotect(attempt.ProtectedSettingsSnapshot))!;
+            Assert.Equal("synthetic-old-secret", snapshot.Credential);
+            Assert.Equal(NotificationDispatcher.EffectiveSettingsHash(snapshot), fixture.Protection.Unprotect(blocked.BlockedEffectiveSettingsHash));
+        }
+        fixture.Bootstrap("Notifications:Smtp:Password", "synthetic-corrected-secret");
+        await fixture.RestartRelayAsync("AuthAccept"); await Task.Delay(TimeSpan.FromSeconds(31));
+        await fixture.RunWorkerAsync(); var accepted = await fixture.GenerationAsync(notice);
+        Assert.True(accepted.State == NotificationGenerationState.SmtpAccepted, $"Corrected credential remained {accepted.State}/{accepted.SafeCode}; observed AUTH={fixture.FactCount("AuthAttempted")}, TCP={fixture.FactCount("TcpAccepted")}, DATA={fixture.FactCount("DataReceived")}"); Assert.Equal(blocked.MessageId, accepted.MessageId);
+        Assert.Equal(blocked.BodyHash, accepted.BodyHash); Assert.Equal(2, fixture.FactCount("AuthAttempted")); Assert.Equal(1, fixture.FactCount("DataReceived"));
+    }
+    [DisposablePostgresFact]
     public async Task Live_wire_contains_original_identifiers_and_no_private_assignment_prose()
     {
         await using var fixture = await Fixture.CreateAsync("AcceptThenDropQuit");
@@ -118,6 +180,13 @@ public sealed class NotificationProcessQualificationTests
         await using var fixture = await Fixture.CreateAsync("Refuse451");
         var first = await fixture.QueueAsync(); await fixture.RunWorkerAsync();
         Assert.Equal(NotificationGenerationState.RetryExhausted, (await fixture.GenerationAsync(first)).State); // deliberate diagnostic has one attempt
+        await Task.Delay(1500); // Exceed connection spacing so only the destination cooldown can refuse B.
+        await using (var timing = fixture.Db())
+        {
+            var physical = await timing.NotificationPhysicalAttempts.SingleAsync();
+            Assert.True(DateTimeOffset.UtcNow - physical.TransmissionStartedAt > TimeSpan.FromSeconds(1));
+            Assert.True(DateTimeOffset.UtcNow - physical.CompletedAt < TimeSpan.FromSeconds(30));
+        }
         await fixture.QueueAsync(); await fixture.RunWorkerAsync();
         Assert.Equal(1, fixture.FactCount("TcpAccepted"));
         await using var db = fixture.Db();
@@ -187,12 +256,17 @@ public sealed class NotificationProcessQualificationTests
         private string installation = Guid.NewGuid().ToString("D");
         private int port;
         private Guid project;
+        private IConfiguration configuration = null!;
+        internal int Port => port;
+        internal NotificationContentProtection Protection => services.GetRequiredService<NotificationContentProtection>();
         private string PolicyPath => Path.Combine(AuthorityRoot, installation + ".json");
         private string ConfigPath => Path.Combine(root, "worker.json");
         private string RelayRoot => Path.Combine(root, "relay");
         internal static async Task<Fixture> CreateAsync(string reply)
         {
             var value = new Fixture(); Directory.CreateDirectory(value.RelayRoot);
+            try
+            {
             value.database = await DisposablePostgresDatabase.CreateAsync("notification_process");
             using var key = RSA.Create(2048);
             var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -211,9 +285,9 @@ public sealed class NotificationProcessQualificationTests
                 ["Instance:InstanceId"] = value.installation, ["DataProtection:KeyRingPath"] = Path.Combine(value.root, "keys"),
             };
             File.WriteAllText(value.ConfigPath, JsonSerializer.Serialize(config));
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(config).Build();
-            var registrations = new ServiceCollection().AddLogging().AddSingleton<IConfiguration>(configuration);
-            registrations.AddAeroLinkInfrastructure(configuration); value.services = registrations.BuildServiceProvider();
+            value.configuration = new ConfigurationBuilder().AddInMemoryCollection(config).Build();
+            var registrations = new ServiceCollection().AddLogging().AddSingleton<IConfiguration>(value.configuration);
+            registrations.AddAeroLinkInfrastructure(value.configuration); value.services = registrations.BuildServiceProvider();
             var policy = new NotificationInstallationPolicy(value.installation, Environment.MachineName, Guid.NewGuid(), Guid.NewGuid(),
                 NotificationMode.Live, ["localhost"], ["sender@example.test"], [], ["admin@example.test"], "diagnostic@example.test", "https://fixture.invalid",
                 AllowManagedCredentials: true, TrustAnchorsPem: [certificate.ExportCertificatePem()]);
@@ -230,8 +304,33 @@ public sealed class NotificationProcessQualificationTests
                 new(Guid.NewGuid(), 0, NotificationMode.Live, "localhost", value.port, "sender@example.test", "AeroLink", "https://fixture.invalid", ""), default);
             await operations.ControlAsync(IdentityService.SystemAdministratorUserName, new(Guid.NewGuid(), saved.Result.GetProperty("version").GetInt64(), "Activate", NotificationMode.Live), default);
             return value;
+            }
+            catch { await value.DisposeAsync(); throw; }
         }
         internal AeroLinkDbContext Db() => new(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(database.ConnectionString).Options);
+        internal void Bootstrap(string key, string value)
+        {
+            var config = JsonSerializer.Deserialize<Dictionary<string, string?>>(File.ReadAllText(ConfigPath))!;
+            config[key] = value; File.WriteAllText(ConfigPath, JsonSerializer.Serialize(config)); configuration[key] = value;
+        }
+        internal async Task CredentialAsync()
+        {
+            await using var scope = services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var state = await db.NotificationInstallationStates.SingleAsync();
+            await scope.ServiceProvider.GetRequiredService<NotificationOperationsService>().SaveSettingsAsync(IdentityService.SystemAdministratorUserName,
+                new(Guid.NewGuid(), state.Version, NotificationMode.Live, null, port, null, null, null, "synthetic-user", Credential: "synthetic-old-secret"), default);
+        }
+        internal async Task ActivateAsync()
+        {
+            await using var scope = services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>(); var state = await db.NotificationInstallationStates.SingleAsync();
+            await scope.ServiceProvider.GetRequiredService<NotificationOperationsService>().ControlAsync(IdentityService.SystemAdministratorUserName,
+                new(Guid.NewGuid(), state.Version, "Activate", NotificationMode.Live), default);
+        }
+        internal async Task WaitPreparedAsync()
+        {
+            var until = DateTimeOffset.UtcNow.AddSeconds(30); while (DateTimeOffset.UtcNow < until)
+            { await using var db = Db(); if (await db.NotificationDeliveryGenerations.AnyAsync(x => x.ProtectedMime.Length > 0 && x.State == NotificationGenerationState.Claimed)) return; await Task.Delay(50); }
+            Assert.Fail("Actual worker did not prepare immutable MIME before the locked start gate.");
+        }
         internal async Task<Guid> QueueAsync()
         {
             await using var scope = services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -313,8 +412,14 @@ public sealed class NotificationProcessQualificationTests
         public async ValueTask DisposeAsync()
         {
             foreach (var worker in workers) { try { if (!worker.HasExited) { worker.Kill(true); await worker.WaitForExitAsync(); } } catch (InvalidOperationException) { } }
-            if (!relay.HasExited) relay.Kill(true); await relay.WaitForExitAsync(); await relayOutput; relay.Dispose();
-            await AllowConnectionsAsync(true); await services.DisposeAsync(); NpgsqlConnection.ClearAllPools(); await database.DisposeAsync();
+            if (relay is not null) { if (!relay.HasExited) relay.Kill(true); await relay.WaitForExitAsync(); await relayOutput; relay.Dispose(); }
+            if (database is not null)
+            {
+                await AllowConnectionsAsync(true);
+                if (services is not null) await services.DisposeAsync();
+                using var ownedPool = new NpgsqlConnection(database.ConnectionString); NpgsqlConnection.ClearPool(ownedPool);
+                await database.DisposeAsync();
+            }
             File.Delete(PolicyPath); File.Delete(PolicyPath + ".generation"); Directory.Delete(root, true);
         }
     }

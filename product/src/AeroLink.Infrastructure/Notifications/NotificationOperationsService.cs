@@ -146,7 +146,7 @@ public sealed class NotificationOperationsService(AeroLinkDbContext db, Notifica
             else if (request.Family == "Readmit")
             {
                 if (old.Mode != settings.Mode || old.ProtectedMime.Length > 0 && old.MessageConfigurationHash != NotificationDispatcher.MessageConfigurationHash(settings)) throw new DomainException("Changed concrete mail requires linked reissue.");
-                old.Readmit(currentEpoch.Id, settings.SendGeneration, now, bound.SourceFamily == NotificationSourceFamily.DiagnosticOperation);
+                old.Readmit(currentEpoch.Id, settings.SendGeneration, now, bound.SourceFamily == NotificationSourceFamily.DiagnosticOperation, request.AcknowledgeDuplicateRisk);
             }
             else
             {
