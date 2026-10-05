@@ -118,6 +118,34 @@ public sealed class ProjectCreationSourceParserTests
         Assert.Contains(result.Findings, x => x.Contains("attachment.txt"));
     }
 
+    // #1199: a phonetic guide (rPh) is a reading of the text, not part of it. Japanese Excel stores the IME
+    // reading there, so 東京 read with its guide became 東京トウキョウ in identifiers, headers and statements.
+    // The owner decided the reading is discarded. Rich-text runs must still join, and plain text is unchanged.
+    [Theory]
+    [InlineData("<c r=\"C2\" t=\"inlineStr\"><is><t>東京</t><rPh sb=\"0\" eb=\"2\"><t>トウキョウ</t></rPh><phoneticPr fontId=\"1\"/></is></c>", null, "東京")]
+    [InlineData("<c r=\"C2\" t=\"s\"><v>0</v></c>", "<si><t>東京</t><rPh sb=\"0\" eb=\"2\"><t>トウキョウ</t></rPh><phoneticPr fontId=\"1\"/></si>", "東京")]
+    [InlineData("<c r=\"C2\" t=\"s\"><v>0</v></c>", "<si><r><t>東</t></r><r><rPr><b/></rPr><t>京</t></r><rPh sb=\"0\" eb=\"2\"><t>トウキョウ</t></rPh></si>", "東京")]
+    [InlineData("<c r=\"C2\" t=\"inlineStr\"><is><r><t xml:space=\"preserve\">Source </t></r><r><rPr><i/></rPr><t>wording</t></r></is></c>", null, "Source wording")]
+    [InlineData("<c r=\"C2\" t=\"s\"><v>0</v></c>", "<si><t>Plain ASCII wording</t></si>", "Plain ASCII wording")]
+    public void XlsxCellTextIsBaseTextWithoutPhoneticGuides(string cell, string? sharedItem, string expected)
+    {
+        using var workbook = Workbook(("sheet1.xml", $"""
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+            <row r="1"><c r="A1" t="inlineStr"><is><t>Identifier</t></is></c><c r="B1" t="inlineStr"><is><t>Level</t></is></c><c r="C1" t="inlineStr"><is><t>Statement</t></is></c></row>
+            <row r="2"><c r="A2" t="inlineStr"><is><t>F-1</t></is></c>{cell}</row>
+            </sheetData></worksheet>
+            """));
+        if (sharedItem is not null)
+        {
+            using var archive = new ZipArchive(workbook, ZipArchiveMode.Update, true);
+            using var writer = new StreamWriter(archive.CreateEntry("xl/sharedStrings.xml").Open());
+            writer.Write($"<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">{sharedItem}</sst>");
+        }
+        workbook.Position = 0;
+        var item = Assert.Single(ProjectCreationSourceParser.Analyse(workbook, "source.xlsx").Objects);
+        Assert.Equal(expected, item.Attributes["Statement"]);
+    }
+
     [Fact]
     public void XlsxUsesDeclaredNamesAndReportsOrphansInsteadOfImportingThem()
     {

@@ -57,6 +57,23 @@ internal static class InceptionTableReader
         return rows;
     }
 
+    /// <summary>
+    /// The cell text of a shared-string item (<c>si</c>) or inline string (<c>is</c>): its direct <c>t</c> and the
+    /// <c>t</c> of each rich-text run <c>r</c>, in order. Phonetic guides (<c>rPh</c>) and <c>phoneticPr</c> hold a
+    /// reading of the text, not the text, and are discarded (#1199). Every XLSX string path uses this decoder.
+    /// </summary>
+    internal static string StringItemText(XElement item)
+    {
+        var ns = item.Name.Namespace;
+        var text = new StringBuilder();
+        foreach (var child in item.Elements())
+        {
+            if (child.Name == ns + "t") text.Append(child.Value);
+            else if (child.Name == ns + "r") foreach (var run in child.Elements(ns + "t")) text.Append(run.Value);
+        }
+        return text.ToString();
+    }
+
     public static IReadOnlyList<InceptionSourceTable> Xlsx(Stream stream)
     {
         using var archive = new InceptionArchiveReader(stream);
@@ -64,7 +81,7 @@ internal static class InceptionTableReader
         var shared = new List<string>();
         if (archive.Entry("xl/sharedStrings.xml") is { } sharedEntry)
         {
-            shared = archive.ReadXml(sharedEntry).Descendants(ns + "si").Select(x => string.Concat(x.Descendants(ns + "t").Select(t => t.Value))).ToList();
+            shared = archive.ReadXml(sharedEntry).Descendants(ns + "si").Select(StringItemText).ToList();
         }
         var workbook = archive.ReadXml(archive.Entry("xl/workbook.xml") ?? throw new InvalidOperationException("The workbook metadata is missing."));
         var relationships = archive.ReadXml(archive.Entry("xl/_rels/workbook.xml.rels") ?? throw new InvalidOperationException("The workbook relationships are missing."));
@@ -102,7 +119,7 @@ internal static class InceptionTableReader
                 {
                     var reference = (string?)cell.Attribute("r") ?? throw new InvalidOperationException("Workbook cells require source coordinates.");
                     var column = ColumnIndex(reference);
-                    var raw = cell.Element(ns + "v")?.Value ?? string.Concat(cell.Descendants(ns + "t").Select(x => x.Value));
+                    var raw = cell.Element(ns + "v")?.Value ?? (cell.Element(ns + "is") is { } inline ? StringItemText(inline) : "");
                     if (cell.Element(ns + "f") is not null)
                         throw new InvalidOperationException($"Workbook cell '{name}:{reference}' contains a formula. Export source values before importing.");
                     var type = (string?)cell.Attribute("t");

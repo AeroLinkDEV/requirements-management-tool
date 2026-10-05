@@ -361,9 +361,9 @@ public sealed class EnterpriseRequirementsService(AeroLinkDbContext db, ILadderP
     private static List<string[]> ParseXlsx(Stream stream)
     {
         using var zip=new ZipArchive(stream,ZipArchiveMode.Read,true);if(zip.Entries.Sum(x=>x.Length)>WorkbookLimit)throw new InvalidOperationException("The workbook expands beyond the 100 MB safety limit.");XNamespace ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main";var shared=new List<string>();var sharedEntry=zip.GetEntry("xl/sharedStrings.xml");
-        if(sharedEntry is not null){using var s=sharedEntry.Open();shared=ReadWorkbookXml(s).Descendants(ns+"si").Select(x=>string.Concat(x.Descendants(ns+"t").Select(t=>t.Value))).ToList();}
+        if(sharedEntry is not null){using var s=sharedEntry.Open();shared=ReadWorkbookXml(s).Descendants(ns+"si").Select(InceptionTableReader.StringItemText).ToList();}
         var sheet=zip.GetEntry("xl/worksheets/sheet1.xml")??throw new InvalidOperationException("The workbook must contain a first worksheet.");using var ss=sheet.Open();var doc=ReadWorkbookXml(ss);var output=new List<string[]>();
-        foreach(var r in doc.Descendants(ns+"row")){var cells=new SortedDictionary<int,string>();foreach(var c in r.Elements(ns+"c")){var reference=(string?)c.Attribute("r")??"A1";var col=ColumnIndex(reference);var raw=c.Element(ns+"v")?.Value??c.Element(ns+"is")?.Value??"";var value=(string?)c.Attribute("t")=="s"&&int.TryParse(raw,out var idx)&&idx<shared.Count?shared[idx]:raw;cells[col]=value;}if(cells.Count>0){var row=new string[cells.Keys.Max()+1];foreach(var cell in cells)row[cell.Key]=cell.Value;output.Add(row);}}return output;
+        foreach(var r in doc.Descendants(ns+"row")){var cells=new SortedDictionary<int,string>();foreach(var c in r.Elements(ns+"c")){var reference=(string?)c.Attribute("r")??"A1";var col=ColumnIndex(reference);var raw=c.Element(ns+"v")?.Value??(c.Element(ns+"is") is { } inline?InceptionTableReader.StringItemText(inline):"");var value=(string?)c.Attribute("t")=="s"&&int.TryParse(raw,out var idx)&&idx<shared.Count?shared[idx]:raw;cells[col]=value;}if(cells.Count>0){var row=new string[cells.Keys.Max()+1];foreach(var cell in cells)row[cell.Key]=cell.Value;output.Add(row);}}return output;
     }
     private const long WorkbookLimit=100L*1024*1024;
 
