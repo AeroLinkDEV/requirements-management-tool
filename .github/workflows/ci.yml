@@ -1471,14 +1471,17 @@ jobs:
     # no information. validate and postgresql-smoke still run on every push as the safety net.
     if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && inputs.full_diagnostics == true)) && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
-    # The observed weekly run hit 20 minutes before completing. The diagnostic shard needs setup time plus
-    # its longest journey set; keep the three runners, pack by duration as PRs do, and retain a bounded
-    # margin over the observed ceiling so timeout cancellation cannot masquerade as a successful aggregate.
+    # The diagnostic shard needs setup time plus its journey set; pack by duration as PRs do, and retain a
+    # bounded margin over the observed ceiling so timeout cancellation cannot masquerade as a successful
+    # aggregate. Six shards, as browser-pr has, since #1340: the journeys now take about 5,200 s of tests
+    # (2026-10-05), so three shards needed about 29 minutes of tests each before setup, and 7 of the 8 weekly
+    # runs to 2026-10-05 were cancelled or failed (run 37328402872: two shards cancelled at 30m24s). Six carry
+    # about 870 s of tests each. The ci-metrics run metadata names the same count (build-run-meta.mjs).
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       METRICS_JOB_ID: browser-full
       METRICS_JOB_NAME: Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
