@@ -68,6 +68,7 @@ public sealed class NotificationProcessQualificationTests
     public async Task Credential_only_bootstrap_correction_rechecks_a_blocker_without_repeating_unchanged_bad_authentication()
     {
         await using var fixture = await Fixture.CreateAsync("AuthRefuse"); await fixture.CredentialAsync();
+        fixture.Bootstrap("Notifications:Smtp:Password", "synthetic-old-secret");
         var notice = await fixture.QueueAssignmentAsync(); await fixture.RunWorkerAsync();
         var blocked = await fixture.GenerationAsync(notice); Assert.Equal(NotificationGenerationState.ConfigBlocked, blocked.State);
         Assert.Equal(1, fixture.FactCount("AuthAttempted")); await fixture.RunWorkerAsync(); Assert.Equal(1, fixture.FactCount("TcpAccepted"));
@@ -75,7 +76,7 @@ public sealed class NotificationProcessQualificationTests
         {
             var attempt = await db.NotificationPhysicalAttempts.SingleAsync();
             var snapshot = JsonSerializer.Deserialize<ResolvedNotificationSettings>(fixture.Protection.Unprotect(attempt.ProtectedSettingsSnapshot))!;
-            Assert.Equal("synthetic-old-secret", snapshot.Credential);
+            Assert.Equal("synthetic-old-secret", snapshot.Credential); Assert.True(snapshot.CredentialsLocked);
             Assert.Equal(NotificationDispatcher.EffectiveSettingsHash(snapshot), fixture.Protection.Unprotect(blocked.BlockedEffectiveSettingsHash));
         }
         fixture.Bootstrap("Notifications:Smtp:Password", "synthetic-corrected-secret");
@@ -83,6 +84,13 @@ public sealed class NotificationProcessQualificationTests
         await fixture.RunWorkerAsync(); var accepted = await fixture.GenerationAsync(notice);
         Assert.True(accepted.State == NotificationGenerationState.SmtpAccepted, $"Corrected credential remained {accepted.State}/{accepted.SafeCode}; observed AUTH={fixture.FactCount("AuthAttempted")}, TCP={fixture.FactCount("TcpAccepted")}, DATA={fixture.FactCount("DataReceived")}"); Assert.Equal(blocked.MessageId, accepted.MessageId);
         Assert.Equal(blocked.BodyHash, accepted.BodyHash); Assert.Equal(2, fixture.FactCount("AuthAttempted")); Assert.Equal(1, fixture.FactCount("DataReceived"));
+        Assert.Equal(blocked.DeadlineTicks, accepted.DeadlineTicks); Assert.Equal(blocked.MaximumAttempts, accepted.MaximumAttempts);
+        Assert.Equal(blocked.MaximumPhysicalAttempts, accepted.MaximumPhysicalAttempts); Assert.Equal(blocked.AdmissionEpochId, accepted.AdmissionEpochId);
+        await using var receipts = fixture.Db(); var attempts = await receipts.NotificationPhysicalAttempts.OrderBy(x => x.ClaimedAt).ToListAsync();
+        var before = JsonSerializer.Deserialize<ResolvedNotificationSettings>(fixture.Protection.Unprotect(attempts[0].ProtectedSettingsSnapshot))!;
+        var after = JsonSerializer.Deserialize<ResolvedNotificationSettings>(fixture.Protection.Unprotect(attempts[1].ProtectedSettingsSnapshot))!;
+        Assert.Equal(before.CredentialsLocked, after.CredentialsLocked); Assert.Equal(before.SettingsId, after.SettingsId);
+        Assert.Equal(before.PolicyHash, after.PolicyHash);
     }
     [DisposablePostgresFact]
     public async Task Live_wire_contains_original_identifiers_and_no_private_assignment_prose()
