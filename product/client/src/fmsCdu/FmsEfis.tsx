@@ -238,13 +238,14 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           {/* Hover data: ground velocity in aircraft axes and the wind, where airspeed stops meaning much. */}
           {heli.hoverData ? (
             <g fill={WHITE} data-testid="pfd-hover-data">
-              <text x="112" y="256">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
-              <text x="112" y="272">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
-              <text x="112" y="290">{`${three(air.wind.direction)}T/${Math.round(air.wind.speed)}`}</text>
+              {/* Separate rows and columns remain distinguishable at the responsive 12px floor. */}
+              <text x="112" y="218">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
+              <text x="112" y="242">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
+              <text x="112" y="266">{`${three(air.wind.direction)}T/${Math.round(air.wind.speed)}`}</text>
               {heli.selectedVelocity ? (
-                <g fill={CYAN} data-testid="pfd-selected-velocity">
-                  <text x="178" y="256">{signed(heli.selectedVelocity.vx)}</text>
-                  <text x="178" y="272">{signed(heli.selectedVelocity.vy)}</text>
+                <g fill={CYAN} textAnchor="end" data-testid="pfd-selected-velocity">
+                  <text x="318" y="218">{signed(heli.selectedVelocity.vx)}</text>
+                  <text x="318" y="242">{signed(heli.selectedVelocity.vy)}</text>
                 </g>
               ) : null}
             </g>
