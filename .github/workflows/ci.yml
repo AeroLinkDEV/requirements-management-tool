@@ -1249,7 +1249,8 @@ jobs:
           FMS_ONLY: ${{ needs.changes.outputs.fms_only }}
         run: |
           set -euo pipefail
-          npx playwright test --list > listed.txt
+          # Discovery is a listing, not an execution report.
+          npx playwright test --list --reporter=list > listed.txt
           # An FMS Test Bench-only change runs the FMS journeys only: the bench's own specs and the specs that
           # observe it (product/test-planner/lib/classify.mjs). They are packed across the same four shards, so the
           # shard set the merge-authority verifier requires is unchanged; the filter fails on an empty result.
@@ -1271,7 +1272,10 @@ jobs:
           fi
           echo "Shard ${{ matrix.shard }} of ${{ strategy.job-total }}: $expected tests across ${#files[@]} spec files."
 
-          npx playwright test "${files[@]}" --reporter=list,json,./scripts/browser-storage-reporter.mjs,./scripts/socket-snapshot-reporter.mjs
+          export AEROLINK_E2E_REPORT_EXECUTION=1
+          export AEROLINK_E2E_REPORT_SHA="$(git rev-parse HEAD)"
+          export AEROLINK_E2E_REPORT_SHARD_TOTAL=${{ strategy.job-total }}
+          npx playwright test "${files[@]}" --reporter=list,json,html,./scripts/browser-storage-reporter.mjs,./scripts/socket-snapshot-reporter.mjs
 
           # The plan anchors each name so a spec contained in a longer one cannot be pulled into a shard it was
           # not given. This stays as the backstop: an anchor that stopped working, or a mistyped plan running
@@ -1535,7 +1539,8 @@ jobs:
           AEROLINK_E2E_SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
-          npx playwright test --list > listed.txt
+          # Discovery is a listing, not an execution report.
+          npx playwright test --list --reporter=list > listed.txt
           node scripts/plan-journey-shard.mjs listed.txt ${{ matrix.shard }} ${{ strategy.job-total }} > plan.txt
           readarray -t planned < plan.txt
           expected="${planned[0]}"
@@ -1544,7 +1549,10 @@ jobs:
             echo "::error::Full shard planned no spec files. Discovery or packing is broken."
             exit 1
           fi
-          npx playwright test "${files[@]}" --reporter=list,json,./scripts/browser-storage-reporter.mjs,./scripts/socket-snapshot-reporter.mjs
+          export AEROLINK_E2E_REPORT_EXECUTION=1
+          export AEROLINK_E2E_REPORT_SHA="$(git rev-parse HEAD)"
+          export AEROLINK_E2E_REPORT_SHARD_TOTAL=${{ strategy.job-total }}
+          npx playwright test "${files[@]}" --reporter=list,json,html,./scripts/browser-storage-reporter.mjs,./scripts/socket-snapshot-reporter.mjs
           actual="$(node -e "const s=require('./journey-durations-full-${{ matrix.shard }}.json').stats; console.log(s.expected + s.unexpected + s.flaky + s.skipped)")"
           if [ "$actual" != "$expected" ]; then
             echo "::error::Full shard planned $expected tests but ran $actual."
