@@ -1,18 +1,23 @@
 import { defineConfig, devices } from '@playwright/test'
 import tiers from './fast-client-tests.json' with { type: 'json' }
+import { fastShard } from './fast-shard'
 
 const port = process.env.AEROLINK_FAST_CLIENT_PORT ?? '5188'
 const baseURL = `http://127.0.0.1:${port}`
 
-// The advisory Fast lane runs the rendered tier in two parallel parts (#1313): the software-WebGL out-the-window specs
-// ("3d"), which take about as long as all the others together, and the rest ("standard"). The view's tests are in three
-// files so the Full browser shards can spread them (#1298, #1232); here they stay one part on one worker. Unset, every
-// rendered spec runs, as it does locally.
+// The advisory Fast lane runs the rendered tier in parallel parts (#1313): the software-WebGL out-the-window specs
+// ("3d"), which take about as long as all the others together; the CDU spec ("cdu"), 246 of the other 462 seconds on
+// the hosted runners (2026-10-05); and the rest ("standard"). The view's tests are in three files so the Full browser
+// shards can spread them (#1298, #1232). Each part runs one worker per job, and Fast shards every part by test across
+// jobs (#1232). Playwright shards by test count in file order, so a long file kept with short ones would leave one
+// shard with most of the time; a part of its own spreads it. Unset, every rendered spec runs, as it does locally.
 export const RENDERED_3D = ['fms-out-the-window-rendered.spec.ts', 'fms-out-the-window-imagery-rendered.spec.ts', 'fms-out-the-window-models-rendered.spec.ts']
+export const RENDERED_CDU = ['fms-cdu-rendered.spec.ts']
 const part = process.env.AEROLINK_FAST_RENDERED_PART || undefined
-if (part !== undefined && part !== 'standard' && part !== '3d') throw new Error(`Unknown AEROLINK_FAST_RENDERED_PART: ${part}`)
+if (part !== undefined && part !== 'standard' && part !== 'cdu' && part !== '3d') throw new Error(`Unknown AEROLINK_FAST_RENDERED_PART: ${part}`)
 const testMatch = part === '3d' ? tiers.rendered.filter((file) => RENDERED_3D.includes(file))
-  : part === 'standard' ? tiers.rendered.filter((file) => !RENDERED_3D.includes(file)) : tiers.rendered
+  : part === 'cdu' ? tiers.rendered.filter((file) => RENDERED_CDU.includes(file))
+  : part === 'standard' ? tiers.rendered.filter((file) => !RENDERED_3D.includes(file) && !RENDERED_CDU.includes(file)) : tiers.rendered
 
 // These fixtures provide their own raw response data and exercise real components.
 // Integrated pages and persistence continue to be proved by the complete Full suite.
@@ -20,7 +25,8 @@ export default defineConfig({
   testDir: './tests',
   testMatch,
   workers: 1,
-  fullyParallel: false,
+  fullyParallel: true,
+  shard: fastShard(),
   retries: 0,
   expect: { timeout: 15_000 },
   outputDir: 'test-results/fast/rendered',

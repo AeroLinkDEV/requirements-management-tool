@@ -726,6 +726,7 @@ const FMS_PATH_REFERENCES = {
   'product/ci-metrics/lib/merge-authority.mjs': 'names the FMS topology it accepts',
   'product/ci-metrics/tests/merge-authority-github.test.mjs': 'test paths for the derivation',
   'product/ci-metrics/tests/merge-authority.test.mjs': 'names the FMS topology it tests',
+  'product/client/fast-logic-durations.json': 'recorded hosted logic durations that weigh the advisory Fast logic shards; an optimisation, never a correctness input',
   'product/client/journey-durations.json': 'recorded spec durations the journey shard planner weighs files by; an optimisation, never a correctness input, read by every shard whatever the topology',
   'product/client/playwright.logic.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
   'product/client/playwright.rendered.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
