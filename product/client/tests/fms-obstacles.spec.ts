@@ -67,7 +67,7 @@ test('an obstacle is coloured as the terrain colouring colours its top: relative
 
 /** A stand-in for the parts of Cesium the layer uses, recording what is drawn. */
 function fakeCesium() {
-  const added: unknown[] = [], removed: unknown[] = []
+  const added: unknown[] = [], removed: unknown[] = [], created: Primitive[] = [], sceneErrors: unknown[] = []
   let renders = 0
   const postRender = new Set<() => void>(), renderError = new Set<(_scene: unknown, error: unknown) => void>()
   type LineOptions = { positions: { height: number }[]; width: number; arcType: number }
@@ -76,8 +76,12 @@ function fakeCesium() {
   class Primitive {
     ready = false
     show: boolean
+    /** As Cesium's Primitive: a failed asynchronous build is thrown from every update after it. */
+    error: unknown = undefined
+    destroyed = false
     readonly attributes = new Map<number, { color: Uint8Array; boundingSphere: object | undefined }>()
     constructor(readonly options: { geometryInstances: GeometryInstance[]; show: boolean }) {
+      created.push(this)
       this.show = options.show
       for (const instance of options.geometryInstances) {
         const positions = instance.options.geometry.options.positions
@@ -89,6 +93,9 @@ function fakeCesium() {
       if (!this.ready) throw new Error('geometry still loading')
       return this.attributes.get(id)
     }
+    update() { if (this.error !== undefined) throw this.error }
+    isDestroyed() { return this.destroyed }
+    destroy() { this.destroyed = true }
   }
   class PointPrimitiveCollection { show = true; items: { position: unknown; pixelSize: number; color: unknown }[] = []; add(o: { position: unknown; pixelSize: number; color: unknown }) { const item = { ...o }; this.items.push(item); return item } }
   const bytes = (color: string) => new Uint8Array([...color.slice(4, -1).split(',').map(Number), 255])
@@ -105,11 +112,18 @@ function fakeCesium() {
     renderError: { addEventListener(listener: (_scene: unknown, error: unknown) => void) { renderError.add(listener); return () => { renderError.delete(listener) } } },
     requestRender: () => { renders += 1 },
   }
-  const lines = () => added.find(p => p instanceof Primitive) as Primitive
-  const render = () => { for (const listener of postRender) listener() }
+  const lines = () => created[0]
+  const error = (reason: unknown) => { sceneErrors.push(reason); for (const listener of renderError) listener(scene, reason) }
+  // As Scene.render: the primitives still in the scene are updated, a throw becomes a render error, and the frame ends.
+  const render = () => {
+    try {
+      for (const primitive of added) if (!removed.includes(primitive)) (primitive as { update?(frameState: unknown): void }).update?.({})
+    } catch (thrown) { error(thrown) }
+    for (const listener of postRender) listener()
+  }
   const complete = () => { lines().ready = true; render(); render() }
-  const error = (reason: string) => { for (const listener of renderError) listener(scene, new Error(reason)) }
-  return { Cesium, scene, added, removed, lines, render, complete, error, listeners: () => postRender.size + renderError.size, renders: () => renders }
+  return { Cesium, scene, added, removed, lines, render, complete, error, sceneErrors,
+    listeners: () => postRender.size + renderError.size, renders: () => renders }
 }
 
 test('the scene layer draws each obstacle from its base to its top at true height, and recolours by clearance', async () => {
@@ -158,7 +172,7 @@ test('createObstacleLayer fetches the bench extract, applies the latest update o
 
 test('delayed obstacle geometry first appears with the latest colours, then reports drawn after that frame', async () => {
   const { obstacles } = parseDof(`${HEADER}\n${OAKDALE}\n`)
-  const { Cesium, scene, lines, render, listeners } = fakeCesium()
+  const { Cesium, scene, lines, render, listeners, sceneErrors } = fakeCesium()
   const layer = drawObstacles(Cesium, scene, obstacles)
   layer.update(1450, 'relative')
   render()
@@ -178,24 +192,39 @@ test('delayed obstacle geometry first appears with the latest colours, then repo
   expect(Array.from(lines().attributes.get(0)!.color)).toEqual([...DANGER_RGB, 255])
   expect(layer.count).toBe(1)
   expect(listeners()).toBe(0)
+  // Once drawn, an error from the lines is not hidden by the layer: the scene's render error handling sees it.
+  const lost = new Error('lines lost after drawing')
+  lines().error = lost
+  render()
+  expect(sceneErrors).toEqual([lost])
   layer.destroy()
 })
 
-test('failed or disposed pending obstacle geometry reports no drawn count and releases its listeners and resources', async () => {
+test('failed or disposed pending obstacle geometry reports no drawn count, says why, and releases its listeners and resources', async () => {
   const { obstacles } = parseDof(`${HEADER}\n${OAKDALE}\n`)
-  for (const failure of ['worker', 'attributes', 'exposed render', 'destroy']) {
+  // #1492: a geometry worker whose module could not be fetched rejects with a TypeError, which reaches the page as the
+  // plain object the worker posted; Cesium then throws it from the primitive's update on every frame.
+  const workerError = { name: 'TypeError', message: 'Failed to fetch dynamically imported module: createPolylineGeometry.js', stack: '' }
+  const failures = {
+    worker: 'obstacle geometry failed: TypeError: Failed to fetch dynamically imported module: createPolylineGeometry.js',
+    attributes: 'obstacle 09-000279 has no rendered geometry',
+    'exposed render': 'the scene stopped rendering: renderer failed',
+    destroy: 'destroyed before geometry was ready',
+  }
+  for (const [failure, reason] of Object.entries(failures)) {
     const fake = fakeCesium(), layer = drawObstacles(fake.Cesium, fake.scene, obstacles)
     if (failure === 'destroy') layer.destroy()
+    else if (failure === 'worker') { fake.lines().error = workerError; fake.render() }
     else {
       fake.lines().ready = true // Cesium also marks FAILED primitives ready.
       if (failure === 'attributes') { fake.lines().attributes.clear(); fake.render() }
-      else {
-        if (failure === 'exposed render') fake.render()
-        fake.error('geometry worker or renderer failed')
-      }
+      else { fake.render(); fake.error(new Error('renderer failed')) }
     }
-    expect(await layer.ready).toHaveProperty('failed')
+    expect(await layer.ready).toEqual({ failed: `obstacles not drawn: ${reason}` })
     await Promise.resolve() // Resource removal follows the engine event traversal.
+    fake.render()
+    // The layer's own failure stays the layer's: the scene goes on rendering without it.
+    expect(fake.sceneErrors, failure).toHaveLength(failure === 'exposed render' ? 1 : 0)
     expect(layer.count).toBe(0)
     expect(fake.listeners()).toBe(0)
     expect(fake.removed).toHaveLength(2)
