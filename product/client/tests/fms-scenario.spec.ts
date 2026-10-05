@@ -70,13 +70,18 @@ test('F16 outage replay refuses malformed actions and unknown, non-NDB or ambigu
   }
 })
 
-test('every built-in scenario passes against the simulation', () => {
-  for (const scenario of SCENARIO_LIBRARY) {
+// One test per scenario, so the Fast logic shards can spread them (#1456); together they took two minutes.
+test('the built-in scenario library is not empty', () => {
+  expect(SCENARIO_LIBRARY.length).toBeGreaterThan(0)
+})
+
+for (const scenario of SCENARIO_LIBRARY) {
+  test(`built-in scenario ${scenario.id} passes against the simulation`, () => {
     const { runner } = runHeadless(scenario)
     expect(runner.results.filter(result => result.status !== 'done' && result.status !== 'pass'), scenario.id).toEqual([])
     expect(runner.passed).toBe(true)
-  }
-})
+  })
+}
 
 test('GPS lost 2 NM before the FAF: the loss is injected at the distance, and the alerts and missed approach follow', () => {
   const { runner, fms } = runHeadless(library('gps-lost-before-faf'))

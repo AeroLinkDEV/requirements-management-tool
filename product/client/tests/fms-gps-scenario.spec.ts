@@ -178,8 +178,9 @@ const gpsTimeline = (scenario: Scenario, chunk: number) => {
   return { timeline, results: runner.results, report: reportMarkdown(runner) }
 }
 
-test('the same GPS scenario gives the same GPS timeline on every run, however the ticks are grouped', () => {
-  for (const id of ['gps1-fde-then-gps2', 'gps1-spoof-walks-off']) {
+// One test per scenario, so the Fast logic shards can spread them (#1456).
+for (const id of ['gps1-fde-then-gps2', 'gps1-spoof-walks-off']) {
+  test(`the same GPS scenario gives the same GPS timeline on every run, however the ticks are grouped: ${id}`, () => {
     const scenario = library(id)
     const first = gpsTimeline(scenario, 1)
     expect(first.results.every(result => result.status === 'done' || result.status === 'pass'), id).toBe(true)
@@ -192,8 +193,8 @@ test('the same GPS scenario gives the same GPS timeline on every run, however th
       expect(grouped.timeline, `${id} in groups of ${chunk}`).toEqual(first.timeline)
       expect(grouped.results).toEqual(first.results)
     }
-  }
-})
+  })
+}
 
 test('the report and the procedure list every GPS stimulus and clear, and name what fixes the GPS timeline', () => {
   const scenario = library('gps1-spoof-walks-off')

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "aerolink-fast-ci/v3",
+  "id": "aerolink-fast-ci/v4",
   "authoritative": false,
   "targetMs": 240000,
   "safety": {
@@ -37,23 +37,41 @@
       "npm run test:fast:rendered"
     ],
     "parts": {
-      "static-logic": {
+      "static": {
         "commands": [
           "npm ci",
           "npm run lint",
           "npm run typecheck",
           "npm run test:fast:routes",
+          "npx playwright install chromium",
+          "npm run test:fast:isolation"
+        ],
+        "shards": 1
+      },
+      "logic": {
+        "commands": [
+          "npm ci",
           "npm run test:fast:logic"
-        ]
+        ],
+        "shards": 3
       },
       "rendered-standard": {
         "commands": [
           "npm ci",
           "npx playwright install chromium",
-          "npm run test:fast:isolation",
           "npm run test:fast:rendered"
         ],
-        "renderedPart": "standard"
+        "renderedPart": "standard",
+        "shards": 2
+      },
+      "rendered-cdu": {
+        "commands": [
+          "npm ci",
+          "npx playwright install chromium",
+          "npm run test:fast:rendered"
+        ],
+        "renderedPart": "cdu",
+        "shards": 3
       },
       "rendered-3d": {
         "commands": [
@@ -61,7 +79,8 @@
           "npx playwright install chromium",
           "npm run test:fast:rendered"
         ],
-        "renderedPart": "3d"
+        "renderedPart": "3d",
+        "shards": 3
       }
     }
   },
