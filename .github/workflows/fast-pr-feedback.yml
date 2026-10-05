@@ -81,8 +81,9 @@ jobs:
   # The client checks run as parts, and the test parts as Playwright test-level shards (#1313, #1456, #1232). Three
   # unsharded parts still missed: the logic suite alone took 7.9 minutes and its job was cancelled at 10 minutes in 25
   # of 40 runs (2026-10-02..05), and the rendered parts took up to 9.4 and 6.8 minutes against the four-minute target.
-  # Static checks run once; logic and the three rendered parts (playwright.rendered.config.ts) are sharded, sized from
-  # hosted test durations so no shard's tests take much over two minutes. The matrix must list every shard of every
+  # Static checks run once. Logic runs as shards of whole files packed by recorded hosted duration
+  # (fast-logic-durations.json), and the three rendered parts (playwright.rendered.config.ts) as Playwright test-count
+  # shards; both are sized from hosted test durations so no shard's tests take much over two and a half minutes. The matrix must list every shard of every
   # manifest part exactly once (fast-ci-workflow.test.mjs). Each leg keeps one rendered worker, on its own runner.
   client-fast:
     name: Fast client ${{ matrix.part }} (${{ matrix.shard }}/${{ matrix.shards }})
@@ -93,9 +94,10 @@ jobs:
       matrix:
         include:
           - { part: static, shard: 1, shards: 1 }
-          - { part: logic, shard: 1, shards: 3 }
-          - { part: logic, shard: 2, shards: 3 }
-          - { part: logic, shard: 3, shards: 3 }
+          - { part: logic, shard: 1, shards: 4 }
+          - { part: logic, shard: 2, shards: 4 }
+          - { part: logic, shard: 3, shards: 4 }
+          - { part: logic, shard: 4, shards: 4 }
           - { part: rendered-standard, shard: 1, shards: 2 }
           - { part: rendered-standard, shard: 2, shards: 2 }
           - { part: rendered-cdu, shard: 1, shards: 3 }

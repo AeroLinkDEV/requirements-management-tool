@@ -86,12 +86,15 @@ identities, and records every remaining file as Full-only. Newly added files the
 Full coverage until their dependencies and assertions are reviewed for early execution. Mixed
 integrated/fixture files must not be added to the isolated manifest merely because they mock one response.
 
-Hosted, the client checks run as parallel jobs (#1313, #1456, #1232): static checks once, then logic and three
-rendered parts (CDU, out-the-window 3D, the rest) as Playwright test-level shards set by
-`AEROLINK_FAST_SHARD`, one job each. Across 40 runs on 2026-10-02..05 the single logic job was cancelled at its
-10-minute cap 25 times (1,174 tests, 7.9 minutes on three workers, two files holding 440 of 1,154 test-seconds), and
-the rendered parts took up to 9.4 and 6.8 minutes against the 240-second target. Shard counts come from those hosted
-per-test durations, so no shard's tests should take much over two minutes; re-measure before changing them. The
+Hosted, the client checks run as parallel jobs (#1313, #1456, #1232), one per shard set by `AEROLINK_FAST_SHARD`:
+static checks once; logic as four shards of whole files packed by recorded hosted duration
+(`product/client/fast-logic-durations.json`, heaviest first into the lightest shard, as the Full journey shards are);
+and three rendered parts (CDU, out-the-window 3D, the rest) as Playwright count-based shards. Across 40 runs on
+2026-10-02..05 the single logic job was cancelled at its 10-minute cap 25 times (1,174 tests, 7.9 minutes on three
+workers, two files holding 440 of 1,154 test-seconds), and the rendered parts took up to 9.4 and 6.8 minutes against
+the 240-second target. Count-based logic shards came out at 938, 521 and 247 test-seconds (run 37359815736), so logic
+is packed instead. The durations file only weighs the packing: a missing or unknown file is weighted at the median and
+still runs exactly once. Refresh it from the per-file times in a Fast run's logic shard logs when the shards drift. The
 aggregate takes every shard's command time from a per-shard artifact and fails when one is missing.
 
 Fast retains its routing report, JSON results and available traces under a per-run artifact, including

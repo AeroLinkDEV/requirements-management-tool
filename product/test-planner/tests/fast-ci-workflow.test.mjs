@@ -138,11 +138,13 @@ test('Fast client parts together run every client command, and split the rendere
         `${name} is sharded, so it may only install and run its tests`)
     }
   }
-  for (const config of ['playwright.logic.config.ts', 'playwright.rendered.config.ts']) {
-    const source = readFileSync(join(repoRoot, 'product/client', config), 'utf8')
-    assert.match(source, /shard: fastShard\(\),/, `${config} does not take the Fast shard`)
-    assert.match(source, /fullyParallel: true,/, `${config} must shard by test, or one long file sets a shard's time`)
-  }
+  // Rendered parts take Playwright's count-based shard; logic packs whole files by recorded duration (#1456).
+  const renderedSource = readFileSync(join(repoRoot, 'product/client/playwright.rendered.config.ts'), 'utf8')
+  assert.match(renderedSource, /shard: fastShard\(\),/, 'the rendered config does not take the Fast shard')
+  const logicSource = readFileSync(join(repoRoot, 'product/client/playwright.logic.config.ts'), 'utf8')
+  assert.match(logicSource, /testMatch: shard \? packedFiles\(tiers\.logic, durations, shard\) : tiers\.logic,/, 'the logic config does not pack its Fast shard')
+  assert.doesNotMatch(logicSource, /shard: fastShard\(\)/, 'the logic config must not also take a count-based shard')
+  for (const source of [renderedSource, logicSource]) assert.match(source, /fullyParallel: true,/, "a Fast config must run fully parallel, or one long file sets a shard's time")
   // Each rendered part runs the rendered tier with its own share of it; lint, types, routes, logic and isolation run once.
   assert.deepEqual(Object.values(parts).filter((part) => part.commands.includes('npm run test:fast:rendered')).map((part) => part.renderedPart).sort(), ['3d', 'cdu', 'standard'])
   for (const once of ['npm run lint', 'npm run typecheck', 'npm run test:fast:routes', 'npm run test:fast:logic', 'npm run test:fast:isolation']) {
@@ -162,4 +164,27 @@ test('Fast client parts together run every client command, and split the rendere
   assert.match(config, /part === '3d' \? tiers\.rendered\.filter\(\(file\) => RENDERED_3D\.includes\(file\)\)/)
   assert.match(config, /part === 'cdu' \? tiers\.rendered\.filter\(\(file\) => RENDERED_CDU\.includes\(file\)\)/)
   assert.match(config, /part === 'standard' \? tiers\.rendered\.filter\(\(file\) => !RENDERED_3D\.includes\(file\) && !RENDERED_CDU\.includes\(file\)\)/)
+})
+
+// #1456: the logic shards are whole files packed by recorded duration. Every shard computes the same assignment, so
+// for any shard count each logic file runs in exactly one shard, recorded or not, and the recorded times come out even.
+test('Fast logic shards run every logic file exactly once, and the recorded durations pack them evenly', async () => {
+  const { packedFiles } = await import(new URL('../../client/fast-shard.ts', import.meta.url))
+  const tiers = JSON.parse(readFileSync(join(repoRoot, 'product/client/fast-client-tests.json'), 'utf8'))
+  const durations = JSON.parse(readFileSync(join(repoRoot, 'product/client/fast-logic-durations.json'), 'utf8'))
+  const oneUnknown = { ...durations }
+  delete oneUnknown[tiers.logic[0]]
+  for (const [label, weights] of [['recorded', durations], ['none recorded', {}], ['one unknown', oneUnknown]]) {
+    for (const total of [1, 2, manifest.client.parts.logic.shards, 7]) {
+      const shards = Array.from({ length: total }, (_, i) => packedFiles(tiers.logic, weights, { current: i + 1, total }))
+      assert.deepEqual(shards.flat().sort(), [...tiers.logic].sort(), `${label}, ${total} shards: every logic file runs exactly once`)
+    }
+  }
+  for (const file of Object.keys(durations)) assert.ok(tiers.logic.includes(file), `fast-logic-durations.json names a file outside the logic tier: ${file}`)
+  // Balance is an optimisation, but a stale or hand-edited file that packs badly should fail here, not in hosted time.
+  const total = manifest.client.parts.logic.shards
+  const loads = Array.from({ length: total }, (_, i) => packedFiles(tiers.logic, durations, { current: i + 1, total })
+    .reduce((sum, file) => sum + (durations[file] ?? 0), 0))
+  const all = Object.values(durations).reduce((sum, value) => sum + value, 0)
+  assert.ok(Math.max(...loads) <= Math.max(all / total * 1.1, ...Object.values(durations)), `the logic shards are uneven: ${loads.map(Math.round).join(', ')}`)
 })
