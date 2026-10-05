@@ -179,11 +179,27 @@ test('the scene draws only when something changes: still while the bench is paus
   const still = await frames()
   await page.waitForTimeout(2000)
   expect(await frames(), 'paused: no frames drawn').toBe(still)
-  // Flying: the aircraft moves every tick (four a second), and each tick asks for frames. The software renderer here
-  // draws only a few frames a second, so the bar is that it keeps drawing, not a frame rate.
+  // Flying: the aircraft moves every tick (four a second), each tick asks for a frame, each frame still blending between
+  // two ticks asks for the next and the camera moved to follow it is a change Cesium draws, so the view keeps drawing for
+  // as long as it flies. How many frames a second that is belongs to the renderer and the host: a loaded hosted runner's
+  // software renderer has drawn one a second or slower, with the bench's own ticks starved alike (#1434). So the bar is
+  // that it keeps drawing because the aircraft moves, not a frame rate: more than five frames drawn for the flight (asked
+  // for by the view, or for a moved camera, never only for tiles), waited for while it goes on flying after the same two
+  // seconds as before.
+  const flightFrames = async () => {
+    const causes = await scene.getAttribute('data-frame-causes') ?? ''
+    const count = (cause: string) => Number(causes.split(', ').find(entry => entry.startsWith(`${cause} `))?.slice(cause.length + 1) ?? 0)
+    return count('asked') + count('camera')
+  }
+  const flightBefore = await flightFrames()
   await page.getByRole('button', { name: 'Fly' }).click()
   await page.waitForTimeout(2000)
-  expect(await frames() - still, 'flying: frames drawn').toBeGreaterThan(5)
+  const flying = async () => {
+    const drawn = await flightFrames() - flightBefore
+    return drawn > 5 ? 'kept drawing for the flight'
+      : `${drawn} frames drawn for the flight (${await frames() - still} in all); requests ${await scene.getAttribute('data-requests') ?? 'none'}; frames drawn for ${await scene.getAttribute('data-frame-causes') ?? 'none'}`
+  }
+  await expect.poll(flying, { message: 'flying: frames drawn', intervals: [1000], timeout: 30_000 }).toBe('kept drawing for the flight')
   await page.getByRole('button', { name: 'Pause' }).click()
   previous = -1
   await expect.poll(settled, { intervals: [3000], timeout: 60_000 }).toBe('tiles loaded, still')
