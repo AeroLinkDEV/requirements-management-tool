@@ -1250,7 +1250,7 @@ jobs:
         run: |
           set -euo pipefail
           # Discovery is a listing, not an execution report.
-          npx playwright test --list --reporter=list > listed.txt
+          npx playwright test --list --reporter=list,./scripts/browser-storage-reporter.mjs > listed.txt
           # An FMS Test Bench-only change runs the FMS journeys only: the bench's own specs and the specs that
           # observe it (product/test-planner/lib/classify.mjs). They are packed across the same four shards, so the
           # shard set the merge-authority verifier requires is unchanged; the filter fails on an empty result.
@@ -1412,6 +1412,9 @@ jobs:
       - name: Mark setup complete
         continue-on-error: true
         run: node "${{ github.workspace }}/product/ci-metrics/bin/mark.mjs" setup-end
+      - name: Verify browser report provenance
+        working-directory: product/client
+        run: node --test scripts/browser-report.test.mjs
       - name: Build the client and run the production journeys
         working-directory: product/client
         env:
@@ -1540,7 +1543,7 @@ jobs:
         run: |
           set -euo pipefail
           # Discovery is a listing, not an execution report.
-          npx playwright test --list --reporter=list > listed.txt
+          npx playwright test --list --reporter=list,./scripts/browser-storage-reporter.mjs > listed.txt
           node scripts/plan-journey-shard.mjs listed.txt ${{ matrix.shard }} ${{ strategy.job-total }} > plan.txt
           readarray -t planned < plan.txt
           expected="${planned[0]}"

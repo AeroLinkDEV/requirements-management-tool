@@ -15,6 +15,7 @@ const windowsDotnet = process.env.USERPROFILE
 const posixDotnet = join(homedir(), '.dotnet', 'dotnet')
 const localDotnet = [windowsDotnet, posixDotnet].find(candidate => candidate && existsSync(candidate))
 const dotnet = process.env.AEROLINK_DOTNET ?? localDotnet ?? 'dotnet'
+const reportMetadata = browserReportMetadata()
 const runId = process.env.AEROLINK_E2E_RUN_ID ?? `${Date.now()}`
 process.env.AEROLINK_E2E_RUN_ID = runId
 const storage = createBrowserStorage(runId)
@@ -39,7 +40,7 @@ const apiLogDir = process.env.AEROLINK_E2E_API_LOG_DIR ?? 'api-logs'
 const apiLogPath = join(apiLogDir, `api-${runId}.log`)
 
 export default defineConfig({
-  metadata: browserReportMetadata(),
+  metadata: reportMetadata,
   testDir: './tests',
   // The production journeys have their own config, because they need the API to serve the built client rather
   // than Vite to serve modules. Running them here would test dev and assert about a build.

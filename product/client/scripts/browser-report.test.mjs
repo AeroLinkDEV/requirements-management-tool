@@ -5,7 +5,6 @@ import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { randomUUID } from 'node:crypto'
 import { browserStoragePath, removeBrowserStorage } from './browser-storage.mjs'
 import { listZipEntries, readZipEntry } from '../../ci-metrics/lib/zip.mjs'
 import { browserReportMetadata } from './browser-report-metadata.mjs'
@@ -74,35 +73,56 @@ for (const [job, step, jsonName] of [
     }
     writeFileSync(config, `import original from ${JSON.stringify(join(client, 'playwright.config.ts').replaceAll('\\', '/'))};
       export default { ...original, globalSetup: undefined, webServer: [], testDir: '.', testMatch: 'report.spec.ts',
-        outputDir: ${JSON.stringify(results)}, retries: 0, reporter: [['list'], ['html', { open: 'never', outputFolder: ${JSON.stringify(report)} }]],
+        outputDir: ${JSON.stringify(results)}, retries: 0,
+        reporter: original.reporter.map(([name, options]) => [name.startsWith('.') ? ${JSON.stringify(client)} + name.slice(2) : name, options]),
         use: { ...original.use, trace: 'retain-on-failure', screenshot: 'only-on-failure' } };`)
-    const script = `npx() {
-      local status=0
-      node "$REPORT_TEST_CLI" "\u0024{@:2}" "--config=$REPORT_TEST_CONFIG" || status=$?
-      if [[ "$*" == *--list* && -f "$PLAYWRIGHT_HTML_OUTPUT_DIR/index.html" ]]; then
-        echo 'Discovery created HTML under the execution-report path' >&2
-        return 42
-      fi
-      return "$status"
-    }
-    ${shardScript(job, step)}`
-    const runIds = []
+    const runner = join(root, 'playwright-runner.mjs')
+    const ownership = join(root, 'ownership.jsonl')
+    writeFileSync(runner, `import { spawnSync } from 'node:child_process'; import { randomUUID } from 'node:crypto';
+      import { appendFileSync, existsSync } from 'node:fs';
+      import { browserStoragePath } from ${JSON.stringify(pathToFileURL(join(client, 'scripts/browser-storage.mjs')).href)};
+      const args = process.argv.slice(2), discovery = args.includes('--list'), runId = randomUUID();
+      appendFileSync(process.env.REPORT_TEST_OWNERSHIP, JSON.stringify({ runId, discovery }) + '\\n');
+      if (discovery && process.env.REPORT_TEST_DISCOVERY_REFUSAL === '1') args.push('--grep=never-matching-report-fixture');
+      const result = spawnSync(process.execPath, [process.env.REPORT_TEST_CLI, ...args, '--config=' + process.env.REPORT_TEST_CONFIG],
+        { env: { ...process.env, AEROLINK_E2E_RUN_ID: runId }, encoding: 'utf8' });
+      process.stdout.write(result.stdout ?? ''); process.stderr.write(result.stderr ?? '');
+      if (discovery && existsSync(process.env.PLAYWRIGHT_HTML_OUTPUT_DIR + '/index.html')) {
+        console.error('Discovery created HTML under the execution-report path'); process.exit(42);
+      }
+      if (discovery && existsSync(browserStoragePath(runId))) {
+        console.error('Discovery left owned browser storage before execution'); process.exit(43);
+      }
+      process.exit(result.status ?? 1);`)
+    const script = `npx() { node "$REPORT_TEST_RUNNER" "\u0024{@:2}"; }
+      ${shardScript(job, step)}`
+    const runIds = () => existsSync(ownership) ? readFileSync(ownership, 'utf8').trim().split('\n').map(line => JSON.parse(line).runId) : []
     try {
-      for (const fails of [false, true]) {
-        const runId = randomUUID(); runIds.push(runId)
+      for (const outcome of ['pass', 'fail', 'discovery-refusal']) {
+        const fails = outcome === 'fail'
+        rmSync(join(root, jsonName), { force: true })
         writeFileSync(join(root, 'report.spec.ts'), `import playwright from ${JSON.stringify(require.resolve('@playwright/test').replaceAll('\\', '/'))}; const { test, expect } = playwright;
           test('first native assertion', async ({ page }) => { await page.setContent('<p>first</p>'); await expect(page.locator('p')).toHaveText('first'); });
           test('second native assertion', async ({ page }) => { await page.setContent('<p>second</p>'); expect(${fails ? '1' : '2'}).toBe(2); });`)
         const executed = spawnSync(bash, ['-c', script], { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 45_000,
           env: { ...process.env, CI: '', FORCE_COLOR: '0', FMS_ONLY: 'false',
             REPORT_TEST_CLI: cli.replaceAll('\\', '/'), REPORT_TEST_CONFIG: config.replaceAll('\\', '/'),
+            REPORT_TEST_RUNNER: runner.replaceAll('\\', '/'), REPORT_TEST_OWNERSHIP: ownership,
+            REPORT_TEST_DISCOVERY_REFUSAL: outcome === 'discovery-refusal' ? '1' : '',
             PLAYWRIGHT_HTML_OPEN: 'never', PLAYWRIGHT_HTML_OUTPUT_DIR: report, PLAYWRIGHT_JSON_OUTPUT_NAME: jsonName,
-            AEROLINK_E2E_RUN_ID: runId, AEROLINK_E2E_SHARD: '1',
+            AEROLINK_E2E_REPORT_DIR: report, AEROLINK_E2E_SHARD: '1',
             AEROLINK_E2E_REPORT_EXECUTION: '', AEROLINK_E2E_REPORT_SHA: '', AEROLINK_E2E_REPORT_SHARD_TOTAL: '',
             GITHUB_RUN_ID: '37075488558', GITHUB_RUN_ATTEMPT: '2', METRICS_JOB_ID: job } })
         const diagnostic = `${executed.stdout}\n${executed.stderr}`
         assert.equal(executed.error, undefined, diagnostic)
-        assert.equal(executed.status, fails ? 1 : 0, diagnostic)
+        assert.equal(executed.status, outcome === 'pass' ? 0 : 1, diagnostic)
+        assert.ok(runIds().every(runId => !existsSync(browserStoragePath(runId))), 'every phase completes its own cleanup')
+        if (outcome === 'discovery-refusal') {
+          assert.match(diagnostic, /No tests found/)
+          assert.equal(existsSync(join(root, jsonName)), false, 'refused discovery never claims executed JSON')
+          assert.equal(existsSync(join(report, 'index.html')), false, 'refused discovery never claims execution HTML')
+          continue
+        }
         const native = JSON.parse(readFileSync(join(root, jsonName), 'utf8'))
         const data = htmlData(join(report, 'index.html'))
         const html = data('report.json')
@@ -141,11 +161,10 @@ for (const [job, step, jsonName] of [
         } else {
           assert.equal(readFileSync(join(root, 'plan.txt'), 'utf8').trim().split('\n')[0], '2')
         }
-        assert.equal(existsSync(browserStoragePath(runId)), false, 'existing storage reporter still completes cleanup')
         rmSync(report, { recursive: true, force: true })
       }
     } finally {
-      for (const runId of runIds) removeBrowserStorage(runId)
+      for (const runId of runIds()) removeBrowserStorage(runId)
       rmSync(root, { recursive: true, force: true })
     }
   })
