@@ -133,7 +133,7 @@ test('F1: DME/DME solves from DME-only stations with their elevations, and a DME
   expect(distanceNm(fix.position, AT)).toBeLessThan(0.01)
   expect(fix.assumedElevation).toEqual([])
   // The same ranges solved as if every station were at sea level land well away: the elevation is what put it right.
-  const seaLevel = [east, north, south].map(s => ({ ...s, elevation: { feet: 0, source: 'data' as const } }))
+  const seaLevel = [east, north, south].map(s => ({ ...s, elevation: { feet: 0, source: 'data' as const, provenance: 'deliberately incorrect sea-level fixture' } }))
   const wrong = radioFixes(observed([east, north, south], AT, 9000, 1000).map((o, i) => ({ ...o, station: seaLevel[i] })), offset(AT, 45, 0.5), 9000, 1000).find(fix => fix.mode === 'DME/DME')
   expect(wrong === undefined || distanceNm(wrong.position, AT) > 0.05).toBe(true)
   // A co-located DME 0.3 NM from its VOR, toward the aircraft: ranges from the DME solve to the aircraft; from the VOR they would not.

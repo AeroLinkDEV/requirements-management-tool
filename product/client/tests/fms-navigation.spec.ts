@@ -1,12 +1,12 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
+import { bearingDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { RNP_DEFAULTS } from '../src/fmsCdu/navigation'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
-import { BenchRadioReceiver, radioFixes } from '../src/fmsCdu/radioNavigation'
+import { BenchRadioReceiver, radioFixes, type RadioFix } from '../src/fmsCdu/radioNavigation'
 import { BufferedSensorPort, type RadioObservation, type SensorFrame } from '../src/fmsCdu/sensorPorts'
 import type { Navaid } from '../src/fmsCdu/navData'
-import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
+import { CivilNavigation, type PositionMeasurement } from '../src/fmsCdu/civilNavigation'
 import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import type { GpsReceiver } from '../src/fmsCdu/gps'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
@@ -61,10 +61,13 @@ const lines = (unit: ScriptedFms) => screenText(unit.screen())
 const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : leg?.kind === 'cond' ? `(${leg.path})` : null }
+// Synthetic, simultaneous observations with known elevations; no prior ambiguity or rejected station.
+const measuredRadioFix = (position: LatLon, at: number): RadioFix => ({ position, at, oldestAt: at, mode: 'DME/DME',
+  anp: 0.2, dmes: ['A', 'B'], vor: null, assumedElevation: [], terrainElevation: [], rejected: [], accuracyBasis: 'laboratory', priorResolved: false })
 
 test('SETUP applies MAG/TRUE to CDU courses and angular entry, keeps true wind, and inhibits polar toggles (M300 3-9)', () => {
   const unit = new ScriptedFms(() => new Date(Date.UTC(2025, 0, 1)))
-  unit.placeAircraft({ position: { lat: 0, lon: 120 }, altitude: 0, track: 100, heading: 100 }, 'NOAA equator reference')
+  unit.placeAircraft({ position: { lat: 0, lon: 120 }, altitude: 0, track: 100 }, 'NOAA equator reference')
   press(unit, 'INIT_REF', 'LSK5L')
   expect(lines(unit)[0]).toContain('SETUP')
   expect(lines(unit)[2]).toContain('MAG')
@@ -76,7 +79,7 @@ test('SETUP applies MAG/TRUE to CDU courses and angular entry, keeps true wind, 
   unit.swapCycles()
   const pilot = unit.resolveWaypoint('REF01090/10')
   expect(typeof pilot).toBe('object')
-  if (typeof pilot !== 'object') throw new Error('PBD refused')
+  if (typeof pilot !== 'object' || !('ident' in pilot)) throw new Error('PBD did not resolve to one waypoint')
   const target = unit.coordinates(pilot.ident)!
   expect(distanceNm({ lat: 0, lon: 120 }, target)).toBeCloseTo(10, 6)
   expect(bearingDeg({ lat: 0, lon: 120 }, target)).toBeCloseTo(89.84, 2)
@@ -332,7 +335,7 @@ test('an external sensor mailbox refuses receiver and Doppler replay even when i
 
 test('radio AUTO acquisition restarts at the first sample in range after a loss', () => {
   const at = { lat: 45, lon: -75 }
-  const station: Navaid = { kind: 'navaid', ident: 'TEST', type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, 90, 10), elevation: { feet: 0, source: 'data' } }
+  const station: Navaid = { kind: 'navaid', ident: 'TEST', type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, 90, 10), elevation: { feet: 0, source: 'data', provenance: 'synthetic sea-level station fixture' } }
   const receiver = new BenchRadioReceiver()
   receiver.tune([station], 0)
   expect(receiver.sample(at, 3000, 3000)[0].slantRangeNm.status).toBe('NORMAL')
@@ -344,7 +347,7 @@ test('radio AUTO acquisition restarts at the first sample in range after a loss'
 
 test('DME/DME and VOR/DME solve measured ranges and bearings rather than substitute a prior or truth position', () => {
   const at = { lat: 45, lon: -75 }, altitude = 3000, now = 10000
-  const stations: Navaid[] = [90, 0, 225].map((course, i) => ({ kind: 'navaid', ident: `T${i}`, type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, course, 10), elevation: { feet: 0, source: 'data' } }))
+  const stations: Navaid[] = [90, 0, 225].map((course, i) => ({ kind: 'navaid', ident: `T${i}`, type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, course, 10), elevation: { feet: 0, source: 'data', provenance: 'synthetic sea-level station fixture' } }))
   const observations: RadioObservation[] = stations.map(station => ({ station,
     slantRangeNm: { at: now, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(at, station.position), altitude / 6076.12) },
     bearingTrue: { at: now, sequence: 1, status: 'NORMAL', value: bearingDeg(station.position, at) } }))
@@ -427,9 +430,9 @@ test('DR retains the wind computed from successive radio fixes when no GPS veloc
   const start = { lat: 45, lon: -75 }
   const navigation = new CivilNavigation(start)
   const input = { dt: 1, air: { headingTrue: 90, tasKt: 120, altitudeFt: 3000 }, gps: null, uncertainGps: null, radioApproved: true, rnp: 1 }
-  navigation.update({ ...input, radio: { position: start, at: 1000, mode: 'DME/DME', anp: 0.2, dmes: ['A', 'B'], vor: null } })
+  navigation.update({ ...input, radio: measuredRadioFix(start, 1000) })
   const next = offset(start, 90, 140 / 3600)
-  navigation.update({ ...input, radio: { position: next, at: 2000, mode: 'DME/DME', anp: 0.2, dmes: ['A', 'B'], vor: null } })
+  navigation.update({ ...input, radio: measuredRadioFix(next, 2000) })
   const dr = navigation.update({ ...input, dt: 60, radio: null })
   expect(dr.mode).toBe('DR')
   expect(distanceNm(next, dr.position)).toBeCloseTo(140 / 60, 2)
@@ -518,6 +521,8 @@ test('dead reckoning uses measured motion and grows its uncertainty independentl
   const { unit, fly } = setup()
   fly(20)
   const initialAnp = unit.navState.anp
+  expect(initialAnp).not.toBeNull()
+  if (initialAnp === null) throw new Error('The healthy GPS fixture must report its measured accuracy.')
   // DME first, then GPS: the aircraft goes straight from a GPS fix to dead reckoning.
   unit.setCondition('dmeOutage', true)
   // KALMAN and DVS are equipped (DEC-150): with them failed as well, no position sensor remains.
@@ -566,15 +571,15 @@ test('S300 phase boundaries use airport-relative altitude and separate arrival a
   const unit = new ScriptedFms(() => new Date('2026-09-29T14:00:00Z'))
   const origin = unit.navdb.airport(unit.activeRoute.origin)!
   const dest = unit.navdb.airport(unit.activeRoute.dest)!
-  unit.placeAircraft({ position: offset(origin.position, 270, 32.9), altitude: origin.elevation + 15999, tas: 0 })
+  unit.placeAircraft({ position: offset(origin.position, 270, 32.9), altitude: origin.elevation + 15999, track: 270 }, 'departure altitude below terminal ceiling')
   expect(unit.flightPhase).toBe('TERMINAL')
-  unit.placeAircraft({ position: offset(origin.position, 270, 32.9), altitude: origin.elevation + 16000, tas: 0 })
+  unit.placeAircraft({ position: offset(origin.position, 270, 32.9), altitude: origin.elevation + 16000, track: 270 }, 'departure altitude at terminal ceiling')
   expect(unit.flightPhase).toBe('EN ROUTE')
-  unit.placeAircraft({ position: offset(origin.position, 270, 33.1), altitude: 2000, tas: 0 })
+  unit.placeAircraft({ position: offset(origin.position, 270, 33.1), altitude: 2000, track: 270 }, 'departure outside terminal radius')
   expect(unit.flightPhase).toBe('EN ROUTE')
-  unit.placeAircraft({ position: offset(dest.position, 90, 29.9), altitude: dest.elevation + 14999, tas: 0 })
+  unit.placeAircraft({ position: offset(dest.position, 90, 29.9), altitude: dest.elevation + 14999, track: 90 }, 'arrival altitude below terminal ceiling')
   expect(unit.flightPhase).toBe('TERMINAL')
-  unit.placeAircraft({ position: offset(dest.position, 90, 29.9), altitude: dest.elevation + 15000, tas: 0 })
+  unit.placeAircraft({ position: offset(dest.position, 90, 29.9), altitude: dest.elevation + 15000, track: 90 }, 'arrival altitude at terminal ceiling')
   expect(unit.flightPhase).toBe('EN ROUTE')
 })
 
@@ -598,17 +603,17 @@ test('RNP defaults by phase: a loaded approach does not grant approach phase', (
   unit.directTo('FERDI')
   unit.press('EXEC')
   const faf = unit.coordinates('FERDI')!
-  unit.placeAircraft({ position: offset(faf, 57, 3.1), altitude: 2000, track: 237, tas: 90 })
+  unit.placeAircraft({ position: offset(faf, 57, 3.1), altitude: 2000, track: 237 }, 'outside approach arming reminder radius')
   unit.armApproach(true)
   expect(screenText(unit.screen())[SCRATCHPAD_LINE]).not.toContain('HSI SCALE TO CHANGE')
-  unit.placeAircraft({ position: offset(faf, 57, 2.9), altitude: 2000, track: 237, tas: 90 })
+  unit.placeAircraft({ position: offset(faf, 57, 2.9), altitude: 2000, track: 237 }, 'inside approach arming reminder radius')
   expect(screenText(unit.screen())[SCRATCHPAD_LINE]).toContain('HSI SCALE TO CHANGE')
   unit.armApproach(false); unit.updateNavigation(0)
   expect(recalled(unit, 'ARM APPROACH')).toBe(true)
-  unit.placeAircraft({ position: offset(faf, 57, 2.1), altitude: 2000, track: 237, tas: 90 })
+  unit.placeAircraft({ position: offset(faf, 57, 2.1), altitude: 2000, track: 237 }, 'outside approach phase radius')
   unit.armApproach(true)
   expect(unit.flightPhase).toBe('TERMINAL')
-  unit.placeAircraft({ position: offset(faf, 57, 1.9), altitude: 2000, track: 237, tas: 90 })
+  unit.placeAircraft({ position: offset(faf, 57, 1.9), altitude: 2000, track: 237 }, 'inside approach phase radius')
   expect(unit.flightPhase).toBe('APPROACH')
   expect(unit.requiredRnp).toBe(0.3)
   for (let prn = 1; prn <= 32; prn += 1) unit.deselectRaimSatellite(prn, true)
@@ -800,7 +805,7 @@ test('TOGA on the approach (laboratory airline profile) drops the rest of it and
 test('E1: the wind is computed only with valid air data and a measured ground velocity (GPS velocity or two radio fixes)', () => {
   const start = { lat: 45, lon: -75 }
   const air = { headingTrue: 90, tasKt: 120, altitudeFt: 3000 }
-  const gps = { position: start, anp: 0.05, receiver: 1 as const, northKt: 0, eastKt: 140 }
+  const gps: PositionMeasurement = { position: start, accuracy95Nm: 0.05, hilNm: 0.2, receiver: 1, northKt: 0, eastKt: 140 }
   const base = { dt: 1, uncertainGps: null, radio: null, radioApproved: true, rnp: 1 }
   const navigation = new CivilNavigation(start)
   expect(navigation.current.windComputed).toBe(false)
@@ -812,9 +817,8 @@ test('E1: the wind is computed only with valid air data and a measured ground ve
   // Dead reckoning: never.
   expect(navigation.update({ ...base, air, gps: null }).windComputed).toBe(false)
   // Radio fixes: the first gives no velocity, the second within the allowed gap does.
-  const fix = (position: typeof start, at: number) => ({ position, at, mode: 'DME/DME' as const, anp: 0.2, dmes: ['A', 'B'], vor: null })
-  expect(navigation.update({ ...base, air, gps: null, radio: fix(start, 1000) }).windComputed).toBe(false)
-  expect(navigation.update({ ...base, air, gps: null, radio: fix(offset(start, 90, 140 / 3600), 2000) }).windComputed).toBe(true)
+  expect(navigation.update({ ...base, air, gps: null, radio: measuredRadioFix(start, 1000) }).windComputed).toBe(false)
+  expect(navigation.update({ ...base, air, gps: null, radio: measuredRadioFix(offset(start, 90, 140 / 3600), 2000) }).windComputed).toBe(true)
 })
 
 test('E1: PROGRESS 1/4 takes a manual wind only while the FMS cannot compute one; it drives the predictions and never the air mass', () => {
@@ -857,7 +861,10 @@ test('E1: PROGRESS 1/4 takes a manual wind only while the FMS cannot compute one
   expect(unit.profile().points[0].eta).not.toBe(before)
   const leg = unit.profile().points[0]
   const course = unit.legGeometry(unit.activeRoute)[0]!.course
-  expect((leg.eta! - unit.now.getTime()) / 3_600_000).toBeCloseTo(leg.distance! / unit.groundSpeedOn(course), 6)
+  const groundSpeed = unit.groundSpeedOn(course)
+  expect(groundSpeed).not.toBeNull()
+  if (groundSpeed === null) throw new Error('The entered-wind fixture must permit the active course.')
+  expect((leg.eta! - unit.now.getTime()) / 3_600_000).toBeCloseTo(leg.distance! / groundSpeed, 6)
   // DELETE: back to the carried wind.
   for (let i = 0; i < 12 && scratch(unit) !== 'DELETE'; i += 1) unit.press('CLR')
   unit.press('LSK3L')

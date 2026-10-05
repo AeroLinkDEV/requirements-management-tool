@@ -21,7 +21,8 @@ const air = { at: 0, headingTrue: 90, tasKt: 100, altitudeFt: 2000 }
 const gpsFix = (overrides: Partial<PositionMeasurement> = {}): PositionMeasurement =>
   ({ position: HERE, receiver: 1, accuracy95Nm: 0.05, hilNm: 0.2, northKt: 0, eastKt: 100, ...overrides })
 const radioFix = (mode: RadioFix['mode'], anp: number): RadioFix =>
-  ({ position: offset(HERE, 90, 0.1), at: 0, anp, mode, dmes: ['YUL', 'YMX'], vor: mode === 'VOR/DME' ? 'YUL' : null, priorResolved: false })
+  ({ position: offset(HERE, 90, 0.1), at: 0, oldestAt: 0, anp, mode, dmes: ['YUL', 'YMX'], vor: mode === 'VOR/DME' ? 'YUL' : null,
+    assumedElevation: [], terrainElevation: [], rejected: [], accuracyBasis: 'laboratory', priorResolved: false })
 const update = (nav: CivilNavigation, input: Partial<Parameters<CivilNavigation['update']>[0]>) =>
   nav.update({ dt: 1, air, gps: null, uncertainGps: null, radio: null, radioApproved: true, rnp: 1, ...input })
 
@@ -176,7 +177,8 @@ test('C1: three DMEs on one line leave a mirror ambiguity the prior resolves; sp
 
 test('C1: a radio fix disambiguated by a GPS-derived prior is GPS-dependent and is not a NAIM backup; an independent one is', () => {
   const air2 = { at: 0, headingTrue: 90, tasKt: 100, altitudeFt }
-  const fix = (priorResolved: boolean): RadioFix => ({ position: offset(at, 90, 0.05), at: now, anp: 0.3, mode: 'DME/DME', dmes: ['A', 'B'], vor: null, priorResolved })
+  const fix = (priorResolved: boolean): RadioFix => ({ position: offset(at, 90, 0.05), at: now, oldestAt: now, anp: 0.3, mode: 'DME/DME', dmes: ['A', 'B'], vor: null,
+    assumedElevation: [], terrainElevation: [], rejected: [], accuracyBasis: 'laboratory', priorResolved })
   const uncertain = { position: offset(at, 0, 2), accuracy95Nm: 0.05, hilNm: 3, receiver: 1 as const, northKt: 0, eastKt: 100 }
   const run = (priorResolved: boolean) => {
     const nav = new CivilNavigation(at)
@@ -222,7 +224,8 @@ test('C1: dead reckoning keeps the GPS dependency of its start and of a GPS-comp
   nav.initialize(offset(at, 90, 2))
   expect(nav.update({ ...base, gps: null, radio: null }).gpsDependent).toBe(true)
   // Two independent radio fixes compute a new wind; DR after them is independent.
-  const radio = (seconds: number): RadioFix => ({ position: offset(at, 90, 100 * seconds / 3600), at: seconds * 1000, anp: 0.3, mode: 'DME/DME', dmes: ['A', 'B'], vor: null, priorResolved: false })
+  const radio = (seconds: number): RadioFix => ({ position: offset(at, 90, 100 * seconds / 3600), at: seconds * 1000, oldestAt: seconds * 1000, anp: 0.3, mode: 'DME/DME', dmes: ['A', 'B'], vor: null,
+    assumedElevation: [], terrainElevation: [], rejected: [], accuracyBasis: 'laboratory', priorResolved: false })
   const indep = new CivilNavigation(at)
   indep.update({ ...base, gps: gpsFixed, radio: null })
   indep.update({ ...base, gps: null, radio: radio(1) })
