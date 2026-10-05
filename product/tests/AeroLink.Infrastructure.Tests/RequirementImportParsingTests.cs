@@ -36,6 +36,33 @@ public sealed class RequirementImportParsingTests
     }
 
     /// <summary>
+    /// #1199: this reader decodes strings separately from the inception reader, so it carries its own rows.
+    /// A phonetic guide (rPh) is a reading, not cell text; it is discarded while rich-text runs still join.
+    /// </summary>
+    [Theory]
+    [InlineData("<c r=\"C2\" t=\"inlineStr\"><is><t>東京</t><rPh sb=\"0\" eb=\"2\"><t>トウキョウ</t></rPh><phoneticPr fontId=\"1\"/></is></c>", "東京")]
+    [InlineData("<c r=\"C2\" t=\"s\"><v>4</v></c>", "東京")]
+    [InlineData("<c r=\"C2\" t=\"s\"><v>5</v></c>", "東京")]
+    [InlineData("<c r=\"C2\" t=\"inlineStr\"><is><r><t xml:space=\"preserve\">Plain </t></r><r><rPr><i/></rPr><t>wording</t></r></is></c>", "Plain wording")]
+    [InlineData("<c r=\"C2\" t=\"s\"><v>6</v></c>", "Plain ASCII wording")]
+    public void Workbook_cell_text_is_the_base_text_without_phonetic_guides(string statementCell, string expected)
+    {
+        var workbook = Workbook(Sheet($"""
+            <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c></row>
+            <row r="2"><c r="A2" t="inlineStr"><is><t>SYSR-00004101</t></is></c><c r="B2" t="inlineStr"><is><t>System</t></is></c>{statementCell}<c r="D2" t="inlineStr"><is><t>Test</t></is></c></row>
+            """), """
+            <?xml version="1.0"?>
+            <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Identifier</t></si><si><t>Level</t></si><si><t>Statement</t></si><si><t>VerificationMethod</t></si><si><t>東京</t><rPh sb="0" eb="2"><t>トウキョウ</t></rPh><phoneticPr fontId="1"/></si><si><r><t>東</t></r><r><rPr><b/></rPr><t>京</t></r><rPh sb="0" eb="2"><t>トウキョウ</t></rPh></si><si><t>Plain ASCII wording</t></si></sst>
+            """);
+
+        using var stream = new MemoryStream(workbook);
+        var row = Assert.Single(EnterpriseRequirementsService.ParseImport(stream, "requirements.xlsx"));
+
+        Assert.Equal("SYSR-00004101", row.Identifier);
+        Assert.Equal(expected, row.Statement);
+    }
+
+    /// <summary>
     /// A declared entry size is a number the sender chose, so it cannot be the only limit. What is asserted
     /// here is the reader's own posture: a document type definition is refused outright, which is what closes
     /// off both external resolution and entity expansion regardless of what the archive claims about itself.
