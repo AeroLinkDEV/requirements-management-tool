@@ -21,6 +21,22 @@ export type ObstacleScene = {
 };
 type Outcome = { drawn: number } | { failed: string };
 
+/**
+ * A thrown value in words. Cesium passes a web worker's error on as the plain object the worker posted ({ name, message,
+ * stack }) unless its name is Error, RuntimeError or DeveloperError, so a TypeError from a worker would otherwise read
+ * "[object Object]" (#1492).
+ */
+export function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const { name, message } = error as { name?: unknown; message?: unknown };
+    if (typeof message === "string") return typeof name === "string" && name ? `${name}: ${message}` : message;
+    try { return JSON.stringify(error); } catch { /* not serialisable: fall through */ }
+  }
+  return String(error);
+}
+
 export type ObstacleLayer = {
   /** Recolours by clearance when the aircraft altitude or the colouring mode changes. */
   update(aircraftAltitudeFt: number, mode: TerrainColouring): void;
@@ -53,8 +69,24 @@ export function drawObstacles(Cesium: ObstacleCesium, scene: ObstacleScene, obst
     const point = tops.add({ position: top, pixelSize: 5, color: neutral });
     return { obstacle, point, key: -1, attributes: null as { color: Uint8Array; boundingSphere?: unknown } | null };
   });
-  const lines = instances.length ? scene.primitives.add(new Cesium.Primitive({ geometryInstances: instances,
-    appearance: new Cesium.PolylineColorAppearance({ translucent: false }), asynchronous: true, show: false })) : null;
+  const lines = instances.length ? new Cesium.Primitive({ geometryInstances: instances,
+    appearance: new Cesium.PolylineColorAppearance({ translucent: false }), asynchronous: true, show: false }) : null;
+  // A failed asynchronous build (a geometry worker's error, such as a worker module that could not be fetched) is thrown
+  // by Cesium from the primitive's update on every frame, as a render error that stops the whole view (#1492). The scene
+  // updates the lines through this guard, which fails the layer with that error instead and leaves the view drawing.
+  // Once drawn, a later error is the scene's again.
+  const guard = lines && {
+    update(frameState: unknown) {
+      if (finished && !visible) return; // Failed or destroyed: the removal follows.
+      try { (lines as unknown as { update(frameState: unknown): void }).update(frameState); } catch (error) {
+        if (visible) throw error;
+        fail(`obstacle geometry failed: ${describeError(error)}`, true);
+      }
+    },
+    isDestroyed: () => lines.isDestroyed(),
+    destroy() { if (!lines.isDestroyed()) lines.destroy(); },
+  };
+  if (guard) scene.primitives.add(guard);
   scene.primitives.add(tops);
   let latest: { altitude: number; mode: TerrainColouring } = { altitude: 0, mode: "off" };
   let last: { altitude: number; mode: TerrainColouring } | null = null;
@@ -67,14 +99,14 @@ export function drawObstacles(Cesium: ObstacleCesium, scene: ObstacleScene, obst
     if (removed || removalDeferred) return;
     removed = true;
     if (scene.primitives.isDestroyed()) return;
-    if (lines) scene.primitives.remove(lines);
+    if (guard) scene.primitives.remove(guard);
     scene.primitives.remove(tops);
   };
-  const fail = (error: unknown, inRender = false) => {
+  const fail = (reason: string, inRender = false) => {
     if (finished) return;
     finished = true;
     stopWatching();
-    resolveReady({ failed: `obstacles not drawn: ${error instanceof Error ? error.message : String(error)}` });
+    resolveReady({ failed: `obstacles not drawn: ${reason}` });
     if (inRender) {
       // Do not alter Cesium's primitive list from inside its own render/error event traversal.
       removalDeferred = true;
@@ -102,7 +134,8 @@ export function drawObstacles(Cesium: ObstacleCesium, scene: ObstacleScene, obst
   };
   // Cesium marks a failed primitive ready too. Observe render errors as well as a rendered frame,
   // and validate its actual instance attributes before exposing either the lines or their top markers.
-  stopErrorWatch = scene.renderError.addEventListener((_scene, error) => fail(error, true));
+  // A scene that stops rendering before the layer has drawn leaves it undrawn, whatever raised the error; say which.
+  stopErrorWatch = scene.renderError.addEventListener((_scene, error) => fail(`the scene stopped rendering: ${describeError(error)}`, true));
   stopReadyWatch = scene.postRender.addEventListener(() => {
     if ((lines && !lines.ready) || finished || destroyed) return;
     if (initialized) {
@@ -123,7 +156,7 @@ export function drawObstacles(Cesium: ObstacleCesium, scene: ObstacleScene, obst
       if (lines) lines.show = true;
       tops.show = initialized = true;
       scene.requestRender?.();
-    } catch (error) { fail(error, true); }
+    } catch (error) { fail(describeError(error), true); }
   });
   return {
     lines, tops, drawn, ready,
@@ -160,7 +193,7 @@ export function createObstacleLayer(Cesium: ObstacleCesium, scene: ObstacleScene
     if (pending) layer.update(pending.altitude, pending.mode);
     scene.requestRender?.();
     return layer.ready;
-  }).catch((error: unknown) => ({ failed: `obstacle data not loaded: ${error instanceof Error ? error.message : String(error)}` }));
+  }).catch((error: unknown) => ({ failed: `obstacle data not loaded: ${describeError(error)}` }));
   return {
     get count() { return layer?.count ?? 0; },
     ready,

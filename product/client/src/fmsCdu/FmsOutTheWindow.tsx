@@ -7,7 +7,7 @@ import {
 } from "./outTheWindow";
 import { GroundImagery, IMAGERY_MAX_ZOOM, browserImageryDecoder, type ImagerySource } from "./groundImagery";
 import { MAIN_ROTOR_RAD_S, createAircraftModel } from "./otwAircraftModel";
-import { createObstacleLayer } from "./otwObstacles";
+import { createObstacleLayer, describeError } from "./otwObstacles";
 import { workerReliefShader } from "./reliefShader";
 import { aircraftCamera } from "./otwCamera";
 import { aircraftRenderLoop } from "./otwRenderLoop";
@@ -129,14 +129,15 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
     let disposed = false;
     let handle: SceneHandle | null = null;
     // The host survives docking, but its diagnostics must describe this scene generation, including startup.
-    for (const name of ["frames", "frameCauses", "requests", "tileQueue", "tilesLoaded", "model", "obstacles"]) delete host.current!.dataset[name];
+    for (const name of ["frames", "frameCauses", "requests", "tileQueue", "tilesLoaded", "model", "obstacles", "obstaclesReason"]) delete host.current!.dataset[name];
     setStatus("loading");
     setFailure("");
     setProgress({ ...initialProgress, destination: renderingDocument, tiles, imagery });
     const failed = (error: unknown) => {
       if (disposed) return;
-      setFailure(error instanceof Error ? error.message : String(error));
-      setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
+      const description = describeError(error);
+      setFailure(description);
+      setStatus(/webgl/i.test(description) ? "no-webgl" : "failed");
     };
     startScene(host.current!, credits.current!, creditViewport.current!, pathMarker.current!, live, tiles, imagery, renderingDocument, () => disposed, failed,
       next => { if (!disposed) setProgress({ ...next, destination: renderingDocument, tiles, imagery }); })
@@ -533,10 +534,15 @@ async function startScene(
     request("model");
   });
   // The FAA obstacles near the bench areas (otwObstacles.ts, Brief C), coloured as the terrain colouring colours their
-  // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed").
+  // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed" with the reason).
   const obstacles = createObstacleLayer(Cesium, { primitives: scene.primitives, postRender: scene.postRender,
     renderError: scene.renderError, requestRender: () => request("obstacles") });
-  void obstacles.ready.then(outcome => { if (disposed()) return; container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; request("obstacles"); });
+  void obstacles.ready.then(outcome => {
+    if (disposed()) return;
+    if ("drawn" in outcome) container.dataset.obstacles = String(outcome.drawn);
+    else Object.assign(container.dataset, { obstacles: "failed", obstaclesReason: outcome.failed });
+    request("obstacles");
+  });
   const orientation = new Cesium.HeadingPitchRoll();
   // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.
   const symbol = canvas(renderingDocument, 48);

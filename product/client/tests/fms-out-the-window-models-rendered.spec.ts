@@ -53,10 +53,15 @@ test('the chase view flies the glTF helicopter model, its rotors turning, in pla
 })
 
 // Brief C: the FAA Digital Obstacle File extract near the bench areas (public/fms-cdu/obstacles, with its provenance)
-// is loaded from the bench's own origin and drawn in the view; the scene element records how many.
+// is loaded from the bench's own origin and drawn in the view; the scene element records how many, or why none.
 test('the FAA obstacles near the bench areas are loaded and drawn in the view (Brief C)', async ({ page }) => {
   test.setTimeout(120_000)
   await open(page, 'off')
   const view = await show(page)
-  await expect(view.locator('.fmsOtwScene')).toHaveAttribute('data-obstacles', '11973', { timeout: 60_000 })
+  const scene = view.locator('.fmsOtwScene')
+  // The layer settles once, as the count or "failed"; a failure names its reason (#1492).
+  await expect(scene).toHaveAttribute('data-obstacles', /^(\d+|failed)$/, { timeout: 60_000 })
+  const reason = await scene.getAttribute('data-obstacles-reason')
+  expect(await scene.getAttribute('data-obstacles'), `the obstacle layer's outcome (reason: ${reason})`).toBe('11973')
+  expect(reason).toBeNull()
 })
