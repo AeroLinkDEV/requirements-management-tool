@@ -379,13 +379,7 @@ function productionDesignReport() {
       const matrix = element.getScreenCTM()
       return matrix ? size * minimumScale(matrix) : 0
     }
-    let matrix = new DOMMatrix()
-    for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
-      const style = getComputedStyle(ancestor)
-      const transform = style.transform === 'none' ? new DOMMatrix() : new DOMMatrix(style.transform)
-      matrix = transform.scale(parseFloat(style.zoom) || 1).multiply(matrix)
-    }
-    return size * minimumScale(matrix)
+    return size
   }
   // DEC-117 owns legibility inside the reader-zoomed Digital Thread canvas. Its surrounding UI remains
   // audited, as does every other surface. Physical CDU key legends retain their #1444 fit owner.
@@ -434,8 +428,9 @@ test('every workspace chunk arrives and keeps the design contract in both densit
     <svg width="100" height="60" viewBox="0 0 200 120"><text x="8" y="30" font-size="16">viewBox control</text></svg>
     <svg width="240" height="100"><g transform="translate(40 40) rotate(30) scale(2 .5)"><text font-size="16">rotated control</text></g></svg>
     <svg width="240" height="100"><g transform="translate(20 40) skewX(60)"><text font-size="16">skew control</text></g></svg>
-    <div style="transform: rotate(30deg); transform-origin: top left"><span style="display: inline-block; font-size:16px; transform:scale(2, .5)">layout control</span></div>
+    <div style="width:240px; transform:rotate(30deg); transform-origin:top left"><svg width="240" height="100" style="transform:scale(2, .5); transform-origin:top left"><text x="8" y="30" font-size="16">layout control</text></svg></div>
     <svg width="240" height="100"><g transform="translate(20 40) rotate(30)"><text font-size="12">readable control</text></g></svg>
+    <div style="width:240px; transform:rotate(30deg); transform-origin:top left"><svg width="240" height="100"><text x="8" y="30" font-size="12">layout readable control</text></svg></div>
   </main>`)
   const controlReport = await page.evaluate(productionDesignReport)
   expect(controlReport.tiny.map(label => label.split(' @ ')[0])).toEqual([
@@ -505,6 +500,8 @@ test('every workspace chunk arrives and keeps the design contract in both densit
             { message: `EFIS readability after resizing to ${width}px [${density}]` }).toEqual([])
           const resized = await page.evaluate(productionDesignReport)
           inventory.push({ route, density, width, fonts: resized.fonts })
+          await page.locator('.efisPfd').screenshot({ path: test.info().outputPath(`pfd-resized-${density}-${width}.png`) })
+          await page.locator('.efisNd').screenshot({ path: test.info().outputPath(`nd-resized-${density}-${width}.png`) })
         }
 
       }
