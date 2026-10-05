@@ -4,6 +4,7 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Integrations;
+using AeroLink.Domain.Notifications;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
@@ -18,6 +19,7 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
 
     internal async Task ValidateAsync(CancellationToken ct)
     {
+        ValidateNotificationEvidence();
         await ProjectFeatureService.RefuseRecordsForDisabledFeaturesAsync(_db, ct);
         await ProjectFeatureService.RefuseStandaloneVerificationWithRequirementsAsync(_db, ct);
         await ValidateTestChangeReviewOriginsAsync(ct);
@@ -35,6 +37,43 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
         await ValidateExactLinkLifecycleIntegrityAsync(ct);
         await ValidateExecutionCutoverProvenanceIntegrityAsync(ct);
         await ValidateReleasedSyntheticSourceSupplementIntegrityAsync(ct);
+    }
+
+    private void ValidateNotificationEvidence()
+    {
+        _db.ChangeTracker.DetectChanges();
+        foreach (var entry in _db.ChangeTracker.Entries())
+        {
+            if (entry.Entity is NotificationContext or NotificationSettingsRevision or NotificationAdmissionEpoch
+                or NotificationOperation or NotificationPreferenceConfirmation
+                && entry.State is EntityState.Modified or EntityState.Deleted)
+                throw new DomainException("Original notification context, admission, settings and command receipts are immutable.");
+            if (entry.Entity is NotificationPhysicalAttempt)
+            {
+                if (entry.State == EntityState.Deleted) throw new DomainException("Physical notification attempts cannot be deleted.");
+                if (entry.State != EntityState.Modified) continue;
+                var terminal = (NotificationAttemptOutcome)entry.OriginalValues[nameof(NotificationPhysicalAttempt.Outcome)]! != NotificationAttemptOutcome.InProgress;
+                var immutable = new[] { "Id", "GenerationId", "ClaimToken", "SettingsRevisionId", "PolicyHash", "ProtectedSettingsSnapshot", "EffectiveSettingsHash", "HostIdentity", "ProcessId", "ProcessStartTicks", "ClaimedAt" };
+                if (entry.Properties.Any(x => x.IsModified && (immutable.Contains(x.Metadata.Name)
+                    || terminal && x.Metadata.Name is not ("TransportDisposed" or "DisposedAt" or "CleanupWarning"))))
+                    throw new DomainException("Physical submission identity and a terminal SMTP outcome are immutable.");
+                if ((bool)entry.OriginalValues[nameof(NotificationPhysicalAttempt.CleanupWarning)]! && entry.Property("CleanupWarning").IsModified
+                    || entry.OriginalValues[nameof(NotificationPhysicalAttempt.TransmissionStartedAt)] is not null && entry.Property("TransmissionStartedAt").IsModified
+                    || (bool)entry.OriginalValues[nameof(NotificationPhysicalAttempt.TransportDisposed)]! && (entry.Property("TransportDisposed").IsModified || entry.Property("DisposedAt").IsModified))
+                    throw new DomainException("Confirmed transport disposal cannot be revoked.");
+            }
+            if (entry.Entity is NotificationDeliveryGeneration)
+            {
+                if (entry.State == EntityState.Deleted) throw new DomainException("Concrete notification generations cannot be deleted.");
+                if (entry.State != EntityState.Modified) continue;
+                var immutable = new[] { "Id", "DeliveryId", "InitialDeliveryId", "OriginalAdmissionEpochId", "OriginalSendGeneration", "OriginalDeadlineTicks", "SettingsRevisionId", "Mode", "PredecessorId", "MessageId", "MessageDate", "ProtectedAddress", "AddressHash", "TemplateVersion", "ContentPolicyVersion", "CreatedAt", "CreatedTicks" };
+                if (entry.Properties.Any(x => x.IsModified && immutable.Contains(x.Metadata.Name)))
+                    throw new DomainException("A concrete notification generation's original identity and destination are immutable.");
+                if (((string)entry.OriginalValues[nameof(NotificationDeliveryGeneration.ProtectedMime)]!).Length > 0
+                    && entry.Properties.Any(x => x.IsModified && x.Metadata.Name is "ProtectedMime" or "BodyHash" or "MessageConfigurationHash"))
+                    throw new DomainException("A prepared notification message is immutable; reissue creates a linked generation.");
+            }
+        }
     }
 
     /// <summary>

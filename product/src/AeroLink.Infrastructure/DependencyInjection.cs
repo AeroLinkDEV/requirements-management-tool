@@ -2,6 +2,7 @@ using AeroLink.Domain.Assurance;
 using AeroLink.Infrastructure.Diagnostics;
 using AeroLink.Infrastructure.Notifications;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.DataProtection;
 using AeroLink.Domain.Contracts;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -64,9 +65,15 @@ public static class DependencyInjection
         services.AddScoped<FmsShowcaseSeeder>();
         services.AddScoped<ImportPracticeSeeder>();
         services.AddScoped<NotificationOutbox>();
+        services.AddSingleton<NotificationInstallationAuthority>();
+        services.AddSingleton<NotificationContentProtection>();
+        services.AddScoped<NotificationSettingsResolver>();
+        services.AddScoped<NotificationEligibility>();
+        services.AddScoped<NotificationDispatcher>();
+        services.AddScoped<NotificationOperationsService>();
+        services.AddSingleton<NotificationSmtpTransport>();
         services.AddScoped<NotificationLinkBuilder>();
         services.AddSingleton<UnsubscribeTokenService>();
-        services.AddScoped<IEmailSender, SmtpEmailSender>();
         services.AddHostedService<NotificationDispatchWorker>();
         services.AddSingleton<EvidenceFileStore>();
         services.AddScoped<ManagedDocumentFileService>();
@@ -77,7 +84,12 @@ public static class DependencyInjection
         services.AddScoped<ManagedDocumentShowcaseSeeder>();
         services.AddHostedService<ManagedDocumentIntegrityWorker>();
         services.AddHostedService<EnterpriseJobWorker>();
-        services.AddDataProtection();
+        var dataProtection = services.AddDataProtection();
+        // A deployment-owned ring supports restart-stable protected notification evidence. Directory
+        // access remains lazy: a broken ring blocks protected operations, not unrelated business saves.
+        var keyRingPath = configuration["DataProtection:KeyRingPath"];
+        if (!string.IsNullOrWhiteSpace(keyRingPath))
+            dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
         services.AddSingleton<IWebhookDnsResolver, SystemWebhookDnsResolver>();
         services.AddSingleton<WebhookDestinationPolicy>();
         services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15))

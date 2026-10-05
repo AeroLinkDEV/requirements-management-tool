@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PersonName } from "./People";
 import { stateLabel } from "./presentation";
 import type { FormEvent } from "react";
@@ -6,6 +6,7 @@ import "./EnterpriseControlCenter.css";
 import "./EnterpriseControlOverrides.css";
 import EnterpriseLifecycleAssurance from "./EnterpriseLifecycleAssurance";
 import {
+  ApiError,
   apiRequest,
   operationError,
   recordClientOperationFailure,
@@ -144,12 +145,58 @@ type Performance = {
   allPassed: boolean;
   samples: { name: string; targetMs: number; p95Ms: number; passed: boolean }[];
 };
+type NotificationMode = "Disabled" | "Capture" | "ControlledTest" | "Live";
+type NotificationSettings = {
+  version: number; mode: NotificationMode; host: string; port: number; sender: string;
+  displayName: string; baseUrl: string; userNameConfigured: boolean; credentialConfigured: boolean;
+};
+type NotificationGeneration = {
+  id: string; deliveryId: string; notificationId: string; contextIdentifier: string; mode: NotificationMode;
+  state: string; version: number; messageId: string; bodyHash: string; intendedDestination: string;
+  effectiveDestination: string; attempts: number; dueAt?: string; deadlineAt?: string; safeCode?: string; createdAt: string;
+};
+type NotificationAttempt = {
+  id: string; startedAt: string; completedAt?: string; outcome: string; phase: string;
+  smtpStatus?: number; safeCode?: string; transportDisposed: boolean; quiescence: "confirmed" | "unproven";
+};
 type NotificationOperations = {
   generatedAt: string;
   smtp: { configured: boolean; hostConfigured: boolean; port?: number; portValid: boolean; useStartTls: boolean; credentialsConfigured: boolean; fromConfigured: boolean };
   links: { configured: boolean; valid: boolean; baseUrl?: string };
   totals: { pending: number; sent: number; failed: number; suppressed: number };
   deliveries: { id: string; recipient: string; address: string; state: string; attempts: number; detail?: string; createdAt: string; completedAt?: string }[];
+  installation: { id: string; label: string; database: string; version: string | number };
+  settings: NotificationSettings;
+  locks: { relay: boolean; sender: boolean; baseUrl: boolean; credentials: boolean; externalModes: boolean; diagnosticTarget: boolean };
+  policy: { maximumMode: NotificationMode; diagnosticTarget: "protected" | "not-configured"; sendAuthority: "current" | "blocked" };
+  health: { state: string; count: number; oldestAt?: string; action: string }[];
+  generations: NotificationGeneration[]; page: number; total: number; pageSize: number;
+};
+type NotificationFamily = "Settings" | "TransportTest" | "Activate" | "Resume" | "Readmit" | "Replay" | "Reissue" | "Suppress";
+type NotificationIntent = {
+  operationKey: string; family: NotificationFamily; expectedVersion: number;
+  projectId?: string; mode?: NotificationMode; deliveryId?: string; generationId?: string; expectedGenerationVersion?: number;
+  acknowledgeDuplicateRisk?: boolean; host?: string; port?: number; sender?: string; displayName?: string;
+  baseUrl?: string; userName?: string; clearCredential?: boolean; requiresCredential?: boolean;
+};
+type NotificationReceipt = {
+  id: string; operationKey: string; family: NotificationFamily; createdAt: string;
+  result: { state: string; notificationId?: string; generationId?: string; version?: number };
+};
+const notificationModes: NotificationMode[] = ["Disabled", "Capture", "ControlledTest", "Live"];
+const notificationFamilies: NotificationFamily[] = ["Settings", "TransportTest", "Activate", "Resume", "Readmit", "Replay", "Reissue", "Suppress"];
+// Only these non-secret semantic fields enter storage; credentials remain in memory.
+const readNotificationIntent = (key: string): NotificationIntent | undefined => {
+  const storedKey = Object.keys(localStorage).filter(candidate => candidate.startsWith(`${key}:`)).sort()[0];
+  const raw = storedKey ? localStorage.getItem(storedKey) : null;
+  if (!raw) return undefined;
+  const value = JSON.parse(raw) as NotificationIntent;
+  if (!value || !/^[0-9a-f-]{36}$/i.test(value.operationKey) || !notificationFamilies.includes(value.family)
+    || !Number.isInteger(value.expectedVersion) || Object.keys(value).some(field => ![
+      "operationKey", "family", "expectedVersion", "projectId", "mode", "deliveryId", "generationId", "expectedGenerationVersion",
+      "acknowledgeDuplicateRisk", "host", "port", "sender", "displayName", "baseUrl", "userName", "clearCredential", "requiresCredential",
+    ].includes(field))) throw new Error("Stored notification operation is invalid. Preserve it for administrator recovery.");
+  return value;
 };
 type Tab =
   | "command"
@@ -211,6 +258,21 @@ export default function EnterpriseControlCenter({
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const [notificationPage, setNotificationPage] = useState(1);
+  const [notificationDraft, setNotificationDraft] = useState<NotificationSettings>();
+  const [notificationUserName, setNotificationUserName] = useState("");
+  const [clearNotificationUserName, setClearNotificationUserName] = useState(false);
+  const [notificationCredential, setNotificationCredential] = useState("");
+  const [clearNotificationCredential, setClearNotificationCredential] = useState(false);
+  const [notificationStorageKey, setNotificationStorageKey] = useState("");
+  const [notificationIntent, setNotificationIntent] = useState<NotificationIntent>();
+  const [notificationReceipt, setNotificationReceipt] = useState<NotificationReceipt>();
+  const [notificationRejected, setNotificationRejected] = useState(false);
+  const [notificationNotCommitted, setNotificationNotCommitted] = useState(false);
+  const [notificationAttempts, setNotificationAttempts] = useState<{ generationId: string; attempts: NotificationAttempt[] }>();
+  const [duplicateRiskAcknowledged, setDuplicateRiskAcknowledged] = useState(false);
+  const notificationInFlight = useRef(false);
+  const notificationReadSequence = useRef(0);
   const selected = requirements.find((x) => x.id === selectedId);
   const mutate = async <T,>(
     operation: string,
@@ -254,10 +316,16 @@ export default function EnterpriseControlCenter({
     }
   }, [api, projectId]);
   const loadNotificationOperations = useCallback(async () => {
+    const sequence = ++notificationReadSequence.current;
     try {
-      const response = await fetch(`${api}/api/operations/notifications`);
+      const response = await fetch(`${api}/api/operations/notifications?page=${notificationPage}&pageSize=25`);
+      if (sequence !== notificationReadSequence.current) return;
       if (response.ok) {
-        setNotificationOperations(await response.json());
+        const operations = await response.json() as NotificationOperations;
+        if (sequence === notificationReadSequence.current) {
+          setNotificationOperations(operations);
+          return operations;
+        }
         return;
       }
       setNotificationOperations(undefined);
@@ -265,23 +333,125 @@ export default function EnterpriseControlCenter({
         ? "Notification delivery operations are available only to global administrators."
         : "Notification delivery operations could not be loaded.");
     } catch {
+      if (sequence !== notificationReadSequence.current) return;
       setNotificationOperations(undefined);
       setError("Notification delivery operations could not be loaded. Refresh to try again.");
     }
-  }, [api]);
-  const queueTransportTest = async () => {
-    const result = await mutate(
-      "operations.notifications.transport-test",
-      "The configured email transport test could not be queued.",
-      () => apiRequest<{ state: string; detail?: string }>(`${api}/api/operations/notifications/transport-test`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }),
-      }),
-    );
-    if (!result) return;
-    setMessage(result.state === "Suppressed"
-      ? `Email test was deliberately suppressed: ${result.detail || "the current administrator has no deliverable address."}`
-      : "Email transport test queued for this administrator account.");
-    await loadNotificationOperations();
+  }, [api, notificationPage]);
+  useEffect(() => {
+    if (notificationOperations && !notificationDraft) setNotificationDraft({ ...notificationOperations.settings });
+  }, [notificationOperations, notificationDraft]);
+  useEffect(() => {
+    if (!notificationOperations?.installation.id) return;
+    let active = true;
+    const initialize = async () => {
+      try {
+        const actor = await apiRequest<{ id: string }>(`${api}/api/auth/me`);
+        if (!actor.id || !active) return;
+        const key = `aerolink-notification-operation:${api}:${notificationOperations.installation.id}:${actor.id}`;
+        const intent = readNotificationIntent(key);
+        if (active) { setNotificationStorageKey(key); setNotificationIntent(intent); }
+      } catch {
+        if (active) setError("Notification operation recovery storage is unavailable. No new operation can be sent.");
+      }
+    };
+    void initialize();
+    return () => { active = false; };
+  }, [api, notificationOperations?.installation.id]);
+  const acceptNotificationReceipt = async (receipt: NotificationReceipt, intent: NotificationIntent) => {
+    if (!receipt || receipt.operationKey !== intent.operationKey || receipt.family !== intent.family || !receipt.id || !receipt.result?.state)
+      throw new Error("The operation receipt could not be confirmed. Recover the original operation before proceeding.");
+    setNotificationReceipt(receipt);
+    localStorage.removeItem(`${notificationStorageKey}:${intent.operationKey}`);
+    setNotificationIntent(readNotificationIntent(notificationStorageKey));
+    setNotificationCredential(""); setNotificationUserName(""); setClearNotificationUserName(false); setClearNotificationCredential(false);
+    setNotificationRejected(false); setNotificationNotCommitted(false);
+    setDuplicateRiskAcknowledged(false);
+    setMessage(`Recorded ${receipt.family}: ${stateLabel(receipt.result.state)}. This receipt does not confirm inbox arrival.`);
+    const current = await loadNotificationOperations();
+    if (current) setNotificationDraft({ ...current.settings });
+  };
+  const findNotificationReceipt = async (intent: NotificationIntent) => {
+    try {
+      const receipt = await apiRequest<NotificationReceipt>(`${api}/api/operations/notifications/operations/${intent.operationKey}?family=${intent.family}`);
+      await acceptNotificationReceipt(receipt, intent);
+      return true;
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 404) { setNotificationNotCommitted(true); return false; }
+      throw failure;
+    }
+  };
+  const runNotificationIntent = async (intent: NotificationIntent, recover: boolean, retry: boolean) => {
+    if (notificationInFlight.current || !notificationStorageKey) return;
+    notificationInFlight.current = true;
+    let requestStarted = false;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      if (recover && await findNotificationReceipt(intent)) return;
+      if (recover && !retry) {
+        setMessage("No committed receipt was found. Retry the original operation with its existing identity; this does not request another send.");
+        return;
+      }
+      if (intent.requiresCredential && !notificationCredential) {
+        setError("Re-enter the original SMTP credential to retry these same settings. The credential was kept only in memory.");
+        return;
+      }
+      if (!recover) {
+        const existing = readNotificationIntent(notificationStorageKey);
+        if (existing) {
+          setNotificationIntent(existing);
+          setMessage("Another tab has an unresolved operation. Recover that original intent first.");
+          return;
+        }
+        // Each key has its own durable entry, so simultaneous tabs cannot overwrite recovery identities.
+        localStorage.setItem(`${notificationStorageKey}:${intent.operationKey}`, JSON.stringify(intent));
+        setNotificationIntent(intent); setNotificationReceipt(undefined);
+        setNotificationRejected(false); setNotificationNotCommitted(false);
+      }
+      const { requiresCredential, ...payload } = intent;
+      const endpoint = intent.family === "Settings" ? "settings" : intent.family === "TransportTest" ? "transport-test" : "commands";
+      requestStarted = true;
+      const receipt = await apiRequest<NotificationReceipt>(`${api}/api/operations/notifications/${endpoint}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, ...(requiresCredential ? { credential: notificationCredential } : {}) }),
+      });
+      await acceptNotificationReceipt(receipt, intent);
+    } catch (failure) {
+      recordClientOperationFailure("operations.notifications.command", failure);
+      if (!recover && !requestStarted) {
+        setError("The original intent could not be preserved in recovery storage. No notification command was sent.");
+        return;
+      }
+      const refused = failure instanceof ApiError && [400, 403, 409, 422].includes(failure.status);
+      setNotificationRejected(refused);
+      setError(refused ? "The operation was refused. Check its original receipt before correcting or discarding this intent."
+        : "The outcome could not be confirmed. Recover the original operation before requesting another action.");
+    } finally { notificationInFlight.current = false; setBusy(false); }
+  };
+  const newNotificationIntent = (fields: Omit<NotificationIntent, "operationKey" | "expectedVersion"> & { expectedVersion?: number }) => {
+    if (!notificationOperations || notificationIntent || !notificationStorageKey || busy) return;
+    void runNotificationIntent({ ...fields, operationKey: crypto.randomUUID(), expectedVersion: fields.expectedVersion ?? notificationOperations.settings.version }, false, false);
+  };
+  const queueTransportTest = () => newNotificationIntent({ family: "TransportTest", projectId });
+  const saveNotificationSettings = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!notificationDraft) return;
+    newNotificationIntent({ family: "Settings", mode: notificationDraft.mode, host: notificationDraft.host, port: notificationDraft.port,
+      sender: notificationDraft.sender, displayName: notificationDraft.displayName, baseUrl: notificationDraft.baseUrl,
+      expectedVersion: notificationDraft.version, userName: notificationOperations?.locks.credentials ? undefined : clearNotificationUserName ? "" : notificationUserName || undefined,
+      clearCredential: !notificationOperations?.locks.credentials && clearNotificationCredential,
+      requiresCredential: !notificationOperations?.locks.credentials && !!notificationCredential });
+  };
+  const notificationCommand = (family: NotificationFamily, generation?: NotificationGeneration) => {
+    newNotificationIntent({ family, mode: family === "Activate" || family === "Resume" ? notificationOperations?.settings.mode : undefined,
+      generationId: generation?.id, expectedGenerationVersion: generation?.version,
+      acknowledgeDuplicateRisk: family === "Replay" ? duplicateRiskAcknowledged : undefined });
+  };
+  const loadNotificationAttempts = async (generationId: string) => {
+    try {
+      const result = await apiRequest<{ attempts: NotificationAttempt[] }>(`${api}/api/operations/notifications/generations/${generationId}/attempts`);
+      setNotificationAttempts({ generationId, attempts: result.attempts });
+    } catch { setError("Attempt evidence could not be loaded. Refresh to try again."); }
   };
   useEffect(() => {
     load();
@@ -519,7 +689,7 @@ export default function EnterpriseControlCenter({
     detail: string,
     tone = "",
   ) => (
-    <article className={`enterpriseMetric ${tone}`}>
+    <article key={name} className={`enterpriseMetric ${tone}`}>
       <span>{name}</span>
       <b>{value.toLocaleString()}</b>
       <small>{detail}</small>
@@ -605,34 +775,105 @@ export default function EnterpriseControlCenter({
       {tab === "notifications" && (
         <section className="enterpriseBody">
           <div className="enterpriseHero">
-            <div>
-              <p>INSTALLATION OPERATIONS / EMAIL OUTBOX</p>
+            <div><p>INSTALLATION OPERATIONS / EMAIL OUTBOX</p>
               <h2>{notificationOperations?.smtp.configured ? "SMTP transport configured" : "SMTP transport not configured"}</h2>
-              <span>Recent delivery evidence only. Credentials, mail bodies, and unredacted recipient addresses are never rendered here.</span>
+              <span>Operational evidence only. Mail bodies and recipient addresses remain protected. SMTP acceptance does not confirm inbox arrival.</span>
             </div>
-            <button onClick={queueTransportTest} disabled={busy || !notificationOperations?.smtp.configured}>
-              {busy ? "Queueing…" : "Send my transport test"}
-            </button>
+            <button onClick={queueTransportTest} disabled={busy || !!notificationIntent || !notificationStorageKey || !notificationOperations || (notificationOperations.settings.mode !== "Capture" && notificationOperations.policy.diagnosticTarget === "not-configured")}>Send my transport test</button>
           </div>
           {notificationOperations ? <>
-            <div className="enterpriseMetrics">
-              {collection("Pending", notificationOperations.totals.pending, "awaiting configured SMTP")}
-              {collection("Sent", notificationOperations.totals.sent, "recent delivery evidence")}
-              {collection("Failed", notificationOperations.totals.failed, "retry limit reached", notificationOperations.totals.failed ? "warn" : "")}
-              {collection("Suppressed", notificationOperations.totals.suppressed, "deliberate non-sends")}
-            </div>
+            <p><b>{notificationOperations.installation.label}</b> · database {notificationOperations.installation.database} · version {notificationOperations.installation.version} · mode <b>{notificationOperations.settings.mode}</b> · settings revision {notificationOperations.settings.version} · send authority <b>{notificationOperations.policy.sendAuthority}</b></p>
+            {notificationIntent && <section className="jobHero" aria-label="Unconfirmed notification operation">
+              <div><h3>Recover the original operation</h3><p>{notificationIntent.family} · {notificationIntent.operationKey}</p>
+                <p>The original intent is preserved. Check its receipt before any new action. A retry uses the same identity and settings revision.</p>
+                {notificationIntent.requiresCredential && <label>Original SMTP credential for retry<input type="password" autoComplete="new-password" value={notificationCredential} onChange={event => setNotificationCredential(event.target.value)} /></label>}
+              </div>
+              <button disabled={busy} onClick={() => void runNotificationIntent(notificationIntent, true, false)}>Check original receipt</button>
+              <button disabled={busy} onClick={() => void runNotificationIntent(notificationIntent, true, true)}>Retry original operation</button>
+              {notificationRejected && notificationNotCommitted && <button disabled={busy} onClick={() => {
+                try { localStorage.removeItem(`${notificationStorageKey}:${notificationIntent.operationKey}`); setNotificationIntent(readNotificationIntent(notificationStorageKey)); setNotificationDraft({ ...notificationOperations.settings }); setNotificationCredential(""); setNotificationRejected(false); setNotificationNotCommitted(false); setError(""); }
+                catch { setError("The refused intent could not be cleared from recovery storage."); }
+              }}>Discard refused operation</button>}
+            </section>}
+            {notificationReceipt && <section className="activeSessions" aria-label="Notification operation receipt">
+              <h3>Operation receipt</h3><p>{notificationReceipt.family} · {stateLabel(notificationReceipt.result.state)} · {new Date(notificationReceipt.createdAt).toLocaleString()}</p>
+              <p>Operation {notificationReceipt.operationKey} · receipt {notificationReceipt.id}</p>
+              {notificationReceipt.result.generationId && <p>Generation {notificationReceipt.result.generationId}</p>}
+              <p>This records the command outcome. Read attempt evidence for transport results; inbox arrival requires separate confirmation.</p>
+            </section>}
+            <div className="enterpriseMetrics">{notificationOperations.health.map(health => collection(stateLabel(health.state), health.count,
+              health.oldestAt ? `Oldest ${new Date(health.oldestAt).toLocaleString()}` : "No outstanding entries",
+              health.count && ["ConfigBlocked", "AcceptanceUnknown", "RetryExhausted", "HeldAdmission", "LegacyUnbound", "Failed"].includes(health.state) ? "warn" : ""))}</div>
             <div className="enterpriseGrid">
-              <section><div className="sectionTitle"><div><h3>Effective transport</h3><p>Configuration state without secret material</p></div></div>
-                <p>SMTP host: <b>{notificationOperations.smtp.hostConfigured ? "configured" : "not configured"}</b> · port {notificationOperations.smtp.portValid ? notificationOperations.smtp.port : "invalid"} · STARTTLS {notificationOperations.smtp.useStartTls ? "on" : "off"}</p>
-                <p>Credentials: <b>{notificationOperations.smtp.credentialsConfigured ? "configured" : "not configured"}</b> · From address {notificationOperations.smtp.fromConfigured ? "configured" : "default"}</p>
-                <p>Mail-link origin: <b>{notificationOperations.links.valid ? notificationOperations.links.baseUrl : "not configured or invalid"}</b></p>
+              <section><div className="sectionTitle"><div><h3>Notification settings</h3><p>Saving settings never activates or readmits queued work. Installation-owned fields are locked.</p></div></div>
+                {notificationDraft && <form className="queryBuilder" onSubmit={saveNotificationSettings}>
+                  <fieldset disabled={busy || !!notificationIntent || !notificationStorageKey}>
+                    {notificationDraft.version !== notificationOperations.settings.version && <p role="status">The saved settings changed. Reload the saved revision before submitting corrections.</p>}
+                    <div>
+                      <label>Delivery mode<select value={notificationDraft.mode} onChange={event => setNotificationDraft({ ...notificationDraft, mode: event.target.value as NotificationMode })}>
+                        {notificationModes.map(mode => <option key={mode} value={mode} disabled={notificationModes.indexOf(mode) > notificationModes.indexOf(notificationOperations.policy.maximumMode) || (notificationOperations.locks.externalModes && ["ControlledTest", "Live"].includes(mode))}>{mode}</option>)}
+                      </select></label>
+                      <label>SMTP host{notificationOperations.locks.relay ? <span>Installation-owned</span> : <input value={notificationDraft.host} onChange={event => setNotificationDraft({ ...notificationDraft, host: event.target.value })} />}</label>
+                      <label>SMTP port{notificationOperations.locks.relay ? <span>Installation-owned</span> : <input type="number" min="1" max="65535" value={notificationDraft.port} onChange={event => setNotificationDraft({ ...notificationDraft, port: Number(event.target.value) })} />}</label>
+                      <label>Sender address{notificationOperations.locks.sender ? <span>Installation-owned</span> : <input value={notificationDraft.sender} onChange={event => setNotificationDraft({ ...notificationDraft, sender: event.target.value })} />}</label>
+                      <label>Sender display name{notificationOperations.locks.sender ? <span>Installation-owned</span> : <input value={notificationDraft.displayName} onChange={event => setNotificationDraft({ ...notificationDraft, displayName: event.target.value })} />}</label>
+                      <label>Mail-link origin{notificationOperations.locks.baseUrl ? <span>Installation-owned</span> : <input value={notificationDraft.baseUrl} onChange={event => setNotificationDraft({ ...notificationDraft, baseUrl: event.target.value })} />}</label>
+                      {notificationOperations.locks.credentials ? <p>Credentials: installation-owned</p> : <>
+                        <label>SMTP username<input autoComplete="off" disabled={clearNotificationUserName} value={notificationUserName} placeholder={notificationOperations.settings.userNameConfigured ? "Configured; leave blank to keep" : "Not configured"} onChange={event => setNotificationUserName(event.target.value)} /></label>
+                        <label><input type="checkbox" checked={clearNotificationUserName} onChange={event => { setClearNotificationUserName(event.target.checked); setNotificationUserName(""); }} /> Clear saved SMTP username</label>
+                        <label>New SMTP credential<input type="password" autoComplete="new-password" disabled={clearNotificationCredential} value={notificationCredential} placeholder={notificationOperations.settings.credentialConfigured ? "Configured; leave blank to keep" : "Not configured"} onChange={event => setNotificationCredential(event.target.value)} /></label>
+                        <label><input type="checkbox" checked={clearNotificationCredential} onChange={event => { setClearNotificationCredential(event.target.checked); setNotificationCredential(""); }} /> Clear saved SMTP credential</label>
+                      </>}
+                    </div>
+                    <p>STARTTLS and certificate validation are mandatory for external transport. Diagnostic destination: {notificationOperations.policy.diagnosticTarget}. No recipient can be entered here.</p>
+                    <button type="submit">Save settings only</button>
+                    {" "}<button type="button" onClick={() => { setNotificationDraft({ ...notificationOperations.settings }); setNotificationUserName(""); setClearNotificationUserName(false); setNotificationCredential(""); setClearNotificationCredential(false); }}>Reload saved settings</button>
+                  </fieldset>
+                </form>}
+                <p>Saved mode: <b>{notificationOperations.settings.mode}</b>. Review the saved revision before explicitly activating it.</p>
+                <button disabled={busy || !!notificationIntent || !notificationStorageKey || notificationOperations.settings.mode === "Disabled" || !notificationOperations.smtp.configured} onClick={() => notificationCommand("Activate")}>Activate saved mode</button>{" "}
+                <button disabled={busy || !!notificationIntent || !notificationStorageKey || notificationOperations.settings.mode === "Disabled" || !notificationOperations.smtp.configured} onClick={() => notificationCommand("Resume")}>Resume current admission</button>
               </section>
-              <section><div className="sectionTitle"><div><h3>Recent delivery state</h3><p>Newest 100 entries; details are bounded operational status</p></div></div>
-                {notificationOperations.deliveries.length ? notificationOperations.deliveries.map((delivery) => <article className="signalRow" key={delivery.id}>
-                  <i className={delivery.state === "Failed" ? "attention" : delivery.state === "Sent" ? "ok" : "pending"}>{delivery.state === "Failed" ? "!" : delivery.state === "Sent" ? "✓" : "…"}</i><div><b>{delivery.state} · {delivery.recipient} · {delivery.address}</b><span>{delivery.attempts} attempt{delivery.attempts === 1 ? "" : "s"} · {new Date(delivery.completedAt || delivery.createdAt).toLocaleString()}{delivery.detail ? ` · ${delivery.detail}` : ""}</span></div>
-                </article>) : <div className="emptyEnterprise"><b>No email deliveries yet</b><p>Queue an administrator transport test after configuring SMTP.</p></div>}
+              <section><div className="sectionTitle"><div><h3>Queue health and recovery</h3><p>Actions follow server authority and preserved attempt evidence.</p></div></div>
+                {notificationOperations.health.map(health => <article className="signalRow" key={health.state}><i className={health.count ? "attention" : "ok"}>{health.count ? "!" : "✓"}</i><div><b>{stateLabel(health.state)} · {health.count}</b><span>{health.action}</span></div></article>)}
+                <p>AcceptanceUnknown requires reconciliation and trusted worker quiescence. Lease expiry alone does not prove a stopped SMTP connection.</p>
+                <label><input type="checkbox" checked={duplicateRiskAcknowledged} onChange={event => setDuplicateRiskAcknowledged(event.target.checked)} /> I acknowledge that replaying unknown acceptance may produce a duplicate email.</label>
+                <p>Quiescence is established by the server; it cannot be declared by this checkbox.</p>
+                <p>Historical Sent entries are SMTP submission evidence. Credentials and message content are never read back.</p>
               </section>
             </div>
+            {notificationOperations.deliveries.some(delivery => delivery.state === "HeldAdmission" || delivery.state === "LegacyUnbound") && <section className="activeSessions" aria-label="Held notification deliveries">
+              <h3>Held delivery backlog</h3><p>Each held delivery requires explicit selection. Ambiguous historical notices remain held.</p>
+              {notificationOperations.deliveries.filter(delivery => delivery.state === "HeldAdmission" || delivery.state === "LegacyUnbound").map(delivery => <div className="signalRow" key={delivery.id}><div>
+                <b>{stateLabel(delivery.state)} · delivery {delivery.id}</b><span>{delivery.recipient} · {delivery.address} · {delivery.detail}</span>
+                {delivery.state === "HeldAdmission" && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => newNotificationIntent({ family: "Readmit", deliveryId: delivery.id })}>Readmit selected held delivery</button>}
+              </div></div>)}
+            </section>}
+            <section className="activeSessions" aria-label="Notification generation history">
+              <div className="sectionTitle"><div><h3>Recent delivery state</h3><p>Server page {notificationOperations.page} · {notificationOperations.total} generations · at most {notificationOperations.pageSize} per page</p></div></div>
+              {notificationOperations.generations.length ? notificationOperations.generations.map(generation => <div key={generation.id}>
+                <div className="signalRow"><i className={["SmtpAccepted", "Captured", "TestAccepted"].includes(generation.state) ? "ok" : "attention"}>{["SmtpAccepted", "Captured", "TestAccepted"].includes(generation.state) ? "✓" : "!"}</i>
+                  <div><b>{stateLabel(generation.state)} · {generation.contextIdentifier}</b>
+                    <span>{generation.mode} · intended destination {generation.intendedDestination} · effective destination {generation.effectiveDestination} · {generation.attempts} attempts{generation.safeCode ? ` · ${generation.safeCode}` : ""}</span>
+                    <span>Generation {generation.id} · version {generation.version} · created {new Date(generation.createdAt).toLocaleString()}</span>
+                    {generation.dueAt && <span>Due {new Date(generation.dueAt).toLocaleString()}{generation.deadlineAt ? ` · deadline ${new Date(generation.deadlineAt).toLocaleString()}` : ""}</span>}
+                    <details><summary>Message identity</summary><p style={{ overflowWrap: "anywhere" }}>Message-ID {generation.messageId}<br />Body hash {generation.bodyHash}</p></details>
+                    <div>
+                      <button disabled={busy} onClick={() => void loadNotificationAttempts(generation.id)}>View attempts</button>{" "}
+                      {["RetryExhausted", "ConfigBlocked", "HeldAdmission"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => notificationCommand("Readmit", generation)}>Readmit generation</button>}{" "}
+                      {generation.state === "AcceptanceUnknown" && <button disabled={busy || !!notificationIntent || !notificationStorageKey || !duplicateRiskAcknowledged} onClick={() => notificationCommand("Replay", generation)}>Request replay after quiescence</button>}{" "}
+                      {["SmtpAccepted", "Captured", "TestAccepted", "Suppressed", "PermanentFailed"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => notificationCommand("Reissue", generation)}>Request new generation</button>}{" "}
+                      {!["SmtpAccepted", "Captured", "TestAccepted", "Suppressed"].includes(generation.state) && <button disabled={busy || !!notificationIntent || !notificationStorageKey} onClick={() => notificationCommand("Suppress", generation)}>Suppress generation</button>}
+                    </div>
+                  </div>
+                </div>
+                {notificationAttempts?.generationId === generation.id && <section aria-label={`Attempts for ${generation.contextIdentifier}`}>
+                  {notificationAttempts.attempts.length ? notificationAttempts.attempts.map(attempt => <div className="signalRow" key={attempt.id}><div><b>{attempt.outcome} · {attempt.phase}</b><span>{new Date(attempt.startedAt).toLocaleString()} · SMTP {attempt.smtpStatus ?? "no status"} · {attempt.safeCode || "no failure code"} · transport {attempt.transportDisposed ? "disposed" : "not confirmed disposed"} · quiescence {attempt.quiescence}</span></div></div>) : <p>No physical attempts recorded.</p>}
+                </section>}
+              </div>) : <div className="emptyEnterprise"><b>No email generations yet</b><p>A transport test creates a diagnostic intent under the saved installation policy.</p></div>}
+              <p><button disabled={busy || notificationOperations.page <= 1} onClick={() => { setNotificationAttempts(undefined); setNotificationPage(notificationOperations.page - 1); }}>Previous page</button>{" "}
+                <button disabled={busy || notificationOperations.page * notificationOperations.pageSize >= notificationOperations.total} onClick={() => { setNotificationAttempts(undefined); setNotificationPage(notificationOperations.page + 1); }}>Next page</button></p>
+            </section>
           </> : <div className="emptyEnterprise"><b>Loading notification operations</b><p>Refresh if configuration evidence is unavailable.</p></div>}
         </section>
       )}

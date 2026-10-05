@@ -29,4 +29,7 @@
     <ProjectReference Include="..\..\tools\AeroLink.Scale\AeroLink.Scale.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="TestSupport/NotificationTlsRelay.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

@@ -535,29 +535,94 @@ supported production restore, which keeps its own rollback contract. Snapshot or
 
 ### Email delivery operability
 
-Email remains an outbox delivery channel over the attributable in-product notification. It never authorizes,
-approves, or signs a controlled record: a mail link opens AeroLink, where authentication and electronic-signature
-confirmation still apply. Configure SMTP only through protected service environment/configuration, never source
-control:
+Email remains an outbox channel over the attributable in-product notification. Email never authorizes,
+approves or signs a controlled record. Live messages carry identifiers and original context, with no
+attachments, controlled titles, free text or calculated five-day email date. The `/notifications/{id}` page
+retains the original request through login/password rotation and separately offers deliberate current-work
+navigation. Legacy `/open` links remain generic navigation. Preference capability GET/HEAD requests are
+read-only; an explicit same-origin antiforgery-protected POST consumes a short-lived confirmation once.
 
-- `Notifications__Smtp__Host`, with optional `Port`, `From`, `UseStartTls`, `UserName`, and `Password`;
-- `Notifications__BaseUrl` as an absolute HTTP(S) origin with no credentials, query, or fragment;
-- `Notifications__UnsubscribeSecret` as a protected value of at least 32 characters.
+External modes start **Disabled**. Merely configuring a relay never admits mail. Global administrators use
+**System Operations → Notifications** to save permitted settings, activate future events, resume admitted
+work, inspect bounded queue/attempt evidence, and explicitly select readmission, replay, reissue or suppression.
+Each mutation has an actor/installation/family/key-bound durable receipt. Recover its original receipt after
+a lost response before retrying the exact command; a fresh key is a deliberate new intent. Browser recovery
+stores no credential. Hidden credentials and usernames survive ordinary settings saves; replacement or clear
+is explicit. `SmtpAccepted` means accepted submission, not confirmed mailbox arrival. `Captured` and
+`TestAccepted` are distinct test terminal outcomes. Historical IDs/duplicates and `Sent` evidence are retained;
+unresolved legacy work is `LegacyUnbound` and cannot be admitted to Live.
 
-Use `START_AEROLINK_EMAIL_DEMO.bat` for the local, non-production proof path. It starts pinned
-`smtp4dev` 3.15.0 under `%LOCALAPPDATA%\AeroLink\smtp4dev\3.15.0`, configures only loopback SMTP on
-port 2525, and starts AeroLink with the loopback link origin. Open `http://127.0.0.1:5000` to inspect the
-captured message. `START_AEROLINK_SMTP4DEV.bat`, `AEROLINK_SMTP4DEV_STATUS.bat`, and
-`STOP_AEROLINK_SMTP4DEV.bat` control only that owned catcher; they do not touch `product/.local`, PostgreSQL,
-or controlled records. The first start installs the pinned free tool into the current user's LocalAppData and
-requires ordinary NuGet/network access; no Docker, tunnel, or secret is required.
+Before upgrading this boundary, stop and prove quiescence of every old API/mailer process, then apply the
+migration and replace the binaries together. Old and new dispatchers must never coexist. Keep external
+mail Disabled until the new authority, protected keys and actual transport qualification are ready. An
+ordinary downgrade to old mailer binaries is unsafe: those binaries do not honor the new generation/epoch
+protocol. A rollback requires stopped workers and externally denied relay submission until the compatible
+protocol is restored; restoring an old configuration is not permission to restart an old mailer.
 
-Global administrators inspect non-secret SMTP/link posture and the newest bounded delivery states in
-**System Operations → Notifications**. It intentionally shows no credentials, message body, or unredacted
-recipient address. The **Send my transport test** operation can deliver only to the signed-in administrator's
-account through the already configured relay; it accepts no SMTP host, recipient, or message from the browser.
-`Pending`, `Sent`, `Failed`, and `Suppressed` remain durable outbox evidence. A missing address, opt-out, or
-superseded queued review obligation is `Suppressed` with a deliberate reason, not a fabricated send.
+Activate always creates a new future-only epoch, including when Live is already active. Older nonterminal
+generations are held. Resume explicitly continues the existing compatible epoch after a pause; readmission
+selects individual eligible held work into the current epoch. Saving Disabled and later Live settings alone
+does not resume anything, and a fresh Activate never implicitly enrolls prior work.
+
+Modes are Disabled, owned-loopback Capture, ControlledTest and Live. Capture permits only literal `127.0.0.1`
+or `::1`; ControlledTest sends synthetic content only to the installation diagnostic target. The diagnostic
+command ignores caller destination/content and personal opt-out. Test outcomes cannot become Live mail.
+Live rechecks the original recipient's account, project access, preference, address and exact active source
+obligation. Narrowing event selection never admits events raised while that selection was disabled.
+
+Protected environment/configuration values remain installation-owned locks:
+`Notifications__Smtp__Host`, `Port`, `From`, `UserName`, `Password`, and `Notifications__BaseUrl`.
+External delivery requires STARTTLS with normal hostname/chain/server-authentication validation, an approved
+relay/sender/recipient policy, and a clean HTTPS origin. Live localhost origins are refused. Reachability of the
+approved internal origin and actual relay credentials/trust are installation commissioning responsibilities.
+No certificate bypass or cloud provider fallback exists. Optional approved `trustAnchorsPem` replaces system
+chain roots while preserving hostname/EKU/validity/constraints and explicit online revocation checks.
+Missing or corrupt custom trust fails closed. Private relay addresses, identities and credentials never belong
+in source control. `Notifications__UnsubscribeSecret` remains a protected legacy-compatible secret of at least
+32 characters; rotating it invalidates earlier email preference capabilities.
+
+Notification installation policy is private operator state outside database/configuration archives:
+`%LOCALAPPDATA%\AeroLink\notification-authority\{InstanceId}.json`, with independent matching
+`{InstanceId}.json.generation` witness. A service may use `AEROLINK_NOTIFICATION_AUTHORITY_ROOT` from its
+protected process environment; configuration restoration cannot redirect that authority. The policy binds the
+existing installation GUID, machine identity, send generation, policy revision, maximum mode, approved relay
+hosts/senders/recipient domains or addresses, diagnostic target, HTTPS base origin and credential-management
+permission. Provision both files deliberately under restrictive service/operator ACLs; do not copy a prior
+installation's authority or choose a generation from an old backup. Missing/corrupt/mismatched authority,
+wrong installation/host or read-only restore validation permits no external submission.
+
+`Restore-AeroLink.ps1` calls `Revoke-AeroLinkNotificationSendGeneration` after archive verification and before
+business database replacement. It durably advances the independent witness first, then writes a Disabled
+policy for the new generation. Interrupted restore, database rollback, restoring old configuration again or
+replacing the policy with an archived generation cannot undo that witness. Afterwards operators must approve
+the new policy generation and explicitly activate future work; backlog remains held unless individually
+selected. Ordinary restart preserves admission, generation, concrete MIME, destination, due time and deadline.
+
+Protected settings and retained message evidence use the existing ASP.NET Data Protection framework.
+`DataProtection__KeyRingPath` optionally selects a deployment-owned persistent ring. Keep that ring and its
+service identity recoverable, restrict its ACLs and treat backups as secrets. Changing/missing/corrupt keys
+can block protected delivery evidence and credentials; it does not fail unrelated business saves and does
+not make old ciphertext compatible with a new ring. Do not clear or replace keys to make mail qualification
+pass. Installation send authority remains separate from key/database/configuration recovery.
+
+Each concrete generation freezes protected destination, MIME, Message-ID, Date, body hash, template/content
+policy and original admission window. Known transient refusal retries use approximately 30, 60, then 120
+minute delays with bounded stable jitter, at most 14 known transient failures and a 24-hour horizon. Correcting
+compatible configuration does not reset that horizon or repeatedly attempt unchanged bad authentication.
+Diagnostic operations allow one physical attempt. Explicit readmission creates a bounded new window; unknown
+replay preserves the original message and requires duplicate-risk acknowledgement. Reissue creates a linked
+new message for a changed destination/mode/content policy. Every linked started attempt must have a durable
+socket-disposal fact or exact local process creation-identity exit proof before another socket may start.
+A PID, missed heartbeat or expired lease alone is not quiescence. Acceptance is recorded before QUIT;
+post-acceptance persistence recovery retries the factual receipt only, never SMTP. A crash before that durable
+receipt leaves acceptance unknown for operator/relay reconciliation.
+
+Use `START_AEROLINK_EMAIL_DEMO.bat` for the local catcher path. It starts pinned smtp4dev 3.15.0 under
+`%LOCALAPPDATA%\AeroLink\smtp4dev\3.15.0` with loopback port 2525 and local links. Save Capture settings
+and explicitly activate future synthetic work in Notifications before sending a diagnostic; opening a catcher
+alone does not activate external email. Existing catcher start/status/stop launchers retain their paths and
+operate only on their owned catcher, never PostgreSQL or controlled records. First install requires ordinary
+NuGet/network access. This fixture path proves capture behavior, not corporate TLS, delivery or commissioning.
 
 `START_AEROLINK_SHARED.bat` now derives its LAN origin before API startup so its mail links use that exact
 `http://LAN:5080` address; it still never opens the Windows firewall and remains plaintext demo-only. Protected

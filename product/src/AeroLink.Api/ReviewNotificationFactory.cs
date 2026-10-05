@@ -1,5 +1,8 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Notifications;
+using AeroLink.Domain.Documents;
+using AeroLink.Domain.Verification;
 
 namespace AeroLink.Api;
 
@@ -12,7 +15,7 @@ internal static class ReviewNotificationFactory
 {
     public static UserNotification ForChangeRequest(Guid projectId, string recipient, ReviewStageKind stageKind,
         string displayNumber, string title, string route, Guid artifactId, DateTimeOffset now,
-        bool priorStageComplete = false)
+        bool priorStageComplete = false, SystemChangeRequest? record = null, ReviewCycle? cycle = null, ApprovalStep? step = null)
     {
         var action = ActionFor(stageKind);
         var type = stageKind switch
@@ -22,14 +25,15 @@ internal static class ReviewNotificationFactory
             _ => throw new ArgumentOutOfRangeException(nameof(stageKind), stageKind, "Unknown frozen review stage kind."),
         };
         var prefix = priorStageComplete ? "The prior stage is complete. " : "";
-        return new(projectId, recipient, type, $"{action.Imperative} {displayNumber}",
+        var notice = new UserNotification(projectId, recipient, type, $"{action.Imperative} {displayNumber}",
             $"{prefix}You are now authorized to {action.Verb} {displayNumber}: {title}",
             route, artifactId, now);
+        return record is null ? notice : notice.BindContext(NotificationContext.ChangeRequestStep(notice, record, cycle!, step!));
     }
 
     public static UserNotification ForTestChangeRequest(Guid projectId, string recipient,
         ReviewStageKind stageKind, string displayNumber, string selectedBy, string route, Guid artifactId,
-        DateTimeOffset now, bool priorStageComplete = false)
+        DateTimeOffset now, bool priorStageComplete = false, TestChangeReview? record = null, ReviewCycle? cycle = null, ApprovalStep? step = null)
     {
         var action = ActionFor(stageKind);
         var type = stageKind switch
@@ -42,13 +46,14 @@ internal static class ReviewNotificationFactory
         var detail = priorStageComplete
             ? $"The prior stage is complete. You are now authorized to {action.Verb} {identity}."
             : $"{selectedBy} selected you to {action.Verb} this test change request.";
-        return new(projectId, recipient, type, $"{action.Imperative} {identity}", detail,
+        var notice = new UserNotification(projectId, recipient, type, $"{action.Imperative} {identity}", detail,
             route, artifactId, now);
+        return record is null ? notice : notice.BindContext(NotificationContext.TestChangeStep(notice, record, cycle!, step!));
     }
 
     public static UserNotification ForManagedDocument(Guid projectId, string recipient,
         ReviewStageKind stageKind, string displayNumber, string stageName, string route, Guid artifactId,
-        DateTimeOffset now)
+        DateTimeOffset now, ManagedDocument? document = null, ManagedDocumentRevision? revision = null, ManagedDocumentReviewStep? step = null)
     {
         var action = ActionFor(stageKind);
         var type = stageKind switch
@@ -57,8 +62,9 @@ internal static class ReviewNotificationFactory
             ReviewStageKind.Approval => "DocumentApprovalActivated",
             _ => throw new ArgumentOutOfRangeException(nameof(stageKind), stageKind, "Unknown frozen review stage kind."),
         };
-        return new(projectId, recipient, type, $"{action.Imperative} {displayNumber}",
+        var notice = new UserNotification(projectId, recipient, type, $"{action.Imperative} {displayNumber}",
             $"{stageName} is ready for your {action.Noun}.", route, artifactId, now);
+        return document is null ? notice : notice.BindContext(NotificationContext.DocumentStep(notice, document, revision!, step!));
     }
 
     private static ReviewAction ActionFor(ReviewStageKind stageKind) => stageKind switch

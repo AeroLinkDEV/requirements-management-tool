@@ -119,6 +119,17 @@ overloads fail before tracker or provider mutation and are marked as compile-tim
 `SaveChangesAsync(false)` owns the usual EF deferred `AcceptAllChanges` decision and must accept the tracked
 states before beginning another logical unit of work.
 
+Notification email extends the transactional outbox with immutable typed original-context records,
+installation settings revisions and admission epochs, concrete message generations, physical attempt
+receipts and scoped administrator operation receipts. Business saves persist source identity and admission
+using database state only; SMTP, protected content and configuration resolution happen afterwards. A durable
+transmission gate precedes sockets, serializes linked generations on the installation row, and records exact
+host/process creation identity. Expired transmission leases require attention; they never authorize takeover.
+Acceptance is persisted independently of QUIT and disposal, and uncertain outcomes need trusted quiescence
+before deliberate replay or reissue. Database/configuration restore revokes an independent installation send
+generation outside their archives before replacement. Operational modes, secret storage and recovery limits
+are defined in [OPERATIONS.md](OPERATIONS.md#email-delivery-operability).
+
 Fresh installations contain no assumed program. The onboarding transaction creates the Program, its first Project/software product, and its initial release together. FMS records are optional demo data controlled by configuration and are disabled by default.
 
 Problem Report CSV/XLSX import publishes its reports, immutable revisions, build links, ledger, original result

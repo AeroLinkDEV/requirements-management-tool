@@ -9,7 +9,7 @@ public enum NotificationChannel { Email }
 /// dispatcher's account of what happened afterwards. Suppressed means the recipient opted out or has no
 /// address — a deliberate non-send, which is different from a failure and must not look like one.
 /// </summary>
-public enum NotificationDeliveryState { Pending, Sent, Failed, Suppressed }
+public enum NotificationDeliveryState { Pending, Sent, Failed, Suppressed, HeldAdmission, LegacyUnbound }
 
 /// <summary>
 /// One attempt to carry an in-app notification to somebody outside the product.
@@ -48,6 +48,8 @@ public sealed class NotificationDelivery
     /// </summary>
     public long Sequence { get; private set; }
     public Guid NotificationId { get; private set; }
+    public Guid? BoundNotificationId { get; private set; }
+    public Guid? AdmissionEpochId { get; private set; }
     public NotificationChannel Channel { get; private set; }
     /// <summary>The AeroLink user name, retained so a delivery is attributable even if the address changes.</summary>
     public string Recipient { get; private set; } = "";
@@ -59,6 +61,16 @@ public sealed class NotificationDelivery
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
+
+    public void HoldAdmission(bool contextBound, DateTimeOffset now)
+    {
+        BoundNotificationId = contextBound ? NotificationId : null;
+        if (State == NotificationDeliveryState.Suppressed) return;
+        State = contextBound ? NotificationDeliveryState.HeldAdmission : NotificationDeliveryState.LegacyUnbound;
+        LastError = contextBound ? "Explicit notification admission is required." : "Historical notification has no exact source context.";
+        UpdatedAt = now;
+    }
+    public void RecordAdmission(Guid epochId) { AdmissionEpochId = epochId; }
 
     public void MarkSent(DateTimeOffset now)
     {

@@ -36,19 +36,10 @@ public sealed class NotificationDispatchWorker(
             try
             {
                 using var scope = scopes.CreateScope();
-                var sender = scope.ServiceProvider.GetRequiredService<IEmailSender>();
-                if (sender.IsConfigured)
-                {
-                    var outbox = scope.ServiceProvider.GetRequiredService<NotificationOutbox>();
-                    var links = scope.ServiceProvider.GetRequiredService<NotificationLinkBuilder>();
-                    var tokens = scope.ServiceProvider.GetRequiredService<UnsubscribeTokenService>();
-                    var result = await outbox.DispatchPendingAsync(sender, links, tokens, BatchSize,
-                        MaximumAttempts, DateTimeOffset.UtcNow, stoppingToken);
-                    if (result.Sent + result.Failed + result.Suppressed > 0)
-                        logger.LogInformation(
-                            "Notification dispatch sent {Sent}, suppressed {Suppressed}, failed {Failed}.",
-                            result.Sent, result.Suppressed, result.Failed);
-                }
+                var dispatcher = scope.ServiceProvider.GetRequiredService<NotificationDispatcher>();
+                var result = await dispatcher.DispatchAsync(BatchSize, stoppingToken);
+                if (result.Sent + result.Failed + result.Suppressed > 0)
+                    logger.LogInformation("Notification dispatch accepted {Accepted}, suppressed {Suppressed}, failed {Failed}.", result.Sent, result.Suppressed, result.Failed);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -56,7 +47,7 @@ public sealed class NotificationDispatchWorker(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Notification dispatch failed; the queue is retained and will be retried.");
+                logger.LogError("Notification dispatch blocked; inspect protected queue health. Category {Category}.", ex is Microsoft.EntityFrameworkCore.DbUpdateException ? "Persistence" : "ConfigurationOrPersistence");
             }
 
             try { await Task.Delay(Interval, stoppingToken); }

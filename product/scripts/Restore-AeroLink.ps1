@@ -101,6 +101,13 @@ function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory
 }
 
 & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive | Out-Host
+if ($production) {
+    # Revocation survives both successful restoration and compensating database/configuration rollback.
+    # Never include this protected external authority in the archive or retained installation pair.
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkNotificationAuthority.psm1') -Force
+    $notificationRevocation = Revoke-AeroLinkNotificationSendGeneration -ProductRoot $productRoot
+    Write-Host "External notifications: $($notificationRevocation.State). Explicit installation admission is required after recovery."
+}
 if ($production -and -not $DisposableQualification) {
     # A recoverable point is captured while the original database and evidence set are still active.
     & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -RetentionDays 15

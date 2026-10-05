@@ -35,6 +35,9 @@ public sealed class ManagedDocument
 
     public Guid Id { get; private set; }
     public Guid ProjectId { get; private set; }
+    public Guid? CurrentStewardAssignmentId { get; private set; }
+    public void RecordStewardAssignment(ManagedDocumentAssignment assignment)
+    { if(assignment.DocumentId != Id || assignment.RevisionId is not null || assignment.NewAssigneeId != StewardId) throw new DomainException("Ownership source does not match document stewardship."); CurrentStewardAssignmentId = assignment.Id; }
     public string DocumentNumber { get; private set; } = "";
     public string Acronym { get; private set; } = "";
     public string DocumentType { get; private set; } = "";
@@ -89,6 +92,9 @@ public sealed class ManagedDocumentRevision
 
     public Guid Id { get; private set; }
     public Guid DocumentId { get; private set; }
+    public Guid? CurrentResponsibleAssignmentId { get; private set; }
+    public void RecordResponsibleAssignment(ManagedDocumentAssignment assignment)
+    { if(assignment.DocumentId != DocumentId || assignment.RevisionId != Id || assignment.NewAssigneeId != ResponsibleOwnerId) throw new DomainException("Ownership source does not match responsible revision owner."); CurrentResponsibleAssignmentId = assignment.Id; }
     public int Revision { get; private set; }
     public Guid? ParentRevisionId { get; private set; }
     public Guid? ParentReleasedDocxAttachmentId { get; private set; }

@@ -565,7 +565,7 @@ public static class ManagedDocumentEndpoints
             if (!contributionEvidence.Any(x => string.Equals(x.ContributorId, data.Revision.InitiatedBy, StringComparison.OrdinalIgnoreCase)))
                 db.ManagedDocumentReviewContributors.Add(new(revisionId, cycle, data.Revision.InitiatedBy, snapshotHash, now));
             var first = data.Revision.ReviewSteps.Single(x => x.Cycle == cycle && x.State == ManagedDocumentReviewStepState.Active);
-            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentSubmitted", actor.UserName, $"Submitted {data.Document.DocumentNumber}.{data.Revision.Revision:D2} to the ordered {reviewers.Count}-step independent review route.", now)); db.UserNotifications.Add(ReviewNotificationFactory.ForManagedDocument(data.Document.ProjectId, first.ApproverId, first.Kind, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", first.StageName, $"managed-document:{data.Document.Id}", data.Document.Id, now));
+            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentSubmitted", actor.UserName, $"Submitted {data.Document.DocumentNumber}.{data.Revision.Revision:D2} to the ordered {reviewers.Count}-step independent review route.", now)); db.UserNotifications.Add(ReviewNotificationFactory.ForManagedDocument(data.Document.ProjectId, first.ApproverId, first.Kind, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", first.StageName, $"managed-document:{data.Document.Id}", data.Document.Id, now, data.Document, data.Revision, first));
             var resultJson = JsonSerializer.Serialize(new { state = data.Revision.State.ToString(), data.Revision.Version, cycle, snapshotHash });
             db.ManagedDocumentOperations.Add(new(revisionId, "Submit", request.OperationKey, payloadHash, resultJson, now));
             await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
@@ -604,10 +604,14 @@ public static class ManagedDocumentEndpoints
         {
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount(); var reason = request.Reason?.Trim() ?? "";
             var prior = document.ReassignSteward(request.AssigneeId, request.ExpectedVersion, now);
-            db.ManagedDocumentAssignments.Add(new(document.Id, null, "DocumentSteward", prior, document.StewardId, actor.UserName, reason, now));
+            var assignment = new ManagedDocumentAssignment(document.Id, null, "DocumentSteward", prior, document.StewardId, actor.UserName, reason, now);
+            db.ManagedDocumentAssignments.Add(assignment);
+            document.RecordStewardAssignment(assignment);
             db.ManagedDocumentEvents.Add(new(document.Id, "DocumentStewardReassigned", actor.UserName, $"Reassigned document stewardship from {prior} to {document.StewardId}. Reason: {reason}", now));
             db.SecurityAuditEvents.Add(new("ManagedDocumentStewardReassigned", actor.UserName, document.DocumentNumber, "Success", $"{prior} -> {document.StewardId}; {reason}", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
-            db.UserNotifications.Add(new(document.ProjectId, document.StewardId, "ManagedDocumentStewardAssigned", $"Steward {document.DocumentNumber}", reason, $"managed-document:{document.Id}", document.Id, now));
+            var notice = new UserNotification(document.ProjectId, document.StewardId, "ManagedDocumentStewardAssigned", $"Steward {document.DocumentNumber}", reason, $"managed-document:{document.Id}", document.Id, now);
+            notice.BindContext(AeroLink.Domain.Notifications.NotificationContext.DocumentAssignment(notice, document, null, assignment));
+            db.UserNotifications.Add(notice);
             await db.SaveChangesAsync(ct); return Results.Ok(new { document.StewardId, document.Version });
         }
         catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -624,10 +628,14 @@ public static class ManagedDocumentEndpoints
         {
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount(); var reason = request.Reason?.Trim() ?? "";
             var prior = data.Revision.ReassignResponsibleOwner(request.AssigneeId, request.ExpectedVersion, now);
-            db.ManagedDocumentAssignments.Add(new(data.Document.Id, data.Revision.Id, "RevisionResponsibleOwner", prior, data.Revision.ResponsibleOwnerId, actor.UserName, reason, now));
+            var assignment = new ManagedDocumentAssignment(data.Document.Id, data.Revision.Id, "RevisionResponsibleOwner", prior, data.Revision.ResponsibleOwnerId, actor.UserName, reason, now);
+            db.ManagedDocumentAssignments.Add(assignment);
+            data.Revision.RecordResponsibleAssignment(assignment);
             db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentRevisionOwnerReassigned", actor.UserName, $"Reassigned responsibility for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from {prior} to {data.Revision.ResponsibleOwnerId}. Reason: {reason}", now));
             db.SecurityAuditEvents.Add(new("ManagedDocumentRevisionOwnerReassigned", actor.UserName, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Success", $"{prior} -> {data.Revision.ResponsibleOwnerId}; {reason}", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
-            db.UserNotifications.Add(new(data.Document.ProjectId, data.Revision.ResponsibleOwnerId, "ManagedDocumentRevisionAssigned", $"Own {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", reason, $"managed-document:{data.Document.Id}", data.Document.Id, now));
+            var notice = new UserNotification(data.Document.ProjectId, data.Revision.ResponsibleOwnerId, "ManagedDocumentRevisionAssigned", $"Own {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", reason, $"managed-document:{data.Document.Id}", data.Document.Id, now);
+            notice.BindContext(AeroLink.Domain.Notifications.NotificationContext.DocumentAssignment(notice, data.Document, data.Revision, assignment));
+            db.UserNotifications.Add(notice);
             await db.SaveChangesAsync(ct); return Results.Ok(new { data.Revision.ResponsibleOwnerId, data.Revision.Version });
         }
         catch (DomainException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -672,7 +680,7 @@ public static class ManagedDocumentEndpoints
             {
                 var older = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == data.Document.Id && x.Id != data.Revision.Id && x.State == ManagedDocumentState.Released).ToListAsync(ct); foreach (var prior in older.Where(x => x.Revision < data.Revision.Revision)) prior.Supersede(now);
             }
-            else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(ReviewNotificationFactory.ForManagedDocument(data.Document.ProjectId, next.ApproverId, next.Kind, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", next.StageName, $"managed-document:{data.Document.Id}", data.Document.Id, now)); }
+            else { var next = data.Revision.ReviewSteps.Single(x => x.Cycle == data.Revision.CurrentReviewCycle && x.State == ManagedDocumentReviewStepState.Active); db.UserNotifications.Add(ReviewNotificationFactory.ForManagedDocument(data.Document.ProjectId, next.ApproverId, next.Kind, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", next.StageName, $"managed-document:{data.Document.Id}", data.Document.Id, now, data.Document, data.Revision, next)); }
             var resultJson = JsonSerializer.Serialize(new { final, state = data.Revision.State.ToString(), data.Revision.Version, reviewStepId = step.Id, cycle = step.Cycle, authority = step.GrantedAuthority, authoritySource = step.AuthoritySource, contentHash });
             db.ManagedDocumentOperations.Add(new(revisionId, "Approve", request.OperationKey, payloadHash, resultJson, now));
             await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");
@@ -715,7 +723,11 @@ public static class ManagedDocumentEndpoints
             data.Revision.Return(actor.UserName, request.ExpectedStepId, request.ExpectedCycle, request.ExpectedVersion, request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.Rationale, now);
             var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
             db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Return", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId));
-            db.ManagedDocumentEvents.Add(new(data.Document.Id, "DocumentReturned", actor.UserName, $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from {step.StageName} under {step.GrantedAuthority} authority ({step.AuthoritySource}): {request.Rationale.Trim()}", now)); db.UserNotifications.Add(new(data.Document.ProjectId, data.Revision.ResponsibleOwnerId, "DocumentReturned", $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", request.Rationale.Trim(), $"managed-document:{data.Document.Id}", data.Document.Id, now));
+            var returned = new ManagedDocumentEvent(data.Document.Id, "DocumentReturned", actor.UserName, $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from {step.StageName} under {step.GrantedAuthority} authority ({step.AuthoritySource}): {request.Rationale.Trim()}", now);
+            db.ManagedDocumentEvents.Add(returned);
+            var notice = new UserNotification(data.Document.ProjectId, data.Revision.ResponsibleOwnerId, "DocumentReturned", $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", request.Rationale.Trim(), $"managed-document:{data.Document.Id}", data.Document.Id, now);
+            notice.BindContext(AeroLink.Domain.Notifications.NotificationContext.DocumentReturned(notice, data.Document, data.Revision, step, returned));
+            db.UserNotifications.Add(notice);
             var resultJson = JsonSerializer.Serialize(new { state = data.Revision.State.ToString(), data.Revision.Version, reviewStepId = step.Id, cycle = step.Cycle, authority = step.GrantedAuthority, authoritySource = step.AuthoritySource, contentHash });
             db.ManagedDocumentOperations.Add(new(revisionId, "Return", request.OperationKey, payloadHash, resultJson, now));
             await db.SaveChangesAsync(ct); return Results.Content(resultJson, "application/json");

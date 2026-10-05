@@ -625,6 +625,15 @@ cohesive internal save phases. The authoritative ordering, provider-read and tra
 state condition, retry contract, and bounded child-state lookup rule live in
 [product/docs/SAVE_BOUNDARY.md](product/docs/SAVE_BOUNDARY.md).
 
+Notification email retains the original recipient, exact review cycle/step, document round, return event or
+assignment task independently of current eligibility. Identifier-only messages link to that original request;
+current-work navigation is deliberate and access is rechecked. External email starts Disabled and requires
+installation-owned policy plus explicit future admission. Scoped command keys recover the original committed
+result before changed settings or source state is revalidated. SMTP acceptance is submission evidence;
+mailbox arrival and installation-specific trust/relay commissioning remain separate operational evidence.
+Supported restore revokes independent send authority, and restored or unresolved historical backlog remains
+held until explicitly selected. Details live in [product/docs/OPERATIONS.md](product/docs/OPERATIONS.md#email-delivery-operability).
+
 Routine change-request reads choose an explicit child-graph load contract so detail and command paths do not
 materialize every controlled history collection; the provider-specific split-query and snapshot rules are
 authoritatively documented in [product/docs/CHANGE_REQUEST_LOADS.md](product/docs/CHANGE_REQUEST_LOADS.md).

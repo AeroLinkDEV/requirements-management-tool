@@ -1,4 +1,5 @@
 using AeroLink.Domain.Common;
+using AeroLink.Domain.Notifications;
 
 namespace AeroLink.Domain.Requirements;
 
@@ -59,6 +60,15 @@ public sealed class UserNotification
     public NotificationState State { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? ReadAt { get; private set; }
+    public NotificationContext? Context { get; private set; }
+    public UserNotification BindContext(NotificationContext context)
+    {
+        if (Context is not null || context.NotificationId != Id || context.ProjectId != ProjectId
+            || context.Recipient != Recipient || context.EventType != Type)
+            throw new DomainException("A notification has one immutable matching source context.");
+        Context = context;
+        return this;
+    }
     public void MarkRead(DateTimeOffset now){if(State==NotificationState.Read)return;State=NotificationState.Read;ReadAt=now;}
 }
 
