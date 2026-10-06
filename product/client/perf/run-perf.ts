@@ -17,7 +17,7 @@ import { arch, cpus, platform, release, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { abbaOrder, holm, medianLevel, nearestRank, permutationTest, plannedRuns, relativeEffect, type Arm, type RunValue } from './stats.ts'
+import { abbaOrder, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, relativeEffect, type Arm, type RunValue } from './stats.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -30,7 +30,7 @@ const { values: options, positionals } = parseArgs({
   options: {
     out: { type: 'string' }, work: { type: 'string' }, arm: { type: 'string', multiple: true }, sha: { type: 'string', multiple: true },
     blocks: { type: 'string' }, rounds: { type: 'string' }, workloads: { type: 'string' }, rates: { type: 'string' },
-    configurations: { type: 'string' }, hours: { type: 'string' }, pilot: { type: 'boolean' },
+    configurations: { type: 'string' }, hours: { type: 'string' }, pilot: { type: 'boolean' }, 'dirty-smoke': { type: 'boolean' },
   },
 })
 
@@ -157,7 +157,12 @@ function arms() {
 function hoursCap() { return Number(options.hours ?? protocol.caps.hostHoursPerBaselineSet) }
 
 function begin(dir: string, kind: string, extra: Record<string, unknown>) {
-  const record = { kind, startedAt: new Date().toISOString(), harness: harnessIdentity(), environment: environment(), protocol, ...extra }
+  // A run set is evidence of the committed harness only: a dirty harness tree refuses to start. --dirty-smoke overrides
+  // that for a smoke run; the session records it, and the report never judges a run set that carries it.
+  const harness = harnessIdentity()
+  if (harness.dirtyEntries > 0 && !options['dirty-smoke'])
+    throw new Error(`the harness tree has ${harness.dirtyEntries} uncommitted entries; commit them, or pass --dirty-smoke for a smoke run that is never judged`)
+  const record = { kind, startedAt: new Date().toISOString(), harness, dirtyOverride: options['dirty-smoke'] === true, environment: environment(), protocol, ...extra }
   writeFileSync(join(dir, `session-${Date.now()}.json`), JSON.stringify(record, null, 2))
   return record
 }
@@ -289,10 +294,9 @@ function report() {
   const { iterations, seed, targetHalfWidthPp, aaFamilyAlpha, aaMeasures, permutations } = protocol.statistics
   const stats = { iterations, seed }
   const testing = { permutations, seed }
-  // A run set is judged only by the test its sessions declared. Sessions declared under revision 1 (a bootstrap p)
-  // keep their recorded verdict; the permutation test here is then descriptive context for them, never a re-judgement.
-  const sessions = readdirSync(dir).filter(name => /^session-d+.json$/.test(name)).map(name => JSON.parse(readFileSync(join(dir, name), 'utf8')))
-  const declaredRevision2 = sessions.length > 0 && sessions.every(session => session.protocol?.statistics?.test === protocol.statistics.test)
+  // A run set is judged only when every one of its sessions recorded exactly these statistics (judgeFamily). Sessions
+  // declared under revision 1 (a bootstrap p) keep their recorded verdict; the test here is then descriptive context.
+  const sessions = readdirSync(dir).filter(name => /^session-\d+\.json$/.test(name)).map(name => JSON.parse(readFileSync(join(dir, name), 'utf8')))
   const lines: string[] = []
   const json: Record<string, unknown> = { schema: 'aerolink.fms-perf-report.v1', protocol, runs: entries.length, failedRuns: entries.filter(e => e.status !== 'passed').length }
   const passed = entries.filter(e => e.status === 'passed' && e.result)
@@ -302,7 +306,7 @@ function report() {
   const head = passed.filter(e => e.kind === 'headless')
   if (head.length) {
     const cells = [...new Set(head.map(e => `${e.workload}|${e.topology}`))]
-    const aa: { cell: string; measure: string; effect: ReturnType<typeof relativeEffect>; test: ReturnType<typeof permutationTest> }[] = []
+    const aa: { cell: string; measure: string; rows: Entry[]; effect: ReturnType<typeof relativeEffect>; test: ReturnType<typeof permutationTest> }[] = []
     const planned: Record<string, number> = {}
     const excluded: string[] = []
     for (const cell of cells) {
@@ -316,7 +320,7 @@ function report() {
         const runs: RunValue[] = rows.map(e => ({ block: e.block, arm: e.arm as Arm, value: measures[measure](e.result!) }))
         if (!runs.some(r => r.arm === 'A') || !runs.some(r => r.arm === 'B')) continue
         const effect = relativeEffect(runs, stats)
-        aa.push({ cell, measure, effect, test: permutationTest(runs, testing) })
+        aa.push({ cell, measure, rows, effect, test: permutationTest(runs, testing) })
         if (aaMeasures.includes(measure)) {
           const perArm = rows.filter(e => e.arm === 'A').length
           planned[cell] = Math.max(planned[cell] ?? 0, plannedRuns({ halfWidthPp: effect.halfWidthPp, runsPerArm: perArm }, targetHalfWidthPp, protocol.caps.headlessRunsPerArmPerCell))
@@ -325,19 +329,18 @@ function report() {
     }
     const family = aa.filter(row => aaMeasures.includes(row.measure))
     const adjusted = holm(family.map(row => row.test.p))
-    const significant = family.filter((_, i) => adjusted[i] <= aaFamilyAlpha)
     const smallest = Math.max(...family.map(row => row.test.smallestP))
-    const verdict = options.pilot ? 'pilot (not judged)'
-      : !declaredRevision2 ? 'not judged here: this run set was declared under protocol revision 1, whose recorded verdict stands; the permutation p below is descriptive context only'
-        : smallest >= aaFamilyAlpha / family.length ? `REFUSED: the smallest attainable p (${smallest}) is not below alpha / m`
-          : significant.length ? 'FAILED' : 'passed'
+    const judged = judgeFamily({ pilot: options.pilot === true, sessions, statistics: protocol.statistics, adjusted, smallestP: family.map(row => row.test.smallestP), alpha: aaFamilyAlpha })
+    const significant = { length: judged.significant }
+    const verdict = `${judged.verdict}${judged.reason ? `: ${judged.reason}` : ''}`
     lines.push(`## Headless A/B (B/A - 1 of arm medians; within-block permutation test, R = ${permutations}; Holm across ${family.length} comparisons)`, '',
       `A/A result: **${verdict}** (family-wise alpha ${aaFamilyAlpha}; ${significant.length} significant after Holm; smallest attainable p ${smallest.toPrecision(3)}, alpha / m = ${(aaFamilyAlpha / family.length).toPrecision(3)}).`, '',
       `Blocks excluded for a failed run: ${excluded.length ? excluded.join('; ') : 'none'}. The 95% intervals are descriptive bootstrap intervals (k - 1 draws within blocks), not the test.`, '',
       '| Workload | Topology | Measure | runs A/B | median A | median B | B/A - 1 | 95% CI (descriptive) | half-width (pp) | permutation p | Holm p |', '|---|---|---|---|---|---|---|---|---|---|---|')
     for (const row of aa) {
       const [workload, topology] = row.cell.split('|')
-      const rows = head.filter(e => e.workload === workload && e.topology === topology)
+      // The rows the test used: the failed-run rule already applied.
+      const rows = row.rows
       const level = (arm: string) => medianLevel(rows.filter(e => e.arm === arm).map(e => measures[row.measure](e.result!)), stats).estimate
       const i = family.indexOf(row)
       lines.push(`| ${workload} | ${topology} | ${row.measure} | ${rows.filter(e => e.arm === 'A').length}/${rows.filter(e => e.arm === 'B').length} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(row.effect.estimate)} | ${pct(row.effect.low)} to ${pct(row.effect.high)} | ${row.effect.halfWidthPp.toFixed(2)} | ${row.test.p.toFixed(4)} | ${i >= 0 ? adjusted[i].toFixed(4) : 'descriptive'} |`)
@@ -347,26 +350,33 @@ function report() {
       lines.push('### Pilot: runs per arm per cell for a 1 pp half-width (capped)', '', '| Cell | planned N |', '|---|---|', ...Object.entries(planned).map(([cell, n]) => `| ${cell.replace('|', ' ')} | ${n} |`), '')
       json.pilotPlanned = planned
     }
-    json.headless = { aa: aa.map((row) => ({ ...row, holm: family.includes(row) ? adjusted[family.indexOf(row)] : null })), verdict, excluded, smallestAttainableP: smallest }
+    json.headless = { aa: aa.map(({ rows: _rows, ...row }) => ({ ...row, holm: family.findIndex(f => f.cell === row.cell && f.measure === row.measure) >= 0 ? adjusted[family.findIndex(f => f.cell === row.cell && f.measure === row.measure)] : null })), verdict: judged, excluded, smallestAttainableP: smallest }
 
-    // Comparison 5: single -> dual on arm B (current main), blocked by the same ABBA blocks.
+    // Comparison 5: single -> dual on arm B (current main), blocked by the same ABBA blocks. The failed-run rule applies
+    // here too: a block in which any arm-B run of the workload failed (either topology) is excluded for that workload.
     const mainRuns = head.filter(e => e.arm === 'B')
     const workloads = [...new Set(mainRuns.map(e => e.workload!))]
     const comparison: Record<string, unknown>[] = []
+    const excluded5: string[] = []
     lines.push('## Comparison 5: single -> dual topology (arm B; reference single)', '', '| Workload | Measure | single | dual | dual/single - 1 | 95% CI (descriptive) | permutation p | over 5%? |', '|---|---|---|---|---|---|---|---|')
-    for (const workload of workloads) for (const measure of ['p50', 'p95', 'p99', 'throughput']) {
-      const runs: RunValue[] = mainRuns.filter(e => e.workload === workload).map(e => ({ block: e.block, arm: e.topology === 'single' ? 'A' : 'B', value: measures[measure](e.result!) }))
-      if (!runs.some(r => r.arm === 'A') || !runs.some(r => r.arm === 'B')) continue
-      const effect = relativeEffect(runs, stats), test = permutationTest(runs, testing)
-      const level = (arm: Arm) => medianLevel(runs.filter(r => r.arm === arm).map(r => r.value), stats).estimate
-      const over = measure === 'throughput' ? effect.estimate < -0.05 : effect.estimate > 0.05
-      comparison.push({ workload, measure, single: level('A'), dual: level('B'), effect, test, over })
-      lines.push(`| ${workload} | ${measure} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(effect.estimate)} | ${pct(effect.low)} to ${pct(effect.high)} | ${test.p.toPrecision(3)} | ${over ? '**yes**' : 'no'} |`)
+    for (const workload of workloads) {
+      const broken = new Set(entries.filter(e => e.kind === 'headless' && e.arm === 'B' && e.workload === workload && e.status !== 'passed').map(e => e.block))
+      broken.forEach(block => excluded5.push(`${workload} block ${block}`))
+      for (const measure of ['p50', 'p95', 'p99', 'throughput']) {
+        const runs: RunValue[] = mainRuns.filter(e => e.workload === workload && !broken.has(e.block)).map(e => ({ block: e.block, arm: e.topology === 'single' ? 'A' : 'B', value: measures[measure](e.result!) }))
+        if (!runs.some(r => r.arm === 'A') || !runs.some(r => r.arm === 'B')) continue
+        const effect = relativeEffect(runs, stats), test = permutationTest(runs, testing)
+        const level = (arm: Arm) => medianLevel(runs.filter(r => r.arm === arm).map(r => r.value), stats).estimate
+        const over = measure === 'throughput' ? effect.estimate < -0.05 : effect.estimate > 0.05
+        comparison.push({ workload, measure, single: level('A'), dual: level('B'), effect, test, over })
+        lines.push(`| ${workload} | ${measure} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(effect.estimate)} | ${pct(effect.low)} to ${pct(effect.high)} | ${test.p.toPrecision(3)} | ${over ? '**yes**' : 'no'} |`)
+      }
     }
-    json.comparison5 = comparison
-    lines.push('')
+    json.comparison5 = { rows: comparison, excluded: excluded5 }
+    lines.push('', `Blocks excluded for a failed run: ${excluded5.length ? excluded5.join('; ') : 'none'}.`, '')
 
-    // Absolute baselines and the dual topology's SYNC record, arm B.
+    // Absolute baselines and the dual topology's SYNC record, arm B. These levels are not blocked (one group of runs),
+    // so a failed run leaves no degenerate stratum: they use every passed run, and the runs column shows the count.
     lines.push('## Absolute baselines (arm B; median over runs, 95% CI, half-width as % of median)', '', '| Workload | Topology | runs | p50 ms | p95 ms | p99 ms | throughput | heap MiB | SYNC residency | first SYNC drop |', '|---|---|---|---|---|---|---|---|---|---|')
     for (const cell of cells) {
       const [workload, topology] = cell.split('|')

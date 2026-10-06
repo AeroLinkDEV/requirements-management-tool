@@ -180,8 +180,10 @@ export function permutationTest(runs: readonly RunValue[], options: { permutatio
   const observed = statistic(blocks.map(block => block.observed))
   const total = blocks.reduce((product, block) => product * block.options.length, 1)
   const atLeast = (labels: readonly number[][]) => statistic(labels).magnitude >= observed.magnitude - 1e-12
-  // Relabelling every block the other way round only negates the log ratio, so at least two labellings reach it.
-  const exactFloor = 2 / total
+  // In balanced blocks (as many A as B), relabelling every block the other way round only negates the log ratio, so at
+  // least two labellings reach the observed statistic. An unbalanced block has no such mirror: the floor is then 1.
+  const balanced = blocks.every(block => block.observed.length * 2 === block.values.length)
+  const exactFloor = (balanced ? 2 : 1) / total
   if (total <= options.permutations) {
     let count = 0
     const digits = blocks.map(() => 0)
@@ -214,6 +216,36 @@ export function medianLevel(values: readonly number[], options: { iterations: nu
   const { replicates, exact } = resample(list, picks => median(picks.flat()), options)
   const low = nearestRank(replicates, 2.5), high = nearestRank(replicates, 97.5)
   return { estimate, low, high, halfWidthPct: estimate ? ((high - low) / 2 / Math.abs(estimate)) * 100 : null, replicates: replicates.length, exact, seed: options.seed }
+}
+
+/** Key order does not change a declaration, so statistics blocks are compared with their keys sorted at every depth. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`
+  return JSON.stringify(value)
+}
+
+export type Judgement = { verdict: 'pilot' | 'not judged' | 'refused' | 'failed' | 'passed'; reason: string; significant: number }
+
+/**
+ * The A/A verdict for a family. It is judged only when every session of the run set recorded exactly the statistics
+ * block in force (a run set declared under another revision keeps its recorded verdict) and none ran on a dirty tree
+ * under the smoke override; it is refused when the design cannot reach alpha / m; otherwise it fails when any
+ * Holm-adjusted p is at or below alpha.
+ */
+export function judgeFamily(input: {
+  pilot: boolean; sessions: readonly { protocol?: { statistics?: unknown }; dirtyOverride?: boolean }[]; statistics: unknown
+  adjusted: readonly number[]; smallestP: readonly number[]; alpha: number
+}): Judgement {
+  const significant = input.adjusted.filter(p => p <= input.alpha).length
+  if (input.pilot) return { verdict: 'pilot', reason: 'not judged', significant }
+  if (!input.sessions.length) return { verdict: 'not judged', reason: 'no session record', significant }
+  if (input.sessions.some(session => canonical(session.protocol?.statistics) !== canonical(input.statistics)))
+    return { verdict: 'not judged', reason: 'a session declared a different statistics block (an earlier protocol revision); its recorded verdict stands, and this test is descriptive context only', significant }
+  if (input.sessions.some(session => session.dirtyOverride)) return { verdict: 'not judged', reason: 'a smoke run on a dirty harness tree (--dirty-smoke)', significant }
+  const floor = Math.max(...input.smallestP), threshold = input.alpha / input.smallestP.length
+  if (!(floor < threshold)) return { verdict: 'refused', reason: `the smallest attainable p (${floor.toPrecision(3)}) is not below alpha / m (${threshold.toPrecision(3)})`, significant }
+  return { verdict: significant ? 'failed' : 'passed', reason: '', significant }
 }
 
 /** Holm's step-down adjustment of a family of p-values, returned in the input order. */

@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { abbaOrder, holm, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, type RunValue } from '../perf/stats'
+import { abbaOrder, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
@@ -128,12 +128,34 @@ test('the within-block permutation test matches its hand enumeration and states 
   expect(drawn.p * 20000).toBeCloseTo(Math.round(drawn.p * 20000), 9)
   expect(permutationTest(flip, { permutations: 19999, seed: 1 })).toMatchObject({ exact: true, smallestP: 2 / 1024 })
   expect(() => permutationTest([{ block: 0, arm: 'A', value: 1 }, { block: 0, arm: 'A', value: 2 }], { permutations: 10, seed: 1 })).toThrow()
+  // An unbalanced block (A 1, 2; B 3) has 3 labellings and no mirror labelling, so its floor is 1/3, not 2/3.
+  const unbalanced: RunValue[] = [{ block: 0, arm: 'A', value: 1 }, { block: 0, arm: 'A', value: 2 }, { block: 0, arm: 'B', value: 3 }]
+  expect(permutationTest(unbalanced, { permutations: 100, seed: 1 })).toMatchObject({ exact: true, permutations: 3, smallestP: 1 / 3 })
+})
+
+test('an A/A family is judged only under the statistics its sessions recorded, and refused when it cannot reject', () => {
+  const statistics = { revision: 2, test: 'within-block permutation', permutations: 19999 }
+  const session = { protocol: { statistics: { permutations: 19999, test: 'within-block permutation', revision: 2 } } }
+  const base = { pilot: false, sessions: [session], statistics, alpha: 0.05 }
+  const forty = (p: number) => Array.from({ length: 40 }, () => p)
+  // Same statistics (key order aside), a reachable floor (1/20000 < 0.05/40): judged; one Holm p at alpha fails it.
+  expect(judgeFamily({ ...base, adjusted: forty(1), smallestP: forty(1 / 20000) }).verdict).toBe('passed')
+  expect(judgeFamily({ ...base, adjusted: [0.05, ...forty(1).slice(1)], smallestP: forty(1 / 20000) })).toMatchObject({ verdict: 'failed', significant: 1 })
+  // One ABBA block can reach no lower than 1/3, above 0.05/40: refused, never passed.
+  expect(judgeFamily({ ...base, adjusted: forty(1), smallestP: forty(1 / 3) }).verdict).toBe('refused')
+  // A session that recorded another statistics block (revision 1), or none, or ran under --dirty-smoke: not judged.
+  const revision1 = { protocol: { statistics: { iterations: 10000, seed: 20261006 } } }
+  expect(judgeFamily({ ...base, sessions: [session, revision1], adjusted: forty(0), smallestP: forty(1 / 20000) }).verdict).toBe('not judged')
+  expect(judgeFamily({ ...base, sessions: [], adjusted: forty(0), smallestP: forty(1 / 20000) }).verdict).toBe('not judged')
+  expect(judgeFamily({ ...base, sessions: [{ ...session, dirtyOverride: true }], adjusted: forty(1), smallestP: forty(1 / 20000) }).verdict).toBe('not judged')
+  expect(judgeFamily({ ...base, pilot: true, adjusted: forty(0), smallestP: forty(1 / 20000) }).verdict).toBe('pilot')
 })
 
 test('under a null with block effects the permutation test rejects at its nominal rate', () => {
   // 400 synthetic A/A sets of ten ABBA blocks: each block has its own level (the host drifting between blocks, up to
   // 50% of the noise-free value) and every run independent noise, with no arm effect. At alpha 0.05 and R = 99 the
-  // rejection rate must stay within 3.5 binomial standard deviations (0.011 for 400 sets) of 0.05.
+  // rejection rate must stay within 3.5 binomial standard deviations (0.011 for 400 sets) of 0.05. This checks gross
+  // validity at 0.05 only, not the far tail where Holm's alpha / 40 sits; the tail rests on the exact construction.
   const random = mulberry32(20261006)
   let rejected = 0
   const sets = 400
