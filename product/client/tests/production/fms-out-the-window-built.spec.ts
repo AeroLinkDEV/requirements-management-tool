@@ -13,10 +13,12 @@ import { observeFmsPublicHeartbeat } from '../../test-support/fms-public-browser
  */
 
 // The view draws with WebGL; headless Chromium has no GPU here and only uses its software renderer when told to.
-// Omit the automatic filmstrip; focused/manual and failure images remain alongside DOM and request traces.
+// Omit automatic filmstrip and DOM snapshot barriers for this live WebGL journey. Playwright also couples
+// its network archive to snapshots: DOM/network replay is lost. Action/source traces, API logs, telemetry,
+// request-policy assertions and focused/manual/failure images remain, with the original guard and oracles.
 test.use({
   launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'] },
-  trace: { mode: 'retain-on-failure', screenshots: false, snapshots: true, sources: true, attachments: true },
+  trace: { mode: 'retain-on-failure', screenshots: false, snapshots: false, sources: true, attachments: true },
 })
 
 test('the out-the-window view and synthetic vision start under the production policy, from this server only, with terrain off', async ({ page, request, baseURL, context }) => {
