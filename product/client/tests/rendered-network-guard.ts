@@ -1,7 +1,16 @@
-import { createServer, request, type ClientRequest } from 'node:http'
+import { createServer, request, type ClientRequest, type IncomingHttpHeaders } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import type { WebSocketRoute } from '@playwright/test'
 import WebSocket from 'ws'
+
+// Connection-scoped (hop-by-hop) response headers describe the upstream connection, not the browser's.
+// Relaying a recovery's `Connection: close` would make the browser open a new loopback connection (#986).
+function withoutHopByHop(headers: IncomingHttpHeaders) {
+  const relayed = { ...headers }
+  const named = String(headers.connection ?? '').split(',').map(token => token.trim().toLowerCase()).filter(Boolean)
+  for (const name of ['connection', 'keep-alive', ...named]) delete relayed[name]
+  return relayed
+}
 
 // A native per-context proxy avoids #1441's split owner/child Fetch event pairing.
 // It permits only the configured HTTP fixture origin, including each redirect hop.
@@ -63,7 +72,7 @@ export async function createRenderedNetworkGuard(baseURL: string) {
       // A retry takes its own connection, so it cannot land on another stale pooled socket.
       const attempt = request(url, fresh ? { method, headers: { ...headers, connection: 'close' }, agent: false } : { method, headers }, response => {
         response.on('error', error => fail(error, 'during the response body', attempt.reusedSocket))
-        outgoing.writeHead(response.statusCode!, response.headers)
+        outgoing.writeHead(response.statusCode!, withoutHopByHop(response.headers))
         response.pipe(outgoing)
       })
       upstream = attempt
@@ -73,17 +82,21 @@ export async function createRenderedNetworkGuard(baseURL: string) {
       attempt.on('error', (error: NodeJS.ErrnoException) => {
         if (attempt.res) { fail(error, 'during the response body', attempt.reusedSocket); return }
         // Node's documented keep-alive race (#1494): a stalled server's keep-alive timer closes a pooled connection
-        // before it reads the request already written to it, so the server never processed that request.
-        // Only a bodyless idempotent request is replayed, once, and only when no response byte arrived.
+        // that already carries a request. The guard cannot know whether the server began processing it, so it
+        // replays only what is safe either way: a bodyless GET/HEAD (idempotent) with zero response bytes, once.
+        // That matches Node's documented retry for this race and the resend Chromium makes on its own connections.
         const responseBytes = attempt.socket && bytesReadBefore >= 0 ? attempt.socket.bytesRead - bytesReadBefore : -1
         if (!retried && !fresh && attempt.reusedSocket && error.code === 'ECONNRESET' && (method === 'GET' || method === 'HEAD')
           && responseBytes === 0 && incoming.readableEnded && bodyBytes === 0 && !downstreamGone && !closed && !outgoing.headersSent) {
           retried = true
-          recovered.push(`${label}: ECONNRESET (${error.message}) on a reused socket; retried once on a new connection`)
+          const recovery = `${label}: ECONNRESET (${error.message}) on a ${attempt.reusedSocket ? 'reused' : 'new'} socket after ${Date.now() - started} ms; retried once on a new connection`
+          recovered.push(recovery)
+          // One line per recovery, so job logs can count them.
+          process.stderr.write(`[rendered-network-guard] recovered ${recovery}\n`)
           send(true).end()
           return
         }
-        fail(error, 'before any response', attempt.reusedSocket)
+        fail(error, `before the response headers (${Math.max(responseBytes, 0)} bytes received)`, attempt.reusedSocket)
       })
       return attempt
     }

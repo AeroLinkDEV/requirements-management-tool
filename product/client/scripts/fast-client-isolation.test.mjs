@@ -53,12 +53,15 @@ test('an unrecoverable upstream failure fails the child test and names its cause
   const output = `${result.stdout}\n${result.stderr}`
 
   assert.notEqual(result.status, 0, output)
+  // The child's page outcomes and replay accounting held; only its teardown may fail. Anchored to a whole line:
+  // a failure's code frame quotes the console.log source, which must not count as the line itself.
+  assert.match(output, /^page outcomes verified\r?$/m)
   assert.match(output, /rendered fixture network transport failed/)
-  assert.match(output, /GET \/reset-always: ECONNRESET .* before any response on a new socket/)
+  assert.match(output, /GET \/reset-always: ECONNRESET .* before the response headers \(0 bytes received\) on a new socket/)
   assert.match(output, /GET \/truncated: ECONNRESET .* during the response body/)
   // Never replayed: a POST, or a GET whose response had begun, on a reset reused connection.
-  assert.match(output, /POST \/reset-reused: \w+ \(.*\) before any response on a reused socket after \d+ ms\."/)
-  assert.match(output, /GET \/partial-reused: ECONNRESET \(.*\) before any response on a reused socket after \d+ ms\."/)
+  assert.match(output, /POST \/reset-reused: \w+ \(.*\) before the response headers \(0 bytes received\) on a reused socket after \d+ ms\."/)
+  assert.match(output, /GET \/partial-reused: ECONNRESET \(.*\) before the response headers \(14 bytes received\) on a reused socket after \d+ ms\."/)
   assert.match(output, /1 failed/)
 })
 

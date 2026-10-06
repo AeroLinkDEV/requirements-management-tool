@@ -4,13 +4,13 @@ import type { AddressInfo, Socket } from 'node:net'
 import { renderedTest } from '../../tests/isolated-client-test'
 import { WebSocketServer } from 'ws'
 
-type NativeServer = { origin: string; externalOrigin: string; apiHits: number; externalHits: number; afterCloseHits: number; reusedResets: number; wsMessages: number; protocols: string[] }
+type NativeServer = { origin: string; externalOrigin: string; apiHits: number; externalHits: number; afterCloseHits: number; reusedResets: number; alwaysResets: { reused: number; new: number }; wsMessages: number; protocols: string[] }
 
 export const nativeTest = renderedTest.extend<{ nativeServer: NativeServer }>({
   nativeServer: async ({ browserName: _browserName }, provide) => {
     const image = await readFile(new URL('../../public/fms-cdu/panel.webp', import.meta.url))
     const font = await readFile(new URL('../../node_modules/@fontsource/dm-sans/files/dm-sans-latin-400-normal.woff2', import.meta.url))
-    const state: NativeServer = { origin: '', externalOrigin: '', apiHits: 0, externalHits: 0, afterCloseHits: 0, reusedResets: 0, wsMessages: 0, protocols: [] }
+    const state: NativeServer = { origin: '', externalOrigin: '', apiHits: 0, externalHits: 0, afterCloseHits: 0, reusedResets: 0, alwaysResets: { reused: 0, new: 0 }, wsMessages: 0, protocols: [] }
     const external = createServer((_request, response) => {
       state.externalHits++
       response.setHeader('Access-Control-Allow-Origin', '*')
@@ -31,7 +31,8 @@ export const nativeTest = renderedTest.extend<{ nativeServer: NativeServer }>({
       // A reused connection that starts a response and then closes: the request was processed, so it must not be replayed.
       if (path === '/partial-reused' && earlier > 0) { request.socket.end('HTTP/1.1 200 O'); return }
       if (path === '/partial-reused') { response.end('fresh'); return }
-      if (path === '/reset-always') { request.socket.destroy(); return }
+      // Counted by connection, so a probe can tell which resets the guard was allowed to replay.
+      if (path === '/reset-always') { state.alwaysResets[earlier > 0 ? 'reused' : 'new']++; request.socket.destroy(); return }
       if (path === '/truncated') {
         response.writeHead(200, { 'Content-Type': 'text/plain' })
         response.write('partial', () => request.socket.destroy())
