@@ -117,7 +117,23 @@ foreach ($functionName in 'Get-QualificationLogTail','Wait-QualificationApiReady
 }
 # The readiness budget and the uploaded location are part of the contract, not incidental text.
 if (-not $qualificationSource.Contains("Wait-QualificationApiReady -Process `$api -Port `$seedApiPort -Attempts 180 -Name 'Disposable seed API'")) { throw 'The seed API readiness wait no longer uses the qualification wait with its unchanged 180-attempt budget.' }
-if (-not $qualificationSource.Contains("Join-Path `$repositoryRoot 'TestResults'") -or -not $qualificationSource.Contains('Save-QualificationDiagnostics -Sources @($root,$backupRoot)')) { throw 'A failed restore qualification no longer copies its owned diagnostics into TestResults.' }
+if (-not $qualificationSource.Contains("Wait-QualificationApiReady -Process `$process -Port `$port -Attempts 120 -Name ")) { throw 'The notification API readiness wait no longer uses the qualification wait with its unchanged 120-attempt budget.' }
+if (-not $qualificationSource.Contains("elseif (`$env:GITHUB_ACTIONS -eq 'true') { Join-Path `$repositoryRoot 'TestResults' }") -or -not $qualificationSource.Contains('Save-QualificationDiagnostics -Sources @($root,$backupRoot)')) { throw 'A failed hosted restore qualification no longer copies its owned diagnostics into TestResults.' }
+# The run's failure path: its top-level try must rethrow from its catch, because after the finally's pg_ctl stop
+# $LASTEXITCODE is 0 and a swallowed failure would pass; and the diagnostics copy must sit on the failed branch
+# of that finally, not on the passing one.
+if (@($qualificationErrors).Count -ne 0) { throw "Restore qualification does not parse: $($qualificationErrors[0].Message)" }
+$qualificationTry = @($qualificationAst.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] -and $_.Finally -and $_.Finally.Find({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Save-QualificationDiagnostics' }, $true) })
+if ($qualificationTry.Count -ne 1) { throw "Restore qualification no longer has exactly one top-level try whose finally copies diagnostics (found $($qualificationTry.Count))." }
+$qualificationTry = $qualificationTry[0]
+if ($qualificationTry.CatchClauses.Count -ne 1 -or -not $qualificationTry.CatchClauses[0].IsCatchAll) { throw 'Restore qualification no longer records its failure in one catch-all clause of its top-level try.' }
+$lastCatchStatement = @($qualificationTry.CatchClauses[0].Body.Statements)[-1]
+if (-not ($lastCatchStatement -is [Management.Automation.Language.ThrowStatementAst]) -or $lastCatchStatement.Pipeline) { throw 'The top-level catch of restore qualification no longer ends in a bare rethrow, so a failed qualification could pass.' }
+$outcomeBranch = @($qualificationTry.Finally.Statements | Where-Object { $_ -is [Management.Automation.Language.IfStatementAst] -and $_.Clauses.Count -eq 1 -and $_.Clauses[0].Item1.Extent.Text -eq '$qualificationPassed' })
+if ($outcomeBranch.Count -ne 1 -or -not $outcomeBranch[0].ElseClause) { throw 'Restore qualification no longer separates its passed and failed cleanup in one if ($qualificationPassed) ... else.' }
+$copyOnFailure = $outcomeBranch[0].ElseClause.Find({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Save-QualificationDiagnostics' }, $true)
+$copyOnPass = $outcomeBranch[0].Clauses[0].Item2.Find({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Save-QualificationDiagnostics' }, $true)
+if (-not $copyOnFailure -or $copyOnPass) { throw 'A failed restore qualification no longer copies its diagnostics on the failure branch of its cleanup.' }
 $workflow = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\.github\workflows\ci.yml') -Raw
 $domainStart = $workflow.IndexOf("`n  backend-core-domain:")
 $domainEnd = $workflow.IndexOf("`n  backend-core-infrastructure:", $domainStart + 1)
@@ -159,10 +175,23 @@ try {
         try { Wait-QualificationApiReady -Process $hung -Port $closedPort -Attempts 2 -Name 'Disposable seed API' -StdoutPath $hungOut -StderrPath $hungErr -AttemptLogPath (Join-Path $ownedRun 'hung.readiness.json') | Out-Null }
         catch { $message = $_.Exception.Message }
         if (-not $message) { throw 'A seed API that never answered was reported ready.' }
-        foreach ($expected in 'after 2 of 2 attempts','is still running','Probe outcomes: 2x','no listening address','still seeding') {
+        # CPU and wall time separate a slow seeder from a stuck one, since the seeders do not log.
+        foreach ($expected in 'after 2 of 2 attempts','is still running with ','s CPU time in ','s wall time since start',"Listener on port ${closedPort}: none.",'Probe outcomes: 2x','no listening address','still seeding') {
             if (-not $message.Contains($expected)) { throw "The hung seed API failure message does not carry '$expected': $message" }
         }
+        $hungLog = Get-Content -LiteralPath (Join-Path $ownedRun 'hung.readiness.json') -Raw | ConvertFrom-Json
+        if (@($hungLog.history).Count -ne 2 -or @($hungLog.history | Where-Object { $_.cpuMs -isnot [long] -and $_.cpuMs -isnot [int] }).Count -ne 0) { throw 'The hung seed API readiness record does not carry the API CPU time for every attempt.' }
     } finally { if (-not $hung.HasExited) { Stop-Process -Id $hung.Id -Force; $hung.WaitForExit(10000) | Out-Null } }
+
+    # Only "no listener" reads as none: any other listener-query failure is reported as such. The stand-in
+    # shadows the cmdlet inside this script only.
+    function Get-NetTCPConnection { throw 'CIM provider unavailable' }
+    try {
+        $message = $null
+        try { Wait-QualificationApiReady -Process $exiting -Port $closedPort -Attempts 1 -Name 'Disposable seed API' -StdoutPath $stdout -StderrPath $stderr -AttemptLogPath (Join-Path $ownedRun 'listener.readiness.json') | Out-Null }
+        catch { $message = $_.Exception.Message }
+        if (-not $message -or -not $message.Contains("Listener on port ${closedPort}: unknown (Get-NetTCPConnection failed: CIM provider unavailable)")) { throw "A failed listener query was not reported as such: $message" }
+    } finally { Remove-Item -LiteralPath Function:\Get-NetTCPConnection }
 
     # Retention: logs at any depth and top-level summaries reach the uploaded directory; key material and
     # evidence do not.

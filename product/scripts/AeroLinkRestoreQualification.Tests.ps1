@@ -1,6 +1,7 @@
 [CmdletBinding()]
-# DiagnosticsDirectory receives a copy of the owned logs when qualification fails. Its default is the repository's
-# TestResults directory because that is what the Domain job uploads on failure; the temp roots are never uploaded.
+# DiagnosticsDirectory receives a copy of the owned logs when qualification fails. Under GitHub Actions its default
+# is the repository's TestResults directory, which the Domain job uploads on failure (the temp roots are never
+# uploaded); a local run defaults to a directory inside its own retained temp root.
 param([string]$PostgresBin, [int]$ExistingPostgresPort = 0, [string]$DiagnosticsDirectory)
 
 $ErrorActionPreference = 'Stop'
@@ -89,7 +90,10 @@ function Wait-QualificationApiReady {
         }
         # Under Windows PowerShell a refused loopback connect surfaces as a 2-second timeout, so a port with no
         # listener and a listener that never answers look alike here; the listener check below tells them apart.
-        $history.Add([pscustomobject]@{ attempt=$attempt+1; startedMs=$startedMs; durationMs=$clock.ElapsedMilliseconds-$startedMs; outcome=$outcome.TrimEnd('.') })
+        # The startup seeders run before app.Run() and do not log, so the API's CPU time is what separates a slow
+        # seeder (CPU keeps rising) from a stuck one (CPU flat) while nothing listens yet.
+        $cpuMs = try { [long]$Process.TotalProcessorTime.TotalMilliseconds } catch { $null }
+        $history.Add([pscustomobject]@{ attempt=$attempt+1; startedMs=$startedMs; durationMs=$clock.ElapsedMilliseconds-$startedMs; cpuMs=$cpuMs; outcome=$outcome.TrimEnd('.') })
         Start-Sleep -Milliseconds 500
     }
     $elapsed = [Math]::Round($clock.Elapsed.TotalSeconds,1)
@@ -97,13 +101,29 @@ function Wait-QualificationApiReady {
         $Process.WaitForExit()
         $state = "process $($Process.Id) exited with code $($Process.ExitCode)"
         try { $state += " at $($Process.ExitTime.ToUniversalTime().ToString('HH:mm:ss.fff'))Z" } catch { }
-    } else { $state = "process $($Process.Id) is still running" }
+    } else {
+        $state = "process $($Process.Id) is still running"
+        try {
+            $wall = [Math]::Round(([DateTime]::Now - $Process.StartTime).TotalSeconds,1)
+            $cpu = [Math]::Round($Process.TotalProcessorTime.TotalSeconds,1)
+            $state += " with ${cpu}s CPU time in ${wall}s wall time since start"
+            $recent = @($history | Select-Object -Last 10 | Where-Object { $null -ne $_.cpuMs })
+            if ($recent.Count -ge 2) {
+                $cpuDelta = [Math]::Round(($recent[-1].cpuMs - $recent[0].cpuMs) / 1000.0,1)
+                $wallDelta = [Math]::Round(($recent[-1].startedMs - $recent[0].startedMs) / 1000.0,1)
+                $state += " (+${cpuDelta}s CPU over the last ${wallDelta}s of probes)"
+            }
+        } catch { $state += " (CPU time unavailable: $($_.Exception.Message))" }
+    }
     $processStartUtc = try { $Process.StartTime.ToUniversalTime().ToString('o') } catch { 'unknown' }
-    $listener = 'unknown'
     try {
         $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique)
         $listener = "pid $($owners -join ',') (API pid $($Process.Id))"
-    } catch { $listener = 'none' }
+    } catch {
+        # Only "no matching connection" means nothing listens; any other failure is reported, not read as none.
+        if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') { $listener = 'none' }
+        else { $listener = "unknown (Get-NetTCPConnection failed: $($_.Exception.Message))" }
+    }
     $outcomes = @($history | Group-Object outcome | Sort-Object Count -Descending | ForEach-Object { "$($_.Count)x $($_.Name)" }) -join '; '
     $listening = @(Select-String -LiteralPath $StdoutPath -Pattern 'Now listening on:.*' -ErrorAction SilentlyContinue | ForEach-Object { $_.Matches[0].Value })
     $summary = [ordered]@{ name=$Name; url=$url; attempts=$history.Count; attemptBudget=$Attempts; elapsedSeconds=$elapsed; state=$state; listener=$listener
@@ -117,7 +137,7 @@ function Wait-QualificationApiReady {
         "--- last stdout ($StdoutPath) ---$nl$(Get-QualificationLogTail $StdoutPath)")
 }
 # Copies the run's owned logs and summaries, never key material or database files, to a directory the CI job
-# uploads. The Domain job uploads TestResults/ on failure, which is where the caller points this by default.
+# uploads. The Domain job uploads TestResults/ on failure, which is where the caller points this under GitHub Actions.
 function Save-QualificationDiagnostics {
     param([Parameter(Mandatory)][string[]]$Sources, [Parameter(Mandatory)][string]$Destination)
     $copied = 0
@@ -125,8 +145,10 @@ function Save-QualificationDiagnostics {
         if (-not (Test-Path -LiteralPath $source -PathType Container)) { continue }
         $sourceFull = [IO.Path]::GetFullPath($source).TrimEnd('\')
         $target = Join-Path $Destination (Split-Path $sourceFull -Leaf)
-        # Logs from any depth (PostgreSQL, the APIs, the relay, restore validation); summaries only from the top
-        # level, so seeded evidence files and archive contents are never mistaken for diagnostics.
+        # Logs from any depth (PostgreSQL, the APIs, the relay); summaries only from the top level, so seeded
+        # evidence files and archive contents are never mistaken for diagnostics. Restore validation's own logs
+        # are not among them: Restore-AeroLink.ps1 deletes its temporary validation-logs directory in its own
+        # finally, before this copy runs.
         foreach ($file in @(Get-ChildItem -LiteralPath $sourceFull -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -le 20MB })) {
             $relative = $file.FullName.Substring($sourceFull.Length).TrimStart('\')
             $topLevel = $relative.IndexOf('\') -lt 0
@@ -138,6 +160,17 @@ function Save-QualificationDiagnostics {
         }
     }
     return $copied
+}
+# At the moment of failure, before the APIs are stopped, records what every PostgreSQL session of the disposable
+# instance is doing, so a seed API that is waiting on the database is told apart from one the database waits on.
+# Called only for the instance this run started; it never throws, so it cannot replace the failure.
+function Save-QualificationDatabaseActivity([string]$Path) {
+    try {
+        $activity = Invoke-QualificationSql 'postgres' ("SELECT coalesce(json_agg(a ORDER BY a.pid), '[]'::json) FROM (SELECT now() AS sampled_at, pid, datname, " +
+            "application_name, backend_type, state, wait_event_type, wait_event, xact_start, query_start, state_change, left(query, 300) AS query " +
+            "FROM pg_stat_activity WHERE pid <> pg_backend_pid()) a;")
+        Set-Content -LiteralPath $Path -Value $activity -Encoding UTF8
+    } catch { Write-Warning "PostgreSQL activity at failure could not be recorded: $($_.Exception.Message)" }
 }
 function Start-NotificationQualificationApi([string]$Database, [string]$Evidence, [string]$Name) {
     $port = Get-FreePort
@@ -299,11 +332,13 @@ try {
         'Database__Provider'='PostgreSql'; 'Instance__InstanceId'=$instanceId; 'Instance__Label'='Disposable notification restore qualification'
         'DataProtection__KeyRingPath'=$keyRing; 'Notifications__DispatchIntervalSeconds'='3600'
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command'='Warning'
-        # UTC timestamps on every API log line, so a slow startup shows which migration or seeder took the time.
+        # UTC timestamps on every API log line, so a slow startup shows when migrations ended and the first logged
+        # line after them. The startup seeders do not log and run before app.Run(), so the timestamps bound the
+        # seeding phase but cannot name a seeder; the readiness wait's CPU time says whether it was busy or stuck.
         # The default console logger honours these Console-level keys; the FormatterOptions section did not apply.
         'Logging__Console__TimestampFormat'='HH:mm:ss.fff '; 'Logging__Console__UseUtcTimestamp'='true'
     }
-    $previous =Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)
+    $previous = Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)
     foreach ($item in $settings.GetEnumerator()) { [Environment]::SetEnvironmentVariable($item.Key,$item.Value,'Process') }
     $api = Start-Process -FilePath $apiExecutable -WorkingDirectory (Split-Path $apiExecutable -Parent) `
         -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr -WindowStyle Hidden -PassThru
@@ -506,7 +541,12 @@ try {
     $qualificationPassed = $true
     $global:LASTEXITCODE=0
 }
-catch { $qualificationFailure = $_; throw }
+catch {
+    $qualificationFailure = $_
+    if ($postgresStarted) { Save-QualificationDatabaseActivity (Join-Path $root 'pg-stat-activity-at-failure.json') }
+    # The rethrow is what fails the run: after the finally's pg_ctl stop, $LASTEXITCODE is 0 again.
+    throw
+}
 finally {
     Stop-NotificationQualificationApi $dispatcherHost
     if ($tlsRelay -and -not $tlsRelay.HasExited) { Stop-Process -Id $tlsRelay.Id -Force; $tlsRelay.WaitForExit(10000)|Out-Null }
@@ -545,7 +585,11 @@ finally {
                 dynamicPortRange=(@(netsh int ipv4 show dynamicport tcp 2>$null) -join ' ').Trim()
                 apiExecutable=$apiExecutable; apiExecutableWrittenUtc=$(if ($apiFile) { $apiFile.LastWriteTimeUtc.ToString('o') } else { $null })
                 seedApiSettings=$settings } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $root 'qualification-failure.json') -Encoding UTF8
-            $diagnosticsTarget = if ($DiagnosticsDirectory) { $DiagnosticsDirectory } else { Join-Path $repositoryRoot 'TestResults' }
+            # Only a GitHub Actions run defaults to TestResults, which the Domain job uploads; a local run keeps the
+            # copy inside its own retained root rather than writing machine paths into the checkout.
+            $diagnosticsTarget = if ($DiagnosticsDirectory) { $DiagnosticsDirectory }
+                elseif ($env:GITHUB_ACTIONS -eq 'true') { Join-Path $repositoryRoot 'TestResults' }
+                else { Join-Path $root 'collected-diagnostics' }
             $diagnosticsTarget = Join-Path $diagnosticsTarget "restore-qualification-$shortToken"
             $copiedCount = Save-QualificationDiagnostics -Sources @($root,$backupRoot) -Destination $diagnosticsTarget
             Write-Warning "Copied $copiedCount restore qualification diagnostic files to $diagnosticsTarget."
