@@ -54,7 +54,7 @@ export type RoutePoint = { ident: string; position: LatLon; active: boolean; con
 
 export type FmsOutputs = {
   /** Which FMS the displays show; the source annunciation keeps the crew from following the wrong one. */
-  source: "FMS1";
+  source: "FMS1" | "FMS2";
   failed: boolean;
   /** Angular display reference. Geometry and desired-track values remain true; displays convert at this boundary. */
   angleReference: "MAG" | "TRUE";
@@ -311,13 +311,16 @@ function radioBusWords(fms: ScriptedFms, failed: boolean): RadioBusWords {
 }
 
 export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
+  // Dual computers retain their attached side through link loss, independent operation and power changes.
+  // A standalone ScriptedFms uses side 1 (its own RMS port); preserve that single-computer identity.
+  const side = fms.dualOperation?.side ?? 1;
   const failed = fms.hasCondition("fmsFail");
   const g = sim.guidance;
   const active = fms.activeRoute;
   const next = active.legs[0];
   const phase = fms.flightPhase;
   const empty: FmsOutputs = {
-    source: "FMS1", failed, angleReference: fms.angleReference, magneticVariation: failed ? fail() : fms.magneticField ? normal(fms.magneticField.declination) : ncd(),
+    source: `FMS${side}`, failed, angleReference: fms.angleReference, magneticVariation: failed ? fail() : fms.magneticField ? normal(fms.magneticField.declination) : ncd(),
     desiredTrack: fail(), crossTrack: fail(), lateralSource: null, verticalDeviation: fail(), verticalSource: null, verticalCoupled: false,
     rollCommand: fail(), distanceToGo: fail(), toWaypoint: fail(), eta: fail(), targetSpeed: fail(), targetAltitude: fail(),
     lateralMode: sim.lateralMode === "HDG" ? (sim.headingHeld ? "HDG HOLD" : "HDG SEL") : g.mode, lateralArmed: [],
