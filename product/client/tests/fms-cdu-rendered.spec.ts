@@ -1728,3 +1728,30 @@ test('the cockpit pilot selections remain keyboard reachable while the docked in
     return window.scrollY
   }, closedFootprint.scrollY)).toBe(closedFootprint.scrollY)
 })
+
+// Source annunciation owner: the public guidance selection must reach both displays, independently of CDU inspection.
+test('cockpit PFD and ND name the guidance computer through FMS 1 to 2 to 1, independently of the inspected CDU', async ({ page }, testInfo) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
+  await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
+  await tab(page, 'Flight and setup')
+  const source = page.getByLabel('FMS guidance source', { exact: true })
+  const inspected = page.getByLabel('CDU inspected', { exact: true })
+  const efis = page.getByRole('region', { name: 'EFIS', exact: true })
+  const expectSource = async (computer: 1 | 2) => {
+    await expect(efis.getByTestId('nav-source')).toHaveText(`FMS${computer} TERM`)
+    await expect(efis.getByTestId('nd-source')).toHaveText(new RegExp(`^FMS${computer} `))
+  }
+  await inspected.selectOption('2')
+  await expect(source).toHaveValue('1')
+  await expectSource(1)
+  await source.selectOption('2')
+  await expectSource(2)
+  await efis.screenshot({ path: testInfo.outputPath('guidance-fms2.png') })
+  await inspected.selectOption('1')
+  await expect(source).toHaveValue('2')
+  await expectSource(2)
+  await source.selectOption('1')
+  await expectSource(1)
+  await efis.screenshot({ path: testInfo.outputPath('guidance-return-fms1.png') })
+})

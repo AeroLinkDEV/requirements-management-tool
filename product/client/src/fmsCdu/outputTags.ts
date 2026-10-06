@@ -42,7 +42,7 @@ const plan = (provenance: string): OutputTag => ({ kind: "plan", provenance });
 
 /** Every word and field of the FMS output bus (efis.ts fmsOutputs). */
 export const FMS_OUTPUT_TAGS: { [K in keyof FmsOutputs]: OutputTag } = {
-  source: annunciation("the FMS the displays show (FMS1)"),
+  source: annunciation("the computer producing the FMS output bus (FMS1 or FMS2)"),
   failed: annunciation("the FMS's own failure state"),
   angleReference: annunciation("the FMS's angular display reference (MAG or TRUE; the crew selects it, forced TRUE in the polar region)"),
   magneticVariation: data("the FMS's magnetic model (WMM2025) at the aircraft's position"),
