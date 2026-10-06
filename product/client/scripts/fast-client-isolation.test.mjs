@@ -18,6 +18,9 @@ function runProbe(spec) {
     cwd: client,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    // In a colour terminal Node's test runner sets FORCE_COLOR=1, and Playwright's line reporter then prefixes
+    // later output with cursor escapes that break whole-line matches of the child's output.
+    env: { ...process.env, FORCE_COLOR: '0' },
   })
 }
 
@@ -38,6 +41,31 @@ test('the ordinary isolation-probe control passes', () => {
 
   assert.equal(result.status, 0, output)
   assert.match(output, /3 passed/)
+})
+
+test('a reset reused upstream connection is retried once and named (#1494)', () => {
+  const result = runProbe('transport-recovery.spec.ts')
+  const output = `${result.stdout}\n${result.stderr}`
+
+  assert.equal(result.status, 0, output)
+  assert.match(output, /1 passed/)
+})
+
+test('an unrecoverable upstream failure fails the child test and names its cause (#1494)', () => {
+  const result = runProbe('transport-failure.spec.ts')
+  const output = `${result.stdout}\n${result.stderr}`
+
+  assert.notEqual(result.status, 0, output)
+  // The child's page outcomes and replay accounting held; only its teardown may fail. Anchored to a whole line:
+  // a failure's code frame quotes the console.log source, which must not count as the line itself.
+  assert.match(output, /^page outcomes verified\r?$/m)
+  assert.match(output, /rendered fixture network transport failed/)
+  assert.match(output, /GET \/reset-always: ECONNRESET .* before the response headers \(0 bytes received\) on a new socket/)
+  assert.match(output, /GET \/truncated: ECONNRESET .* during the response body/)
+  // Never replayed: a POST, or a GET whose response had begun, on a reset reused connection.
+  assert.match(output, /POST \/reset-reused: \w+ \(.*\) before the response headers \(0 bytes received\) on a reused socket after \d+ ms\."/)
+  assert.match(output, /GET \/partial-reused: ECONNRESET \(.*\) before the response headers \(14 bytes received\) on a reused socket after \d+ ms\."/)
+  assert.match(output, /1 failed/)
 })
 
 test('swallowed browser violations are prevented and still fail even when mocked', () => {
