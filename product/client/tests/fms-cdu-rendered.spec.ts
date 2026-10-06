@@ -1024,6 +1024,8 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
   await card.getByRole('button', { name: 'Run the scenario' }).click()
   await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v6')
+  // Run every 250 ms callback at 64x through the scenario's 900 s horizon, independent of host timer pacing.
+  await page.clock.runFor(14_250)
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })
