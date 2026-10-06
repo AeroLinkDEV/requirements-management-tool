@@ -304,14 +304,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const onKey = useCallback((event: CduKeyEvent) => {
     const title = screenText(backend.screen())[0].trim();
     setLog(entries => [{ ...event, title }, ...entries].slice(0, 200));
-    recordTo?.key(event.fn);
+    recordTo?.key(event.fn, event.held);
   }, [backend, recordTo]);
 
   // Stable physical-side callbacks let memoized faceplate keys skip the four-Hz bench ticks (#1349).
   const onCockpitKeys = useMemo(() => ([1, 2] as const).map(side => (event: CduKeyEvent) => {
     const title = screenText(system.computers[side - 1].screen())[0].trim();
     setLog(entries => [{ ...event, title: `CDU ${side}: ${title}` }, ...entries].slice(0, 200));
-    if (side === 1) recordTo?.key(event.fn);
+    if (side === 1) recordTo?.key(event.fn, event.held);
   }), [system, recordTo]);
 
   const reset = () => { setSession(value => value + 1); setLog([]); setPlaying(false); setRecording(false); };

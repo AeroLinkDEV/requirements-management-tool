@@ -51,7 +51,11 @@ export type Trigger =
 
 export type Action =
   | SensorStimulus
-  | { kind: "keys"; keys: CduFunction[] }
+  /**
+   * CDU keys pressed in order, in one tick. With held, each is pressed and held (CLR held clears the whole scratchpad);
+   * a step without it presses each key plainly, as scenarios written before held existed do.
+   */
+  | { kind: "keys"; keys: CduFunction[]; held?: boolean }
   | { kind: "type"; text: string }
   | { kind: "condition"; condition: ConditionId; on: boolean }
   | { kind: "alert"; text: string }
@@ -174,7 +178,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
   const what = (() => {
     if (isSensorStimulus(a)) return describeSensorStimulus(a);
     switch (a.kind) {
-      case "keys": return `press ${a.keys.map(key => key.replace(/^CHAR_/, "")).join(" ")}`;
+      case "keys": return `press ${a.held ? "and hold " : ""}${a.keys.map(key => key.replace(/^CHAR_/, "")).join(" ")}`;
       case "type": return `type ${a.text} into the scratchpad`;
       case "condition": return `${a.on ? "inject" : "remove"} the condition ${a.condition}`;
       case "alert": return `raise the alert ${a.text}`;
@@ -285,7 +289,9 @@ function actionProblem(action: unknown): string | null {
   if (!a || typeof a !== "object") return "an action is required";
   if (typeof a.kind === "string" && isSensorStimulus({ kind: a.kind })) return sensorStimulusProblem(a);
   switch (a.kind) {
-    case "keys": return Array.isArray(a.keys) && a.keys.length > 0 && a.keys.every(key => typeof key === "string" && KEY.test(key)) ? null : "keys must be a non-empty list of CDU functions";
+    case "keys":
+      if (a.held !== undefined && typeof a.held !== "boolean") return "held must be true or false";
+      return Array.isArray(a.keys) && a.keys.length > 0 && a.keys.every(key => typeof key === "string" && KEY.test(key)) ? null : "keys must be a non-empty list of CDU functions";
     case "type": return text(a.text, /^[A-Z0-9 ./-]{1,24}$/) ? null : "type needs up to 24 scratchpad characters";
     case "externalRadioHead": return "external radio control head is not equipped in the default profile (DEC-150); this stimulus is refused";
     case "condition": {
@@ -555,7 +561,7 @@ export class ScenarioRunner {
     const fms = this.fms;
     if (isSensorStimulus(action)) { applySensorStimulus(fms, action); return; }
     switch (action.kind) {
-      case "keys": for (const key of action.keys) fms.press(key); return;
+      case "keys": for (const key of action.keys) fms.press(key, { held: action.held === true }); return;
       case "type": for (const key of keysFor(action.text)) fms.press(key); return;
       case "condition": fms.setCondition(action.condition, action.on); return;
       case "alert": fms.raiseAlert(action.text); return;
@@ -830,7 +836,8 @@ export class ScenarioRecorder {
   readonly steps: ScenarioStep[] = [];
   private readonly start: number;
   private readonly clock: () => Date;
-  private lastKeyAt: number | null = null;
+  /** The tick and held flag of the last step, when it was a keys step: a key on the same tick joins it. */
+  private lastKeys: { seconds: number; held: boolean } | null = null;
 
   constructor(clock: () => Date) {
     this.clock = clock;
@@ -843,16 +850,19 @@ export class ScenarioRecorder {
   private add(action: Action) {
     const seconds = this.seconds;
     const last = this.steps.at(-1);
-    // Keys pressed less than a second apart are one step, as a crew member types an entry.
-    if (action.kind === "keys" && last?.action.kind === "keys" && this.lastKeyAt !== null && seconds - this.lastKeyAt < 1) {
+    // Each key replays at its own tick (#1505): only keys landing on the same tick, held alike, share a step, so no
+    // key moves to another tick and a run of quick keys is not pressed all at once.
+    const held = action.kind === "keys" && action.held === true;
+    if (action.kind === "keys" && last?.action.kind === "keys" && this.lastKeys?.seconds === seconds && this.lastKeys.held === held) {
       last.action.keys.push(...action.keys);
     } else {
       this.steps.push({ when: seconds === 0 ? { kind: "start" } : { kind: "time", seconds }, action });
     }
-    this.lastKeyAt = action.kind === "keys" ? seconds : null;
+    this.lastKeys = action.kind === "keys" ? { seconds, held } : null;
   }
 
-  key(fn: CduFunction) { this.add({ kind: "keys", keys: [fn] }); }
+  /** A CDU key pressed on the bench; held when the crew held it (CLR held clears the whole scratchpad). */
+  key(fn: CduFunction, held = false) { this.add(held ? { kind: "keys", keys: [fn], held: true } : { kind: "keys", keys: [fn] }); }
   condition(condition: ConditionId, on: boolean) { this.add({ kind: "condition", condition, on }); }
   /** A barometric altitude change made on the bench: the crew's setting, an injected error or the declared QNH. */
   baro(change: { setting?: "STD" | number; errorFt?: number; declaredQnh?: number }) { this.add({ kind: "baro", ...change }); }

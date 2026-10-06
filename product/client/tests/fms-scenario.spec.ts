@@ -170,12 +170,13 @@ test('a recording of keys, conditions and a screen check plays back and passes; 
   now += 1000
   recorder.checkLine(0, screenText(fms.screen())[0])
   const scenario = recorder.toScenario('Recorded')
-  // Keys pressed within a second are one step.
-  expect(scenario.steps.map(step => step.action.kind)).toEqual(['keys', 'condition', 'expectLine'])
-  expect(scenario.steps[0]).toEqual({ when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG', 'CHAR_1'] } })
+  // Each key keeps its own tick (#1505): 0.3 s after PROG is the next tick, not PROG's step.
+  expect(scenario.steps.map(step => step.action.kind)).toEqual(['keys', 'keys', 'condition', 'expectLine'])
+  expect(scenario.steps[0]).toEqual({ when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG'] } })
+  expect(scenario.steps[1]).toEqual({ when: { kind: 'time', seconds: 0.5 }, action: { kind: 'keys', keys: ['CHAR_1'] } })
   // Recorded times land on the tick grid, at the tick where playback will run them.
-  expect(scenario.steps[1].when).toEqual({ kind: 'time', seconds: 2.5 })
-  expect(scenario.steps[2].within).toBe(5)
+  expect(scenario.steps[2].when).toEqual({ kind: 'time', seconds: 2.5 })
+  expect(scenario.steps[3].within).toBe(5)
   expect(scenario.maxSeconds).toBe(60)
 
   // Played back on a fresh simulation, and through JSON as a saved scenario would be.
