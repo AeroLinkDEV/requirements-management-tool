@@ -311,12 +311,20 @@ export class FlightSimulator {
     this.goArounds = fms.goArounds;
     this.phase = fms.verticalPhase;
     this.last = this.guide();
+    fms.attachSettle(() => this.settleFailure());
+    this.settleFailure();
   }
 
-  get guidance() {
-    // Power/table failure is observable even while the plant is paused; reading outputs cannot retain stale LNAV.
+  /** The guidance as last computed. Reading it changes nothing (#1518): the failure watch below keeps it current. */
+  get guidance() { return this.last; }
+
+  /**
+   * A power or table failure (or the recovery) takes effect even while the plant is paused, so the outputs never
+   * retain stale LNAV: the reversion latches when the action that failed the FMS ends, at that instant's heading and
+   * altitude, as the bench has always shown it, whether or not anything reads the guidance before the next step.
+   */
+  private settleFailure() {
     if (this.fms.hasCondition("fmsFail") !== this.fmsFailed) { this.watchFailure(); this.last = this.guide(); }
-    return this.last;
   }
   get verticalMode() { return this.vertical; }
   get approachMode() { return this.approach; }
@@ -664,7 +672,8 @@ export class FlightSimulator {
   }
 
   /** An unselected computer computes its own route guidance against the common aircraft, without integrating physics. */
-  observe(dt: number, selected?: FlightSimulator) {
+  observe(dt: number, selected?: FlightSimulator) { this.fms.compute(() => this.observeStep(dt, selected)); }
+  private observeStep(dt: number, selected?: FlightSimulator) {
     const fms = this.fms;
     if (selected) this.adoptAfcsSelections(selected);
     fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
@@ -679,7 +688,8 @@ export class FlightSimulator {
   }
 
   /** Publish current adopted navigation while paused, without integrating or sequencing another aircraft. */
-  refreshGuidance(selected?: FlightSimulator) {
+  refreshGuidance(selected?: FlightSimulator) { this.fms.compute(() => this.refreshStep(selected)); }
+  private refreshStep(selected?: FlightSimulator) {
     if (selected) this.adoptAfcsSelections(selected);
     this.watchFailure(); this.last = this.guide();
     this.outputPort?.write({ at: this.fms.now.getTime(), sequence: ++this.outputSequence,
@@ -688,7 +698,8 @@ export class FlightSimulator {
   }
 
   /** Flies for dt seconds of simulated time, in steps of at most one second. */
-  step(dt: number) {
+  step(dt: number) { this.fms.compute(() => this.flyStep(dt)); }
+  private flyStep(dt: number) {
     let left = dt;
     while (left > 1e-6) {
       const h = Math.min(1, left);

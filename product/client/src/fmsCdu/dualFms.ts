@@ -205,7 +205,10 @@ export class DualFmsSystem {
     this.peer(side).refreshSensorInput(); this.reconcile();
   }
   /** Only the selected flight controller integrates physics. The other computes guidance/sequence against that aircraft. */
-  step(dt: number) {
+  step(dt: number) { this.compute(() => this.stepBoth(dt)); this.notify(); }
+  /** Both computers take part in one step or tick: each settles (#1518) only when the whole of it has ended. */
+  private compute(work: () => void) { this.computers[0].compute(() => this.computers[1].compute(work)); }
+  private stepBoth(dt: number) {
     let remaining = dt;
     while (remaining > 1e-6) {
       const h = Math.min(1, remaining), selected = this.unit(this.driver), other = this.peer(this.driver);
@@ -214,14 +217,14 @@ export class DualFmsSystem {
       other.observeAircraft(selected); this.flights[2 - this.driver].observe(h, this.simulator);
       this.reconcile(); this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator)); remaining -= h;
     }
-    this.notify();
   }
-  tick() {
+  tick() { this.compute(() => this.tickBoth()); this.notify(); }
+  private tickBoth() {
     const selected = this.unit(this.driver), other = this.peer(this.driver);
     if (this.driver === 2) this.unit(1).observeAircraft(selected);
     this.unit(1).refreshSensorInput(); this.unit(1).tick();
     this.unit(2).observeAircraft(selected); this.unit(2).refreshSensorInput(); this.unit(2).tick();
     other.observeAircraft(selected); this.settingsChanged(1); this.settingsChanged(2); this.reconcile();
-    this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator)); this.notify();
+    this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator));
   }
 }

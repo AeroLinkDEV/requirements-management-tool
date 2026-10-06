@@ -192,6 +192,15 @@ export type DeselectableInput = "TAS" | "HDG" | "DME" | "VOR/DME/TCN" | "DVS" | 
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
   private changes = 0;
+  /**
+   * Reading the FMS never changes it (#1518): the screen, the bus outputs, the guidance and any digest are observers.
+   * What a read used to latch is settled at a defined point instead: when a kernel computation (a key, a bench
+   * condition, a flight step or tick) ends, and at every change notification outside one. The bench renders after each
+   * of those, so the bench's timing is kept, and a headless run or a digest that never renders sees the same state.
+   */
+  private computing = 0;
+  private notifyPending = false;
+  private settlers: (() => void)[] = [];
   private page: PageId = "IDENT";
   private index = 0;
   private scratch = "";
@@ -792,19 +801,57 @@ export class ScriptedFms implements CduBackend {
   screen(): CduScreen {
     if (this.powerState === "TEST") return compose(Array.from({ length: 14 }, () => ({ left: { text: " ".repeat(24), color: "white" as const, inverse: true } })));
     if (this.hasCondition("fmsFail")) return compose([]);
-    const page = PAGES[this.page];
-    const count = Math.max(1, page.pages(this));
-    this.index = Math.min(this.index, count - 1);
-    const lines = page.render(this, this.index);
+    // The page shown: the index is settled (settleView) when an action ends, never by drawing the screen.
+    const lines = PAGES[this.page].render(this, Math.min(this.index, this.pageCount() - 1));
     lines[13] = this.scratchLine();
     return compose(lines);
   }
 
+  private pageCount() { return Math.max(1, PAGES[this.page].pages(this)); }
+
+  /** A route or page that shrank under the view leaves it on its last page, as the bench has always shown it. */
+  private settleView() {
+    if (!this.hasCondition("fmsFail")) this.index = Math.min(this.index, this.pageCount() - 1);
+  }
+
   press(fn: CduFunction, options: { held?: boolean } = {}) {
     if (this.hasCondition("fmsFail")) return;
-    this.handle(fn, options);
-    this.crossTalk?.settingsChanged();
-    this.emit();
+    this.compute(() => {
+      // A key acts on the page shown, even when nothing has drawn or settled the view since the route changed.
+      this.settleView();
+      this.handle(fn, options);
+      this.crossTalk?.settingsChanged();
+      this.emit();
+    });
+  }
+
+  /**
+   * One kernel computation: a key, a bench condition, or (from the flight and the dual system) a step or a tick. Its
+   * own reads are part of it; when the outermost one ends, what it changed is settled and its observers are notified.
+   */
+  compute<T>(work: () => T): T {
+    this.computing += 1;
+    try { return work(); } finally {
+      this.computing -= 1;
+      if (this.computing === 0) {
+        this.settle();
+        if (this.notifyPending) { this.notifyPending = false; for (const listener of this.listeners) listener(); }
+      }
+    }
+  }
+
+  /** Work that completes at the end of each kernel computation: the flight attaches its FMS-failure watch here. */
+  attachSettle(settle: () => void) { this.settlers.push(settle); }
+
+  private settling = false;
+  private settle() {
+    if (this.settling) return;
+    this.settling = true;
+    try {
+      this.settleView();
+      this.settleRendezvous();
+      for (const settle of this.settlers) settle();
+    } finally { this.settling = false; }
   }
 
   // ------------------------------------------------------------------ test bench
@@ -829,6 +876,10 @@ export class ScriptedFms implements CduBackend {
   }
 
   setCondition(id: ConditionId, on: boolean) {
+    this.compute(() => this.applyCondition(id, on));
+  }
+
+  private applyCondition(id: ConditionId, on: boolean) {
     if (on === this.hasCondition(id)) return;
     if (id === "independent" && this.crossTalk) { this.crossTalk.setIndependent(on); return; }
     switch (id) {
@@ -2458,7 +2509,12 @@ export class ScriptedFms implements CduBackend {
     return route === this.active ? (index === 0 ? 1 : 2) : first ? 4 : 3;
   }
 
-  /** The rendezvous with the moving waypoint at `index` of `route`, as last determined (determined now if it never was). */
+  /**
+   * The rendezvous with the moving waypoint at `index` of `route`, as last determined. One never determined yet is
+   * solved now: inside a kernel computation (a key, a step) that determines it, as its first use always has; an observer
+   * reading between computations gets the same answer without keeping it. Every computation ends by determining the
+   * rest (settleRendezvous), so a read between computations finds them determined.
+   */
   rendezvousFor(route: Route, index: number): MovingRendezvous | null {
     const leg = route.legs[index];
     if (leg?.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return null;
@@ -2466,8 +2522,20 @@ export class ScriptedFms implements CduBackend {
     const cached = this.rendezvousCache.get(key);
     if (cached && cached.condition === this.rendezvousCondition(route, index)) return cached;
     const solved = this.solveRendezvous(route, index, leg.ident);
-    this.rendezvousCache.set(key, solved);
+    if (this.computing > 0 || this.settling) this.rendezvousCache.set(key, solved);
     return solved;
+  }
+
+  /**
+   * M300 11-37: the rendezvous is determined when the action that put the moving waypoint in the route (or changed its
+   * condition) ends: an EXEC, an entry, a direct-to, a sequence. The 10-second schedule then runs from there
+   * (updateRendezvous). The bench used to do this by drawing the route after the action; now no draw is needed.
+   */
+  private settleRendezvous() {
+    for (const route of [this.active, this.modified]) {
+      if (!route) continue;
+      route.legs.forEach((_, index) => { this.rendezvousFor(route, index); });
+    }
   }
 
   /**
@@ -4210,6 +4278,9 @@ export class ScriptedFms implements CduBackend {
 
   private emit() {
     this.changes += 1;
+    // Inside a computation the observers wait for its end, so none of them ever sees, or reads into, a half-done step.
+    if (this.computing > 0) { this.notifyPending = true; return; }
+    this.settle();
     for (const listener of this.listeners) listener();
   }
 
