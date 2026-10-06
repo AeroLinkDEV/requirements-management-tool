@@ -57,6 +57,13 @@
     "descriptiveMeasures": ["heap"]
   },
   "pilot": { "headlessBlocks": 2, "browserRounds": 2 },
+  "baseline": {
+    "declared": "After both pilots and before any baseline run. The browser windows (60 s at 1x, 2400 s at 64x) and the 15 s warm-up are kept as declared before the pilot.",
+    "headlessBlocks": 10,
+    "headlessReason": "the pilot's half-widths (1.7 to 48 pp at 4 runs per arm) plan more than the cap for every cell, so N = 20 runs per arm (10 ABBA blocks), the cap",
+    "browserRounds": 10,
+    "browserReason": "the pilot plans the cap of 10 for seven of the eight cells (4 for view-off-svs-off at 64x); every round runs every cell, so 10 rounds"
+  },
   "caps": { "headlessRunsPerArmPerCell": 20, "browserRunsPerCell": 10, "hostHoursPerBaselineSet": 4 },
   "quietHost": {
     "sampleSeconds": 5,

@@ -38,8 +38,10 @@ test('the exact bootstrap of a three-run sample matches its hand enumeration', (
   expect(effect.halfWidthPp).toBeCloseTo(112.5, 9)
   // One arm alone: the 9 resamples of {1, 2, 4} have medians 1, 1.5, 1.5, 2, 2.5, 2.5, 3, 3, 4; 2.5% is rank 1 (1) and
   // 97.5% is rank 9 (4). Half-width (4 - 1) / 2 = 1.5, which is 75% of the median 2.
-  expect(medianLevel([1, 2, 4].map(value => ({ block: 0, value })), { iterations: 1000, seed: 1 }))
+  expect(medianLevel([1, 2, 4], { iterations: 1000, seed: 1 }))
     .toMatchObject({ exact: true, replicates: 9, estimate: 2, low: 1, high: 4, halfWidthPct: 75 })
+  // Two runs (one per browser round): 2^1 = 2 resamples, medians 10 and 30, around the median 20: half-width 50%.
+  expect(medianLevel([10, 30], { iterations: 1000, seed: 1 })).toMatchObject({ replicates: 2, estimate: 20, low: 10, high: 30, halfWidthPct: 50 })
 })
 
 test('two runs per arm per block are resampled one at a time, so their spread is not understated', () => {

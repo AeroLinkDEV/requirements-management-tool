@@ -269,6 +269,7 @@ function interactionDurations(result: Record<string, any>): [number, number] {
   return values.length ? [values[Math.floor((values.length - 1) / 2)], values[values.length - 1]] : [NaN, NaN]
 }
 
+const width = (level: { halfWidthPct: number | null }, digits: number) => level.halfWidthPct === null ? 'n/a' : `${level.halfWidthPct.toFixed(digits)}%`
 const pct = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%`
 const fixed = (value: number, digits = 3) => Number.isFinite(value) ? value.toFixed(digits) : 'n/a'
 
@@ -311,7 +312,7 @@ function report() {
     for (const row of aa) {
       const [workload, topology] = row.cell.split('|')
       const rows = head.filter(e => e.workload === workload && e.topology === topology)
-      const level = (arm: string) => medianLevel(rows.filter(e => e.arm === arm).map(e => ({ block: e.block, value: measures[row.measure](e.result!) })), stats).estimate
+      const level = (arm: string) => medianLevel(rows.filter(e => e.arm === arm).map(e => measures[row.measure](e.result!)), stats).estimate
       const i = family.indexOf(row)
       lines.push(`| ${workload} | ${topology} | ${row.measure} | ${rows.filter(e => e.arm === 'A').length}/${rows.filter(e => e.arm === 'B').length} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(row.effect.estimate)} | ${pct(row.effect.low)} to ${pct(row.effect.high)} | ${row.effect.halfWidthPp.toFixed(2)} | ${row.effect.p.toFixed(4)} | ${i >= 0 ? adjusted[i].toFixed(4) : 'descriptive'} |`)
     }
@@ -331,7 +332,7 @@ function report() {
       const runs: RunValue[] = mainRuns.filter(e => e.workload === workload).map(e => ({ block: e.block, arm: e.topology === 'single' ? 'A' : 'B', value: measures[measure](e.result!) }))
       if (!runs.some(r => r.arm === 'A') || !runs.some(r => r.arm === 'B')) continue
       const effect = relativeEffect(runs, stats)
-      const level = (arm: Arm) => medianLevel(runs.filter(r => r.arm === arm), stats).estimate
+      const level = (arm: Arm) => medianLevel(runs.filter(r => r.arm === arm).map(r => r.value), stats).estimate
       const over = measure === 'throughput' ? effect.estimate < -0.05 : effect.estimate > 0.05
       comparison.push({ workload, measure, single: level('A'), dual: level('B'), effect, over })
       lines.push(`| ${workload} | ${measure} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(effect.estimate)} | ${pct(effect.low)} to ${pct(effect.high)} | ${over ? '**yes**' : 'no'} |`)
@@ -346,8 +347,8 @@ function report() {
       const rows = mainRuns.filter(e => e.workload === workload && e.topology === topology)
       if (!rows.length) continue
       const show = (measure: string, scale = 1) => {
-        const level = medianLevel(rows.map(e => ({ block: e.block, value: measures[measure](e.result!) / scale })), stats)
-        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (±${level.halfWidthPct.toFixed(2)}%)`
+        const level = medianLevel(rows.map(e => measures[measure](e.result!) / scale), stats)
+        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (±${width(level, 2)})`
       }
       const sync = rows[0].result!.sync as { residency: number; firstDrop: { simSeconds: number; reason: string | null } | null } | null
       const drops = [...new Set(rows.map(e => JSON.stringify((e.result!.sync as typeof sync)?.firstDrop ?? null)))]
@@ -367,15 +368,15 @@ function report() {
       const [configuration, rate] = cell.split('|')
       const rows = web.filter(e => e.configuration === configuration && String(e.rate) === rate)
       const levels = Object.fromEntries(Object.entries(browserMeasures).map(([name, take]) => {
-        const values = rows.map(e => ({ block: e.block, value: take(e.result!) })).filter(v => Number.isFinite(v.value))
+        const values = rows.map(e => take(e.result!)).filter(value => Number.isFinite(value))
         return [name, values.length ? medianLevel(values, stats) : null]
       }))
       browserJson.push({ configuration, rate: Number(rate), runs: rows.length, levels })
       plannedBrowser[cell] = Math.max(...['callback p95', 'throughput'].map(name => levels[name]
-        ? plannedRuns({ halfWidthPp: levels[name]!.halfWidthPct, runsPerArm: rows.length }, targetHalfWidthPp, protocol.caps.browserRunsPerCell) : 0))
+        ? plannedRuns({ halfWidthPp: levels[name]!.halfWidthPct ?? 0, runsPerArm: rows.length }, targetHalfWidthPp, protocol.caps.browserRunsPerCell) : 0))
       lines.push(`| ${configuration} | ${rate}x | ${rows.length} | ${Object.keys(browserMeasures).map(name => {
         const level = levels[name]; const scale = name === 'heap' ? 2 ** 20 : 1
-        return level ? `${fixed(level.estimate / scale, 1)} [${fixed(level.low / scale, 1)}, ${fixed(level.high / scale, 1)}] (±${level.halfWidthPct.toFixed(1)}%)` : 'n/a'
+        return level ? `${fixed(level.estimate / scale, 1)} [${fixed(level.low / scale, 1)}, ${fixed(level.high / scale, 1)}] (±${width(level, 1)})` : 'n/a'
       }).join(' | ')} |`)
     }
     const sample = web[0].result as Record<string, any>

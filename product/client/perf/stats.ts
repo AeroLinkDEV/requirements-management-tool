@@ -135,15 +135,19 @@ export function relativeEffect(runs: readonly RunValue[], options: { iterations:
   }
 }
 
-export type Level = { estimate: number; low: number; high: number; halfWidthPct: number; replicates: number; exact: boolean; seed: number }
+export type Level = { estimate: number; low: number; high: number; halfWidthPct: number | null; replicates: number; exact: boolean; seed: number }
 
-/** One arm's median over runs, with a 95% interval bootstrapped within blocks; the half-width is a % of the median. */
-export function medianLevel(runs: readonly { block: number; value: number }[], options: { iterations: number; seed: number }): Level {
-  const list = groups(runs.map(run => ({ ...run, arm: 'A' as const })))
-  const estimate = median(runs.map(run => run.value))
+/**
+ * One arm's median over runs, with a 95% interval from resampling those runs as one group (n - 1 draws; see resample).
+ * An absolute level compares nothing, so there is no block effect to cancel; a browser round holds one run per cell,
+ * so blocking it would leave nothing to resample. The half-width is a % of the median (null when the median is 0).
+ */
+export function medianLevel(values: readonly number[], options: { iterations: number; seed: number }): Level {
+  const list = groups(values.map(value => ({ block: 0, arm: 'A' as const, value })))
+  const estimate = median(values)
   const { replicates, exact } = resample(list, picks => median(picks.flat()), options)
   const low = nearestRank(replicates, 2.5), high = nearestRank(replicates, 97.5)
-  return { estimate, low, high, halfWidthPct: ((high - low) / 2 / estimate) * 100, replicates: replicates.length, exact, seed: options.seed }
+  return { estimate, low, high, halfWidthPct: estimate ? ((high - low) / 2 / Math.abs(estimate)) * 100 : null, replicates: replicates.length, exact, seed: options.seed }
 }
 
 /** Holm's step-down adjustment of a family of p-values, returned in the input order. */
