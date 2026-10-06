@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([string]$PostgresBin, [int]$ExistingPostgresPort = 0)
+# DiagnosticsDirectory receives a copy of the owned logs when qualification fails. Under GitHub Actions its default
+# is the repository's TestResults directory, which the Domain job uploads on failure (the temp roots are never
+# uploaded); a local run defaults to a directory inside its own retained temp root.
+param([string]$PostgresBin, [int]$ExistingPostgresPort = 0, [string]$DiagnosticsDirectory)
 
 $ErrorActionPreference = 'Stop'
 if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
@@ -54,6 +57,121 @@ function Assert-OwnedQualificationPath([string]$Path, [string]$Parent) {
     if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Qualification path escaped its owned root: $resolved" }
     return $resolved
 }
+# #1498: a hosted run waited the whole readiness budget for the seed API and threw a message naming only a
+# stderr path on the runner's temp drive, which no job uploads, so the cause was lost. The wait now records
+# every attempt and puts the reason in the thrown message itself: whether the process exited (and its code),
+# what each readiness probe saw, the listener on the port, and the last lines of both logs. The budget and
+# the readiness condition are unchanged: an HTTP 200 from /health/ready, abandoned early only on exit.
+function Get-QualificationLogTail([string]$Path, [int]$Lines = 15) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '(no file)' }
+    $tail = @(Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Length -gt 400) { $_.Substring(0,400) + '...' } else { $_ } })
+    if ($tail.Count -eq 0) { return '(empty)' }
+    return ($tail -join [Environment]::NewLine)
+}
+function Wait-QualificationApiReady {
+    param([Parameter(Mandatory)][Diagnostics.Process]$Process, [Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][int]$Attempts,
+        [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$StdoutPath, [Parameter(Mandatory)][string]$StderrPath,
+        [Parameter(Mandatory)][string]$AttemptLogPath)
+    $url = "http://127.0.0.1:$Port/health/ready"
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $history = New-Object System.Collections.Generic.List[object]
+    for ($attempt=0;$attempt -lt $Attempts;$attempt++) {
+        if ($Process.HasExited) { break }
+        $startedMs = $clock.ElapsedMilliseconds
+        try {
+            $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
+            $outcome = "HTTP $([int]$response.StatusCode)"
+            if ($response.StatusCode -eq 200) { return [pscustomobject]@{ Attempts=$attempt+1; ElapsedMs=$clock.ElapsedMilliseconds } }
+        } catch {
+            $failure = $_.Exception
+            if ($failure -is [Net.WebException] -and $failure.Response) { $outcome = "HTTP $([int]$failure.Response.StatusCode)" }
+            elseif ($failure -is [Net.WebException]) { $outcome = "$($failure.Status): $($failure.Message)" }
+            else { $outcome = "$($failure.GetType().Name): $($failure.Message)" }
+        }
+        # Under Windows PowerShell a refused loopback connect surfaces as a 2-second timeout, so a port with no
+        # listener and a listener that never answers look alike here; the listener check below tells them apart.
+        # The startup seeders run before app.Run() and do not log, so the API's CPU time is what separates a slow
+        # seeder (CPU keeps rising) from a stuck one (CPU flat) while nothing listens yet.
+        $cpuMs = try { [long]$Process.TotalProcessorTime.TotalMilliseconds } catch { $null }
+        $history.Add([pscustomobject]@{ attempt=$attempt+1; startedMs=$startedMs; durationMs=$clock.ElapsedMilliseconds-$startedMs; cpuMs=$cpuMs; outcome=$outcome.TrimEnd('.') })
+        Start-Sleep -Milliseconds 500
+    }
+    $elapsed = [Math]::Round($clock.Elapsed.TotalSeconds,1)
+    if ($Process.HasExited) {
+        $Process.WaitForExit()
+        $state = "process $($Process.Id) exited with code $($Process.ExitCode)"
+        try { $state += " at $($Process.ExitTime.ToUniversalTime().ToString('HH:mm:ss.fff'))Z" } catch { }
+    } else {
+        $state = "process $($Process.Id) is still running"
+        try {
+            $wall = [Math]::Round(([DateTime]::Now - $Process.StartTime).TotalSeconds,1)
+            $cpu = [Math]::Round($Process.TotalProcessorTime.TotalSeconds,1)
+            $state += " with ${cpu}s CPU time in ${wall}s wall time since start"
+            $recent = @($history | Select-Object -Last 10 | Where-Object { $null -ne $_.cpuMs })
+            if ($recent.Count -ge 2) {
+                $cpuDelta = [Math]::Round(($recent[-1].cpuMs - $recent[0].cpuMs) / 1000.0,1)
+                $wallDelta = [Math]::Round(($recent[-1].startedMs - $recent[0].startedMs) / 1000.0,1)
+                $state += " (+${cpuDelta}s CPU over the last ${wallDelta}s of probes)"
+            }
+        } catch { $state += " (CPU time unavailable: $($_.Exception.Message))" }
+    }
+    $processStartUtc = try { $Process.StartTime.ToUniversalTime().ToString('o') } catch { 'unknown' }
+    try {
+        $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique)
+        $listener = "pid $($owners -join ',') (API pid $($Process.Id))"
+    } catch {
+        # Only "no matching connection" means nothing listens; any other failure is reported, not read as none.
+        if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') { $listener = 'none' }
+        else { $listener = "unknown (Get-NetTCPConnection failed: $($_.Exception.Message))" }
+    }
+    $outcomes = @($history | Group-Object outcome | Sort-Object Count -Descending | ForEach-Object { "$($_.Count)x $($_.Name)" }) -join '; '
+    $listening = @(Select-String -LiteralPath $StdoutPath -Pattern 'Now listening on:.*' -ErrorAction SilentlyContinue | ForEach-Object { $_.Matches[0].Value })
+    $summary = [ordered]@{ name=$Name; url=$url; attempts=$history.Count; attemptBudget=$Attempts; elapsedSeconds=$elapsed; state=$state; listener=$listener
+        listening=($listening -join ' | '); processStartUtc=$processStartUtc; history=$history.ToArray() }
+    try { $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $AttemptLogPath -Encoding UTF8 } catch { }
+    $nl = [Environment]::NewLine
+    throw ("$Name did not become ready after $($history.Count) of $Attempts attempts in ${elapsed}s; $state. " +
+        "Listener on port ${Port}: $listener. Kestrel reported: $(if ($listening) { $listening -join ' | ' } else { 'no listening address' }). " +
+        "Probe outcomes: $(if ($outcomes) { $outcomes } else { 'none' }).$nl" +
+        "--- last stderr ($StderrPath) ---$nl$(Get-QualificationLogTail $StderrPath)$nl" +
+        "--- last stdout ($StdoutPath) ---$nl$(Get-QualificationLogTail $StdoutPath)")
+}
+# Copies the run's owned logs and summaries, never key material or database files, to a directory the CI job
+# uploads. The Domain job uploads TestResults/ on failure, which is where the caller points this under GitHub Actions.
+function Save-QualificationDiagnostics {
+    param([Parameter(Mandatory)][string[]]$Sources, [Parameter(Mandatory)][string]$Destination)
+    $copied = 0
+    foreach ($source in $Sources) {
+        if (-not (Test-Path -LiteralPath $source -PathType Container)) { continue }
+        $sourceFull = [IO.Path]::GetFullPath($source).TrimEnd('\')
+        $target = Join-Path $Destination (Split-Path $sourceFull -Leaf)
+        # Logs from any depth (PostgreSQL, the APIs, the relay); summaries only from the top level, so seeded
+        # evidence files and archive contents are never mistaken for diagnostics. Restore validation's own logs
+        # are not among them: Restore-AeroLink.ps1 deletes its temporary validation-logs directory in its own
+        # finally, before this copy runs.
+        foreach ($file in @(Get-ChildItem -LiteralPath $sourceFull -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -le 20MB })) {
+            $relative = $file.FullName.Substring($sourceFull.Length).TrimStart('\')
+            $topLevel = $relative.IndexOf('\') -lt 0
+            if (-not ($file.Extension -in '.log','.jsonl' -or ($topLevel -and $file.Extension -in '.json','.txt'))) { continue }
+            $copy = Join-Path $target $relative
+            New-Item -ItemType Directory -Path (Split-Path $copy -Parent) -Force | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination $copy -Force
+            $copied++
+        }
+    }
+    return $copied
+}
+# At the moment of failure, before the APIs are stopped, records what every PostgreSQL session of the disposable
+# instance is doing, so a seed API that is waiting on the database is told apart from one the database waits on.
+# Called only for the instance this run started; it never throws, so it cannot replace the failure.
+function Save-QualificationDatabaseActivity([string]$Path) {
+    try {
+        $activity = Invoke-QualificationSql 'postgres' ("SELECT coalesce(json_agg(a ORDER BY a.pid), '[]'::json) FROM (SELECT now() AS sampled_at, pid, datname, " +
+            "application_name, backend_type, state, wait_event_type, wait_event, xact_start, query_start, state_change, left(query, 300) AS query " +
+            "FROM pg_stat_activity WHERE pid <> pg_backend_pid()) a;")
+        Set-Content -LiteralPath $Path -Value $activity -Encoding UTF8
+    } catch { Write-Warning "PostgreSQL activity at failure could not be recorded: $($_.Exception.Message)" }
+}
 function Start-NotificationQualificationApi([string]$Database, [string]$Evidence, [string]$Name) {
     $port = Get-FreePort
     $values = [ordered]@{
@@ -64,6 +182,7 @@ function Start-NotificationQualificationApi([string]$Database, [string]$Evidence
         'Instance__InstanceId'=$instanceId; 'Instance__Label'='Disposable notification restore qualification'
         'DataProtection__KeyRingPath'=$keyRing; 'Notifications__DispatchIntervalSeconds'='1'
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command'='Warning'
+        'Logging__Console__TimestampFormat'='HH:mm:ss.fff '; 'Logging__Console__UseUtcTimestamp'='true'
     }
     $snapshot = Get-AeroLinkProcessEnvironmentSnapshot -Name @($values.Keys)
     try {
@@ -71,14 +190,11 @@ function Start-NotificationQualificationApi([string]$Database, [string]$Evidence
         $process = Start-Process -FilePath $apiExecutable -WorkingDirectory (Split-Path $apiExecutable -Parent) `
             -RedirectStandardOutput (Join-Path $root "$Name.stdout.log") -RedirectStandardError (Join-Path $root "$Name.stderr.log") -WindowStyle Hidden -PassThru
     } finally { Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $snapshot }
+    # Retain the handle at once so Windows PowerShell can still report the exit code of a quick exit.
+    [void]$process.Handle
     try {
-        $ready = $false
-        for ($attempt=0;$attempt -lt 120;$attempt++) {
-            if ($process.HasExited) { break }
-            try { if ((Invoke-WebRequest "http://127.0.0.1:$port/health/ready" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $ready=$true;break } } catch { }
-            Start-Sleep -Milliseconds 500
-        }
-        if (-not $ready) { throw "Notification dispatcher API did not become ready. See $root/$Name.stderr.log" }
+        [void](Wait-QualificationApiReady -Process $process -Port $port -Attempts 120 -Name "Notification dispatcher API ($Name)" `
+            -StdoutPath (Join-Path $root "$Name.stdout.log") -StderrPath (Join-Path $root "$Name.stderr.log") -AttemptLogPath (Join-Path $root "$Name.readiness.json"))
         return [pscustomobject]@{ Process=$process; BaseUrl="http://127.0.0.1:$port" }
     } catch { if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit(10000)|Out-Null }; throw }
 }
@@ -216,14 +332,20 @@ try {
         'Database__Provider'='PostgreSql'; 'Instance__InstanceId'=$instanceId; 'Instance__Label'='Disposable notification restore qualification'
         'DataProtection__KeyRingPath'=$keyRing; 'Notifications__DispatchIntervalSeconds'='3600'
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command'='Warning'
+        # UTC timestamps on every API log line, so a slow startup shows when migrations ended and the first logged
+        # line after them. The startup seeders do not log and run before app.Run(), so the timestamps bound the
+        # seeding phase but cannot name a seeder; the readiness wait's CPU time says whether it was busy or stuck.
+        # The default console logger honours these Console-level keys; the FormatterOptions section did not apply.
+        'Logging__Console__TimestampFormat'='HH:mm:ss.fff '; 'Logging__Console__UseUtcTimestamp'='true'
     }
     $previous = Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)
     foreach ($item in $settings.GetEnumerator()) { [Environment]::SetEnvironmentVariable($item.Key,$item.Value,'Process') }
     $api = Start-Process -FilePath $apiExecutable -WorkingDirectory (Split-Path $apiExecutable -Parent) `
         -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr -WindowStyle Hidden -PassThru
-    $ready = $false
-    for ($attempt=0;$attempt -lt 180;$attempt++) { if($api.HasExited){break};try{$response=Invoke-WebRequest -Uri "http://127.0.0.1:$seedApiPort/health/ready" -UseBasicParsing -TimeoutSec 2;if($response.StatusCode -eq 200){$ready=$true;break}}catch{};Start-Sleep -Milliseconds 500 }
-    if(-not $ready){throw "Disposable seed API did not become ready. See $apiErr"}
+    [void]$api.Handle
+    $seedReady = Wait-QualificationApiReady -Process $api -Port $seedApiPort -Attempts 180 -Name 'Disposable seed API' `
+        -StdoutPath $apiOut -StderrPath $apiErr -AttemptLogPath (Join-Path $root 'seed-api.readiness.json')
+    Write-Host "Disposable seed API ready after $($seedReady.Attempts) readiness attempts in $([Math]::Round($seedReady.ElapsedMs/1000,1))s."
     # Primary executable owner: ordinary settings save and explicit G1 activation produce a real bound
     # Pending generation before backup. A future due time permits a restart control without TCP transport.
     # A shared actual STARTTLS relay below proves post-backup DATA acceptance and the durable receipt.
@@ -419,6 +541,12 @@ try {
     $qualificationPassed = $true
     $global:LASTEXITCODE=0
 }
+catch {
+    $qualificationFailure = $_
+    if ($postgresStarted) { Save-QualificationDatabaseActivity (Join-Path $root 'pg-stat-activity-at-failure.json') }
+    # The rethrow is what fails the run: after the finally's pg_ctl stop, $LASTEXITCODE is 0 again.
+    throw
+}
 finally {
     Stop-NotificationQualificationApi $dispatcherHost
     if ($tlsRelay -and -not $tlsRelay.HasExited) { Stop-Process -Id $tlsRelay.Id -Force; $tlsRelay.WaitForExit(10000)|Out-Null }
@@ -445,5 +573,26 @@ finally {
     if ($qualificationPassed) {
         if(Test-Path -LiteralPath $root){$ownedRoot=Assert-OwnedQualificationPath $root ([IO.Path]::GetTempPath());Remove-Item -LiteralPath $ownedRoot -Recurse -Force}
         if(Test-Path -LiteralPath $backupRoot){$ownedBackupRoot=Assert-OwnedQualificationPath $backupRoot ([IO.Path]::GetTempPath());Remove-Item -LiteralPath $ownedBackupRoot -Recurse -Force}
-    } else { Write-Warning "Restore qualification failed; owned diagnostics retained at $root and $backupRoot." }
+    } else {
+        Write-Warning "Restore qualification failed; owned diagnostics retained at $root and $backupRoot."
+        # Best effort: a failure to copy diagnostics must never replace the qualification failure being reported.
+        try {
+            $apiFile = Get-Item -LiteralPath $apiExecutable -ErrorAction SilentlyContinue
+            [ordered]@{ failedAtUtc=[DateTime]::UtcNow.ToString('o'); message="$qualificationFailure"
+                position=$(if ($qualificationFailure) { $qualificationFailure.InvocationInfo.PositionMessage } else { $null })
+                scriptStackTrace=$(if ($qualificationFailure) { $qualificationFailure.ScriptStackTrace } else { $null })
+                postgresPort=$pgPort; seedApiPort=$seedApiPort; smtpPort=$smtpPort; postgresBin=$PostgresBin
+                dynamicPortRange=(@(netsh int ipv4 show dynamicport tcp 2>$null) -join ' ').Trim()
+                apiExecutable=$apiExecutable; apiExecutableWrittenUtc=$(if ($apiFile) { $apiFile.LastWriteTimeUtc.ToString('o') } else { $null })
+                seedApiSettings=$settings } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $root 'qualification-failure.json') -Encoding UTF8
+            # Only a GitHub Actions run defaults to TestResults, which the Domain job uploads; a local run keeps the
+            # copy inside its own retained root rather than writing machine paths into the checkout.
+            $diagnosticsTarget = if ($DiagnosticsDirectory) { $DiagnosticsDirectory }
+                elseif ($env:GITHUB_ACTIONS -eq 'true') { Join-Path $repositoryRoot 'TestResults' }
+                else { Join-Path $root 'collected-diagnostics' }
+            $diagnosticsTarget = Join-Path $diagnosticsTarget "restore-qualification-$shortToken"
+            $copiedCount = Save-QualificationDiagnostics -Sources @($root,$backupRoot) -Destination $diagnosticsTarget
+            Write-Warning "Copied $copiedCount restore qualification diagnostic files to $diagnosticsTarget."
+        } catch { Write-Warning "Restore qualification diagnostics could not be copied: $($_.Exception.Message)" }
+    }
 }
