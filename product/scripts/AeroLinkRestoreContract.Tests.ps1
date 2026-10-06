@@ -102,4 +102,88 @@ finally {
     Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $callerBefore
     Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $emptyProbeBefore
 }
+
+# #1498: a hosted run's seed API never became ready, and the only clue was a stderr path on runner temp, which no
+# job uploads. These drive the qualification's real readiness wait and diagnostics copy (extracted from the
+# script by its AST, not restated) against a stand-in process, so they run without PostgreSQL or a Release build.
+$qualificationPath = Join-Path $PSScriptRoot 'AeroLinkRestoreQualification.Tests.ps1'
+$qualificationSource = Get-Content -LiteralPath $qualificationPath -Raw
+$qualificationTokens = $null; $qualificationErrors = $null
+$qualificationAst = [Management.Automation.Language.Parser]::ParseFile($qualificationPath, [ref]$qualificationTokens, [ref]$qualificationErrors)
+foreach ($functionName in 'Get-QualificationLogTail','Wait-QualificationApiReady','Save-QualificationDiagnostics') {
+    $definition = $qualificationAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+    if (-not $definition) { throw "Restore qualification no longer defines $functionName." }
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+# The readiness budget and the uploaded location are part of the contract, not incidental text.
+if (-not $qualificationSource.Contains("Wait-QualificationApiReady -Process `$api -Port `$seedApiPort -Attempts 180 -Name 'Disposable seed API'")) { throw 'The seed API readiness wait no longer uses the qualification wait with its unchanged 180-attempt budget.' }
+if (-not $qualificationSource.Contains("Join-Path `$repositoryRoot 'TestResults'") -or -not $qualificationSource.Contains('Save-QualificationDiagnostics -Sources @($root,$backupRoot)')) { throw 'A failed restore qualification no longer copies its owned diagnostics into TestResults.' }
+$workflow = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\.github\workflows\ci.yml') -Raw
+$domainStart = $workflow.IndexOf("`n  backend-core-domain:")
+$domainEnd = $workflow.IndexOf("`n  backend-core-infrastructure:", $domainStart + 1)
+if ($domainStart -lt 0 -or $domainEnd -lt 0) { throw 'The Domain job that runs restore qualification can no longer be identified in ci.yml.' }
+$domainJob = $workflow.Substring($domainStart, $domainEnd - $domainStart)
+if (-not $domainJob.Contains('AeroLinkRestoreQualification.Tests.ps1') -or $domainJob -notmatch 'name: domain-test-diagnostics-[^\r\n]*\r?\n\s+path: \$\{\{ github\.workspace \}\}/TestResults/') {
+    throw 'The Domain job that runs restore qualification no longer uploads TestResults/, so the copied diagnostics would be lost again.'
+}
+
+$readinessFixture = Join-Path ([IO.Path]::GetTempPath()) ('arq-contract-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+$ownedRun = Join-Path $readinessFixture 'arq-run'
+New-Item -ItemType Directory -Path $ownedRun | Out-Null
+try {
+    $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $probe.Start(); $closedPort = $probe.LocalEndpoint.Port; $probe.Stop()
+    $engine = (Get-Command powershell.exe -ErrorAction Stop).Source
+    $stdout = Join-Path $ownedRun 'seed-api.stdout.log'; $stderr = Join-Path $ownedRun 'seed-api.stderr.log'
+    # An API that dies during startup: the message must carry its exit code and stderr, not just a path.
+    $exiting = Start-Process -FilePath $engine -ArgumentList @('-NoProfile','-Command','[Console]::Out.WriteLine(''applying migrations''); [Console]::Error.WriteLine(''Unhandled exception. Failed to bind to address 1498''); exit 7') `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+    [void]$exiting.Handle
+    $message = $null
+    try { Wait-QualificationApiReady -Process $exiting -Port $closedPort -Attempts 180 -Name 'Disposable seed API' -StdoutPath $stdout -StderrPath $stderr -AttemptLogPath (Join-Path $ownedRun 'seed-api.readiness.json') | Out-Null }
+    catch { $message = $_.Exception.Message }
+    if (-not $message) { throw 'A seed API that exited during startup was reported ready.' }
+    foreach ($expected in 'Disposable seed API did not become ready','exited with code 7','Failed to bind to address 1498','applying migrations') {
+        if (-not $message.Contains($expected)) { throw "The seed API failure message does not carry '$expected': $message" }
+    }
+    $attemptLog = Get-Content -LiteralPath (Join-Path $ownedRun 'seed-api.readiness.json') -Raw | ConvertFrom-Json
+    if ($attemptLog.state -notlike '*exited with code 7*' -or $attemptLog.attemptBudget -ne 180) { throw 'The seed API readiness record does not name the exit or the budget.' }
+
+    # An API that stays alive but never answers, the hosted failure's shape: the budget is spent, the process is
+    # named as still running, and each probe outcome is counted. Two attempts keep this fast.
+    $hungOut = Join-Path $ownedRun 'hung.stdout.log'; $hungErr = Join-Path $ownedRun 'hung.stderr.log'
+    $hung = Start-Process -FilePath $engine -ArgumentList @('-NoProfile','-Command','[Console]::Out.WriteLine(''still seeding''); Start-Sleep -Seconds 60') `
+        -RedirectStandardOutput $hungOut -RedirectStandardError $hungErr -WindowStyle Hidden -PassThru
+    [void]$hung.Handle
+    try {
+        $message = $null
+        try { Wait-QualificationApiReady -Process $hung -Port $closedPort -Attempts 2 -Name 'Disposable seed API' -StdoutPath $hungOut -StderrPath $hungErr -AttemptLogPath (Join-Path $ownedRun 'hung.readiness.json') | Out-Null }
+        catch { $message = $_.Exception.Message }
+        if (-not $message) { throw 'A seed API that never answered was reported ready.' }
+        foreach ($expected in 'after 2 of 2 attempts','is still running','Probe outcomes: 2x','no listening address','still seeding') {
+            if (-not $message.Contains($expected)) { throw "The hung seed API failure message does not carry '$expected': $message" }
+        }
+    } finally { if (-not $hung.HasExited) { Stop-Process -Id $hung.Id -Force; $hung.WaitForExit(10000) | Out-Null } }
+
+    # Retention: logs at any depth and top-level summaries reach the uploaded directory; key material and
+    # evidence do not.
+    New-Item -ItemType Directory -Path (Join-Path $ownedRun 'owned-starttls'),(Join-Path $ownedRun 'source evidence') | Out-Null
+    Set-Content -LiteralPath (Join-Path $ownedRun 'postgres.log') -Value 'database system is ready'
+    Set-Content -LiteralPath (Join-Path $ownedRun 'owned-starttls\relay.stderr.log') -Value 'relay'
+    Set-Content -LiteralPath (Join-Path $ownedRun 'owned-starttls\key.pem') -Value 'PRIVATE KEY'
+    Set-Content -LiteralPath (Join-Path $ownedRun 'source evidence\attachment.txt') -Value 'controlled evidence'
+    $uploaded = Join-Path $readinessFixture 'TestResults\restore-qualification-contract'
+    $copied = Save-QualificationDiagnostics -Sources @($ownedRun, (Join-Path $readinessFixture 'absent-backup-root')) -Destination $uploaded
+    $leaf = Join-Path $uploaded 'arq-run'
+    foreach ($kept in 'seed-api.stderr.log','seed-api.stdout.log','seed-api.readiness.json','postgres.log','owned-starttls\relay.stderr.log') {
+        if (-not (Test-Path -LiteralPath (Join-Path $leaf $kept) -PathType Leaf)) { throw "Failed restore qualification diagnostics did not retain $kept in the uploaded directory." }
+    }
+    if ((Get-Content -LiteralPath (Join-Path $leaf 'seed-api.stderr.log') -Raw) -notlike '*Failed to bind to address 1498*') { throw 'The retained seed API stderr is not the original log.' }
+    foreach ($excluded in 'owned-starttls\key.pem','source evidence\attachment.txt') {
+        if (Test-Path -LiteralPath (Join-Path $leaf $excluded)) { throw "Failed restore qualification diagnostics copied $excluded, which is not a diagnostic." }
+    }
+    if ($copied -lt 5) { throw "Failed restore qualification diagnostics reported $copied copied files." }
+}
+finally {
+    Remove-Item -LiteralPath $readinessFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
 $global:LASTEXITCODE=0

@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param([string]$PostgresBin, [int]$ExistingPostgresPort = 0)
+# DiagnosticsDirectory receives a copy of the owned logs when qualification fails. Its default is the repository's
+# TestResults directory because that is what the Domain job uploads on failure; the temp roots are never uploaded.
+param([string]$PostgresBin, [int]$ExistingPostgresPort = 0, [string]$DiagnosticsDirectory)
 
 $ErrorActionPreference = 'Stop'
 if (-not (Get-Module -Name AeroLinkProcessEnvironment)) {
@@ -54,6 +56,89 @@ function Assert-OwnedQualificationPath([string]$Path, [string]$Parent) {
     if (-not $resolved.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Qualification path escaped its owned root: $resolved" }
     return $resolved
 }
+# #1498: a hosted run waited the whole readiness budget for the seed API and threw a message naming only a
+# stderr path on the runner's temp drive, which no job uploads, so the cause was lost. The wait now records
+# every attempt and puts the reason in the thrown message itself: whether the process exited (and its code),
+# what each readiness probe saw, the listener on the port, and the last lines of both logs. The budget and
+# the readiness condition are unchanged: an HTTP 200 from /health/ready, abandoned early only on exit.
+function Get-QualificationLogTail([string]$Path, [int]$Lines = 15) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '(no file)' }
+    $tail = @(Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Length -gt 400) { $_.Substring(0,400) + '...' } else { $_ } })
+    if ($tail.Count -eq 0) { return '(empty)' }
+    return ($tail -join [Environment]::NewLine)
+}
+function Wait-QualificationApiReady {
+    param([Parameter(Mandatory)][Diagnostics.Process]$Process, [Parameter(Mandatory)][int]$Port, [Parameter(Mandatory)][int]$Attempts,
+        [Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$StdoutPath, [Parameter(Mandatory)][string]$StderrPath,
+        [Parameter(Mandatory)][string]$AttemptLogPath)
+    $url = "http://127.0.0.1:$Port/health/ready"
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $history = New-Object System.Collections.Generic.List[object]
+    for ($attempt=0;$attempt -lt $Attempts;$attempt++) {
+        if ($Process.HasExited) { break }
+        $startedMs = $clock.ElapsedMilliseconds
+        try {
+            $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
+            $outcome = "HTTP $([int]$response.StatusCode)"
+            if ($response.StatusCode -eq 200) { return [pscustomobject]@{ Attempts=$attempt+1; ElapsedMs=$clock.ElapsedMilliseconds } }
+        } catch {
+            $failure = $_.Exception
+            if ($failure -is [Net.WebException] -and $failure.Response) { $outcome = "HTTP $([int]$failure.Response.StatusCode)" }
+            elseif ($failure -is [Net.WebException]) { $outcome = "$($failure.Status): $($failure.Message)" }
+            else { $outcome = "$($failure.GetType().Name): $($failure.Message)" }
+        }
+        # Under Windows PowerShell a refused loopback connect surfaces as a 2-second timeout, so a port with no
+        # listener and a listener that never answers look alike here; the listener check below tells them apart.
+        $history.Add([pscustomobject]@{ attempt=$attempt+1; startedMs=$startedMs; durationMs=$clock.ElapsedMilliseconds-$startedMs; outcome=$outcome.TrimEnd('.') })
+        Start-Sleep -Milliseconds 500
+    }
+    $elapsed = [Math]::Round($clock.Elapsed.TotalSeconds,1)
+    if ($Process.HasExited) {
+        $Process.WaitForExit()
+        $state = "process $($Process.Id) exited with code $($Process.ExitCode)"
+        try { $state += " at $($Process.ExitTime.ToUniversalTime().ToString('HH:mm:ss.fff'))Z" } catch { }
+    } else { $state = "process $($Process.Id) is still running" }
+    $processStartUtc = try { $Process.StartTime.ToUniversalTime().ToString('o') } catch { 'unknown' }
+    $listener = 'unknown'
+    try {
+        $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess -Unique)
+        $listener = "pid $($owners -join ',') (API pid $($Process.Id))"
+    } catch { $listener = 'none' }
+    $outcomes = @($history | Group-Object outcome | Sort-Object Count -Descending | ForEach-Object { "$($_.Count)x $($_.Name)" }) -join '; '
+    $listening = @(Select-String -LiteralPath $StdoutPath -Pattern 'Now listening on:.*' -ErrorAction SilentlyContinue | ForEach-Object { $_.Matches[0].Value })
+    $summary = [ordered]@{ name=$Name; url=$url; attempts=$history.Count; attemptBudget=$Attempts; elapsedSeconds=$elapsed; state=$state; listener=$listener
+        listening=($listening -join ' | '); processStartUtc=$processStartUtc; history=$history.ToArray() }
+    try { $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $AttemptLogPath -Encoding UTF8 } catch { }
+    $nl = [Environment]::NewLine
+    throw ("$Name did not become ready after $($history.Count) of $Attempts attempts in ${elapsed}s; $state. " +
+        "Listener on port ${Port}: $listener. Kestrel reported: $(if ($listening) { $listening -join ' | ' } else { 'no listening address' }). " +
+        "Probe outcomes: $(if ($outcomes) { $outcomes } else { 'none' }).$nl" +
+        "--- last stderr ($StderrPath) ---$nl$(Get-QualificationLogTail $StderrPath)$nl" +
+        "--- last stdout ($StdoutPath) ---$nl$(Get-QualificationLogTail $StdoutPath)")
+}
+# Copies the run's owned logs and summaries, never key material or database files, to a directory the CI job
+# uploads. The Domain job uploads TestResults/ on failure, which is where the caller points this by default.
+function Save-QualificationDiagnostics {
+    param([Parameter(Mandatory)][string[]]$Sources, [Parameter(Mandatory)][string]$Destination)
+    $copied = 0
+    foreach ($source in $Sources) {
+        if (-not (Test-Path -LiteralPath $source -PathType Container)) { continue }
+        $sourceFull = [IO.Path]::GetFullPath($source).TrimEnd('\')
+        $target = Join-Path $Destination (Split-Path $sourceFull -Leaf)
+        # Logs from any depth (PostgreSQL, the APIs, the relay, restore validation); summaries only from the top
+        # level, so seeded evidence files and archive contents are never mistaken for diagnostics.
+        foreach ($file in @(Get-ChildItem -LiteralPath $sourceFull -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -le 20MB })) {
+            $relative = $file.FullName.Substring($sourceFull.Length).TrimStart('\')
+            $topLevel = $relative.IndexOf('\') -lt 0
+            if (-not ($file.Extension -in '.log','.jsonl' -or ($topLevel -and $file.Extension -in '.json','.txt'))) { continue }
+            $copy = Join-Path $target $relative
+            New-Item -ItemType Directory -Path (Split-Path $copy -Parent) -Force | Out-Null
+            Copy-Item -LiteralPath $file.FullName -Destination $copy -Force
+            $copied++
+        }
+    }
+    return $copied
+}
 function Start-NotificationQualificationApi([string]$Database, [string]$Evidence, [string]$Name) {
     $port = Get-FreePort
     $values = [ordered]@{
@@ -64,6 +149,7 @@ function Start-NotificationQualificationApi([string]$Database, [string]$Evidence
         'Instance__InstanceId'=$instanceId; 'Instance__Label'='Disposable notification restore qualification'
         'DataProtection__KeyRingPath'=$keyRing; 'Notifications__DispatchIntervalSeconds'='1'
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command'='Warning'
+        'Logging__Console__TimestampFormat'='HH:mm:ss.fff '; 'Logging__Console__UseUtcTimestamp'='true'
     }
     $snapshot = Get-AeroLinkProcessEnvironmentSnapshot -Name @($values.Keys)
     try {
@@ -71,14 +157,11 @@ function Start-NotificationQualificationApi([string]$Database, [string]$Evidence
         $process = Start-Process -FilePath $apiExecutable -WorkingDirectory (Split-Path $apiExecutable -Parent) `
             -RedirectStandardOutput (Join-Path $root "$Name.stdout.log") -RedirectStandardError (Join-Path $root "$Name.stderr.log") -WindowStyle Hidden -PassThru
     } finally { Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $snapshot }
+    # Retain the handle at once so Windows PowerShell can still report the exit code of a quick exit.
+    [void]$process.Handle
     try {
-        $ready = $false
-        for ($attempt=0;$attempt -lt 120;$attempt++) {
-            if ($process.HasExited) { break }
-            try { if ((Invoke-WebRequest "http://127.0.0.1:$port/health/ready" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $ready=$true;break } } catch { }
-            Start-Sleep -Milliseconds 500
-        }
-        if (-not $ready) { throw "Notification dispatcher API did not become ready. See $root/$Name.stderr.log" }
+        [void](Wait-QualificationApiReady -Process $process -Port $port -Attempts 120 -Name "Notification dispatcher API ($Name)" `
+            -StdoutPath (Join-Path $root "$Name.stdout.log") -StderrPath (Join-Path $root "$Name.stderr.log") -AttemptLogPath (Join-Path $root "$Name.readiness.json"))
         return [pscustomobject]@{ Process=$process; BaseUrl="http://127.0.0.1:$port" }
     } catch { if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit(10000)|Out-Null }; throw }
 }
@@ -216,14 +299,18 @@ try {
         'Database__Provider'='PostgreSql'; 'Instance__InstanceId'=$instanceId; 'Instance__Label'='Disposable notification restore qualification'
         'DataProtection__KeyRingPath'=$keyRing; 'Notifications__DispatchIntervalSeconds'='3600'
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command'='Warning'
+        # UTC timestamps on every API log line, so a slow startup shows which migration or seeder took the time.
+        # The default console logger honours these Console-level keys; the FormatterOptions section did not apply.
+        'Logging__Console__TimestampFormat'='HH:mm:ss.fff '; 'Logging__Console__UseUtcTimestamp'='true'
     }
-    $previous = Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)
+    $previous =Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)
     foreach ($item in $settings.GetEnumerator()) { [Environment]::SetEnvironmentVariable($item.Key,$item.Value,'Process') }
     $api = Start-Process -FilePath $apiExecutable -WorkingDirectory (Split-Path $apiExecutable -Parent) `
         -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr -WindowStyle Hidden -PassThru
-    $ready = $false
-    for ($attempt=0;$attempt -lt 180;$attempt++) { if($api.HasExited){break};try{$response=Invoke-WebRequest -Uri "http://127.0.0.1:$seedApiPort/health/ready" -UseBasicParsing -TimeoutSec 2;if($response.StatusCode -eq 200){$ready=$true;break}}catch{};Start-Sleep -Milliseconds 500 }
-    if(-not $ready){throw "Disposable seed API did not become ready. See $apiErr"}
+    [void]$api.Handle
+    $seedReady = Wait-QualificationApiReady -Process $api -Port $seedApiPort -Attempts 180 -Name 'Disposable seed API' `
+        -StdoutPath $apiOut -StderrPath $apiErr -AttemptLogPath (Join-Path $root 'seed-api.readiness.json')
+    Write-Host "Disposable seed API ready after $($seedReady.Attempts) readiness attempts in $([Math]::Round($seedReady.ElapsedMs/1000,1))s."
     # Primary executable owner: ordinary settings save and explicit G1 activation produce a real bound
     # Pending generation before backup. A future due time permits a restart control without TCP transport.
     # A shared actual STARTTLS relay below proves post-backup DATA acceptance and the durable receipt.
@@ -419,6 +506,7 @@ try {
     $qualificationPassed = $true
     $global:LASTEXITCODE=0
 }
+catch { $qualificationFailure = $_; throw }
 finally {
     Stop-NotificationQualificationApi $dispatcherHost
     if ($tlsRelay -and -not $tlsRelay.HasExited) { Stop-Process -Id $tlsRelay.Id -Force; $tlsRelay.WaitForExit(10000)|Out-Null }
@@ -445,5 +533,22 @@ finally {
     if ($qualificationPassed) {
         if(Test-Path -LiteralPath $root){$ownedRoot=Assert-OwnedQualificationPath $root ([IO.Path]::GetTempPath());Remove-Item -LiteralPath $ownedRoot -Recurse -Force}
         if(Test-Path -LiteralPath $backupRoot){$ownedBackupRoot=Assert-OwnedQualificationPath $backupRoot ([IO.Path]::GetTempPath());Remove-Item -LiteralPath $ownedBackupRoot -Recurse -Force}
-    } else { Write-Warning "Restore qualification failed; owned diagnostics retained at $root and $backupRoot." }
+    } else {
+        Write-Warning "Restore qualification failed; owned diagnostics retained at $root and $backupRoot."
+        # Best effort: a failure to copy diagnostics must never replace the qualification failure being reported.
+        try {
+            $apiFile = Get-Item -LiteralPath $apiExecutable -ErrorAction SilentlyContinue
+            [ordered]@{ failedAtUtc=[DateTime]::UtcNow.ToString('o'); message="$qualificationFailure"
+                position=$(if ($qualificationFailure) { $qualificationFailure.InvocationInfo.PositionMessage } else { $null })
+                scriptStackTrace=$(if ($qualificationFailure) { $qualificationFailure.ScriptStackTrace } else { $null })
+                postgresPort=$pgPort; seedApiPort=$seedApiPort; smtpPort=$smtpPort; postgresBin=$PostgresBin
+                dynamicPortRange=(@(netsh int ipv4 show dynamicport tcp 2>$null) -join ' ').Trim()
+                apiExecutable=$apiExecutable; apiExecutableWrittenUtc=$(if ($apiFile) { $apiFile.LastWriteTimeUtc.ToString('o') } else { $null })
+                seedApiSettings=$settings } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $root 'qualification-failure.json') -Encoding UTF8
+            $diagnosticsTarget = if ($DiagnosticsDirectory) { $DiagnosticsDirectory } else { Join-Path $repositoryRoot 'TestResults' }
+            $diagnosticsTarget = Join-Path $diagnosticsTarget "restore-qualification-$shortToken"
+            $copiedCount = Save-QualificationDiagnostics -Sources @($root,$backupRoot) -Destination $diagnosticsTarget
+            Write-Warning "Copied $copiedCount restore qualification diagnostic files to $diagnosticsTarget."
+        } catch { Write-Warning "Restore qualification diagnostics could not be copied: $($_.Exception.Message)" }
+    }
 }
