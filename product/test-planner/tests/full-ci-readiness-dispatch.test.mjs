@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -174,6 +174,73 @@ const boundStep = () => {
   assert.ok(start > 0 && end > start, 'the bound step must exist')
   return requester.slice(start, end)
 }
+
+test('completed Product jobs re-read only an absent authentication step, then fail closed at the bound (#1507)', () => {
+  const step = boundStep()
+  // Exercise the workflow's jobs-read shell, before its final aggregate validator. On the pre-fix workflow
+  // this is the one-shot read: the missing-then-success row fails because it never requests the second page.
+  const oneShot = step.indexOf('          read_api "$api/actions/runs/$run_id/jobs?')
+  const retry = step.indexOf('          jobs_attempt=1')
+  const end = step.indexOf('          python - "$RUNNER_TEMP/product-jobs.json"', oneShot)
+  assert.ok(oneShot >= 0 && end > oneShot, 'the workflow must read and validate Product jobs')
+  const shell = step.slice(retry >= 0 ? retry : oneShot, end).replace(/^          /gm, '')
+  const success = { name: 'Authenticate label-dispatched pull-request context', status: 'completed', conclusion: 'success' }
+  const jobs = steps => ({ jobs: [{ name: 'Classify changed product areas', steps }] })
+  // This shell owns polling, not the final aggregate verdict. Existing authentication/aggregate guards remain
+  // in the following validator. No production export or test-only flag is needed.
+  for (const [name, responses, reads, exitCode] of [
+    ['success', [jobs([success])], 1, 0],
+    ['missing then success', [jobs([]), jobs([success])], 2, 0],
+    ['missing twice then success', [jobs([]), jobs([]), jobs([success])], 3, 0],
+    ['missing throughout', [jobs([])], 3, 1],
+    ['duplicate authentication', [jobs([success, success]), jobs([success])], 1, 1],
+    ...['failure', 'cancelled', 'skipped', null].map(conclusion => [
+      `authentication ${conclusion}`, [jobs([{ ...success, conclusion }]), jobs([success])], 1, 1,
+    ]),
+    ['authentication incomplete', [jobs([{ ...success, status: 'in_progress' }]), jobs([success])], 1, 1],
+    ['missing then failure', [jobs([]), jobs([{ ...success, conclusion: 'failure' }]), jobs([success])], 2, 1],
+    ['no classifier', [{ jobs: [] }, jobs([success])], 1, 1],
+    ['duplicate classifier', [{ jobs: [...jobs([]).jobs, ...jobs([]).jobs] }, jobs([success])], 1, 1],
+  ]) {
+    const scratch = mkdtempSync(join(tmpdir(), 'aerolink-jobs-read-'))
+    try {
+      responses.forEach((response, index) => writeFileSync(join(scratch, `response-${index + 1}.json`), JSON.stringify(response)))
+      // gh api is stubbed at the transport boundary. The workflow itself still chooses when to re-read,
+      // when to delay, and whether absent evidence or a definitive mismatch can authorize proceeding.
+      const script = `set -euo pipefail
+api=https://invalid.example
+run_id=123
+reads=0
+gh() {
+  [ "$1" = api ] && [ "$2" = "$api/actions/runs/$run_id/jobs?filter=latest&per_page=100" ] && [ "$3" = --output ]
+  reads=$((reads + 1))
+  printf '%s\\n' "$reads" >> "$RUNNER_TEMP/reads"
+  response=$reads
+  if [ "$response" -gt ${responses.length} ]; then response=${responses.length}; fi
+  cp "$RUNNER_TEMP/response-$response.json" "$4"
+}
+read_api() { gh api "$@"; }
+sleep() { printf '%s\\n' "$1" >> "$RUNNER_TEMP/sleeps"; }
+${shell}
+echo PROCEED
+`
+      const path = join(scratch, 'jobs-read.sh')
+      writeFileSync(path, script)
+      const result = spawnSync(bash, ['--noprofile', '--norc', path.replace(/\\/g, '/')], {
+        env: { ...process.env, RUNNER_TEMP: scratch.replace(/\\/g, '/') }, encoding: 'utf8', timeout: 10_000,
+      })
+      assert.ifError(result.error)
+      const actualReads = readFileSync(join(scratch, 'reads'), 'utf8').trim().split('\n').length
+      assert.equal(actualReads, reads, `${name}: number of jobs API reads`)
+      assert.equal(result.status, exitCode, `${name}: ${result.stdout}\n${result.stderr}`)
+      if (reads > 1) assert.deepEqual(readFileSync(join(scratch, 'sleeps'), 'utf8').trim().split('\n'), Array(reads - 1).fill('3'), name)
+      if (exitCode === 0) assert.match(result.stdout, /^PROCEED$/m, name)
+      else assert.doesNotMatch(result.stdout, /^PROCEED$/m, name)
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  }
+})
 
 test('every read the requester makes retries transient errors, and no write is ever retried', () => {
   const step = boundStep()
