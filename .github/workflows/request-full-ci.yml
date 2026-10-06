@@ -282,8 +282,46 @@ jobs:
             exit 1
           fi
 
-          read_api "$api/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
-            --output "$RUNNER_TEMP/product-jobs.json"
+          # A just-completed green run can briefly omit its authentication step from the jobs API (#1507).
+          # Re-read only that absent evidence, at most three times. Present failed/duplicate evidence refuses
+          # immediately; the original validator below still authenticates the step and aggregate before binding.
+          jobs_attempt=1
+          while true; do
+            read_api "$api/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+              --output "$RUNNER_TEMP/product-jobs.json"
+            if node --input-type=module - "$RUNNER_TEMP/product-jobs.json" <<'NODE_PRODUCT_JOBS'
+          import { readFileSync } from 'node:fs'
+          const jobs = JSON.parse(readFileSync(process.argv[2], 'utf8')).jobs ?? []
+          const classifiers = jobs.filter(job => job.name === 'Classify changed product areas')
+          if (classifiers.length !== 1) {
+            console.error(`expected exactly one Product classifier job, found ${classifiers.length}`)
+            process.exit(1)
+          }
+          const steps = (classifiers[0].steps ?? []).filter(step => step.name === 'Authenticate label-dispatched pull-request context')
+          if (steps.length === 0) process.exit(75)
+          if (steps.length !== 1) {
+            console.error(`expected exactly one Product label-dispatch authentication step, found ${steps.length}`)
+            process.exit(1)
+          }
+          const step = steps[0]
+          if (step.status !== 'completed' || step.conclusion !== 'success') {
+            console.error(`Product label-dispatch authentication is not authoritative success: status=${step.status} conclusion=${step.conclusion}`)
+            process.exit(1)
+          }
+          NODE_PRODUCT_JOBS
+            then
+              break
+            else
+              jobs_status=$?
+            fi
+            if [ "$jobs_status" -ne 75 ] || [ "$jobs_attempt" -ge 3 ]; then
+              echo "::error::Product authentication evidence refused after $jobs_attempt jobs read(s)."
+              exit 1
+            fi
+            echo "::warning::Product authentication step is absent from the completed run; re-reading jobs ($jobs_attempt/3)."
+            sleep 3
+            jobs_attempt=$((jobs_attempt + 1))
+          done
           python - "$RUNNER_TEMP/product-jobs.json" <<'PY'
           import json
           import sys
