@@ -997,6 +997,8 @@ test('a numeric word can be forced with a status from the bus monitor, and the F
 })
 
 test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit later-SBAS LPV scenario passes on the bench', async ({ page }) => {
+  // The simulated satellite sky follows UTC. Keep this scenario proof independent of the host's time of day.
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
   await open(page)
   await tab(page, 'Nav data')
   const demo = page.getByRole('group', { name: 'Real-data demonstration' })
