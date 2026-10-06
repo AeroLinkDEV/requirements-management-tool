@@ -1,0 +1,62 @@
+{
+  "schema": "aerolink.fms-perf-protocol.v1",
+  "issue": "#1510 (I0a of #1502 D10)",
+  "declared": "Declared before the pilot. The browser windows are set by the pilot and declared here before any baseline run.",
+  "warmupSimSeconds": 60,
+  "headless": {
+    "topologies": ["single", "dual"],
+    "workloads": [
+      { "id": "W1", "scenario": "kbtv-rnav15-advisory", "window": "the scenario's own end" },
+      { "id": "W2", "scenario": "87n-offshore-sar", "window": "the scenario's own end" },
+      {
+        "id": "W3",
+        "scenario": "perf-w3-dual-sync",
+        "window": "a declared 1800 s of simulated time, whether or not the runner has finished",
+        "windowSimSeconds": 1800,
+        "definition": {
+          "id": "perf-w3-dual-sync",
+          "title": "Dual-FMS SYNC: the 87N sector search flown on both computers",
+          "objective": "Performance workload W3 (#1510): the 87N offshore SAR start state, the sector search entered on CDU 1 and executed, so the SYNC link carries a plan transfer; then flown for the declared window. SYNC residency is recorded and any drop out of SYNC is reported.",
+          "maxSeconds": 1800,
+          "start": "87n-offshore-sar",
+          "startTime": "2026-09-29T15:00:00Z",
+          "steps": [
+            { "when": { "kind": "start" }, "action": { "kind": "keys", "keys": ["TACT", "LSK4L", "LSK6R", "EXEC"] } },
+            { "when": { "kind": "start" }, "action": { "kind": "expectLine", "line": 0, "pattern": "ACT SECTOR SAR" } }
+          ]
+        }
+      },
+      { "id": "W4a", "scenario": "gps1-fde-then-gps2", "window": "the scenario's own end" },
+      { "id": "W4b", "scenario": "dead-reckoning", "window": "the scenario's own end" }
+    ]
+  },
+  "browser": {
+    "scenario": "87n-offshore-sar",
+    "rates": [1, 64],
+    "windowSimSeconds": { "1": 60, "64": 2400 },
+    "warmupWallSeconds": 15,
+    "viewport": { "width": 1440, "height": 900, "deviceScaleFactor": 1 },
+    "benchView": "engineering",
+    "outsideView": { "layout": "hud", "view": "cockpit", "ground": "relief", "colouring": "off" },
+    "configurations": [
+      { "id": "view-off-svs-off", "outsideView": false, "svs": false },
+      { "id": "view-on-svs-off", "outsideView": true, "svs": false },
+      { "id": "view-off-svs-on", "outsideView": false, "svs": true },
+      { "id": "view-on-svs-on", "outsideView": true, "svs": true }
+    ],
+    "interaction": { "key": "BRT", "pairs": "two presses 1 s apart (brighten, then dim back), a pair every 6 s of wall time in the window" },
+    "chromiumArgs": ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--enable-precise-memory-info"]
+  },
+  "statistics": {
+    "level": 0.95,
+    "iterations": 10000,
+    "seed": 20261006,
+    "targetHalfWidthPp": 1,
+    "aaFamilyAlpha": 0.05,
+    "aaMeasures": ["p50", "p95", "p99", "throughput"],
+    "descriptiveMeasures": ["heap"]
+  },
+  "pilot": { "headlessBlocks": 2, "browserRounds": 2 },
+  "caps": { "headlessRunsPerArmPerCell": 20, "browserRunsPerCell": 10, "hostHoursPerBaselineSet": 4 },
+  "quietHost": { "sampleSeconds": 3, "maxBusyPercent": 25, "maxWaitSeconds": 60 }
+}
