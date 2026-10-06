@@ -227,24 +227,48 @@ function canonical(value: unknown): string {
 
 export type Judgement = { verdict: 'pilot' | 'not judged' | 'refused' | 'failed' | 'passed'; reason: string; significant: number }
 
+/** What judgeFamily needs from one session record of a run set. */
+export type SessionEvidence = {
+  /** The statistics block the session recorded when it started. */
+  protocol?: { statistics?: unknown }
+  /** The statistics block in protocol.json at the session's recorded harness commit (git show), or null if unreadable. */
+  committedStatistics?: unknown
+  dirtyOverride?: boolean
+  harness?: { commit?: string; dirtyEntries?: number }
+  /** The matching session-end record's harness identity, or null when the session never recorded its end. */
+  end?: { commit?: string; dirtyEntries?: number } | null
+}
+
 /**
  * The A/A verdict for a family. It is judged only when every session of the run set recorded exactly the statistics
- * block in force (a run set declared under another revision keeps its recorded verdict) and none ran on a dirty tree
- * under the smoke override; it is refused when the design cannot reach alpha / m; otherwise it fails when any
- * Holm-adjusted p is at or below alpha.
+ * block in force, that block is the one committed at the session's harness commit (so a hand-edited declaration is not
+ * judged), the session started and ended at the same commit on a clean tree, and none ran under the smoke override.
+ * A run set declared under another revision keeps its recorded verdict. It is refused when the family is not the
+ * complete declared family (every workload x topology x measure; a failed-run exclusion can empty a cell) or when the
+ * design cannot reach alpha / m. Otherwise it fails when any Holm-adjusted p is at or below alpha.
  */
 export function judgeFamily(input: {
-  pilot: boolean; sessions: readonly { protocol?: { statistics?: unknown }; dirtyOverride?: boolean }[]; statistics: unknown
-  adjusted: readonly number[]; smallestP: readonly number[]; alpha: number
+  pilot: boolean; sessions: readonly SessionEvidence[]; statistics: unknown
+  adjusted: readonly number[]; smallestP: readonly number[]; alpha: number; declaredFamilySize: number
 }): Judgement {
   const significant = input.adjusted.filter(p => p <= input.alpha).length
   if (input.pilot) return { verdict: 'pilot', reason: 'not judged', significant }
   if (!input.sessions.length) return { verdict: 'not judged', reason: 'no session record', significant }
-  if (input.sessions.some(session => canonical(session.protocol?.statistics) !== canonical(input.statistics)))
+  const inForce = canonical(input.statistics)
+  if (input.sessions.some(session => canonical(session.protocol?.statistics) !== inForce))
     return { verdict: 'not judged', reason: 'a session declared a different statistics block (an earlier protocol revision); its recorded verdict stands, and this test is descriptive context only', significant }
+  if (input.sessions.some(session => canonical(session.committedStatistics) !== inForce))
+    return { verdict: 'not judged', reason: 'a session\'s recorded statistics are not those committed at its harness commit', significant }
   if (input.sessions.some(session => session.dirtyOverride)) return { verdict: 'not judged', reason: 'a smoke run on a dirty harness tree (--dirty-smoke)', significant }
-  const floor = Math.max(...input.smallestP), threshold = input.alpha / input.smallestP.length
-  if (!(floor < threshold)) return { verdict: 'refused', reason: `the smallest attainable p (${floor.toPrecision(3)}) is not below alpha / m (${threshold.toPrecision(3)})`, significant }
+  if (input.sessions.some(session => (session.harness?.dirtyEntries ?? 1) > 0)) return { verdict: 'not judged', reason: 'a session started on a dirty harness tree', significant }
+  if (input.sessions.some(session => !session.end || session.end.commit !== session.harness?.commit || (session.end.dirtyEntries ?? 1) > 0))
+    return { verdict: 'not judged', reason: 'a session has no end record, or ended at another commit or on a dirty tree', significant }
+  const refusals: string[] = []
+  if (input.adjusted.length !== input.declaredFamilySize || input.smallestP.length !== input.declaredFamilySize)
+    refusals.push(`the family has ${input.adjusted.length} of the ${input.declaredFamilySize} declared comparisons`)
+  const floor = input.smallestP.length ? Math.max(...input.smallestP) : Infinity, threshold = input.alpha / input.declaredFamilySize
+  if (!(floor < threshold)) refusals.push(`the smallest attainable p (${floor.toPrecision(3)}) is not below alpha / m (${threshold.toPrecision(3)})`)
+  if (refusals.length) return { verdict: 'refused', reason: refusals.join('; '), significant }
   return { verdict: significant ? 'failed' : 'passed', reason: '', significant }
 }
 

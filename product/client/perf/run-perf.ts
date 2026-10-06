@@ -17,7 +17,7 @@ import { arch, cpus, platform, release, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { abbaOrder, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, relativeEffect, type Arm, type RunValue } from './stats.ts'
+import { abbaOrder, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, relativeEffect, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -296,7 +296,19 @@ function report() {
   const testing = { permutations, seed }
   // A run set is judged only when every one of its sessions recorded exactly these statistics (judgeFamily). Sessions
   // declared under revision 1 (a bootstrap p) keep their recorded verdict; the test here is then descriptive context.
-  const sessions = readdirSync(dir).filter(name => /^session-\d+\.json$/.test(name)).map(name => JSON.parse(readFileSync(join(dir, name), 'utf8')))
+  // Each session is also checked against protocol.json as committed at its harness commit, and against its end record.
+  const records = (pattern: RegExp) => readdirSync(dir).filter(name => pattern.test(name)).map(name => JSON.parse(readFileSync(join(dir, name), 'utf8')))
+  const ends = records(/^session-end-\d+\.json$/)
+  const root = git(client, 'rev-parse', '--show-toplevel')
+  const committed = (commit: unknown) => {
+    if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) return null
+    try { return JSON.parse(git(root, 'show', `${commit}:product/client/perf/protocol.json`)).statistics ?? null } catch { return null }
+  }
+  const sessions: SessionEvidence[] = records(/^session-\d+\.json$/).map(session => ({
+    ...session, committedStatistics: committed(session.harness?.commit),
+    end: ends.find(end => end.startedAt === session.startedAt && end.kind === session.kind)?.harnessAtEnd ?? null,
+  }))
+  const declaredFamilySize = protocol.headless.workloads.length * protocol.headless.topologies.length * aaMeasures.length
   const lines: string[] = []
   const json: Record<string, unknown> = { schema: 'aerolink.fms-perf-report.v1', protocol, runs: entries.length, failedRuns: entries.filter(e => e.status !== 'passed').length }
   const passed = entries.filter(e => e.status === 'passed' && e.result)
@@ -329,12 +341,12 @@ function report() {
     }
     const family = aa.filter(row => aaMeasures.includes(row.measure))
     const adjusted = holm(family.map(row => row.test.p))
-    const smallest = Math.max(...family.map(row => row.test.smallestP))
-    const judged = judgeFamily({ pilot: options.pilot === true, sessions, statistics: protocol.statistics, adjusted, smallestP: family.map(row => row.test.smallestP), alpha: aaFamilyAlpha })
+    const smallest = family.length ? Math.max(...family.map(row => row.test.smallestP)) : Infinity
+    const judged = judgeFamily({ pilot: options.pilot === true, sessions, statistics: protocol.statistics, adjusted, smallestP: family.map(row => row.test.smallestP), alpha: aaFamilyAlpha, declaredFamilySize })
     const significant = { length: judged.significant }
     const verdict = `${judged.verdict}${judged.reason ? `: ${judged.reason}` : ''}`
     lines.push(`## Headless A/B (B/A - 1 of arm medians; within-block permutation test, R = ${permutations}; Holm across ${family.length} comparisons)`, '',
-      `A/A result: **${verdict}** (family-wise alpha ${aaFamilyAlpha}; ${significant.length} significant after Holm; smallest attainable p ${smallest.toPrecision(3)}, alpha / m = ${(aaFamilyAlpha / family.length).toPrecision(3)}).`, '',
+      `A/A result: **${verdict}** (family-wise alpha ${aaFamilyAlpha}; ${significant.length} significant after Holm; smallest attainable p ${smallest.toPrecision(3)}, alpha / m = ${(aaFamilyAlpha / declaredFamilySize).toPrecision(3)}; ${family.length} of ${declaredFamilySize} declared comparisons present).`, '',
       `Blocks excluded for a failed run: ${excluded.length ? excluded.join('; ') : 'none'}. The 95% intervals are descriptive bootstrap intervals (k - 1 draws within blocks), not the test.`, '',
       '| Workload | Topology | Measure | runs A/B | median A | median B | B/A - 1 | 95% CI (descriptive) | half-width (pp) | permutation p | Holm p |', '|---|---|---|---|---|---|---|---|---|---|---|')
     for (const row of aa) {

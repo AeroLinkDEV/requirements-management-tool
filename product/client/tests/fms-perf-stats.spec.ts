@@ -133,22 +133,37 @@ test('the within-block permutation test matches its hand enumeration and states 
   expect(permutationTest(unbalanced, { permutations: 100, seed: 1 })).toMatchObject({ exact: true, permutations: 3, smallestP: 1 / 3 })
 })
 
-test('an A/A family is judged only under the statistics its sessions recorded, and refused when it cannot reject', () => {
+test('an A/A family is judged only when complete, clean and under the statistics committed with it', () => {
+  // Synthetic session records and p-values only: no measured data is scored here.
   const statistics = { revision: 2, test: 'within-block permutation', permutations: 19999 }
-  const session = { protocol: { statistics: { permutations: 19999, test: 'within-block permutation', revision: 2 } } }
-  const base = { pilot: false, sessions: [session], statistics, alpha: 0.05 }
-  const forty = (p: number) => Array.from({ length: 40 }, () => p)
-  // Same statistics (key order aside), a reachable floor (1/20000 < 0.05/40): judged; one Holm p at alpha fails it.
-  expect(judgeFamily({ ...base, adjusted: forty(1), smallestP: forty(1 / 20000) }).verdict).toBe('passed')
-  expect(judgeFamily({ ...base, adjusted: [0.05, ...forty(1).slice(1)], smallestP: forty(1 / 20000) })).toMatchObject({ verdict: 'failed', significant: 1 })
-  // One ABBA block can reach no lower than 1/3, above 0.05/40: refused, never passed.
-  expect(judgeFamily({ ...base, adjusted: forty(1), smallestP: forty(1 / 3) }).verdict).toBe('refused')
-  // A session that recorded another statistics block (revision 1), or none, or ran under --dirty-smoke: not judged.
-  const revision1 = { protocol: { statistics: { iterations: 10000, seed: 20261006 } } }
-  expect(judgeFamily({ ...base, sessions: [session, revision1], adjusted: forty(0), smallestP: forty(1 / 20000) }).verdict).toBe('not judged')
-  expect(judgeFamily({ ...base, sessions: [], adjusted: forty(0), smallestP: forty(1 / 20000) }).verdict).toBe('not judged')
-  expect(judgeFamily({ ...base, sessions: [{ ...session, dirtyOverride: true }], adjusted: forty(1), smallestP: forty(1 / 20000) }).verdict).toBe('not judged')
-  expect(judgeFamily({ ...base, pilot: true, adjusted: forty(0), smallestP: forty(1 / 20000) }).verdict).toBe('pilot')
+  const recorded = { permutations: 19999, test: 'within-block permutation', revision: 2 }
+  const commit = 'c'.repeat(40)
+  const session = { protocol: { statistics: recorded }, committedStatistics: recorded, harness: { commit, dirtyEntries: 0 }, end: { commit, dirtyEntries: 0 } }
+  const base = { pilot: false, sessions: [session], statistics, alpha: 0.05, declaredFamilySize: 40 }
+  const of = (n: number, p: number) => Array.from({ length: n }, () => p)
+  // Complete (40 of 40), a reachable floor (1/20000 < 0.05/40): judged; one Holm p at alpha fails it.
+  expect(judgeFamily({ ...base, adjusted: of(40, 1), smallestP: of(40, 1 / 20000) }).verdict).toBe('passed')
+  expect(judgeFamily({ ...base, adjusted: [0.05, ...of(39, 1)], smallestP: of(40, 1 / 20000) })).toMatchObject({ verdict: 'failed', significant: 1 })
+  // Refused, never passed: one ABBA block's floor (1/3); an empty family (the failed-run rule can empty it); 8 of 40.
+  expect(judgeFamily({ ...base, adjusted: of(40, 1), smallestP: of(40, 1 / 3) }).verdict).toBe('refused')
+  expect(judgeFamily({ ...base, adjusted: [], smallestP: [] }).verdict).toBe('refused')
+  expect(judgeFamily({ ...base, adjusted: of(8, 1), smallestP: of(8, 1 / 20000) }).verdict).toBe('refused')
+  // Not judged: another statistics block (revision 1), the same test with a different R, a declaration other than the
+  // one committed at the session's harness commit, no session, the smoke override, a dirty start, no end record, an
+  // end at another commit or on a dirty tree.
+  const judgedWith = (sessions: object[]) => judgeFamily({ ...base, sessions, adjusted: of(40, 1), smallestP: of(40, 1 / 20000) }).verdict
+  const otherR = { ...recorded, permutations: 9999 }
+  expect(judgedWith([session, { ...session, protocol: { statistics: { iterations: 10000, seed: 20261006 } } }])).toBe('not judged')
+  expect(judgedWith([{ ...session, protocol: { statistics: otherR }, committedStatistics: otherR }])).toBe('not judged')
+  expect(judgedWith([{ ...session, committedStatistics: otherR }])).toBe('not judged')
+  expect(judgedWith([{ ...session, committedStatistics: null }])).toBe('not judged')
+  expect(judgedWith([])).toBe('not judged')
+  expect(judgedWith([{ ...session, dirtyOverride: true }])).toBe('not judged')
+  expect(judgedWith([{ ...session, harness: { commit, dirtyEntries: 2 } }])).toBe('not judged')
+  expect(judgedWith([{ ...session, end: null }])).toBe('not judged')
+  expect(judgedWith([{ ...session, end: { commit: 'd'.repeat(40), dirtyEntries: 0 } }])).toBe('not judged')
+  expect(judgedWith([{ ...session, end: { commit, dirtyEntries: 1 } }])).toBe('not judged')
+  expect(judgeFamily({ ...base, pilot: true, adjusted: of(40, 0), smallestP: of(40, 1 / 20000) }).verdict).toBe('pilot')
 })
 
 test('under a null with block effects the permutation test rejects at its nominal rate', () => {
