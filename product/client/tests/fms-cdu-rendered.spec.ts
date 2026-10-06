@@ -996,7 +996,9 @@ test('a numeric word can be forced with a status from the bus monitor, and the F
   await expect(page.getByTestId('route-gps1')).toContainText('not usable · no fix')
 })
 
-test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit later-SBAS LPV scenario passes on the bench', async ({ page }) => {
+test('the KBTV demonstration defaults to S300 advisory VNAV after its manual setup', async ({ page }) => {
+  // The simulated satellite sky follows UTC. Keep this scenario proof independent of the host's time of day.
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
   await open(page)
   await tab(page, 'Nav data')
   const demo = page.getByRole('group', { name: 'Real-data demonstration' })
@@ -1015,13 +1017,21 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
   await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v10')
   await page.screenshot({ path: test.info().outputPath('s300-kbtv-advisory.png'), fullPage: true })
-  // The library scenario flies it from the same start state, on a restarted simulation.
+})
+
+test('the KBTV later-SBAS LPV library scenario passes all five checks from a fresh bench', async ({ page }) => {
+  // The library start state configures a fresh FMS system independently of the manual demonstration setup.
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  await open(page)
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v10')
   await tab(page, 'Scenarios')
   const card = page.getByRole('region', { name: 'Scenarios' })
   await page.getByLabel('Simulation rate').selectOption('64')
   await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
   await card.getByRole('button', { name: 'Run the scenario' }).click()
   await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v6')
+  // Run every 250 ms callback at 64x through the scenario's 900 s horizon, independent of host timer pacing.
+  await page.clock.runFor(14_250)
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })
