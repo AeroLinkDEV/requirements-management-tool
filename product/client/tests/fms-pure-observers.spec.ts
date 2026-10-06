@@ -24,6 +24,9 @@ import type { CduFunction } from '../src/fmsCdu/variants'
 // Both must give the bench's behaviour, so a headless run, a state digest or an analyzer view sees the same simulation.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
 const ALL_PAGES = [CORE_PAGES, PLANNING_PAGES, NAV_PAGES, RADIO_PAGES, TACTICAL_PAGES, DATALINK_PAGES].flatMap(pages => Object.values(pages))
+const RADIO_DEVICES = ['nav1', 'nav2', 'dme1', 'dme2', 'adf', 'adf2'] as const
+/** A read that some states refuse (a device a profile lacks, say): purity is about what it changes, not what it returns. */
+const attempt = (read: () => unknown) => { try { read() } catch { /* refused in this state */ } }
 
 /** What the bench reads after each callback: the CDU screen and lamps, and the guidance computer's bus and air data. */
 const render = (fms: ScriptedFms, sim: FlightSimulator) => {
@@ -119,19 +122,26 @@ test('the rendezvous with a moving waypoint is determined at the EXEC, rendered 
       { when: { kind: 'after', seconds: 3 }, action: { kind: 'expectNoAlert', text: 'NONE' } },
     ],
   }
-  const procedure = (rendered: boolean) => {
+  const procedure = (rendered: boolean, run = scenario) => {
     let now = START
     const system = new DualFmsSystem(() => new Date(now))
     const one = system.computers[0]
     Object.assign(one.wind, { direction: 0, speed: 0 })
     one.defineMoving('SHIP1', offset(one.position, 30, 12), 90, 40); one.directTo('SHIP1'); one.press('EXEC')
-    const runner = new ScenarioRunner(scenario, one, undefined, system.flights[0])
+    const runner = new ScenarioRunner(run, one, undefined, system.flights[0])
     while (!runner.finished) { advanceTicks(1, ms => { now += ms }, system, runner); if (rendered) render(one, system.simulator) }
     return { status: one.routeStatus, rendezvous: one.rendezvousFor(one.route, 0) }
   }
   const stepped = procedure(false)
   expect(stepped).toEqual(procedure(true))
   expect(stepped).toMatchObject({ status: 'MOD', rendezvous: { computedAt: START + 2000, condition: 4 } })
+
+  // Declared boundary: each step is its own computation, even when two share a tick (one submission, one computation).
+  // A wind step in the procedure's tick comes after the rendezvous is determined, so the solve is the procedure-only one.
+  const windAfter: Scenario = { ...scenario, steps: [scenario.steps[0], { when: { kind: 'after', seconds: 0 }, action: { kind: 'wind', direction: 270, speed: 60 } }, scenario.steps[1]] }
+  const sameTick = procedure(false, windAfter)
+  expect(sameTick).toEqual(procedure(true, windAfter))
+  expect(sameTick.rendezvous).toEqual(stepped.rendezvous)
 })
 
 // Owner: a settle that keeps starting computations is a programming fault, reported, never carried on in.
@@ -270,13 +280,28 @@ test('reading the whole dual system between computations changes none of its sta
       }
       touch(system.flights[side])
       for (const flight of system.flights) { fmsOutputs(fms, flight); aircraftData(fms, flight) }
+      // The bench's tabs and cards: the GPS tab (its view, the receivers' buses, the stimulus record), the sensor
+      // card's per-device radio reads, and the map's nearby navaids.
+      const view = fmsGpsView(fms, system.computers[0]); attempt(() => view.difference())
+      for (const receiver of fms.gps) { touch(receiver); attempt(() => receiver.bus()); attempt(() => receiver.rawBus()) }
+      for (const index of [0, 1]) attempt(() => view.stimulus.state(index))
+      for (const device of RADIO_DEVICES) {
+        attempt(() => fms.radioReceiving(device)); attempt(() => fms.adfRelativeBearing(device as 'adf'))
+        attempt(() => fms.navRadial(device as 'nav1')); attempt(() => fms.dmeSlantRangeNm(device as 'dme1'))
+        attempt(() => fms.dmeReportedIdent(device as 'dme1')); attempt(() => fms.dmeStation(device as 'dme1'))
+        attempt(() => fms.radioPort?.faults(device)); attempt(() => fms.radioPort?.dmeReceiving(device as 'dme1'))
+      }
+      attempt(() => fms.tacanStation()); attempt(() => fms.tacanBearingAndRange())
+      attempt(() => fms.navdb.nearby(fms.position, 32))
     })
   }
   const changed: string[] = []
   const rest = (label: string, system: DualFmsSystem) => {
-    const before = snapshot(system)
+    // The GPS stimulus record is bench state the GPS tab reads, so it is in the snapshot too.
+    const root = { system, stimulus: stimulusFor(system.computers[0]) }
+    const before = snapshot(root)
     readEverything(system)
-    const after = snapshot(system)
+    const after = snapshot(root)
     for (const path of new Set([...before.keys(), ...after.keys()]))
       if (before.get(path) !== after.get(path) && !/\.magvar\.cached\b/.test(path)) changed.push(`${label} ${path}: ${before.get(path)} -> ${after.get(path)}`)
   }
@@ -300,6 +325,15 @@ test('reading the whole dual system between computations changes none of its sta
   one.replaceLegs(legs(12, one)); press(one, 'LEGS', 'NEXT', 'NEXT')
   one.route.legs.splice(7); rest('legs-unsettled', system)
   one.press('LSK6L')
+  // A moving waypoint spliced into the active route: its rendezvous was never determined, and a read must not keep it.
+  one.defineMoving('SHIP2', offset(one.position, 90, 20), 0, 30)
+  one.activeRoute.legs.splice(1, 0, { kind: 'wpt', ident: 'SHIP2' }); rest('rendezvous-unsettled', system)
+  one.activeRoute.legs.splice(1, 1)
+  // Masking held while the integrity condition is on. No action can leave that state behind (the condition clears the
+  // masking), so the condition is injected into the private condition set directly; drawing the GPS tab must not clear it.
+  const stimulus = stimulusFor(one), injected = (one as unknown as { injected: Set<string> }).injected
+  stimulus.toggleMasked(0, 7); injected.add('gpsIntegrity'); rest('masking-unsettled', system)
+  injected.delete('gpsIntegrity'); stimulus.toggleMasked(0, 7)
   one.magvar.load({ ...WMM2025_DATABASE, coefficients: `${WMM2025_DATABASE.coefficients} ` }); rest('fail-unsettled', system)
 
   // And one short library scenario, read at a few of its ticks.
