@@ -2,8 +2,12 @@
 //
 // The experimental unit is one run: a fresh process (headless) or a fresh browser (browser runner). Ticks inside a run
 // are autocorrelated and long-tailed, so they are summarised per run (percentiles) and never resampled. Runs are taken
-// in ABBA blocks; the bootstrap resamples runs within each block and arm, so a drift of the host between blocks cancels
-// instead of widening or biasing the interval. Effects are relative: B/A - 1 of the arm medians, with A the reference.
+// in ABBA blocks. Effects are relative: B/A - 1 of the arm medians, with A the reference.
+//
+// Protocol revision 2 (#1519 review): the inferential test is a within-block permutation (randomization) test on that
+// statistic (permutationTest). The bootstrap (relativeEffect, medianLevel) gives descriptive 95% intervals only; it is
+// not a test. Revision 1 took a two-sided bootstrap p from relativeEffect; with two runs per arm per block that p was
+// zero far too often under the null (a 21% family fail rate over ABBA-preserving relabellings of real A/A data).
 //
 // Pure functions only: no clock, no randomness except the seeded generator the caller names and records.
 
@@ -57,8 +61,6 @@ export type Effect = {
   high: number
   /** Half the interval width, in percentage points. */
   halfWidthPp: number
-  /** Two-sided bootstrap p-value for no effect: 2 x the smaller tail at zero, capped at 1. */
-  p: number
   /** Replicates used; exact is true when every distinct resample was enumerated once instead of drawn. */
   replicates: number
   exact: boolean
@@ -127,11 +129,75 @@ export function relativeEffect(runs: readonly RunValue[], options: { iterations:
   const estimate = relative(list.map(group => group.values))
   const { replicates, exact } = resample(list, relative, options)
   const low = nearestRank(replicates, 2.5), high = nearestRank(replicates, 97.5)
-  const below = replicates.filter(value => value <= 0).length, above = replicates.filter(value => value >= 0).length
+  return { estimate, low, high, halfWidthPp: ((high - low) / 2) * 100, replicates: replicates.length, exact, seed: options.seed }
+}
+
+export type Permutation = {
+  /** B/A - 1 of the arm medians of the observed labelling. */
+  estimate: number
+  /** Two-sided p for exchangeable arms within each block. */
+  p: number
+  /** Labellings evaluated; exact when every labelling was enumerated once (p = count / labellings). */
+  permutations: number
+  exact: boolean
+  /** The smallest p this design and R can return: below alpha / m, or the family cannot reject. */
+  smallestP: number
+  seed: number
+}
+
+
+/** Every way to label `a` of the indices 0..n-1 as arm A, each as the index set labelled A. */
+function labellings(n: number, a: number): number[][] {
+  const out: number[][] = []
+  const pick = (from: number, chosen: number[]) => {
+    if (chosen.length === a) { out.push([...chosen]); return }
+    for (let i = from; i < n; i += 1) { chosen.push(i); pick(i + 1, chosen); chosen.pop() }
+  }
+  pick(0, [])
+  return out
+}
+
+/**
+ * Within-block permutation test of B against A (protocol revision 2). Under the A/A null the runs of a block are
+ * exchangeable between arms, so each block's arm labels are re-dealt, keeping its count per arm (2 + 2 in an ABBA
+ * block: 6 labellings). The statistic is |ln(median B / median A)|, the two-sided form of B/A - 1 of the arm medians.
+ * When the labellings number no more than `permutations`, all are enumerated (exact p = count at or above the
+ * observed / labellings, the observed included); otherwise `permutations` are drawn with the seeded generator and
+ * p = (c + 1) / (R + 1). A block that lacks either arm cannot be relabelled and is refused: the caller excludes it.
+ */
+export function permutationTest(runs: readonly RunValue[], options: { permutations: number; seed: number }): Permutation {
+  const blocks = [...new Set(runs.map(run => run.block))].map(block => {
+    const values = runs.filter(run => run.block === block)
+    const a = values.filter(run => run.arm === 'A').length
+    if (a === 0 || a === values.length) throw new Error(`block ${block} has runs of one arm only`)
+    return { values: values.map(run => run.value), observed: values.flatMap((run, i) => run.arm === 'A' ? [i] : []), options: labellings(values.length, a) }
+  })
+  const statistic = (labels: readonly number[][]) => {
+    const a: number[] = [], b: number[] = []
+    blocks.forEach((block, i) => block.values.forEach((value, j) => (labels[i].includes(j) ? a : b).push(value)))
+    return { magnitude: Math.abs(Math.log(median(b) / median(a))), effect: median(b) / median(a) - 1 }
+  }
+  const observed = statistic(blocks.map(block => block.observed))
+  const total = blocks.reduce((product, block) => product * block.options.length, 1)
+  const atLeast = (labels: readonly number[][]) => statistic(labels).magnitude >= observed.magnitude - 1e-12
+  // Relabelling every block the other way round only negates the log ratio, so at least two labellings reach it.
+  const exactFloor = 2 / total
+  if (total <= options.permutations) {
+    let count = 0
+    const digits = blocks.map(() => 0)
+    for (let n = 0; n < total; n += 1) {
+      if (atLeast(blocks.map((block, i) => block.options[digits[i]]))) count += 1
+      for (let i = 0; i < digits.length; i += 1) { digits[i] += 1; if (digits[i] < blocks[i].options.length) break; digits[i] = 0 }
+    }
+    return { estimate: observed.effect, p: count / total, permutations: total, exact: true, smallestP: exactFloor, seed: options.seed }
+  }
+  const random = mulberry32(options.seed)
+  let count = 0
+  for (let n = 0; n < options.permutations; n += 1)
+    if (atLeast(blocks.map(block => block.options[Math.floor(random() * block.options.length)]))) count += 1
   return {
-    estimate, low, high, halfWidthPp: ((high - low) / 2) * 100,
-    p: Math.min(1, (2 * Math.min(below, above)) / replicates.length),
-    replicates: replicates.length, exact, seed: options.seed,
+    estimate: observed.effect, p: (count + 1) / (options.permutations + 1), permutations: options.permutations, exact: false,
+    smallestP: Math.max(1 / (options.permutations + 1), exactFloor), seed: options.seed,
   }
 }
 

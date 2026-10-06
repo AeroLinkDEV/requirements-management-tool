@@ -9,12 +9,15 @@ import { frameSummary } from './stats.ts'
 //
 // Instrumentation is an init script only; the application has no measurement seam:
 // - the 250 ms simulation interval's callbacks are wrapped, and each one's end is taken in a microtask queued after
-//   the callback, so React's microtask render of the tick is included;
+//   the callback, so React's microtask render of the tick is included. Work React schedules on its default lane (a
+//   Scheduler macrotask after the callback) is not included in the callback figure; it appears in long tasks and Long
+//   Animation Frames. Exactly one 250 ms interval may be live while measuring, or the run fails;
 // - requestAnimationFrame is wrapped (frame intervals), and Long Animation Frames and long tasks are observed;
 // - Event Timing (key -> next paint) for a benign CDU key, whose durations the browser rounds to 8 ms;
 // - JS heap from performance.memory (--enable-precise-memory-info) after a forced collection.
 // The bench has no unpaced mode (only 1/4/16/64x on its 250 ms timer), so browser throughput is paced: a deviation
-// from D10 12.2 recorded in the report. At 64x every callback is expected to be a long task.
+// from D10 12.2 recorded in the report. At 64x every callback is expected to be a long task. Worker backlog (D10 12.2)
+// is not applicable before I3: there is no worker yet.
 
 const protocol = JSON.parse(readFileSync(new URL('./protocol.json', import.meta.url), 'utf8'))
 const rate = Number(process.env.AEROLINK_PERF_RATE)
@@ -32,7 +35,7 @@ type Measured = {
   events: { name: string; duration: number; processing: number; delay: number; interaction: number }[]; wall: number
 }
 
-test('browser frame cost', async ({ page, request, context }) => {
+test('browser frame cost', async ({ page, request, context, headless }) => {
   test.setTimeout(15 * 60_000)
   if (!result || !configuration || !protocol.browser.rates.includes(rate)) throw new Error('AEROLINK_PERF_RATE, _CONFIGURATION and _RESULT are required')
   const windowSim: number = protocol.browser.windowSimSeconds[String(rate)]
@@ -46,9 +49,13 @@ test('browser frame cost', async ({ page, request, context }) => {
       events: [] as { start: number; name: string; duration: number; processing: number; delay: number; interaction: number }[],
     }
     const nativeInterval = window.setInterval.bind(window)
+    const nativeClear = window.clearInterval.bind(window)
+    const live = new Set<number>()
+    window.clearInterval = ((id?: number) => { if (id !== undefined) live.delete(id); nativeClear(id) }) as typeof window.clearInterval
     window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
       if (typeof handler !== 'function' || timeout !== 250) return nativeInterval(handler, timeout, ...args)
-      return nativeInterval((...callArgs: unknown[]) => {
+      let id = 0
+      id = nativeInterval((...callArgs: unknown[]) => {
         const start = performance.now()
         try { (handler as (...a: unknown[]) => void)(...callArgs) } finally {
           queueMicrotask(() => {
@@ -57,6 +64,8 @@ test('browser frame cost', async ({ page, request, context }) => {
           })
         }
       }, timeout)
+      live.add(id)
+      return id
     }) as typeof window.setInterval
     const nativeRaf = window.requestAnimationFrame.bind(window)
     window.requestAnimationFrame = callback => nativeRaf(time => {
@@ -79,6 +88,7 @@ test('browser frame cost', async ({ page, request, context }) => {
     ;(window as unknown as { __fmsPerf: unknown }).__fmsPerf = {
       begin() { state.measuring = true; state.begin = performance.now(); state.ticks = 0; state.callbacks = []; state.rafIntervals = []; state.lastFrame = -1 },
       get ticks() { return state.ticks },
+      get liveIntervals() { return live.size },
       finish() {
         state.measuring = false; state.end = performance.now()
         const inside = <T extends { start: number }>(list: T[]) => list.filter(entry => entry.start >= state.begin && entry.start <= state.end)
@@ -114,10 +124,13 @@ test('browser frame cost', async ({ page, request, context }) => {
   await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
   await page.waitForTimeout(protocol.browser.warmupWallSeconds * 1000)
   const otw = async () => configuration.outsideView
-    ? { frames: Number(await scene.getAttribute('data-frames') ?? 0), tilesLoaded: await scene.getAttribute('data-tiles-loaded'), causes: await scene.getAttribute('data-frame-causes') }
+    ? { frames: Number(await scene.getAttribute('data-frames') ?? 0), tilesLoaded: await scene.getAttribute('data-tiles-loaded'),
+      tileQueue: await scene.getAttribute('data-tile-queue'), causes: await scene.getAttribute('data-frame-causes') }
     : null
+  const liveIntervals = () => page.evaluate(() => (window as unknown as { __fmsPerf: { liveIntervals: number } }).__fmsPerf.liveIntervals)
   const atWarmup = await otw()
 
+  expect(await liveIntervals(), 'one wrapped 250 ms interval: the simulation tick').toBe(1)
   await page.evaluate(() => (window as unknown as { __fmsPerf: { begin(): void } }).__fmsPerf.begin())
   const ticks = () => page.evaluate(() => (window as unknown as { __fmsPerf: { ticks: number } }).__fmsPerf.ticks)
   let presses = 0
@@ -129,6 +142,7 @@ test('browser frame cost', async ({ page, request, context }) => {
     await page.waitForTimeout(5000)
   }
   const measured = await page.evaluate(() => (window as unknown as { __fmsPerf: { finish(): Measured } }).__fmsPerf.finish())
+  expect(await liveIntervals(), 'still one wrapped 250 ms interval at the end of the window').toBe(1)
   const atEnd = await otw()
   const finished = await scenarios.locator('.fmsScenarioResult').count()
 
@@ -152,7 +166,7 @@ test('browser frame cost', async ({ page, request, context }) => {
     longAnimationFrames: { count: measured.loaf.length, p95Ms: measured.loaf.length ? frameSummary(measured.loaf.map(entry => entry.duration)).p95 : null },
     interaction: { key: protocol.browser.interaction.key, presses, entries: measured.events, resolutionStepMs: step, exemptFromOnePercentTarget: true },
     heapUsedBytesAfterGc: heap, outsideView: { atWarmup, atEnd }, scenarioFinishedInWindow: finished > 0,
-    browser: { version: context.browser()?.version() ?? null, headless: true, renderer, viewport: protocol.browser.viewport },
+    browser: { version: context.browser()?.version() ?? null, headless, renderer, viewport: protocol.browser.viewport },
   }
   writeFileSync(result, JSON.stringify(summary, null, 2))
   expect(finished, 'the mission is still running at the end of the window').toBe(0)

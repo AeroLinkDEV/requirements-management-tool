@@ -13,7 +13,7 @@ import { createBrowserStorage } from '../scripts/browser-storage.mjs'
  * AEROLINK_PERF_MODE=browser runs browser.perf.ts against one API built from the harness checkout, serving the arm's
  * production build (AEROLINK_PERF_DIST) through Client__StaticFiles, with a disposable SQLite database and the terrain
  * relay off, as playwright.production.config.ts does. Each browser run gets a fresh API process on its own copy of
- * one disposable database the orchestrator seeded once (AEROLINK_PERF_MODE=seed runs seed.perf.ts to make it), so
+ * one disposable database the orchestrator seeds once per session (AEROLINK_PERF_MODE=seed runs seed.perf.ts to make it), so
  * every run starts from identical state without paying for the showcase seed each time.
  */
 const clientDir = fileURLToPath(new URL('..', import.meta.url))
@@ -39,7 +39,9 @@ function browserServer() {
     command: 'node scripts/run-api-with-log.mjs',
     cwd: clientDir,
     env: {
-      // --no-build: the orchestrator builds the API once from the harness checkout and records its SHA.
+      // --no-build: the API is built once from the harness checkout (dotnet build -c Release) before a session, and the
+      // orchestrator records the harness commit, source tree and the built assembly's SHA-256. --no-build runs whatever
+      // was last built there: the record identifies that binary but cannot by itself prove which tree it came from.
       AEROLINK_E2E_API_ARGV: JSON.stringify([dotnet, 'run', '--configuration', 'Release', '--no-build', '--project', '../src/AeroLink.Api', '--urls', origin]),
       AEROLINK_E2E_API_LOG: join(outputDir, 'api.log'),
       AEROLINK_E2E_API_LOG_LABEL: 'perf-api',
