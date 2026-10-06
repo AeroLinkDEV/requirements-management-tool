@@ -17,13 +17,15 @@ export const logicTest = base.extend({
 })
 
 export const renderedTest = base.extend<RenderedFixtureState>({
-  networkGuard: async ({ baseURL }, provide) => {
+  networkGuard: async ({ baseURL }, provide, testInfo) => {
     expect(baseURL, 'rendered fixtures require an isolated client origin').toBeTruthy()
     const guard = await createRenderedNetworkGuard(baseURL!)
     try { await provide(guard) } finally {
       await guard.close()
+      // A recovered keep-alive reset is evidence, not a failure; keep it in the report (#1494).
+      for (const description of guard.recovered) testInfo.annotations.push({ type: 'rendered-network-guard', description })
       expect(guard.unexpected, 'rendered fixture attempted API or external network access').toEqual([])
-      expect(guard.failures, 'rendered fixture WebSocket transport failed').toEqual([])
+      expect(guard.failures, 'rendered fixture network transport failed').toEqual([])
     }
   },
   proxy: async ({ networkGuard }, provide) => { await provide(networkGuard.proxy) },

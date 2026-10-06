@@ -1,4 +1,4 @@
-import { createServer, request } from 'node:http'
+import { createServer, request, type ClientRequest } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import type { WebSocketRoute } from '@playwright/test'
 import WebSocket from 'ws'
@@ -14,6 +14,7 @@ export async function createRenderedNetworkGuard(baseURL: string) {
   }
   const unexpected: string[] = []
   const failures: string[] = []
+  const recovered: string[] = []
   const webSockets = new Set<WebSocket>()
   const allowed = (value: string) => {
     const url = new URL(value)
@@ -40,14 +41,57 @@ export async function createRenderedNetworkGuard(baseURL: string) {
     const headers = { ...incoming.headers }
     delete headers['proxy-authorization']
     delete headers['proxy-connection']
-    const upstream = request(url, { method: incoming.method, headers }, response => {
-      outgoing.writeHead(response.statusCode!, response.headers)
-      response.pipe(outgoing)
+    const method = incoming.method ?? 'GET'
+    const label = `${method} ${url.pathname}`
+    const started = Date.now()
+    let bodyBytes = 0
+    incoming.on('data', (chunk: Buffer) => { bodyBytes += chunk.length })
+    let downstreamGone = false
+    let settled = false
+    let retried = false
+    let upstream: ClientRequest
+    // An upstream failure is never silent (#1494): the page gets a 502, or a broken connection
+    // instead of a body cut short, and the fixture fails naming the cause.
+    const fail = (error: NodeJS.ErrnoException, phase: string, reused: boolean) => {
+      if (settled || downstreamGone || closed) return
+      settled = true
+      failures.push(`${label}: ${error.code ?? 'error'} (${error.message}) ${phase} on a ${reused ? 'reused' : 'new'} socket after ${Date.now() - started} ms${retried ? ', after one retry' : ''}.`)
+      if (outgoing.headersSent) outgoing.destroy()
+      else outgoing.writeHead(502).end()
+    }
+    const send = (fresh: boolean) => {
+      // A retry takes its own connection, so it cannot land on another stale pooled socket.
+      const attempt = request(url, fresh ? { method, headers: { ...headers, connection: 'close' }, agent: false } : { method, headers }, response => {
+        response.on('error', error => fail(error, 'during the response body', attempt.reusedSocket))
+        outgoing.writeHead(response.statusCode!, response.headers)
+        response.pipe(outgoing)
+      })
+      upstream = attempt
+      // A pooled socket has read earlier responses; only bytes beyond this mark belong to this attempt.
+      let bytesReadBefore = -1
+      attempt.on('socket', socket => { bytesReadBefore = socket.bytesRead; trackSocket(socket) })
+      attempt.on('error', (error: NodeJS.ErrnoException) => {
+        if (attempt.res) { fail(error, 'during the response body', attempt.reusedSocket); return }
+        // Node's documented keep-alive race (#1494): a stalled server's keep-alive timer closes a pooled connection
+        // before it reads the request already written to it, so the server never processed that request.
+        // Only a bodyless idempotent request is replayed, once, and only when no response byte arrived.
+        const responseBytes = attempt.socket && bytesReadBefore >= 0 ? attempt.socket.bytesRead - bytesReadBefore : -1
+        if (!retried && !fresh && attempt.reusedSocket && error.code === 'ECONNRESET' && (method === 'GET' || method === 'HEAD')
+          && responseBytes === 0 && incoming.readableEnded && bodyBytes === 0 && !downstreamGone && !closed && !outgoing.headersSent) {
+          retried = true
+          recovered.push(`${label}: ECONNRESET (${error.message}) on a reused socket; retried once on a new connection`)
+          send(true).end()
+          return
+        }
+        fail(error, 'before any response', attempt.reusedSocket)
+      })
+      return attempt
+    }
+    outgoing.on('close', () => {
+      if (!outgoing.writableFinished) downstreamGone = true
+      upstream.destroy()
     })
-    upstream.on('socket', trackSocket)
-    upstream.on('error', () => { if (!outgoing.headersSent) outgoing.writeHead(502); outgoing.end() })
-    outgoing.on('close', () => upstream.destroy())
-    incoming.pipe(upstream)
+    incoming.pipe(send(false))
   })
   server.on('connection', trackSocket)
   // The allowed client uses HTTP. Never establish an opaque TLS tunnel to any service.
@@ -65,7 +109,7 @@ export async function createRenderedNetworkGuard(baseURL: string) {
     server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
   })
   return {
-    allowed, record, unexpected, failures,
+    allowed, record, unexpected, failures, recovered,
     proxy: { server: `http://127.0.0.1:${(server.address() as AddressInfo).port}` },
     async connectWebSocket(route: WebSocketRoute) {
       const destination = new URL(route.url())

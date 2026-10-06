@@ -40,6 +40,28 @@ test('the ordinary isolation-probe control passes', () => {
   assert.match(output, /3 passed/)
 })
 
+test('a reset reused upstream connection is retried once and named (#1494)', () => {
+  const result = runProbe('transport-recovery.spec.ts')
+  const output = `${result.stdout}\n${result.stderr}`
+
+  assert.equal(result.status, 0, output)
+  assert.match(output, /1 passed/)
+})
+
+test('an unrecoverable upstream failure fails the child test and names its cause (#1494)', () => {
+  const result = runProbe('transport-failure.spec.ts')
+  const output = `${result.stdout}\n${result.stderr}`
+
+  assert.notEqual(result.status, 0, output)
+  assert.match(output, /rendered fixture network transport failed/)
+  assert.match(output, /GET \/reset-always: ECONNRESET .* before any response on a new socket/)
+  assert.match(output, /GET \/truncated: ECONNRESET .* during the response body/)
+  // Never replayed: a POST, or a GET whose response had begun, on a reset reused connection.
+  assert.match(output, /POST \/reset-reused: \w+ \(.*\) before any response on a reused socket after \d+ ms\."/)
+  assert.match(output, /GET \/partial-reused: ECONNRESET \(.*\) before any response on a reused socket after \d+ ms\."/)
+  assert.match(output, /1 failed/)
+})
+
 test('swallowed browser violations are prevented and still fail even when mocked', () => {
   const result = runProbe('network-offending.spec.ts')
   const output = `${result.stdout}\n${result.stderr}`
