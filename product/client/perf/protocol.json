@@ -58,5 +58,10 @@
   },
   "pilot": { "headlessBlocks": 2, "browserRounds": 2 },
   "caps": { "headlessRunsPerArmPerCell": 20, "browserRunsPerCell": 10, "hostHoursPerBaselineSet": 4 },
-  "quietHost": { "sampleSeconds": 3, "maxBusyPercent": 25, "maxWaitSeconds": 60 }
+  "quietHost": {
+    "sampleSeconds": 5,
+    "maxBusyPercent": 15,
+    "maxWaitSeconds": 300,
+    "revision": "Tightened after the headless pilot and before any baseline run: the pilot's criterion (3 s, 25%, 60 s) admitted runs that other work on the shared host slowed by up to 30%. A run that starts after the wait without meeting it is still run, flagged and kept."
+  }
 }
