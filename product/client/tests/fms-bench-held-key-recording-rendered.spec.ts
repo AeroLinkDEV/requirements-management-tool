@@ -48,10 +48,12 @@ for (const row of rows) {
     await page.clock.runFor(250)
     await station.cdu.locator('.fmsCduKey[data-key="B"]').click()
     await expect.poll(scratchpad).toBe('AB')
-    // CLR held for its full second clears the whole scratchpad live.
+    // CLR held for its full second clears the whole scratchpad live. The hold starts between bench ticks, so its
+    // timer fires between ticks too (at 1.35 s, recorded on the 1.25 s tick) rather than tying with one.
+    await page.clock.runFor(100)
     await station.cdu.focus()
     await page.keyboard.down('Backspace')
-    await page.clock.runFor(1000)
+    await page.clock.runFor(1100)
     await page.keyboard.up('Backspace')
     await expect.poll(scratchpad).toBe('')
 
@@ -67,7 +69,10 @@ for (const row of rows) {
 
     // Replayed on a restarted bench, the held CLR clears both characters, as it did live (a plain CLR would leave A).
     await station.scenarios.getByRole('button', { name: 'Run the scenario' }).click()
-    await page.clock.runFor(2000)
+    // The replay types A and B first, so the blank scratchpad at the end is the held CLR's work, not an idle run.
+    await page.clock.runFor(250)
+    await expect.poll(scratchpad).toBe('AB')
+    await page.clock.runFor(1750)
     await expect(station.scenarios.getByRole('status').filter({ hasText: /^NO CHECKS/ })).toBeVisible()
     await station.showCdu()
     expect(await scratchpad()).toBe('')
