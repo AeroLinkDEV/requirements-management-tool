@@ -18,6 +18,9 @@ function runProbe(spec) {
     cwd: client,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    // In a colour terminal Node's test runner sets FORCE_COLOR=1, and Playwright's line reporter then prefixes
+    // later output with cursor escapes that break whole-line matches of the child's output.
+    env: { ...process.env, FORCE_COLOR: '0' },
   })
 }
 
