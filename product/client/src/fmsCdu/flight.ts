@@ -315,6 +315,12 @@ export class FlightSimulator {
     this.settleFailure();
   }
 
+  /** The output port's consumer is an observer (#1518): what it reads, even mid-step, is never kept. */
+  private publish(frame: Parameters<GuidanceOutputPort<Guidance>["write"]>[0]) {
+    const port = this.outputPort;
+    if (port) this.fms.observe(() => port.write(frame));
+  }
+
   /** The guidance as last computed. Reading it changes nothing (#1518): the failure watch below keeps it current. */
   get guidance() { return this.last; }
 
@@ -679,7 +685,7 @@ export class FlightSimulator {
     fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
     const computed = this.guide(dt); this.updateApproach(computed.crossTrack);
     this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
-    this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
+    this.publish({ at: fms.now.getTime(), sequence: ++this.outputSequence,
       status: fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
       value: fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
     const final = fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
@@ -692,7 +698,7 @@ export class FlightSimulator {
   private refreshStep(selected?: FlightSimulator) {
     if (selected) this.adoptAfcsSelections(selected);
     this.watchFailure(); this.last = this.guide();
-    this.outputPort?.write({ at: this.fms.now.getTime(), sequence: ++this.outputSequence,
+    this.publish({ at: this.fms.now.getTime(), sequence: ++this.outputSequence,
       status: this.fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
       value: this.fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
   }
@@ -724,7 +730,7 @@ export class FlightSimulator {
     // target the hold flies from this first step, not the approach's.
     const guidance = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.last = guidance;
-    this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
+    this.publish({ at: fms.now.getTime(), sequence: ++this.outputSequence,
       status: fms.hasCondition("fmsFail") ? "FAIL" : guidance.desiredTrack === null ? "NCD" : "NORMAL",
       value: fms.hasCondition("fmsFail") ? null : structuredClone(guidance) });
     // The airspeed moves toward the target at the acceleration limit. Bank toward the command at the roll-rate limit,

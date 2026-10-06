@@ -2,9 +2,17 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { offset, type Leg } from '../src/fmsCdu/fmsModel'
-import { ScenarioRunner, TICK_SECONDS, advanceTicks, runHeadless, type Scenario } from '../src/fmsCdu/scenario'
+import { distanceNm, offset, type Leg } from '../src/fmsCdu/fmsModel'
+import { CORE_PAGES } from '../src/fmsCdu/fmsPages'
+import { DATALINK_PAGES } from '../src/fmsCdu/datalinkPages'
+import { NAV_PAGES } from '../src/fmsCdu/navPages'
+import { PLANNING_PAGES } from '../src/fmsCdu/planningPages'
+import { profileById } from '../src/fmsCdu/profile'
+import { RADIO_PAGES } from '../src/fmsCdu/radioPages'
+import { ScenarioRunner, TICK_SECONDS, advanceTicks, runHeadless, scenarioStart, type Scenario } from '../src/fmsCdu/scenario'
+import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { TACTICAL_PAGES } from '../src/fmsCdu/tacticalPages'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
@@ -12,6 +20,7 @@ import type { CduFunction } from '../src/fmsCdu/variants'
 // after every callback, so each case runs twice: once rendered the way the bench renders, once with no read at all.
 // Both must give the bench's behaviour, so a headless run, a state digest or an analyzer view sees the same simulation.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
+const ALL_PAGES = [CORE_PAGES, PLANNING_PAGES, NAV_PAGES, RADIO_PAGES, TACTICAL_PAGES, DATALINK_PAGES].flatMap(pages => Object.values(pages))
 
 /** What the bench reads after each callback: the CDU screen and lamps, and the guidance computer's bus and air data. */
 const render = (fms: ScriptedFms, sim: FlightSimulator) => {
@@ -71,6 +80,32 @@ test('the rendezvous with a moving waypoint is determined at the EXEC, rendered 
   const headless = drive(false)
   expect(headless).toEqual(drive(true))
   expect(headless.schedule).toEqual([0, 10, 20])
+
+  // On the dual bench a SYNC copies the plan into FMS 2 and then reconciles its navigation: FMS 2 determines its
+  // rendezvous from where it stands once the whole exchange has ended, not part-way through it (CDU 2 on LEGS shows it).
+  const sync = (rendered: boolean) => {
+    let now = START
+    const system = new DualFmsSystem(() => new Date(now))
+    const [one, two] = system.computers
+    const draw = () => { if (rendered) { render(one, system.simulator); two.screen(); two.lamps() } }
+    const fly = (ticks: number) => { for (let i = 0; i < ticks; i += 1) { now += TICK_SECONDS * 1000; system.step(TICK_SECONDS); draw() } }
+    system.setLinkAvailable(false); system.setLinkAvailable(true)
+    fly(40)
+    Object.assign(one.wind, { direction: 0, speed: 0 })
+    one.defineMoving('SHIP1', offset(one.position, 30, 12), 90, 40)
+    one.directTo('SHIP1'); one.press('EXEC'); draw()
+    two.press('LEGS'); draw()
+    fly(8)
+    one.dualOperation!.requestMode('SYNC'); draw()
+    one.dualOperation!.confirmMode(true); draw()
+    const rendezvous = two.rendezvousFor(two.activeRoute, 0)!
+    return { mode: system.mode, rendezvous, from: two.position, at: now }
+  }
+  const synced = sync(false)
+  expect(synced).toEqual(sync(true))
+  expect(synced).toMatchObject({ mode: 'SYNC', rendezvous: { computedAt: synced.at, condition: 1, achievable: true } })
+  // Condition 1 solves from the present position: its distance is the distance from where FMS 2 now stands.
+  expect(Math.abs(distanceNm(synced.from, synced.rendezvous.position!) - synced.rendezvous.distanceNm!)).toBeLessThan(1e-9)
 })
 
 // Owner: the laboratory FMS-failure reversion latches at the action that failed the FMS, paused or flying, whether or
@@ -117,4 +152,97 @@ test('an FMS failure latches its reversion at the toggle without a render, pause
   const headless = failure(runHeadless(scenario, START).sim)
   expect(headless).toEqual(rendered)
   expect(headless.map(event => event.at)).toEqual([START + 2000])
+
+  // At 4x the bench runs four ticks per callback and draws once: the latch is still at the tick of the toggle, not at
+  // the end of the callback, so a run's timeline does not depend on its rate (the scenario run contract).
+  const midCallback: Scenario = { ...scenario, steps: [{ ...scenario.steps[0], when: { kind: 'time', seconds: 2.25 } }, scenario.steps[1]] }
+  const paced = (rate: number) => {
+    let now = START
+    const system = new DualFmsSystem(() => new Date(now))
+    const runner = new ScenarioRunner(midCallback, system.computers[0], undefined, system.flights[0])
+    while (!runner.finished) { advanceTicks(rate, ms => { now += ms }, system, runner); render(system.computers[0], system.simulator) }
+    return failure(system.flights[0])
+  }
+  const once = paced(1)
+  expect(paced(4)).toEqual(once)
+  expect(once.map(event => event.at)).toEqual([START + 2250])
+})
+
+// Owner of purity itself: whatever reads the system between computations (every getter, every page at every index, the
+// bus outputs of either computer against either flight) leaves its whole state as it was. The snapshot walks data
+// only, never an accessor, so taking it reads nothing. The one memo it allows is the magnetic model's last field,
+// keyed by all of its inputs.
+test('reading the whole dual system between computations changes none of its state', () => {
+  const snapshot = (root: unknown) => {
+    const out = new Map<string, string>(), seen = new Map<object, string>()
+    const walk = (value: unknown, path: string) => {
+      if (typeof value === 'function') return
+      if (value === null || typeof value !== 'object') { out.set(path, Object.is(value, -0) ? '-0' : String(value)); return }
+      if (seen.has(value)) { out.set(path, `<ref ${seen.get(value)}>`); return }
+      seen.set(value, path)
+      if (value instanceof Date) { out.set(path, `D${value.getTime()}`); return }
+      if (value instanceof Map) { out.set(`${path}#size`, String(value.size)); for (const [k, v] of value) walk(v, `${path}{${String(k)}}`); return }
+      if (value instanceof Set) { out.set(`${path}#size`, String(value.size)); let i = 0; for (const v of value) walk(v, `${path}<${i++}>`); return }
+      if (ArrayBuffer.isView(value)) { out.set(path, `buffer ${(value as Uint8Array).length}`); return }
+      for (const key of Object.getOwnPropertyNames(value)) {
+        const property = Object.getOwnPropertyDescriptor(value, key)!
+        if ('value' in property) walk(property.value, `${path}.${key}`)
+      }
+    }
+    walk(root, '$')
+    return out
+  }
+  const getters = (object: object) => {
+    const names = new Set<string>()
+    for (let p: object | null = object; p && p !== Object.prototype; p = Object.getPrototypeOf(p))
+      for (const key of Object.getOwnPropertyNames(p)) if (Object.getOwnPropertyDescriptor(p, key)!.get) names.add(key)
+    return [...names]
+  }
+  const readEverything = (system: DualFmsSystem) => {
+    const touch = (object: object) => { for (const name of getters(object)) { try { void (object as Record<string, unknown>)[name] } catch { /* some getters throw in some states */ } } }
+    touch(system)
+    system.computers.forEach((fms, side) => {
+      touch(fms); if (fms.dualOperation) touch(fms.dualOperation)
+      fms.screen(); fms.lamps(); fms.profile(); fms.rendezvous()
+      for (const route of [fms.activeRoute, fms.route]) route.legs.forEach((leg, i) => { if (leg.kind === 'wpt') { fms.coordinates(leg.ident, route); fms.rendezvousFor(route, i) } })
+      for (const page of ALL_PAGES) {
+        const count = Math.max(1, page.pages(fms))
+        for (let i = 0; i < Math.min(count, 12); i += 1) { try { page.render(fms, i) } catch { /* a page may not render in this state */ } }
+      }
+      touch(system.flights[side])
+      for (const flight of system.flights) { fmsOutputs(fms, flight); aircraftData(fms, flight) }
+    })
+  }
+  const changed: string[] = []
+  const rest = (label: string, system: DualFmsSystem) => {
+    const before = snapshot(system)
+    readEverything(system)
+    const after = snapshot(system)
+    for (const [path, value] of after) if (before.get(path) !== value && !/\.magvar\.cached\b/.test(path)) changed.push(`${label} ${path}: ${before.get(path)} -> ${value}`)
+  }
+
+  // The three mechanisms at their rest points: a moving waypoint entered and executed, a LEGS view, an FMS failure.
+  let now = START
+  const system = new DualFmsSystem(() => new Date(now))
+  const [one] = system.computers
+  one.defineMoving('SHIP1', offset(one.position, 30, 12), 90, 40); one.directTo('SHIP1'); rest('moving-mod', system)
+  one.press('EXEC'); rest('moving-exec', system)
+  for (let i = 0; i < 20; i += 1) { now += 250; system.step(0.25) }
+  rest('moving-flying', system)
+  one.replaceLegs(legs(12, one)); press(one, 'LEGS', 'NEXT', 'NEXT', 'LSK6L'); rest('legs-shrunk', system)
+  one.setCondition('fmsFail', true); rest('fail-paused', system)
+  now += 250; system.step(0.25); rest('fail-flying', system)
+  one.setCondition('fmsFail', false); rest('recovered', system)
+  now += 250; system.tick(); rest('recovered-tick', system)
+
+  // And one short library scenario, read at a few of its ticks.
+  const scenario = SCENARIO_LIBRARY.find(s => s.id === 'manual-rnp')!
+  let at = scenarioStart(scenario) ?? START
+  const run = new DualFmsSystem(() => new Date(at), { profile: profileById(scenario.profile) })
+  const runner = new ScenarioRunner(scenario, run.computers[0], undefined, run.flights[0])
+  for (let t = 0; !runner.finished && t < 400; t += 1) {
+    advanceTicks(1, ms => { at += ms }, run, runner)
+    if (t % 100 === 0) rest(`${scenario.id}@${t}`, run)
+  }
+  expect(changed.slice(0, 20)).toEqual([])
 })

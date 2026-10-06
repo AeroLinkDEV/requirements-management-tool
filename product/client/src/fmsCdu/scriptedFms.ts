@@ -189,6 +189,14 @@ export type MovingRendezvous = {
 /** The DESELECT 1/1 lines (M300 17-2) of the equipment this profile configures; GPS has its own page. */
 export type DeselectableInput = "TAS" | "HDG" | "DME" | "VOR/DME/TCN" | "DVS" | "KALMAN";
 
+/**
+ * The kernel computation the computers of one system share (#1518): how deep it is, whether observers are running
+ * inside it, and whether its end is settling them. A settle that starts another computation makes it run again, at
+ * most SETTLE_ROUNDS times (a bound against a settle that never comes to rest; none is known to need a second round).
+ */
+type Computation = { depth: number; observing: number; settling: boolean; dirty: boolean; members: ScriptedFms[] };
+const SETTLE_ROUNDS = 4;
+
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
   private changes = 0;
@@ -198,9 +206,9 @@ export class ScriptedFms implements CduBackend {
    * condition, a flight step or tick) ends, and at every change notification outside one. The bench renders after each
    * of those, so the bench's timing is kept, and a headless run or a digest that never renders sees the same state.
    */
-  private computing = 0;
+  private computation: Computation = { depth: 0, observing: 0, settling: false, dirty: false, members: [this] };
   private notifyPending = false;
-  private settlers: (() => void)[] = [];
+  private settler: (() => void) | null = null;
   private page: PageId = "IDENT";
   private index = 0;
   private scratch = "";
@@ -826,32 +834,69 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * One kernel computation: a key, a bench condition, or (from the flight and the dual system) a step or a tick. Its
-   * own reads are part of it; when the outermost one ends, what it changed is settled and its observers are notified.
+   * One kernel computation: a key, a bench control or condition, a cross-talk operation, or (from the flight and the
+   * dual system) a step or a tick. Its own reads are part of it. Every computer of the system takes part in it
+   * (shareComputation), so when the outermost one ends each computer settles once, after the whole of it, and then its
+   * observers are notified. A change notification outside any computation is a computation of its own.
    */
   compute<T>(work: () => T): T {
-    this.computing += 1;
+    const computation = this.computation;
+    computation.depth += 1;
     try { return work(); } finally {
-      this.computing -= 1;
-      if (this.computing === 0) {
-        this.settle();
-        if (this.notifyPending) { this.notifyPending = false; for (const listener of this.listeners) listener(); }
-      }
+      computation.depth -= 1;
+      if (computation.depth === 0) this.finishComputation();
     }
   }
 
-  /** Work that completes at the end of each kernel computation: the flight attaches its FMS-failure watch here. */
-  attachSettle(settle: () => void) { this.settlers.push(settle); }
+  /**
+   * Runs an observer called from inside a computation: the consumer of the flight's output port. What it reads is never
+   * kept, even though it reads in the middle of a step.
+   */
+  observe<T>(work: () => T): T {
+    this.computation.observing += 1;
+    try { return work(); } finally { this.computation.observing -= 1; }
+  }
 
-  private settling = false;
-  private settle() {
-    if (this.settling) return;
-    this.settling = true;
+  /** The two computers of a dual system take part in each other's computations (#1518). */
+  shareComputation(peer: ScriptedFms) {
+    peer.computation = this.computation;
+    this.computation.members.push(peer);
+  }
+
+  /** The FMS-failure watch of the flight that drives this computer, run as each computation ends; a later flight replaces it. */
+  attachSettle(settle: () => void) { this.settler = settle; }
+
+  /** Whether a read now belongs to the kernel, which keeps what it determines, rather than to an observer. */
+  private get kernelReading() {
+    const computation = this.computation;
+    return computation.settling || (computation.depth > 0 && computation.observing === 0);
+  }
+
+  private finishComputation() {
+    const computation = this.computation;
+    // A computation that a settle starts (an alert it raises, say) is settled by another round of this one.
+    if (computation.settling) { computation.dirty = true; return; }
+    computation.settling = true;
     try {
-      this.settleView();
-      this.settleRendezvous();
-      for (const settle of this.settlers) settle();
-    } finally { this.settling = false; }
+      for (let round = 0; round < SETTLE_ROUNDS; round += 1) {
+        computation.dirty = false;
+        for (const member of computation.members) member.settle();
+        if (!computation.dirty) break;
+      }
+    } finally { computation.settling = false; }
+    // The listeners run after the computation, so what they read is not kept; an action one of them takes is a
+    // computation of its own.
+    for (const member of computation.members) {
+      if (!member.notifyPending) continue;
+      member.notifyPending = false;
+      for (const listener of member.listeners) listener();
+    }
+  }
+
+  private settle() {
+    this.settleView();
+    this.settleRendezvous();
+    this.settler?.();
   }
 
   // ------------------------------------------------------------------ test bench
@@ -2522,7 +2567,7 @@ export class ScriptedFms implements CduBackend {
     const cached = this.rendezvousCache.get(key);
     if (cached && cached.condition === this.rendezvousCondition(route, index)) return cached;
     const solved = this.solveRendezvous(route, index, leg.ident);
-    if (this.computing > 0 || this.settling) this.rendezvousCache.set(key, solved);
+    if (this.kernelReading) this.rendezvousCache.set(key, solved);
     return solved;
   }
 
@@ -4278,10 +4323,9 @@ export class ScriptedFms implements CduBackend {
 
   private emit() {
     this.changes += 1;
-    // Inside a computation the observers wait for its end, so none of them ever sees, or reads into, a half-done step.
-    if (this.computing > 0) { this.notifyPending = true; return; }
-    this.settle();
-    for (const listener of this.listeners) listener();
+    // The observers wait for the computation's end, so none of them ever sees, or reads into, a half-done step.
+    this.notifyPending = true;
+    if (this.computation.depth === 0) this.compute(() => undefined);
   }
 
   private scratchLine(): Line {
