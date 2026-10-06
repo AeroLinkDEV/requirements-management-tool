@@ -70,8 +70,10 @@ export function describeSensorStimulus(a: SensorStimulus): string {
   }
 }
 
-/** Throws on an unavailable target; an unapplied stimulus is an execution error, never a pass. */
-export function applySensorStimulus(fms: ScriptedFms, a: SensorStimulus): void {
+/** Throws on an unavailable target; an unapplied stimulus is an execution error, never a pass. One kernel computation (#1518). */
+export function applySensorStimulus(fms: ScriptedFms, a: SensorStimulus): void { fms.compute(() => applyStimulus(fms, a)); }
+
+function applyStimulus(fms: ScriptedFms, a: SensorStimulus): void {
   const problem = sensorStimulusProblem(a);
   if (problem) throw new Error(problem);
   switch (a.kind) {

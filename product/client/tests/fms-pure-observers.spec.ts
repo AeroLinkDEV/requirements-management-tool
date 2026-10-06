@@ -1,6 +1,8 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
+import { fmsGpsView } from '../src/fmsCdu/gpsBench'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm, offset, type Leg } from '../src/fmsCdu/fmsModel'
 import { CORE_PAGES } from '../src/fmsCdu/fmsPages'
@@ -13,6 +15,7 @@ import { ScenarioRunner, TICK_SECONDS, advanceTicks, runHeadless, scenarioStart,
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { TACTICAL_PAGES } from '../src/fmsCdu/tacticalPages'
+import { WMM2025_DATABASE } from '../src/fmsCdu/wmm2025'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
@@ -106,6 +109,62 @@ test('the rendezvous with a moving waypoint is determined at the EXEC, rendered 
   expect(synced).toMatchObject({ mode: 'SYNC', rendezvous: { computedAt: synced.at, condition: 1, achievable: true } })
   // Condition 1 solves from the present position: its distance is the distance from where FMS 2 now stands.
   expect(Math.abs(distanceNm(synced.from, synced.rendezvous.position!) - synced.rendezvous.distanceNm!)).toBeLessThan(1e-9)
+
+  // A scenario action is one computation too: a procedure step (which changes the route without a notification)
+  // determines the modification's rendezvous at its own tick, as the bench drawing after that callback did.
+  const scenario: Scenario = {
+    id: 'pure-observer-procedure', title: 'Procedure with a moving waypoint', objective: 'Rendezvous timing', maxSeconds: 6,
+    steps: [
+      { when: { kind: 'time', seconds: 2 }, action: { kind: 'procedure', procedure: 'APPROACH', ident: 'R24R' } },
+      { when: { kind: 'after', seconds: 3 }, action: { kind: 'expectNoAlert', text: 'NONE' } },
+    ],
+  }
+  const procedure = (rendered: boolean) => {
+    let now = START
+    const system = new DualFmsSystem(() => new Date(now))
+    const one = system.computers[0]
+    Object.assign(one.wind, { direction: 0, speed: 0 })
+    one.defineMoving('SHIP1', offset(one.position, 30, 12), 90, 40); one.directTo('SHIP1'); one.press('EXEC')
+    const runner = new ScenarioRunner(scenario, one, undefined, system.flights[0])
+    while (!runner.finished) { advanceTicks(1, ms => { now += ms }, system, runner); if (rendered) render(one, system.simulator) }
+    return { status: one.routeStatus, rendezvous: one.rendezvousFor(one.route, 0) }
+  }
+  const stepped = procedure(false)
+  expect(stepped).toEqual(procedure(true))
+  expect(stepped).toMatchObject({ status: 'MOD', rendezvous: { computedAt: START + 2000, condition: 4 } })
+})
+
+// Owner: a settle that keeps starting computations is a programming fault, reported, never carried on in.
+test('a settle that never comes to rest throws instead of leaving the FMS half settled', () => {
+  const { fms } = single()
+  let calls = 0
+  fms.attachSettle(() => { calls += 1; fms.raiseAlert(`LOOP ${calls}`) })
+  expect(() => fms.press('CLR')).toThrow(/did not come to rest/)
+  expect(calls).toBe(4)
+})
+
+// Owner of the observer gate: a consumer of the flight's output port is an observer even though it is called from
+// inside a step. Reading the bus outputs there, as the moving waypoint becomes the modification's first, keeps nothing.
+test('an output-port consumer reading the outputs mid-step changes nothing the step determines', () => {
+  const drive = (consumer: boolean) => {
+    let now = START
+    const fms = new ScriptedFms(() => new Date(now))
+    let reads = 0
+    const sim: FlightSimulator = new FlightSimulator(fms, consumer ? { write: () => { fmsOutputs(fms, sim); reads += 1 } } : undefined)
+    Object.assign(fms.wind, { direction: 0, speed: 0 })
+    const fixed = (i: number, nm: number): Leg => ({ kind: 'wpt', ident: `PO${String(i).padStart(2, '0')}`, position: offset(fms.position, 0, nm) })
+    fms.replaceLegs([fixed(1, 0.6), fixed(2, 6), fixed(3, 12)]); fms.press('EXEC')
+    fms.defineMoving('SHIP1', offset(fms.position, 30, 12), 90, 40)
+    fms.replaceLegs([fixed(1, 0.6), { kind: 'wpt', ident: 'SHIP1' }, fixed(2, 6), fixed(3, 12)])
+    for (let i = 0; i < 400 && fms.activeRoute.legs[0]?.kind === 'wpt' && (fms.activeRoute.legs[0] as { ident: string }).ident === 'PO01'; i += 1) {
+      now += TICK_SECONDS * 1000; sim.step(TICK_SECONDS)
+    }
+    return { reads: reads > 0, at: now, first: fms.route.legs[0], rendezvous: fms.rendezvousFor(fms.route, 0) }
+  }
+  const quiet = drive(false), read = drive(true)
+  expect(read.reads).toBe(true)
+  expect({ ...read, reads: false }).toEqual(quiet)
+  expect(quiet.rendezvous).toMatchObject({ condition: 4, computedAt: quiet.at })
 })
 
 // Owner: the laboratory FMS-failure reversion latches at the action that failed the FMS, paused or flying, whether or
@@ -218,7 +277,8 @@ test('reading the whole dual system between computations changes none of its sta
     const before = snapshot(system)
     readEverything(system)
     const after = snapshot(system)
-    for (const [path, value] of after) if (before.get(path) !== value && !/\.magvar\.cached\b/.test(path)) changed.push(`${label} ${path}: ${before.get(path)} -> ${value}`)
+    for (const path of new Set([...before.keys(), ...after.keys()]))
+      if (before.get(path) !== after.get(path) && !/\.magvar\.cached\b/.test(path)) changed.push(`${label} ${path}: ${before.get(path)} -> ${after.get(path)}`)
   }
 
   // The three mechanisms at their rest points: a moving waypoint entered and executed, a LEGS view, an FMS failure.
@@ -234,6 +294,13 @@ test('reading the whole dual system between computations changes none of its sta
   now += 250; system.step(0.25); rest('fail-flying', system)
   one.setCondition('fmsFail', false); rest('recovered', system)
   now += 250; system.tick(); rest('recovered-tick', system)
+  // Every action settles when it ends, so those rest points are settled already and cannot show a read that latches.
+  // Changing a part of the state directly, past every action, leaves one unsettled: a LEGS view whose modification
+  // shrinks under page 3/3, and a magnetic table that fails the FMS. Reading must leave both exactly as they are.
+  one.replaceLegs(legs(12, one)); press(one, 'LEGS', 'NEXT', 'NEXT')
+  one.route.legs.splice(7); rest('legs-unsettled', system)
+  one.press('LSK6L')
+  one.magvar.load({ ...WMM2025_DATABASE, coefficients: `${WMM2025_DATABASE.coefficients} ` }); rest('fail-unsettled', system)
 
   // And one short library scenario, read at a few of its ticks.
   const scenario = SCENARIO_LIBRARY.find(s => s.id === 'manual-rnp')!
@@ -245,4 +312,25 @@ test('reading the whole dual system between computations changes none of its sta
     if (t % 100 === 0) rest(`${scenario.id}@${t}`, run)
   }
   expect(changed.slice(0, 20)).toEqual([])
+})
+
+// Owner: the GPS tab's view only reads. The integrity condition takes the satellite selection, so the bench's masking
+// is cleared when the condition comes on (and while it holds), not whenever the tab happens to be drawn.
+test('the GPS integrity condition clears the bench masking whether or not the GPS tab is drawn', () => {
+  const drive = (drawn: boolean) => {
+    const { fms } = single()
+    const stimulus = stimulusFor(fms)
+    const prn = 7 // the masking record, whichever satellites are in view
+    stimulus.toggleMasked(0, prn)
+    expect(stimulus.state(0).masked).toEqual([prn])
+    fms.setCondition('gpsIntegrity', true)
+    if (drawn) fmsGpsView(fms)
+    const held = stimulus.state(0).masked
+    fms.setCondition('gpsIntegrity', false)
+    if (drawn) fmsGpsView(fms)
+    return { held, after: stimulus.state(0).masked }
+  }
+  const hidden = drive(false)
+  expect(hidden).toEqual(drive(true))
+  expect(hidden).toEqual({ held: [], after: [] })
 })

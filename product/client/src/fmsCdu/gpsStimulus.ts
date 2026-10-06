@@ -152,7 +152,10 @@ export class GpsStimulus {
    * re-read the receivers and tells the listener. Returns false, and changes nothing, when the operation is invalid or
    * the receiver refuses it (a status patch it does not accept).
    */
-  apply(index: number, op: GpsOp): boolean {
+  apply(index: number, op: GpsOp): boolean { return this.fms.compute(() => this.applyNow(index, op)); }
+
+  /** One operation, as one kernel computation of the FMS (#1518): the tab, a scenario and a recording all go through it. */
+  private applyNow(index: number, op: GpsOp): boolean {
     if ((index !== 0 && index !== 1) || gpsOpProblem(op) !== null) return false;
     const rx = this.receiver(index), state = this.states[index];
     let update: Partial<ReceiverStimulus>;
@@ -212,6 +215,8 @@ export class GpsStimulus {
       }
     }
     this.states[index] = { ...state, ...update };
+    // While the integrity condition holds the selection, masking is not kept (the bench used to clear it as it drew).
+    if (this.fms.hasCondition("gpsIntegrity")) this.clearMasking();
     this.fms.gpsUpdated();
     this.listener?.(index, structuredClone(op));
     return true;

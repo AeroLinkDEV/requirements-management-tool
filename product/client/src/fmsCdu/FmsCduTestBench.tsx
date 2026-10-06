@@ -183,8 +183,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     const system = new DualFmsSystem(() => new Date(simTime.current), { profile, secondaryProfile: profileById(secondaryProfileChoice.current) ?? profile, ...(userDatabase ? { userDatabase } : {}) });
     const fms = system.computers[0], flight = system.flights[0];
     const start = pendingStart.current;
-    const started = start ? START_STATES[start].setUp(fms, flight) : null;
-    if (start) { fms.dualOperation?.settingsChanged(); fms.dualOperation?.finishEdit(true); system.computers[1].observeAircraft(fms); }
+    // A start state and its copy to FMS 2 are one computation over both computers (#1518): both settle once, at the end.
+    const started = start ? fms.compute(() => {
+      const outcome = START_STATES[start].setUp(fms, flight);
+      fms.dualOperation?.settingsChanged(); fms.dualOperation?.finishEdit(true); system.computers[1].observeAircraft(fms);
+      return outcome;
+    }) : null;
     // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards.
     const chosen = variantById(variantId);
     const runner = pendingScenario.current

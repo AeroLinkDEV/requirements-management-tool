@@ -17,6 +17,8 @@ import {
 } from "./fmsModel";
 import { Constellation, seededRandom } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
+import { stimulusFor } from "./gpsStimulus";
+import { asComputations } from "./computation";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
@@ -192,7 +194,7 @@ export type DeselectableInput = "TAS" | "HDG" | "DME" | "VOR/DME/TCN" | "DVS" | 
 /**
  * The kernel computation the computers of one system share (#1518): how deep it is, whether observers are running
  * inside it, and whether its end is settling them. A settle that starts another computation makes it run again, at
- * most SETTLE_ROUNDS times (a bound against a settle that never comes to rest; none is known to need a second round).
+ * most SETTLE_ROUNDS times; one still not at rest after that is a programming fault and throws.
  */
 type Computation = { depth: number; observing: number; settling: boolean; dirty: boolean; members: ScriptedFms[] };
 const SETTLE_ROUNDS = 4;
@@ -209,6 +211,27 @@ export class ScriptedFms implements CduBackend {
   private computation: Computation = { depth: 0, observing: 0, settling: false, dirty: false, members: [this] };
   private notifyPending = false;
   private settler: (() => void) | null = null;
+  // The actions the crew, the bench and the scenarios take, each one computation (press and setCondition compute
+  // themselves). The steps' own internals (tick, arrive, updateNavigation, setAircraft...) run inside a step already.
+  static {
+    asComputations(ScriptedFms, [
+      "abeamPoints", "acknowledgeComputerMessage", "activateHover", "activateSar", "activateSecondary", "addMark", "answerCall",
+      "armApproach", "cancelHover", "cancelTdn", "changeHold", "chooseEntry", "completeSar", "copyActiveToSecondary",
+      "createPilot", "createUserWaypoint", "declareQnh", "declareSurface", "defineHold", "defineMoving", "definePoint",
+      "defineTemporary", "deselectRaimSatellite", "designateHoverMark", "designateHoverMarkIdent", "designateHoverMarkOnTop",
+      "directTo", "endCall", "enterManualWind", "enterQnh", "enterWaypoint", "eraseHold", "eraseModification", "executeTdn",
+      "forgetPilot", "goAround", "importUserDatabase", "initializePosition", "interceptCourse", "interruptSar", "loadArinc424",
+      "loadBacktrack", "loadCompanyRoute", "loadMagvar", "loadNavData", "modify", "open", "overrideDiscontinuity",
+      "placeAircraft", "powerOff", "powerOn", "predictRaimAt", "predictRaimEta", "proceedFromPins", "raiseAlert",
+      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "replaceLegs",
+      "requestMissedApproach", "saveCompanyRoute", "selectGpsReceiver", "selectProcedure", "selectRunway", "sequence",
+      "setAirInputFaults", "setApirsFaultBias", "setApproachTemperature", "setBaroError", "setBaroSetting", "setDeselected",
+      "setDmeDeselected", "setDvsInputSurface", "setDvsWindMagnetic", "setFafAltitude", "setFuel", "setGpsBaro",
+      "setInhibited", "setNavRadioMode", "setNdbOffAir", "setOffset", "setRadio", "setRadioFaults", "setRnp", "setScratch",
+      "setSensorHealth", "setStationFault", "setStationOffAir", "setSurfaceDrift", "setUtcTime", "setWaterCurrent", "squawk",
+      "startSelfTest", "swapCycles", "swapRadio", "toggleAngleReference",
+    ], self => self);
+  }
   private page: PageId = "IDENT";
   private index = 0;
   private scratch = "";
@@ -878,12 +901,13 @@ export class ScriptedFms implements CduBackend {
     if (computation.settling) { computation.dirty = true; return; }
     computation.settling = true;
     try {
-      for (let round = 0; round < SETTLE_ROUNDS; round += 1) {
+      for (let round = 0; round < SETTLE_ROUNDS && (round === 0 || computation.dirty); round += 1) {
         computation.dirty = false;
         for (const member of computation.members) member.settle();
-        if (!computation.dirty) break;
       }
-    } finally { computation.settling = false; }
+      // A settle that keeps starting computations never comes to rest: a programming fault, never a state to carry on in.
+      if (computation.dirty) throw new Error(`FMS settle did not come to rest in ${SETTLE_ROUNDS} rounds (#1518)`);
+    } finally { computation.settling = false; computation.dirty = false; }
     // The listeners run after the computation, so what they read is not kept; an action one of them takes is a
     // computation of its own.
     for (const member of computation.members) {
@@ -957,6 +981,9 @@ export class ScriptedFms implements CduBackend {
         if (id === "gpsLost") for (const receiver of this.receivers) receiver.injectFault("RF_INPUT", on);
         // GPS integrity is applied every step while on (applyGpsIntegrityCondition); off clears what it set.
         if (id === "gpsIntegrity" && !on) this.clearGpsIntegrityCondition();
+        // The condition takes the satellite selection, so the bench's masking no longer applies: it is cleared here, when
+        // the condition comes on, not whenever the GPS tab happens to be drawn (#1518).
+        if (id === "gpsIntegrity" && on) stimulusFor(this).clearMasking();
         if (["gpsLost", "gpsIntegrity", "dmeOutage", "apirsFail", "dvsFail"].includes(id)) this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
         // The FMS restarts on its IDENT page when it comes back.

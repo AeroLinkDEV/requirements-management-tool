@@ -3,6 +3,7 @@ import { defaultLegMinutes, entrySegments, holdGeometry, type HoldSegment } from
 import { groundVelocity, iasFromTas, tasFromIas } from "./kinematics";
 import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
+import { asComputations } from "./computation";
 import { speedCommandIas, verticalArrived, verticalCommand } from "./transition";
 import { altitudeMeets, type AltitudeConstraint, type ProfilePoint, type VerticalPhase } from "./vnav";
 import type { GuidanceOutputPort } from "./sensorPorts";
@@ -232,6 +233,15 @@ export type VerticalPath = { altitude: number; source: "VNAV" | "APPR"; coupled:
 
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
+  // The crew's autopilot selections, the bench's and the scenarios', each one kernel computation of the FMS (#1518).
+  static {
+    asComputations(FlightSimulator, [
+      "adoptAircraftMotion", "armLnav", "engageAltitudeHold", "engageGoAround", "engageGroundSpeed", "engageHover",
+      "engageRadioHeight", "engageTransitionDown", "engageTransitionDownToHover", "engageTransitionUp", "engageVerticalSpeed",
+      "engageVnav", "proceedFromPins", "receiveSynchronizedProgress", "releaseForceTrim", "selectAltitude", "selectHeading",
+      "selectHoverHeight", "selectSpeed",
+    ], self => self.fms);
+  }
   private outputSequence = 0;
   private readonly outputPort: GuidanceOutputPort<Guidance> | null;
   private readonly profile: AircraftProfile["parameters"];

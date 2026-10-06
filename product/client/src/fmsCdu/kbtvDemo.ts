@@ -19,6 +19,11 @@ export const KBTV_SOURCE = "FAA CIFP 2609, KBTV extract: real public-domain data
  * again when it is already active changes nothing.
  */
 export function loadKbtvDemonstration(fms: ScriptedFms): { loaded: string; already?: boolean } | { refused: string } {
+  // The load and the swap are one kernel computation (#1518): the FMS settles once, with the new cycle active.
+  return fms.compute(() => loadKbtv(fms));
+}
+
+function loadKbtv(fms: ScriptedFms): { loaded: string; already?: boolean } | { refused: string } {
   if (fms.activeCycle.source === KBTV_SOURCE) return { loaded: fms.activeCycle.id, already: true };
   const outcome = fms.loadArinc424(KBTV_CIFP_2609, KBTV_SOURCE);
   if ("refused" in outcome) return outcome;
