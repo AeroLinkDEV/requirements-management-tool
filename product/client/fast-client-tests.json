@@ -26,6 +26,7 @@
     "fms-tactical-maint.spec.ts",
     "fms-demo-cycle.spec.ts",
     "fms-scenario.spec.ts",
+    "fms-scenario-recorded-keys.spec.ts",
     "fms-authority.spec.ts",
     "fms-predictions.spec.ts",
     "fms-lab-controls.spec.ts",
