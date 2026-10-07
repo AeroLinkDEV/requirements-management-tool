@@ -2,6 +2,9 @@ import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./condition
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, errorProblem, settingProblem } from "./baro";
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
+import { FmsKernel } from "./kernel/kernel";
+import { singleComposition } from "./kernel/legacyPlantAdapter";
+import { FRAME_SECONDS } from "./kernel/time";
 import { START_STATES, type StartStateId } from "./kbtvDemo";
 import { GPS_MODEL_VERSION, type GpsMode } from "./gps";
 import { PROFILES, profileById, profileSummary } from "./profile";
@@ -30,7 +33,7 @@ import { applySensorStimulus, describeSensorStimulus, isSensorStimulus, sensorSt
 // - A scenario is validated before it runs. An unknown step, a malformed payload or a step that throws is an
 //   invalid scenario or an execution error, never a pass. A run with no checks is "no checks", not a pass.
 
-export const TICK_SECONDS = 0.25;
+export const TICK_SECONDS = FRAME_SECONDS;
 
 /** When a step runs. Times are simulated seconds from the start of the run. */
 export type Trigger =
@@ -412,8 +415,9 @@ export function scenarioProblems(value: unknown): string[] {
 // ------------------------------------------------------------------ running
 
 /**
- * Runs a scenario against a simulation. It observes; it does not fly the aircraft or move the clock. Whoever owns
- * them (the bench, or runHeadless) advances them one tick at a time with advanceTicks, which polls after each tick.
+ * Runs a scenario against a simulation. It observes; it does not fly the aircraft or move the clock. The kernel
+ * (kernel/kernel.ts) polls it in each frame's ACTION phase, after the step that led into the frame; the bench and
+ * runHeadless both advance the kernel.
  */
 export class ScenarioRunner {
   readonly results: StepResult[];
@@ -702,33 +706,20 @@ export class ScenarioRunner {
   }
 }
 
-/**
- * Advances a simulation by whole ticks: each moves the clock, integrates the flight and then lets the runner observe.
- * The bench and runHeadless both use it, so a scenario sees the same timeline at any rate.
- */
-export function advanceTicks(ticks: number, moveClock: (ms: number) => void, sim: Pick<FlightSimulator, "step">, runner: ScenarioRunner | null) {
-  const running = runner !== null && !runner.finished;
-  for (let i = 0; i < ticks; i += 1) {
-    moveClock(TICK_SECONDS * 1000);
-    sim.step(TICK_SECONDS);
-    runner?.poll();
-    // A run's timeline ends on the tick where it finishes, however many ticks the caller asked for.
-    if (running && runner.finished) return;
-  }
-}
-
 /** The scenario's planned start (epoch ms), when it names one. */
 export const scenarioStart = (scenario: Scenario) => (scenario.startTime && Number.isFinite(Date.parse(scenario.startTime)) ? Date.parse(scenario.startTime) : null);
 
-/** Runs a scenario to its end on a fresh simulation, tick by tick, as the tests do. */
+/**
+ * Runs a scenario to its end on a fresh simulation, frame by frame on the kernel, as the tests do. It keeps the
+ * single-computer composition until the headless switch to the dual one (#1517 I1d).
+ */
 export function runHeadless(scenario: Scenario, start = scenarioStart(scenario) ?? Date.UTC(2026, 8, 27, 14, 0, 0), context?: RunContext) {
-  let now = start;
-  const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) });
-  const sim = new FlightSimulator(fms);
+  const { fms, sim, plant } = singleComposition(start, { profile: profileById(scenario.profile) });
   const runner = new ScenarioRunner(scenario, fms, context, sim);
+  const kernel = new FmsKernel(plant, runner);
   // The runner ends itself at maxSeconds; the bound only keeps a broken runner from looping forever.
   const limit = Math.ceil((Number.isFinite(scenario.maxSeconds) ? scenario.maxSeconds : 0) / TICK_SECONDS) + 2;
-  for (let t = 0; !runner.finished && t < limit; t += 1) advanceTicks(1, ms => { now += ms; }, sim, runner);
+  for (let t = 0; !runner.finished && t < limit; t += 1) kernel.advance(1);
   return { runner, fms, sim };
 }
 

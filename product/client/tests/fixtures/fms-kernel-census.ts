@@ -18,7 +18,9 @@ import { offset, type Leg } from '../../src/fmsCdu/fmsModel'
 import { stimulusFor } from '../../src/fmsCdu/gpsStimulus'
 import { MISSION_87N_OFFSHORE_SAR } from '../../src/fmsCdu/heliDemo'
 import { ACTIVE_PROFILE, profileById } from '../../src/fmsCdu/profile'
-import { ScenarioRunner, advanceTicks, scenarioStart, type Scenario, type StepResult } from '../../src/fmsCdu/scenario'
+import { FmsKernel } from '../../src/fmsCdu/kernel/kernel'
+import { dualComposition, singleComposition } from '../../src/fmsCdu/kernel/legacyPlantAdapter'
+import { ScenarioRunner, scenarioStart, type Scenario, type StepResult } from '../../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../../src/fmsCdu/scriptedFms'
 import { WMM2025_DATABASE } from '../../src/fmsCdu/wmm2025'
@@ -218,30 +220,29 @@ type Arm = {
   dual(start: number, scenario: Scenario | null, onInstantClose: () => void): Composed
 }
 
-/** The I1-0 reference arm: today's composition, advanced by advanceTicks. */
+/** The I1a arm: the legacy plant adapter's compositions on the kernel. */
 const ARM: Arm = {
   single(start, scenario, onInstantClose) {
-    let now = start
-    const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) })
-    const sim = new FlightSimulator(fms)
+    const { fms, sim, plant } = singleComposition(start, { profile: profileById(scenario.profile) })
     const runner = new ScenarioRunner(scenario, fms, undefined, sim)
+    const kernel = new FmsKernel(plant, runner)
     return {
       units: { computers: [fms], flights: [sim] }, runner, system: null, guidance: () => ({ fms, sim }),
-      fly: frames => advanceTicks(frames, ms => { onInstantClose(); now += ms }, sim, runner),
+      fly: frames => { kernel.advance(frames, { onInstantClose }) },
       freeze: () => { throw new Error('the single composition has no freeze') },
     }
   },
   dual(start, scenario, onInstantClose) {
-    let now = start
     const profile = profileById(scenario?.profile) ?? ACTIVE_PROFILE
-    const system = new DualFmsSystem(() => new Date(now), { profile, secondaryProfile: profile })
+    const { system, plant } = dualComposition(start, { profile, secondaryProfile: profile })
     const fms = system.computers[0]
     const runner = scenario ? new ScenarioRunner(scenario, fms, { variant: 'census', cycle: fms.activeCycle.id }, system.flights[0]) : null
+    const kernel = new FmsKernel(plant, runner)
     return {
       units: { computers: system.computers, flights: system.flights }, runner, system,
       guidance: () => ({ fms: system.computers[system.guidanceSide - 1], sim: system.simulator }),
-      fly: frames => advanceTicks(frames, ms => { onInstantClose(); now += ms }, system, runner),
-      freeze: () => { onInstantClose(); now += FRAME_MS; system.tick() },
+      fly: frames => { kernel.advance(frames, { onInstantClose }) },
+      freeze: () => { kernel.advance(1, { flightFreeze: true, onInstantClose }) },
     }
   },
 }

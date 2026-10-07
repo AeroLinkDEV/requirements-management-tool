@@ -24,8 +24,9 @@ import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } from "./kbtvDemo";
 import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
-import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
-import { DualFmsSystem } from "./dualFms";
+import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, scenarioStart, type Scenario } from "./scenario";
+import { FmsKernel } from "./kernel/kernel";
+import { dualComposition } from "./kernel/legacyPlantAdapter";
 import type { ScriptedFms } from "./scriptedFms";
 import type { FmsSide } from "./crossTalk";
 import { WMM2025_DATABASE } from "./wmm2025";
@@ -166,21 +167,21 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   // The aircraft profile the next session flies (profile.ts); a scenario that names one flies that one.
   const profileChoice = useRef(ACTIVE_PROFILE.id);
   const secondaryProfileChoice = useRef("");
-  // Simulated time: it starts at the wall clock (or a scenario's planned start, which fixes the GPS sky) and runs at the chosen rate while the flight is playing.
-  const simTime = useRef(Date.now());
   // A scenario run or a recording starts on the next session, so it always begins from a restarted simulation.
   const pendingScenario = useRef<Scenario | null>(null);
   const pendingRecording = useRef(false);
   // A demonstration start state (kbtvDemo.ts) also starts on the next session: a restarted simulation, then set up.
   const pendingStart = useRef<StartStateId | null>(null);
-  const { system, runner, recorder, started } = useMemo(() => {
-    simTime.current = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
+  const { system, kernel, runner, recorder, started } = useMemo(() => {
+    // Simulated time is the kernel's (kernel/time.ts): it starts at the wall clock, or at a scenario's planned start
+    // (which fixes the GPS sky), and moves only as the kernel advances.
+    const utc0 = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
     const profile = profileById(pendingScenario.current?.profile) ?? profileById(profileChoice.current) ?? ACTIVE_PROFILE;
     // The user database (E5) is kept per signed-in user and profile; a scenario run starts from an empty one in memory,
     // so its outcome does not depend on what a user has stored.
     const userDatabase = pendingScenario.current || !userName ? undefined
       : { store: browserUserDatabaseStore(window.localStorage), scope: { userId: userName, profileId: profile.id } };
-    const system = new DualFmsSystem(() => new Date(simTime.current), { profile, secondaryProfile: profileById(secondaryProfileChoice.current) ?? profile, ...(userDatabase ? { userDatabase } : {}) });
+    const { system, plant } = dualComposition(utc0, { profile, secondaryProfile: profileById(secondaryProfileChoice.current) ?? profile, ...(userDatabase ? { userDatabase } : {}) });
     const fms = system.computers[0], flight = system.flights[0];
     const start = pendingStart.current;
     // A start state and its copy to FMS 2 are one computation over both computers (#1518): both settle once, at the end.
@@ -194,11 +195,13 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     const runner = pendingScenario.current
       ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id }, flight)
       : null;
-    const recorder = pendingRecording.current ? new ScenarioRecorder(() => new Date(simTime.current)) : null;
+    const recorder = pendingRecording.current ? new ScenarioRecorder(plant.clock.now) : null;
+    // The surface, the start state and the runner's t = 0 poll above are the ACTION phase at F_0; the kernel rests there.
+    const kernel = new FmsKernel(plant, runner);
     pendingScenario.current = null;
     pendingRecording.current = false;
     pendingStart.current = null;
-    return { system, runner, recorder, started: start && started ? { id: start, outcome: started } : null };
+    return { system, kernel, runner, recorder, started: start && started ? { id: start, outcome: started } : null };
   }, [session, userName]); // eslint-disable-line react-hooks/exhaustive-deps
   const backend = system.computers[cduSide - 1];
   const peerBackend = system.computers[2 - cduSide];
@@ -263,21 +266,22 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   }, [outside.shown]);
   const variant = variantById(variantId);
 
-  // Time moves in ticks (scenario.ts): while flying, each callback runs `rate` ticks, each advancing the clock, the
-  // flight and then the scenario, so a run sees the same timeline at any rate or callback pacing. Paused with no run
-  // is an aircraft freeze: the aircraft stands still but the clock runs, so timers and a self test complete. Paused
-  // during a run pauses the run: its clock stops, so no deadline or delayed step is consumed.
+  // Time moves in kernel frames (kernel/kernel.ts): while flying, each callback advances `rate` frames, each moving the
+  // clock and the flight and then running the scenario's steps, so a run sees the same timeline at any rate or callback
+  // pacing. Paused with no run is a flight freeze, one frame per callback: the aircraft stands still but the clock
+  // runs, so timers and a self test complete. Paused during a run halts the kernel: its clock stops, so no deadline or
+  // delayed step is consumed. Between callbacks the kernel rests in the frame's open ACTION, where the controls act.
   useEffect(() => {
     const interval = TICK_SECONDS * 1000;
     const timer = window.setInterval(() => {
       const running = runner !== null && !runner.finished;
-      if (playing) advanceTicks(rate, ms => { simTime.current += ms; }, system, runner);
-      else if (!running) { simTime.current += interval; system.tick(); }
+      if (playing) kernel.advance(rate);
+      else if (!running) kernel.advance(1, { flightFreeze: true });
       // A finished scenario pauses the flight once; flying on afterwards is the engineer's choice.
       if (runner?.finished && pausedFor.current !== runner) { pausedFor.current = runner; setPlaying(false); }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [system, runner, playing, rate]);
+  }, [kernel, runner, playing, rate]);
 
   /** A different aircraft profile restarts the simulation in it. */
   const chooseProfile = (id: string) => {
