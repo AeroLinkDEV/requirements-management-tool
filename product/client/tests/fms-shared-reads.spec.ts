@@ -57,6 +57,11 @@ test('nearby answers with the entries in range nearest first, the same whether i
   for (let round = 0; round < 3; round += 1)
     for (const at of positions)
       for (const nm of [160, 32, 5]) expect(db.nearby(at, nm).map(identity), `${at.lat},${at.lon} ${nm} NM`).toEqual(computedNearby(entries, at, nm).map(identity))
+  // Kept answers are exact: 0.2 NM further south, an entry 4.9 NM north has left the 5 NM range.
+  const edge = entries.find(entry => entry.kind === 'navaid')!, { lat, lon } = edge.position
+  const inside = { lat: lat - 4.9 / 60, lon }, outside = { lat: lat - 5.1 / 60, lon }
+  for (const at of [inside, outside, inside]) expect(db.nearby(at, 5).map(identity)).toEqual(computedNearby(entries, at, 5).map(identity))
+  expect([inside, outside].map(at => db.nearby(at, 5).map(identity).includes(identity(edge)))).toEqual([true, false])
   expect(db.nearby(here, 32).length).toBeGreaterThan(0)
   expect(db.nearby(here, 32).length).toBeLessThan(db.nearby(here, 160).length)
   // A caller that edits its answer, computed or kept, edits its own copy; the answer holds the database's own entries.
