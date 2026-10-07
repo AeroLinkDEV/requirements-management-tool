@@ -166,9 +166,9 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
       </g>
 
       {/* The vantage and the guiding legend, after the clipped symbols so no navaid label can cover them. */}
-      {/* ", GUIDING" goes on a second line so the label never reaches the north marker. */}
+      {/* "GUIDING" goes on a second line so the label never reaches the north marker. */}
       <text className="computer" x={-R * 1.6 + 6} y={-R - 4} data-testid="map-computer">
-        FMS {side} · INSPECTED{guiding?.side === side ? <tspan x={-R * 1.6 + 6} dy={15}>, GUIDING</tspan> : null}
+        FMS {side} · INSPECTED{guiding?.side === side ? <tspan x={-R * 1.6 + 6} dy={15}>GUIDING</tspan> : null}
       </text>
       {other ? (
         <g className="guiding legend" data-testid="guiding-label">

@@ -29,7 +29,8 @@ test('SYNC: the map names its vantage, and marks the other computer, under its o
   await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
   await open(page)
   await expect(map(page)).toHaveAttribute('aria-label', /^Navigation map, FMS 1 inspected and guiding, \d+ NM range, LNAV mode, active waypoint MUN$/)
-  await expect(vantage(page)).toHaveText('FMS 1 · INSPECTED, GUIDING')
+  await expect(vantage(page)).toHaveText('FMS 1 · INSPECTEDGUIDING') // Two lines: FMS 1 · INSPECTED, then GUIDING.
+  await expect(vantage(page).locator('tspan')).toHaveText('GUIDING')
   // The bench opens in this state: the longest vantage label must not run into the north marker.
   const overlap = await vantage(page).evaluate(label => {
     const north = label.ownerSVGElement!.querySelector('text.north') as SVGTextElement
@@ -52,7 +53,8 @@ test('SYNC: the map names its vantage, and marks the other computer, under its o
   })).toBe(true)
   await inspect(page, 2) // Inspecting the guiding computer: one computer, no marker.
   await expect(map(page)).toHaveAttribute('aria-label', /^Navigation map, FMS 2 inspected and guiding, \d+ NM range, LNAV mode, active waypoint MUN$/)
-  await expect(vantage(page)).toHaveText('FMS 2 · INSPECTED, GUIDING')
+  await expect(vantage(page)).toHaveText('FMS 2 · INSPECTEDGUIDING')
+  await expect(vantage(page).locator('tspan')).toHaveText('GUIDING')
   await expect(guidingLeg(page)).toHaveCount(0)
 })
 
