@@ -60,7 +60,7 @@ const ALT_HOLD_GAIN = 10;
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
 export type Guidance = {
   mode: GuidanceMode;
-  /** The leg being flown, for the map; null in heading mode. */
+  /** The computed path's endpoints for the engineering flown-path overlay; null in HDG, even with an active route. */
   legFrom: LatLon | null;
   legTo: LatLon | null;
   desiredTrack: number | null;
@@ -1652,7 +1652,8 @@ export class FlightSimulator {
       this.lnavArmed = false;
       return managed;
     }
-    return { ...managed, mode: "HDG", bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -this.bankLimit, this.bankLimit) };
+    // Retain managed geometry/DTG for route computations, but no flown-path endpoints while steering a selected heading.
+    return { ...managed, mode: "HDG", legFrom: null, legTo: null, bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -this.bankLimit, this.bankLimit) };
   }
 
   /** The guidance LNAV would fly. With dt > 0 (and LNAV engaged) it also sequences what the aircraft has reached. */
