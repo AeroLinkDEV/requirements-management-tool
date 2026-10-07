@@ -549,7 +549,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           <p className="fmsBenchHint">
             {lowerDisplay === "nd"
               ? "A generic EFIS drawn only from what the FMS publishes and the aircraft's own attitude and air data. Magenta is what the FMS commands, green an engaged mode, white armed, cyan selected, amber a flag."
-              : "Engineering map: north-up, with the aircraft's true position as well as the FMS position. Not a cockpit display."}
+              : "Engineering map: north-up, drawn from the inspected CDU's computer, with the aircraft's true position as well as the FMS position; a dashed lavender line marks the other computer's leg while it is guiding. Not a cockpit display."}
           </p>
         </section>
 
@@ -559,7 +559,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             onChange={event => system.selectGuidance(Number(event.target.value) as FmsSide)}>
             <option value={1}>FMS 1</option><option value={2}>FMS 2</option>
           </select></label>
-          <p className="fmsBenchHint">One physical aircraft. EFIS and AFCS use FMS {system.guidanceSide}; computer entries address CDU {cduSide}. Sensor faults affect the shared aircraft inputs.</p>
+          <p className="fmsBenchHint">One physical aircraft. EFIS and AFCS use FMS {system.guidanceSide}; computer entries address CDU {cduSide}, and the engineering map follows it. Sensor faults affect the shared aircraft inputs.</p>
           <p className="fmsBenchReadout">
             {next?.kind === "wpt"
               ? <>Active waypoint <strong>{next.ident}</strong>{guidance.distanceToGo !== null && guidance.mode === "LNAV" ? `, ${guidance.distanceToGo.toFixed(1)} NM` : ""}</>
@@ -727,7 +727,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               onChange={event => setCduSide(Number(event.target.value) as FmsSide)}>
               <option value={1}>FMS 1 / CDU 1</option><option value={2}>FMS 2 / CDU 2</option>
             </select></label> : null}
-            <p className="fmsBenchHint">Scenario playback and recording target CDU 1. CDU 2 input is not recorded. EFIS and AFCS follow the separately selected guidance source.</p>
+            <p className="fmsBenchHint">Scenario playback and recording target CDU 1. CDU 2 input is not recorded. EFIS and AFCS follow the separately selected guidance source; the engineering map follows the inspected CDU.</p>
           </section>
         </>)} />
         <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios" && iosVisible} render={() => (

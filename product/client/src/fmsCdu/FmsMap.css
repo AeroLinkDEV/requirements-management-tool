@@ -100,8 +100,9 @@
   font-size: 12px;
 }
 
-/* Which computer the map shows, and (#1504) the leg the other, guiding computer is flying: a bench annotation in the
-   same amber as the true position, dashed so it never reads as this computer's own magenta leg. */
+/* Which computer the map shows, and (#1504) the leg the other, guiding computer is flying. D13: the guiding computer is
+   never conflated with the truth, so not the TRUE amber; lavender #a99bff is a hue the map uses nowhere else (8.4:1 on
+   #07090c), dashed and drawn under this computer's own paths so it never reads as its magenta leg. */
 .fmsMap .computer {
   fill: #e8e8e2;
   font-size: 13px;
@@ -110,18 +111,18 @@
 .fmsMap .guiding path,
 .fmsMap .guiding line {
   fill: none;
-  stroke: #ffb21e;
+  stroke: #a99bff;
   stroke-width: 1.4;
   stroke-dasharray: 3 3;
 }
 
 .fmsMap .guiding circle {
   fill: none;
-  stroke: #ffb21e;
+  stroke: #a99bff;
   stroke-width: 1.2;
 }
 
 .fmsMap .guiding text {
-  fill: #ffb21e;
+  fill: #a99bff;
   font-size: 12px;
 }

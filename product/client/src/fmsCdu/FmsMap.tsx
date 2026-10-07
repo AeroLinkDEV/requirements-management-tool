@@ -1,5 +1,5 @@
 import type { FmsSide } from "./crossTalk";
-import { racetrackOutline, sarTrack, segmentsOutline, type FlightSimulator } from "./flight";
+import { racetrackOutline, sarTrack, segmentsOutline, type FlightSimulator, type Guidance } from "./flight";
 import { arcSweep, bearingDeg, distanceNm, longitudeDelta, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsMap.css";
@@ -10,7 +10,7 @@ import "./FmsMap.css";
  * in cyan. It reads the scripted FMS and the flight simulation; it has no state of its own beyond the range.
  *
  * One computer per map (#1504, #1502 §19 item 1): everything is drawn from the inspected computer `fms` and its own
- * guidance `sim`. When another computer is guiding the aircraft, the one thing taken from it is a separate amber marker
+ * guidance `sim`. When another computer is guiding the aircraft, the one thing taken from it is a separate lavender marker
  * for the leg it is flying, labelled with its side ("FMS 2 guiding → TOLGU"), so the two are never mixed.
  */
 
@@ -20,9 +20,27 @@ type Props = { fms: ScriptedFms; sim: FlightSimulator; side: FmsSide; guiding: C
 const R = 100; // the map is drawn in a -R..R box; the range ring at R is the selected range
 
 /** What the guiding computer is flying, in words: its active waypoint on a route leg, otherwise its mode. */
-function guidingLabel({ side, fms, sim }: Computer) {
+function guidingLabel({ side, fms, sim }: Computer, arrow: string) {
   const to = fms.activeRoute.legs[0];
-  return sim.guidance.mode === "LNAV" && to?.kind === "wpt" ? `FMS ${side} guiding → ${to.ident}` : `FMS ${side} guiding, ${sim.guidance.mode} mode`;
+  return sim.guidance.mode === "LNAV" && to?.kind === "wpt" ? `FMS ${side} guiding ${arrow} ${to.ident}` : `FMS ${side} guiding, ${sim.guidance.mode} mode`;
+}
+
+/** The track actually flown on an LNAV leg with a lateral offset: the leg moved sideways by the offset distance. */
+function offsetTrack(g: Guidance, shift: number): LatLon[] | null {
+  if (!shift || !g.legFrom || !g.legTo || g.desiredTrack === null || g.mode !== "LNAV") return null;
+  const side = g.desiredTrack + (shift > 0 ? 90 : -90);
+  return [offset(g.legFrom, side, Math.abs(shift)), offset(g.legTo, side, Math.abs(shift))];
+}
+
+/**
+ * The path the guiding computer is actually flying, or null when no line would be true: none in heading mode, and none
+ * on an arc (RF/AF) leg, whose chord is not the path flown (the legend still names the leg). An offset is drawn offset.
+ */
+function guidingPath({ fms, sim }: Computer): LatLon[] | null {
+  const g = sim.guidance, leg = fms.activeRoute.legs[0];
+  if (g.mode === "HDG" || !g.legFrom || !g.legTo) return null;
+  if (g.mode === "LNAV" && leg?.kind === "wpt" && (leg.path === "RF" || leg.path === "AF")) return null;
+  return offsetTrack(g, fms.activeRoute.offset?.nm ?? 0) ?? [g.legFrom, g.legTo];
 }
 
 export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
@@ -89,21 +107,18 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   // In a hold or search pattern the guidance leg is the active one; the route resumes from the fix.
   const onRoute = g.mode === "LNAV";
   // The offset track actually flown, parallel to the active leg.
-  const shift = active.offset?.nm ?? 0;
-  const offsetLeg = shift && g.legFrom && g.legTo && g.desiredTrack !== null && g.mode === "LNAV"
-    ? [offset(g.legFrom, g.desiredTrack + (shift > 0 ? 90 : -90), Math.abs(shift)), offset(g.legTo, g.desiredTrack + (shift > 0 ? 90 : -90), Math.abs(shift))]
-    : null;
+  const offsetLeg = offsetTrack(g, active.offset?.nm ?? 0);
   const activeLeg = onRoute && firstLeg && activeTo ? [firstLeg, laterFirst[0]] : null;
 
-  // The other computer, when it is the one guiding the aircraft: only its flown leg and its label.
+  // The other computer, when it is the one guiding the aircraft: only its flown path and its label.
   const other = guiding && guiding.side !== side ? guiding : null;
-  const otherLabel = other ? guidingLabel(other) : null;
-  const otherLeg = other?.sim.guidance.legFrom && other.sim.guidance.legTo ? [other.sim.guidance.legFrom, other.sim.guidance.legTo] : null;
+  const otherLeg = other ? guidingPath(other) : null;
   const otherTo = otherLeg ? project(otherLeg[1]) : null;
+  const vantage = `FMS ${side} · INSPECTED${guiding?.side === side ? ", GUIDING" : ""}`;
 
   return (
     <svg className="fmsMap" viewBox={`${-R * 1.6} ${-R - 20} ${R * 3.2} ${2 * R + 40}`} role="img"
-      aria-label={`Navigation map, FMS ${side}, ${range} NM range, ${g.mode} mode${activeTo && active.legs[0]?.kind === "wpt" ? `, active waypoint ${active.legs[0].ident}` : ""}${otherLabel ? `; ${otherLabel}` : ""}`}>
+      aria-label={`Navigation map, FMS ${side} inspected${guiding?.side === side ? " and guiding" : ""}, ${range} NM range, ${g.mode} mode${activeTo && active.legs[0]?.kind === "wpt" ? `, active waypoint ${active.legs[0].ident}` : ""}${other ? `; ${guidingLabel(other, "to")}` : ""}`}>
       <defs>
         <clipPath id="fmsMapClip"><rect x={-R * 1.6} y={-R - 20} width={R * 3.2} height={2 * R + 40} /></clipPath>
       </defs>
@@ -112,13 +127,6 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
       <text className="ringLabel" x={4} y={-R + 12}>{range}</text>
       <text className="ringLabel" x={4} y={-R / 2 + 12}>{range / 2}</text>
       <text className="north" x={0} y={-R - 6}>N</text>
-      <text className="computer" x={-R * 1.6 + 6} y={-R - 4} data-testid="map-computer">FMS {side}</text>
-      {otherLabel ? (
-        <g className="guiding legend" data-testid="guiding-label">
-          <line x1={-R * 1.6 + 6} y1={R + 12} x2={-R * 1.6 + 22} y2={R + 12} />
-          <text x={-R * 1.6 + 26} y={R + 16}>{otherLabel}</text>
-        </g>
-      ) : null}
 
       <g clipPath="url(#fmsMapClip)">
         {nearby.map(entry => {
@@ -130,6 +138,14 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
             </g>
           );
         })}
+        {/* Under this computer's own paths, so where both computers fly the same leg only its magenta shows. */}
+        {otherLeg && otherTo && other ? (
+          <g className="guiding" data-testid="guiding-leg">
+            <path d={path(otherLeg)} />
+            <circle cx={otherTo.x.toFixed(1)} cy={otherTo.y.toFixed(1)} r={3.5} />
+            <text x={(otherTo.x + 6).toFixed(1)} y={(otherTo.y + 14).toFixed(1)}>FMS {other.side}</text>
+          </g>
+        ) : null}
         {racetrack ? <path className="hold" d={path(racetrack)} /> : null}
         {sarPath ? <path className="sar" d={path(sarPath)} /> : null}
         {joinPath ? <path className={fms.hoverJoinPreview ? "modified" : "active"} d={path(joinPath)} data-testid="hover-join" /> : null}
@@ -139,12 +155,6 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
         {activeLeg ? <path className="active" d={path(activeLeg)} /> : null}
         {offsetLeg ? <path className="offset" d={path(offsetLeg)} /> : null}
         {g.legFrom && g.legTo && g.mode !== "LNAV" ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
-        {otherLeg && otherTo ? (
-          <g className="guiding" data-testid="guiding-leg">
-            <path d={path(otherLeg)} />
-            <circle cx={otherTo.x.toFixed(1)} cy={otherTo.y.toFixed(1)} r={3.5} />
-          </g>
-        ) : null}
         {waypoints.map(({ ident, at, active: isActive }) => {
           const q = project(at);
           return (
@@ -155,6 +165,15 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
           );
         })}
       </g>
+
+      {/* The vantage and the guiding legend, after the clipped symbols so no navaid label can cover them. */}
+      <text className="computer" x={-R * 1.6 + 6} y={-R - 4} data-testid="map-computer">{vantage}</text>
+      {other ? (
+        <g className="guiding legend" data-testid="guiding-label">
+          <line x1={-R * 1.6 + 6} y1={R + 12} x2={-R * 1.6 + 22} y2={R + 12} />
+          <text x={-R * 1.6 + 26} y={R + 16}>{guidingLabel(other, "→")}</text>
+        </g>
+      ) : null}
 
       {/* Where the aircraft really is, when the FMS position has drifted from it (a simulator view, not a display). */}
       {trueOffset ? (
