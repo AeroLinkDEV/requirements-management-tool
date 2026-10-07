@@ -13,7 +13,7 @@ import {
   START_POSITION, WAYPOINT, arcLength, bearingDeg, bearingIntersection, courseDeg, distanceNm, formatPosition, fromLocal, toLocal, holdEntry, isOutstanding,
   maxSarGroundSpeed, offset, longitudeDelta,
   type Hold, type HoldEntry, type HoldStatus, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
-  type SarPattern, type Uplink,
+  type SarPattern, type Uplink, type DeepReadonly,
 } from "./fmsModel";
 import { Constellation, seededRandom } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
@@ -1169,8 +1169,7 @@ export class ScriptedFms implements CduBackend {
   /** VOR stations with a collocated DME, nearest first: the stations VOR/DME can use (M300 12-19). */
   vorDmeStations(): Navaid[] {
     return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid"
-      && (entry.type === "VORDME" || entry.type === "VORTAC") && !this.inhibited.includes(entry.ident))
-      .sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position));
+      && (entry.type === "VORDME" || entry.type === "VORTAC") && !this.inhibited.includes(entry.ident));
   }
   nearestVorDme(): Navaid | undefined { return this.vorDmeStations()[0]; }
 
@@ -1191,8 +1190,7 @@ export class ScriptedFms implements CduBackend {
   /** TACAN-capable stations in range, nearest first (a TACAN or VORTAC with a channel). */
   tacanStations(): Navaid[] {
     return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && ["TACAN", "VORTAC"].includes(entry.type)
-      && entry.channel !== undefined && !this.inhibited.includes(entry.ident))
-      .sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position));
+      && entry.channel !== undefined && !this.inhibited.includes(entry.ident));
   }
   /** The TACAN's measured magnetic bearing to its station and its slant range (null without valid words). */
   tacanBearingAndRange(): { bearing: number; rangeNm: number } | null {
@@ -1391,8 +1389,7 @@ export class ScriptedFms implements CduBackend {
   }
   private stationOn(frequency: string, types: readonly string[]): Navaid | undefined {
     return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && types.includes(entry.type)
-      && Number(entry.frequency) === Number(frequency) && !this.inhibited.includes(entry.ident))
-      .sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position))[0];
+      && Number(entry.frequency) === Number(frequency) && !this.inhibited.includes(entry.ident))[0];
   }
   /** The magnetic radial the NAV receiver measures, from the station's bearing word (null without a valid one). */
   navRadial(device: "nav1" | "nav2"): number | null {
@@ -1436,8 +1433,7 @@ export class ScriptedFms implements CduBackend {
     if (frequency === null || this.rms!.adf(device).mode !== "ADF") return null;
     // An NDB off the air (a bench stimulus) gives nothing to receive: no bearing, the RMI flag, and no fault row (plan C3).
     const ndb = this.db.nearby(this.truth, ADF_RANGE_NM).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type === "NDB"
-      && Number(entry.frequency) === Number(frequency) && this.rms!.ndbTransmitting(entry))
-      .sort((a, b) => distanceNm(this.truth, a.position) - distanceNm(this.truth, b.position))[0];
+      && Number(entry.frequency) === Number(frequency) && this.rms!.ndbTransmitting(entry))[0];
     return ndb ? normalizeAngle(bearingDeg(this.truth, ndb.position) - (this.aircraft.heading ?? this.heading)) : null;
   }
   /** The bearing as the ADF page shows it: relative, magnetic or true (M300 13-24). */
@@ -1496,7 +1492,7 @@ export class ScriptedFms implements CduBackend {
 
   private autoRadioStations() {
     return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type !== "NDB"
-      && !this.inhibited.includes(entry.ident)).sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position)).slice(0, 6);
+      && !this.inhibited.includes(entry.ident)).slice(0, 6);
   }
 
   private sampleSensors(): SensorFrame | null {
@@ -1620,6 +1616,13 @@ export class ScriptedFms implements CduBackend {
 
   /** Last input as published, for replay/adapter diagnostics. This is separate from the computed position. */
   get navigationInputs(): SensorFrame | null { return this.sensorFrame ? structuredClone(this.sensorFrame) : null; }
+  /**
+   * The published frame itself, for a reader inside the system that reads it every cycle (#1502 D10). Each sample
+   * publishes a new frame and nothing edits one once published, so it is a value; the reader must not edit it either.
+   * FMS 2's sensor port hands it over as FMS 2's own frame (an alias, not a copy). Its type stays SensorFrame because
+   * the port and the GPS bus code take mutable bus types; fms-shared-reads.spec.ts deep-freezes it at run time instead.
+   */
+  peekNavigationInputs(): SensorFrame | null { return this.sensorFrame; }
 
   /** Read a connected simulator before computing guidance so an expired input cannot command one extra step. */
   refreshSensorInput() { this.updateNavigation(0); }
@@ -2143,7 +2146,7 @@ export class ScriptedFms implements CduBackend {
 
   /** Local phase remains independently observable after system navigation adoption or a health notification. */
   get localFlightPhase(): FlightPhase {
-    return this.phaseAt(this.localNavigationSolution.position);
+    return this.phaseAt(this.peekLocalNavigationSolution().position);
   }
 
   private phaseAt(position: LatLon): FlightPhase {
@@ -3021,6 +3024,8 @@ export class ScriptedFms implements CduBackend {
     this.pendingHoverPoints = null; this.pendingJoin = null;
   }
   get localNavigationSolution() { return this.localSolution ? structuredClone(this.localSolution) : this.navigation.current; }
+  /** The local solution itself, for a read-only comparison (#1502 D10); a fresh one replaces it, nothing edits it. */
+  peekLocalNavigationSolution(): DeepReadonly<CivilSolution> { return this.localSolution ?? this.navigation.current; }
   get navigationWindEstimate() { return this.navigation.windEstimate; }
   receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }) {
     if (this.hasCondition("fmsFail")) return;

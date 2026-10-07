@@ -8,6 +8,8 @@ import type { ProcedureHold, SpeedLimit } from "./navData";
  */
 
 export type LatLon = { lat: number; lon: number };
+/** A value read across a boundary without a copy: read-only at every level, so the reader cannot edit the owner's value. */
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown ? T : T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
 
 /** Present position of the simulated aircraft at the start of a session, just east of CYOW. */
 export const START_POSITION: LatLon = { lat: 45.3100, lon: -75.6817 };

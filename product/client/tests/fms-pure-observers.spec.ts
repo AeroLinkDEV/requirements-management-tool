@@ -239,8 +239,9 @@ test('an FMS failure latches its reversion at the toggle without a render, pause
 
 // Owner of purity itself: whatever reads the system between computations (every getter, every page at every index, the
 // bus outputs of either computer against either flight) leaves its whole state as it was. The snapshot walks data
-// only, never an accessor, so taking it reads nothing. The one memo it allows is the magnetic model's last field,
-// keyed by all of its inputs.
+// only, never an accessor, so taking it reads nothing. The memos it allows are each keyed by all of its inputs: the
+// magnetic model's last field, and the navigation database's last nearby answers (an immutable database's answer per
+// exact position and range, which fms-shared-reads.spec.ts proves is the computed answer).
 test('reading the whole dual system between computations changes none of its state', () => {
   const snapshot = (root: unknown) => {
     const out = new Map<string, string>(), seen = new Map<object, string>()
@@ -303,7 +304,7 @@ test('reading the whole dual system between computations changes none of its sta
     readEverything(system)
     const after = snapshot(root)
     for (const path of new Set([...before.keys(), ...after.keys()]))
-      if (before.get(path) !== after.get(path) && !/\.magvar\.cached\b/.test(path)) changed.push(`${label} ${path}: ${before.get(path)} -> ${after.get(path)}`)
+      if (before.get(path) !== after.get(path) && !/\.magvar\.cached\b|\.db\.(nearbyMemo|allEntries)\b/.test(path)) changed.push(`${label} ${path}: ${before.get(path)} -> ${after.get(path)}`)
   }
 
   // The three mechanisms at their rest points: a moving waypoint entered and executed, a LEGS view, an FMS failure.

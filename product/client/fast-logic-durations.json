@@ -68,6 +68,7 @@
  "fms-sensor-failure-scenarios.spec.ts": 12.7,
  "fms-sensor-state.spec.ts": 0.2,
  "fms-sensor-transitions.spec.ts": 1,
+ "fms-shared-reads.spec.ts": 117,
  "fms-stage-f-configuration.spec.ts": 0.1,
  "fms-stage-f-mission.spec.ts": 0.1,
  "fms-synthetic-vision.spec.ts": 0.1,
