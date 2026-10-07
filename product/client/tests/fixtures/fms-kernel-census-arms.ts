@@ -1,0 +1,153 @@
+// Runs the #1517 census against one arm's checkout and compares arms (#1502 D7 9.3). Node 24, from product/client:
+//
+//   node tests/fixtures/fms-kernel-census-arms.ts run --arm <arm product/client> --out <result.json> [--engine node|chromium|both] [--port <n>] [--modes all|first] [--runs <substring>]
+//   node tests/fixtures/fms-kernel-census-arms.ts compare <a.json> <b.json>
+//   node tests/fixtures/fms-kernel-census-arms.ts golden <reference result.json> <fms-kernel-golden-digests.ts>
+//
+// An arm is a worktree at one commit with its own node_modules. Its census, encoder and simulation are loaded from that
+// checkout through its own Vite configuration: in Node by Vite's module loader, and in Chromium on the headless kernel
+// page served on a private port. Both arms of a comparison must run in the same engine build (the qualified
+// environment); a Node run is reported, not claimed. The golden fixture is written only from a reference arm's Node
+// run, never from code under test.
+
+import { execFileSync } from 'node:child_process'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { parseArgs } from 'node:util'
+
+type Mode = { rate: 1 | 4; rendered: boolean; digest: boolean }
+type Result = { id: string; frames: string[]; end: string; sha256: string; bytes: number; outcome: string | null; results: unknown; endedAfter: number | null; ms: number }
+type Entry = { engine: string; mode: Mode; result: Result }
+type CensusRecord = { schema: string; arm: { commit: string; dirty: string[] }; engines: { node: string; chromium: string | null }; entries: Entry[] }
+
+const MODES: Mode[] = [
+  { rate: 1, rendered: false, digest: true }, { rate: 4, rendered: false, digest: true },
+  { rate: 1, rendered: true, digest: true }, { rate: 4, rendered: true, digest: true },
+  // The self-check: no frame digest, only the end state. Its outcome, step results and end state must equal the others'.
+  { rate: 1, rendered: false, digest: false },
+]
+const modeKey = (mode: Mode) => `${mode.rate}x ${mode.rendered ? 'rendered' : 'headless'}${mode.digest ? '' : ' digest-off'}`
+
+const { values: options, positionals } = parseArgs({
+  allowPositionals: true,
+  options: { arm: { type: 'string' }, out: { type: 'string' }, engine: { type: 'string' }, port: { type: 'string' }, modes: { type: 'string' }, runs: { type: 'string' } },
+})
+
+const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
+
+async function run() {
+  if (!options.arm || !options.out) throw new Error('run needs --arm and --out')
+  const arm = resolve(options.arm)
+  const engine = options.engine ?? 'both'
+  const modes = options.modes === 'first' ? MODES.slice(0, 1) : MODES
+  const dirty = git(arm, 'status', '--porcelain', '--', 'src', 'tests/fixtures', 'package-lock.json', 'vite.config.ts').split('\n').filter(Boolean)
+  const record: CensusRecord = { schema: 'aerolink.fms-kernel-census.v1', arm: { commit: git(arm, 'rev-parse', 'HEAD'), dirty }, engines: { node: process.version, chromium: null }, entries: [] }
+  const { createServer } = await import('vite')
+  const port = Number(options.port ?? 5797)
+  const server = await createServer({ root: arm, configFile: resolve(arm, 'vite.config.ts'), logLevel: 'error', server: { host: '127.0.0.1', port, strictPort: true, hmr: false } })
+  const pick = (ids: string[]) => ids.filter(id => !options.runs || id.includes(options.runs))
+  try {
+    if (engine === 'node' || engine === 'both') {
+      const census = await server.ssrLoadModule('/tests/fixtures/fms-kernel-census.ts')
+      for (const id of pick(census.CENSUS_RUNS.map((r: { id: string }) => r.id))) {
+        for (const mode of modes) {
+          const begin = performance.now()
+          const result = census.runCensus(census.CENSUS_RUNS.find((r: { id: string }) => r.id === id), mode)
+          record.entries.push({ engine: 'node', mode, result: { ...result, ms: performance.now() - begin } })
+          console.log(`node ${id} ${modeKey(mode)}: ${result.frames.length} frames ${result.sha256.slice(0, 12)} ${Math.round(performance.now() - begin)} ms`)
+        }
+      }
+    }
+    if (engine === 'chromium' || engine === 'both') {
+      await server.listen()
+      const { chromium } = await import('@playwright/test')
+      const browser = await chromium.launch()
+      record.engines.chromium = browser.version()
+      try {
+        const page = await browser.newPage()
+        await page.goto(`http://127.0.0.1:${port}/tests/fixtures/fms-kernel-headless.html`)
+        await page.waitForFunction(() => document.getElementById('status')?.textContent === 'ready', null, { timeout: 120_000 })
+        const ids: string[] = await page.evaluate(() => window.fmsKernelCensus.ids)
+        for (const id of pick(ids)) {
+          for (const mode of modes) {
+            const result: Result = await page.evaluate(([i, m]) => window.fmsKernelCensus.run(i as string, m as Mode), [id, mode] as const)
+            record.entries.push({ engine: 'chromium', mode, result })
+            console.log(`chromium ${id} ${modeKey(mode)}: ${result.frames.length} frames ${result.sha256.slice(0, 12)} ${Math.round(result.ms)} ms`)
+          }
+        }
+      } finally { await browser.close() }
+    }
+  } finally { await server.close() }
+  writeFileSync(options.out, JSON.stringify(record))
+}
+
+/** Every difference between two arms, per engine, run and mode; and whether each arm's modes agree with one another. */
+function compare(aPath: string, bPath: string) {
+  const a: CensusRecord = JSON.parse(readFileSync(aPath, 'utf8')), b: CensusRecord = JSON.parse(readFileSync(bPath, 'utf8'))
+  const key = (e: Entry) => `${e.engine} | ${e.result.id} | ${modeKey(e.mode)}`
+  const bByKey = new Map(b.entries.map(e => [key(e), e]))
+  const differences: string[] = []
+  let compared = 0, frames = 0
+  for (const entry of a.entries) {
+    const other = bByKey.get(key(entry))
+    if (!other) { differences.push(`${key(entry)}: missing from B`); continue }
+    compared += 1; frames += entry.result.frames.length
+    const x = entry.result, y = other.result
+    const first = x.frames.findIndex((frame, i) => frame !== y.frames[i])
+    if (x.frames.length !== y.frames.length || first >= 0) differences.push(`${key(entry)}: frames ${x.frames.length} vs ${y.frames.length}, first difference at frame ${first}`)
+    if (x.sha256 !== y.sha256 || x.bytes !== y.bytes) differences.push(`${key(entry)}: SHA-256 ${x.sha256} vs ${y.sha256} (${x.bytes} vs ${y.bytes} bytes)`)
+    if (x.end !== y.end) differences.push(`${key(entry)}: end state differs`)
+    if (JSON.stringify([x.outcome, x.results, x.endedAfter]) !== JSON.stringify([y.outcome, y.results, y.endedAfter])) differences.push(`${key(entry)}: outcome or step results differ`)
+  }
+  for (const entry of b.entries) if (!a.entries.some(e => key(e) === key(entry))) differences.push(`${key(entry)}: missing from A`)
+  // Within one arm and engine, every mode of a run must agree: the frame digests at 1x and 4x, rendered or not (#1518),
+  // and the outcome, step results and end state with the digest off (the I1-0 self-check).
+  const modesAgree = (record: CensusRecord) => {
+    const states = new Map<string, Set<string>>(), digests = new Map<string, Set<string>>()
+    for (const e of record.entries) {
+      const k = `${e.engine} | ${e.result.id}`
+      states.set(k, (states.get(k) ?? new Set()).add(`${e.result.end}|${e.result.outcome}|${e.result.endedAfter}|${JSON.stringify(e.result.results)}`))
+      if (e.mode.digest) digests.set(k, (digests.get(k) ?? new Set()).add(`${e.result.sha256}|${e.result.frames.join(',')}`))
+    }
+    return [...[...states].filter(([, values]) => values.size > 1).map(([k]) => `${k}: outcome, results or end state differ between modes`),
+      ...[...digests].filter(([, values]) => values.size > 1).map(([k]) => `${k}: frame digests differ between modes`)]
+  }
+  const engines = (record: CensusRecord) => {
+    const node = new Map(record.entries.filter(e => e.engine === 'node').map(e => [`${e.result.id} | ${modeKey(e.mode)}`, e.result.sha256]))
+    return record.entries.filter(e => e.engine === 'chromium' && node.has(`${e.result.id} | ${modeKey(e.mode)}`) && node.get(`${e.result.id} | ${modeKey(e.mode)}`) !== e.result.sha256).map(e => `${e.result.id} | ${modeKey(e.mode)}`)
+  }
+  const modesDisagree = { a: modesAgree(a), b: modesAgree(b) }
+  const reference = (engine: string) => a.entries.filter(e => e.engine === engine && e.mode.rate === 1 && !e.mode.rendered && e.mode.digest)
+  console.log(JSON.stringify({
+    a: { ...a.arm, engines: a.engines }, b: { ...b.arm, engines: b.engines }, compared, frames, differences,
+    modesDisagree, nodeVsChromium: { a: engines(a), b: engines(b) },
+    runs: (reference('chromium').length ? reference('chromium') : reference('node')).map(e => ({ engine: e.engine, id: e.result.id, frames: e.result.frames.length, sha256: e.result.sha256 })),
+  }, null, 2))
+  if (differences.length || modesDisagree.a.length || modesDisagree.b.length) process.exitCode = 1
+}
+
+/** The golden fixture: per run, the SHA-256, the frame count, every 100th frame digest and the end digest. */
+function golden(reference: string, target: string) {
+  const record: CensusRecord = JSON.parse(readFileSync(reference, 'utf8'))
+  if (record.arm.dirty.length) throw new Error('the reference arm has local changes')
+  const base = record.entries.filter(e => e.engine === 'node' && e.mode.rate === 1 && !e.mode.rendered && e.mode.digest)
+  const runs = Object.fromEntries(base.map(({ result }) => [result.id, {
+    sha256: result.sha256, frames: result.frames.length, every100th: result.frames.filter((_, i) => i % 100 === 0), end: result.end,
+    outcome: result.outcome, endedAfter: result.endedAfter,
+  }]))
+  const text = [
+    '// GENERATED by tests/fixtures/fms-kernel-census-arms.ts golden from the reference arm\'s Node census (1x, headless).',
+    '// Never edit or merge by hand: regenerate from source when the base moves (#1517 I1-0).',
+    `// Generator: ${record.arm.commit} (Node ${record.engines.node}).`,
+    `export const GOLDEN_GENERATOR = ${JSON.stringify(record.arm.commit)}`,
+    `export const GOLDEN_DIGESTS: Readonly<Record<string, { sha256: string; frames: number; every100th: readonly string[]; end: string; outcome: string | null; endedAfter: number | null }>> = ${JSON.stringify(runs, null, 2).replaceAll('"', '\'')}`,
+    '',
+  ].join('\n')
+  writeFileSync(target, text)
+}
+
+const command = positionals[0]
+if (command === 'run') await run()
+else if (command === 'compare') compare(positionals[1], positionals[2])
+else if (command === 'golden') golden(positionals[1], positionals[2])
+else throw new Error('usage: run | compare <a> <b> | golden <reference> <target>')

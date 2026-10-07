@@ -89,7 +89,8 @@
     "fms-vor-dme.spec.ts",
     "fms-nav-status-pages.spec.ts",
     "fms-perf-stats.spec.ts",
-    "fms-pure-observers.spec.ts"
+    "fms-pure-observers.spec.ts",
+    "fms-kernel-digest.spec.ts"
   ],
   "rendered": [
     "client-truth-rendered.spec.ts",
