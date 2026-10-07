@@ -545,7 +545,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           <Pfd bus={bus} air={air} now={backend.now.getTime()} svs={svs ? tiles : null} />
           {lowerDisplay === "nd"
             ? <Nd bus={bus} air={air} range={range} />
-            : <div className="fmsBenchMapScreen"><FmsMap fms={backend} sim={sim} range={range} /></div>}
+            : <div className="fmsBenchMapScreen"><FmsMap fms={backend} sim={system.flights[cduSide - 1]} side={cduSide} guiding={{ side: system.guidanceSide, fms: guidanceBackend, sim }} range={range} /></div>}
           <p className="fmsBenchHint">
             {lowerDisplay === "nd"
               ? "A generic EFIS drawn only from what the FMS publishes and the aircraft's own attitude and air data. Magenta is what the FMS commands, green an engaged mode, white armed, cyan selected, amber a flag."
