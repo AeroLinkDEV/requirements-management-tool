@@ -195,10 +195,14 @@ for (const { id, topology, speed, ndbInRange } of CENSUS)
           const ndb = units[0].navdb.nearby(units[0].truePosition, 75).find(entry => entry.kind === 'navaid' && entry.type === 'NDB')
           if (ndb?.kind === 'navaid' && ndb.frequency) units[0].setRadio('adf', ndb.frequency)
         }
-        // FMS 2 acted on between ticks: an inhibit re-samples it at once, reading FMS 1's frame again, which it already
-        // holds (the frame is shared, so it is the same object both times). The inhibit is lifted later the same way.
-        if (units.length === 2 && step * speed === 80) units[1].setInhibited(units[1].navdb.nearby(units[1].position, 160).filter(entry => entry.kind === 'navaid').slice(0, 1).map(entry => entry.ident))
-        if (units.length === 2 && step * speed === 240) units[1].setInhibited([])
+        // FMS 2 acted on between ticks. Within a tick FMS 1 samples again before FMS 2 next reads, but here FMS 2 re-samples
+        // twice with no FMS 1 sample between: an inhibit, then a sensor refresh. The second read is of the frame FMS 2
+        // already holds, the same object when shared. The inhibit is lifted later the same way.
+        if (units.length === 2 && step * speed === 80) {
+          units[1].setInhibited(units[1].navdb.nearby(units[1].position, 160).filter(entry => entry.kind === 'navaid').slice(0, 1).map(entry => entry.ident))
+          units[1].refreshSensorInput()
+        }
+        if (units.length === 2 && step * speed === 240) { units[1].setInhibited([]); units[1].refreshSensorInput() }
         // The ADF bearing: no library scenario reads it, and its NDB lookup is one of the callers that lost a re-sort.
         const adf = units.map(unit => [unit.adfRelativeBearing('adf'), unit.adfRelativeBearing('adf2')])
         adfFound += adf.flat().filter(bearing => bearing !== null).length
