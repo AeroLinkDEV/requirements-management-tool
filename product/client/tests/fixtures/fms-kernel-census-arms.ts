@@ -1,6 +1,8 @@
 // Runs the #1517 census against one arm's checkout and compares arms (#1502 D7 9.3). Node 24, from product/client:
 //
-//   node tests/fixtures/fms-kernel-census-arms.ts run --arm <arm product/client> --out <result.json> [--engine node|chromium|both] [--port <n>] [--modes all|first] [--runs <substring>]
+//   node tests/fixtures/fms-kernel-census-arms.ts run --arm <arm product/client> --out <result.json> [--node-modes 1h] [--chromium-modes 1h,4r,off]
+//        [--shard <k>/<n>] [--port <n>] [--runs <substring>]
+//   node tests/fixtures/fms-kernel-census-arms.ts merge <out.json> <shard.json>...
 //   node tests/fixtures/fms-kernel-census-arms.ts compare <a.json> <b.json>
 //   node tests/fixtures/fms-kernel-census-arms.ts golden <reference result.json> <fms-kernel-golden-digests.ts>
 //
@@ -26,11 +28,21 @@ const MODES: Mode[] = [
   // The self-check: no frame digest, only the end state. Its outcome, step results and end state must equal the others'.
   { rate: 1, rendered: false, digest: false },
 ]
+/** Mode codes: 1h, 4h (1x or 4x, headless), 1r, 4r (rendered), off (1x headless, digest off). An empty list skips the engine. */
+const MODE_CODES: Readonly<Record<string, Mode>> = { '1h': MODES[0], '4h': MODES[1], '1r': MODES[2], '4r': MODES[3], off: MODES[4] }
+const modesOf = (list: string | undefined, fallback: string) => (list ?? fallback).split(',').filter(Boolean).map(code => {
+  const mode = MODE_CODES[code]
+  if (!mode) throw new Error(`unknown mode ${code}`)
+  return mode
+})
 const modeKey = (mode: Mode) => `${mode.rate}x ${mode.rendered ? 'rendered' : 'headless'}${mode.digest ? '' : ' digest-off'}`
 
 const { values: options, positionals } = parseArgs({
   allowPositionals: true,
-  options: { arm: { type: 'string' }, out: { type: 'string' }, engine: { type: 'string' }, port: { type: 'string' }, modes: { type: 'string' }, runs: { type: 'string' } },
+  options: {
+    arm: { type: 'string' }, out: { type: 'string' }, port: { type: 'string' }, runs: { type: 'string' }, shard: { type: 'string' },
+    'node-modes': { type: 'string' }, 'chromium-modes': { type: 'string' },
+  },
 })
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
@@ -38,19 +50,21 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, 
 async function run() {
   if (!options.arm || !options.out) throw new Error('run needs --arm and --out')
   const arm = resolve(options.arm)
-  const engine = options.engine ?? 'both'
-  const modes = options.modes === 'first' ? MODES.slice(0, 1) : MODES
+  const nodeModes = modesOf(options['node-modes'], '1h'), chromiumModes = modesOf(options['chromium-modes'], '1h,4r,off')
+  const [shard, shards] = (options.shard ?? '1/1').split('/').map(Number)
+  if (!(shards >= 1 && shard >= 1 && shard <= shards)) throw new Error(`bad --shard ${options.shard}`)
   const dirty = git(arm, 'status', '--porcelain', '--', 'src', 'tests/fixtures', 'package-lock.json', 'vite.config.ts').split('\n').filter(Boolean)
   const record: CensusRecord = { schema: 'aerolink.fms-kernel-census.v1', arm: { commit: git(arm, 'rev-parse', 'HEAD'), dirty }, engines: { node: process.version, chromium: null }, entries: [] }
   const { createServer } = await import('vite')
   const port = Number(options.port ?? 5797)
   const server = await createServer({ root: arm, configFile: resolve(arm, 'vite.config.ts'), logLevel: 'error', server: { host: '127.0.0.1', port, strictPort: true, hmr: false } })
-  const pick = (ids: string[]) => ids.filter(id => !options.runs || id.includes(options.runs))
+  // Shards take the runs round-robin in census order.
+  const pick = (ids: string[]) => ids.filter((id, i) => i % shards === shard - 1 && (!options.runs || id.includes(options.runs)))
   try {
-    if (engine === 'node' || engine === 'both') {
+    if (nodeModes.length) {
       const census = await server.ssrLoadModule('/tests/fixtures/fms-kernel-census.ts')
       for (const id of pick(census.CENSUS_RUNS.map((r: { id: string }) => r.id))) {
-        for (const mode of modes) {
+        for (const mode of nodeModes) {
           const begin = performance.now()
           const result = census.runCensus(census.CENSUS_RUNS.find((r: { id: string }) => r.id === id), mode)
           record.entries.push({ engine: 'node', mode, result: { ...result, ms: performance.now() - begin } })
@@ -58,7 +72,7 @@ async function run() {
         }
       }
     }
-    if (engine === 'chromium' || engine === 'both') {
+    if (chromiumModes.length) {
       await server.listen()
       const { chromium } = await import('@playwright/test')
       const browser = await chromium.launch()
@@ -69,7 +83,7 @@ async function run() {
         await page.waitForFunction(() => document.getElementById('status')?.textContent === 'ready', null, { timeout: 120_000 })
         const ids: string[] = await page.evaluate(() => window.fmsKernelCensus.ids)
         for (const id of pick(ids)) {
-          for (const mode of modes) {
+          for (const mode of chromiumModes) {
             const result: Result = await page.evaluate(([i, m]) => window.fmsKernelCensus.run(i as string, m as Mode), [id, mode] as const)
             record.entries.push({ engine: 'chromium', mode, result })
             console.log(`chromium ${id} ${modeKey(mode)}: ${result.frames.length} frames ${result.sha256.slice(0, 12)} ${Math.round(result.ms)} ms`)
@@ -146,8 +160,19 @@ function golden(reference: string, target: string) {
   writeFileSync(target, text)
 }
 
+/** One record from a run's shards: one arm, one engine build each. */
+function merge(target: string, parts: string[]) {
+  const records: CensusRecord[] = parts.map(part => JSON.parse(readFileSync(part, 'utf8')))
+  const key = (r: CensusRecord) => JSON.stringify([r.arm, r.engines.node])
+  if (new Set(records.map(key)).size !== 1) throw new Error('the shards are not from one arm and one Node')
+  const chromium = [...new Set(records.map(r => r.engines.chromium).filter(Boolean))]
+  if (chromium.length > 1) throw new Error('the shards ran in different Chromium builds')
+  writeFileSync(target, JSON.stringify({ ...records[0], engines: { node: records[0].engines.node, chromium: chromium[0] ?? null }, entries: records.flatMap(r => r.entries) }))
+}
+
 const command = positionals[0]
 if (command === 'run') await run()
 else if (command === 'compare') compare(positionals[1], positionals[2])
+else if (command === 'merge') merge(positionals[1], positionals.slice(2))
 else if (command === 'golden') golden(positionals[1], positionals[2])
-else throw new Error('usage: run | compare <a> <b> | golden <reference> <target>')
+else throw new Error('usage: run | merge <out> <shards...> | compare <a> <b> | golden <reference> <target>')
