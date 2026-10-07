@@ -5,7 +5,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm, longitudeDelta, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { NavDatabase, type NavEntry } from '../src/fmsCdu/navData'
 import { ACTIVE_PROFILE, profileById } from '../src/fmsCdu/profile'
-import { ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from '../src/fmsCdu/scenario'
+import { ScenarioRunner, TICK_SECONDS, scenarioStart, type Scenario } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
@@ -39,7 +39,11 @@ const flyScenario = (scenario: Scenario, speed: number, topology: 'single' | 'du
     state = () => ({ dual, results: runner.results, outcome: runner.outcome })
   }
   const limit = Math.ceil(scenario.maxSeconds / TICK_SECONDS) + 2
-  for (let t = 0; t < limit && !runner.finished; t += speed) { advanceTicks(speed, moveClock, sim, runner); onStep(state(), units) }
+  // Each tick moves the clock, steps the flight and lets the runner observe; a step of `speed` ticks ends early with the run.
+  for (let t = 0; t < limit && !runner.finished; t += speed) {
+    for (let i = 0; i < speed && !runner.finished; i += 1) { moveClock(TICK_SECONDS * 1000); sim.step(TICK_SECONDS); runner.poll() }
+    onStep(state(), units)
+  }
   return { runner, computers: units }
 }
 
