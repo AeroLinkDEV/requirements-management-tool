@@ -55,13 +55,11 @@ function hovering(side: FmsSide, ownReceivers = false) {
 }
 
 /**
- * The hover procedure over the sighting, activated and executed on FMS 1 (and so on FMS 2, in SYNC). FMS 2 is primed
- * first (selected for 1 s): a computer that has never guided has no AFCS words and refuses TDN, so without it FMS 2
- * would raise no transition request of its own.
+ * The hover procedure over the sighting, activated and executed on FMS 1 (and so on FMS 2, in SYNC). FMS 2 receives the
+ * one AFCS's words while FMS 1 guides (#1537), so it raises its own transition request at its TDN.
  */
 function hoverProcedure() {
   const setup = mission()
-  setup.system.selectGuidance(2); setup.fly(1); setup.system.selectGuidance(1)
   setup.fly(1)
   for (const key of ['TACT', 'LSK1R', 'LSK4L', 'LSK6R', 'EXEC'] as const) setup.one.press(key)
   expect(setup.two.hover.status).toBe('ACT')

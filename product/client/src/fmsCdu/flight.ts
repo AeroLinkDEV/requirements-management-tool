@@ -662,6 +662,10 @@ export class FlightSimulator {
     this.lateral = previous.lateral; this.lnavArmed = previous.lnavArmed; this.heading = previous.heading; this.held = previous.held;
     this.lowCollective = structuredClone(previous.lowCollective); this.lowHorizontal = structuredClone(previous.lowHorizontal);
     this.hoverHeading = previous.hoverHeading; this.hoverHeightFt = previous.hoverHeightFt; this.tdSpeed = previous.tdSpeed; this.tdIas = previous.tdIas;
+    // The one AFCS's status words (IAS, hover height, VX/VY) reach both computers, guiding or not (#1502 D3 endpoint 35:
+    // AFCS.status to FMS1, FMS2 and EFIS; #1537). Only the flying flight computes them, so the other computer receives
+    // the same words; without them it read IAS 0 and refused TDN below the gate speed. I5a replaces `fms.afcs` (T6).
+    this.fms.afcs = previous.fms.afcs ? { ...previous.fms.afcs } : null;
     // Bench installation assumption: M300 7-8 says the approach is armed automatically or by "an instrument panel-mounted
     // switch", depending on the installation. The bench models one such aircraft switch wired to both computers, so the
     // other computer adopts the selected one's arm. Without it, the other computer never enters the approach phase and
@@ -769,7 +773,7 @@ export class FlightSimulator {
   private observeStep(dt: number, selected?: FlightSimulator) {
     const fms = this.fms;
     if (selected) this.adoptAfcsSelections(selected);
-    fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
+    fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover(false);
     const computed = this.guide(dt); this.updateApproach(computed.crossTrack);
     this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.publish({ at: fms.now.getTime(), sequence: ++this.outputSequence,
@@ -1168,9 +1172,15 @@ export class FlightSimulator {
   }
   private rendezvousRollInvalid = false;
 
-  private watchHover() {
+  /**
+   * The AFCS's response to the FMS's hover requests and refusals. `coupled` is false for a computer that is not guiding:
+   * the AFCS consumes only the guiding computer's guidance (#1502 D3 endpoints 31-32), so the other computer's request
+   * or refusal, now raised on the same AFCS words (#1537), is noted but never engaged, cancelled or logged here.
+   */
+  private watchHover(coupled = true) {
     const hover = this.fms.hover;
     if (!this.advisory) return;
+    if (!coupled) { this.hoverRequest = hover.request; this.hoverRefusal = hover.refused; return; }
     if (hover.request !== this.hoverRequest) {
       this.hoverRequest = hover.request;
       const data = hover.requestData;
