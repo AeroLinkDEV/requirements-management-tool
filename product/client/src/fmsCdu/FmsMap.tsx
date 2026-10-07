@@ -114,7 +114,6 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   const other = guiding && guiding.side !== side ? guiding : null;
   const otherLeg = other ? guidingPath(other) : null;
   const otherTo = otherLeg ? project(otherLeg[1]) : null;
-  const vantage = `FMS ${side} · INSPECTED${guiding?.side === side ? ", GUIDING" : ""}`;
 
   return (
     <svg className="fmsMap" viewBox={`${-R * 1.6} ${-R - 20} ${R * 3.2} ${2 * R + 40}`} role="img"
@@ -167,7 +166,10 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
       </g>
 
       {/* The vantage and the guiding legend, after the clipped symbols so no navaid label can cover them. */}
-      <text className="computer" x={-R * 1.6 + 6} y={-R - 4} data-testid="map-computer">{vantage}</text>
+      {/* ", GUIDING" goes on a second line so the label never reaches the north marker. */}
+      <text className="computer" x={-R * 1.6 + 6} y={-R - 4} data-testid="map-computer">
+        FMS {side} · INSPECTED{guiding?.side === side ? <tspan x={-R * 1.6 + 6} dy={15}>, GUIDING</tspan> : null}
+      </text>
       {other ? (
         <g className="guiding legend" data-testid="guiding-label">
           <line x1={-R * 1.6 + 6} y1={R + 12} x2={-R * 1.6 + 22} y2={R + 12} />

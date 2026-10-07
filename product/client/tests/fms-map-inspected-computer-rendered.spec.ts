@@ -30,6 +30,14 @@ test('SYNC: the map names its vantage, and marks the other computer, under its o
   await open(page)
   await expect(map(page)).toHaveAttribute('aria-label', /^Navigation map, FMS 1 inspected and guiding, \d+ NM range, LNAV mode, active waypoint MUN$/)
   await expect(vantage(page)).toHaveText('FMS 1 · INSPECTED, GUIDING')
+  // The bench opens in this state: the longest vantage label must not run into the north marker.
+  const overlap = await vantage(page).evaluate(label => {
+    const north = label.ownerSVGElement!.querySelector('text.north') as SVGTextElement
+    const a = (label as SVGTextElement).getBBox(), b = north.getBBox()
+    return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+  })
+  expect(overlap).toBe(false)
+  await page.locator('.fmsMap').screenshot({ path: test.info().outputPath('default-inspected-guiding.png') })
   await expect(guidingLeg(page)).toHaveCount(0)
   await guideWith(page, 2)
   // Synchronized computers fly the same leg; the marker still says which computer the aircraft follows.
