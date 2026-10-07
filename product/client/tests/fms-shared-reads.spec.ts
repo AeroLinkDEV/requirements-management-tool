@@ -50,19 +50,21 @@ test('nearby answers with the entries in range nearest first, the same whether i
   const fms = new ScriptedFms(() => new Date(START))
   const db = fms.navdb, entries = db.exportData().entries
   const here = fms.position
-  // More positions than the database keeps answers for, asked three times round, so answers are kept, reused and dropped.
-  const positions: LatLon[] = [here, ...[0, 70, 140, 210, 280].map((bearing, i) => offset(here, bearing, 10 + 30 * i)), { lat: -0, lon: 0 }]
+  // More questions than the database keeps answers for, asked three times round, so answers are kept, reused and
+  // dropped. Each position shares its latitude or its longitude with another, and each is asked at three ranges.
+  const positions: LatLon[] = [here, { lat: here.lat, lon: here.lon + 1.5 }, { lat: here.lat + 1.5, lon: here.lon },
+    ...[70, 140, 210, 280].map((bearing, i) => offset(here, bearing, 10 + 30 * i)), { lat: -0, lon: 0 }]
   for (let round = 0; round < 3; round += 1)
     for (const at of positions)
       for (const nm of [160, 32, 5]) expect(db.nearby(at, nm).map(identity), `${at.lat},${at.lon} ${nm} NM`).toEqual(computedNearby(entries, at, nm).map(identity))
-  // The same position at another range is another question, asked straight after the first.
-  const wide = db.nearby(here, 160), narrow = db.nearby(here, 32)
-  expect(narrow.length).toBeGreaterThan(0)
-  expect(narrow.length).toBeLessThan(wide.length)
-  // A caller that edits its answer edits its own copy, and the answer holds the database's own entries, as it always did.
-  wide.splice(0, wide.length)
-  const again = db.nearby(here, 160)
-  expect(again.map(identity)).toEqual(computedNearby(entries, here, 160).map(identity))
+  expect(db.nearby(here, 32).length).toBeGreaterThan(0)
+  expect(db.nearby(here, 32).length).toBeLessThan(db.nearby(here, 160).length)
+  // A caller that edits its answer, computed or kept, edits its own copy; the answer holds the database's own entries.
+  const computed = db.nearby(here, 5), kept = db.nearby(here, 5)
+  expect(kept.length).toBeGreaterThan(0)
+  computed.splice(0); kept.splice(0)
+  const again = db.nearby(here, 5)
+  expect(again.map(identity)).toEqual(computedNearby(entries, here, 5).map(identity))
   expect(again.every(entry => db.find(entry.ident).includes(entry))).toBe(true)
   // A merged database is another database: it answers with its own entries, not the one it was merged from.
   const moved = { ...again[0], ident: 'ZZMOVED', position: offset(here, 0, 1) } as NavEntry
@@ -151,8 +153,8 @@ const copying = <T>(run: () => T): T => {
 // Owner of the composition: per step, the whole state of a run with the shared reads and kept answers is the state of
 // the same run that copies and recomputes, so the change is bit-identical. The shared run is also frozen: nothing edits
 // a value it was handed, and the database the answers come from ends the run as it started. The digest sees what the
-// freeze cannot (a reader telling frames apart by identity, a kept answer wrong at a run's own positions); the freeze
-// names the writer the digest would only show as a difference. A helicopter hover mission in single and dual at one and
+// freeze and the nearby test cannot, such as a kept answer reused for a nearby but different position the run flies
+// through; the freeze names a writer that leaves no difference behind. A helicopter hover mission in single and dual at one and
 // four ticks per step, and the dual fixed-wing approach the comparison 5 analysis measured (W1). The PR that added this
 // recorded the same census over the whole library against main; a library-wide run here costs minutes per Fast run.
 const CENSUS = [
