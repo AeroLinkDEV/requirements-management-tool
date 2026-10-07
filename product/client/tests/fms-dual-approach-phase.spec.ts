@@ -1,8 +1,9 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import { MISSION_87N_OFFSHORE_SAR } from '../src/fmsCdu/heliDemo'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import { START_STATES } from '../src/fmsCdu/kbtvDemo'
-import { TICK_SECONDS, advanceTicks } from '../src/fmsCdu/scenario'
+import { TICK_SECONDS } from '../src/fmsCdu/scenario'
 
 // #1511 owner: in a synchronized dual installation both computers fly one approach in one phase of flight. Each
 // computer enters the approach phase 2 NM before the FAF when the approach is armed and integrity is predicted
@@ -13,8 +14,7 @@ import { TICK_SECONDS, advanceTicks } from '../src/fmsCdu/scenario'
 
 /** The bench's start-state composition (FmsCduTestBench.tsx): set up FMS 1 and its flight, then copy to FMS 2. */
 function approachSetup() {
-  let now = Date.parse(MISSION_87N_OFFSHORE_SAR.startTime!)
-  const system = new DualFmsSystem(() => new Date(now))
+  const { system, plant } = dualComposition(Date.parse(MISSION_87N_OFFSHORE_SAR.startTime!))
   const [one, two] = system.computers
   expect(one.compute(() => {
     const outcome = START_STATES['87n-rnav190-final'].setUp(one, system.flights[0])
@@ -22,7 +22,8 @@ function approachSetup() {
     return outcome
   })).toEqual({ ready: true })
   expect(system.mode).toBe('SYNC')
-  const tick = () => advanceTicks(1, ms => { now += ms }, system, null)
+  const kernel = new FmsKernel(plant)
+  const tick = () => { kernel.advance(1) }
   return { system, one, two, tick }
 }
 
