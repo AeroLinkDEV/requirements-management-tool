@@ -45,6 +45,7 @@
     "fms-tdn-flight.spec.ts",
     "fms-87n-mission.spec.ts",
     "fms-hover-join.spec.ts",
+    "fms-guidance-source-switch.spec.ts",
     "fms-navaid-data.spec.ts",
     "fms-ndb-approach.spec.ts",
     "fms-pi-transition.spec.ts",

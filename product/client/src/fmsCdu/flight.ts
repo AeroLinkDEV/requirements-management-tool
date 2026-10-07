@@ -664,18 +664,90 @@ export class FlightSimulator {
     this.hoverHeading = previous.hoverHeading; this.hoverHeightFt = previous.hoverHeightFt; this.tdSpeed = previous.tdSpeed; this.tdIas = previous.tdIas;
   }
 
-  /** The bench changes the selected computer without resetting the single physical aircraft. */
+  /**
+   * The bench changes the selected computer without resetting the single physical aircraft. Without `previous`, an
+   * unselected computer's flight follows the aircraft's measured air data. With it, this flight takes over from the one
+   * that was flying (#1508): the one aircraft's motion and the one AFCS's state carry over unchanged, and the AFCS
+   * decouples from the computer it leaves (decoupleOnSourceChange).
+   */
   adoptAircraftMotion(previous?: FlightSimulator) {
-    this.airspeed = this.fms.trueAirspeed ?? this.airspeed;
-    this.bank = this.fms.navigationInputs?.attitude?.value?.bank ?? 0;
-    if (previous) {
-      this.attitude = { ...previous.attitude };
-      this.lastGround = previous.lastGround ? { ...previous.lastGround } : null;
-      this.adoptAfcsSelections(previous);
-      // Laboratory source change cancels a captured approach; the crew must re-arm against the new computer's authority.
-      this.approach = "OFF"; this.gpsLateral = false; this.fms.armApproach(false);
-      this.watchFailure(); this.last = this.guide(); this.record("FMS SOURCE CHANGED", "AFCS selections retained; approach requires re-arming");
+    if (!previous) {
+      this.airspeed = this.fms.trueAirspeed ?? this.airspeed;
+      this.bank = this.fms.navigationInputs?.attitude?.value?.bank ?? 0;
+      return;
     }
+    // The plant: one aircraft, so its motion is continuous (#1502 R04 later makes this a single plant, not a copy).
+    this.airspeed = previous.airspeed; this.bank = previous.bank;
+    this.attitude = { ...previous.attitude };
+    this.lastGround = previous.lastGround ? { ...previous.lastGround } : null;
+    this.airVelocity = previous.airVelocity ? { ...previous.airVelocity } : null;
+    this.iasOk = previous.iasOk;
+    // The one AFCS: its selections, the departure's lateral-hold latch, the low-height protection and the last hover
+    // feedback sample, so the receiver-continuity check (R3-02) judges the new computer's feedback against it.
+    this.adoptAfcsSelections(previous);
+    this.lvlLost = previous.lvlLost; this.lowHeight = previous.lowHeight;
+    this.lastFeedback = previous.lastFeedback ? { ...previous.lastFeedback, position: { ...previous.lastFeedback.position } } : null;
+    // Laboratory source change cancels a captured approach; the crew must re-arm against the new computer's authority.
+    this.approach = "OFF"; this.gpsLateral = false; this.fms.armApproach(false);
+    const cancelled = this.decoupleOnSourceChange(previous);
+    this.watchFailure(); this.last = this.guide();
+    this.record("FMS SOURCE CHANGED", ["AFCS selections retained; approach requires re-arming", ...cancelled].join("; "));
+  }
+
+  /**
+   * A guidance source change (#1502 §19 item 2, decided by Sean, 6 Oct 2026): the AFCS cancels any FMS-coupled
+   * transition in progress (the TDN transition to MRK, the hover join) and holds its current low-speed mode: HOV at the
+   * present position, or ATT when the new computer gives no eligible hover feedback. Each cancellation is annunciated
+   * (FMA amber, plan B3.4) and the crew re-engages against the new computer, as an approach is re-armed. A transition
+   * request the new computer has outstanding at the change (raised in the same step) is not engaged either.
+   * Returns what was cancelled, for the source-change annunciation.
+   */
+  private decoupleOnSourceChange(previous: FlightSimulator): string[] {
+    const cancelled: string[] = [];
+    const coupled = previous.fmsTransition !== null
+      && (previous.pendingTdh !== null || (previous.lowHorizontal?.mode === "TDH" && previous.lowHorizontal.target !== null));
+    this.pendingTdh = null; this.fmsTransition = null; this.plannedTdhNm = null;
+    this.hoverRequest = this.fms.hover.request;
+    const h = this.lowHorizontal;
+    const tdh: AxisMode[] = [{ axis: "pitch", mode: "TD/H" }, { axis: "roll", mode: "TD/H" }];
+    let reengage = false;
+    // The horizontal hold, judged once, here (D4 6.2a, R3-02): the new computer's hover feedback must be continuous
+    // with the AFCS's last sample. Then HOV re-datums at the present position as that computer measures it (as FTR
+    // does; a TD/H cancelled is a stop where it is, not yet an arrival, as when the FMS withdraws its request: F2), and
+    // the continuity check restarts from that sample, so a receiver offset is never judged twice. Otherwise ATT on the
+    // latched air-velocity command. The collective stays (a TD/H descent already started goes on to the hover height,
+    // as in F2).
+    const holds = h !== null && (h.mode === "HOV" || (coupled && h.mode === "TDH"));
+    const { feedback, reason } = holds ? this.continuousFeedback(0) : { feedback: null, reason: null };
+    if (holds && feedback) {
+      this.lowHorizontal = { mode: "HOV", target: feedback.position, speed: 0, track: h.track, captured: h.mode === "HOV" };
+      this.noteFeedback(feedback);
+    } else if (holds) {
+      this.lowHorizontal = { ...h, mode: "ATT" };
+      this.lastFeedback = null;
+    }
+    if (coupled && h?.mode === "TDH") {
+      this.record("TD/H CANCELLED", `FMS source changed: the transition to MRK ends; ${feedback ? "HOV where it is" : `ATT: ${reason}`}`, tdh);
+      cancelled.push(`TD/H to MRK cancelled, ${feedback ? "HOV at the present position" : "HOV LOST, ATT"}`); reengage = true;
+    } else if (coupled) {
+      this.record("TD/H CANCELLED", "FMS source changed: TD/H to MRK disarmed; TD goes on to the gate", tdh);
+      cancelled.push("TD/H to MRK disarmed"); reengage = true;
+    } else if (holds && feedback) cancelled.push("HOV at the present position");
+    else if (holds) {
+      this.record("HOV LOST", `FMS source changed: ${reason}; ATT holds the last air-velocity command`, [{ axis: "pitch", mode: "HOV" }, { axis: "roll", mode: "HOV" }]);
+      cancelled.push("HOV LOST, ATT"); reengage = true;
+    }
+    // The hover join: flown under NAV, or NAV armed to capture it.
+    if (previous.joinPlan !== null && (previous.lateral === "LNAV" || previous.lnavArmed)) {
+      const engaged = previous.lateral === "LNAV";
+      this.lateral = "HDG"; this.lnavArmed = false;
+      if (engaged) { this.heading = Math.round(norm360(this.fms.heading)); this.held = true; }
+      this.record("HOVER JOIN CANCELLED", engaged ? `FMS source changed: HDG HOLD ${String(this.heading).padStart(3, "0")}°T` : "FMS source changed: NAV disarmed",
+        [{ axis: "roll", mode: "NAV" }]);
+      cancelled.push(engaged ? "hover join cancelled, HDG HOLD" : "NAV to the hover join disarmed"); reengage = true;
+    }
+    if (reengage) cancelled.push("re-engage on the new computer");
+    return cancelled;
   }
 
   /** Accepted SYNC copies current procedure progress; each computer subsequently computes its own guidance. */
