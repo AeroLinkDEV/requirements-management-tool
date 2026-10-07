@@ -8,6 +8,7 @@
 // statistic (permutationTest). The bootstrap (relativeEffect, medianLevel) gives descriptive 95% intervals only; it is
 // not a test. Revision 1 took a two-sided bootstrap p from relativeEffect; with two runs per arm per block that p was
 // zero far too often under the null (a 21% family fail rate over ABBA-preserving relabellings of real A/A data).
+// Revision 3 (#1536) adds an unscored priming pass before block 0 (headlessSchedule, scoredRuns); the test is unchanged.
 //
 // Pure functions only: no clock, no randomness except the seeded generator the caller names and records.
 
@@ -39,6 +40,54 @@ export function abbaOrder(blocks: number): Arm[] {
   const order: Arm[] = []
   for (let b = 0; b < blocks; b += 1) order.push('A', 'B', 'B', 'A')
   return order
+}
+
+/** One slot of the headless schedule: one arm's runs, one per workload x topology, each a fresh process. */
+export type ScheduledSlot = {
+  primed: boolean
+  /** The ABBA block; null for a priming slot, which belongs to no block. */
+  block: number | null
+  slot: number
+  arm: Arm
+  runs: { position: number; workload: string; topology: string }[]
+}
+
+/**
+ * The headless run order (protocol revision 3): a priming pass, then `blocks` ABBA blocks. Within a slot the topology
+ * order alternates by slot, so neither topology always runs first.
+ *
+ * The priming pass is one unscored run per arm per workload x topology, arm A then arm B (priming slots 0 and 1, with the
+ * same topology alternation). Every session opens on arm A, and its first run of a cell is a cold start (31-33% slower at
+ * p50 on W1 in the revision-2 A/A); in an A/B, A is the base, so an unprimed first block biases B/A - 1 toward "B faster"
+ * and hides slowdowns (#1536). Priming slots belong to no block; the scored blocks are still numbered from 0.
+ */
+export function headlessSchedule(blocks: number, workloads: readonly string[], topologies: readonly string[]): ScheduledSlot[] {
+  const slotRuns = (slot: number) => {
+    const ordered = slot % 2 ? [...topologies].reverse() : [...topologies]
+    let position = 0
+    return workloads.flatMap(workload => ordered.map(topology => ({ position: position++, workload, topology })))
+  }
+  const priming = (['A', 'B'] as const).map((arm, slot) => ({ primed: true, block: null, slot, arm, runs: slotRuns(slot) }))
+  return [...priming, ...abbaOrder(blocks).map((arm, slot) => ({ primed: false, block: Math.floor(slot / 4), slot, arm, runs: slotRuns(slot) }))]
+}
+
+/** What the report needs from one recorded run (runs.jsonl). */
+export type RecordedRun = { kind: string; status: string; primed?: boolean; block: number | null; arm: string; workload?: string; topology?: string }
+
+/** The runs an analysis may use: every run but the priming runs (`primed: true`), which are recorded and never analysed. */
+export function scoredRuns<T extends RecordedRun>(entries: readonly T[]): T[] {
+  return entries.filter(entry => entry.primed !== true)
+}
+
+/**
+ * The declared failed-run rule (protocol.json statistics.failedRun) for one analysis unit (`unit` selects its runs): a
+ * block in which any of the unit's runs failed is excluded whole, both arms. Returns the unit's passed runs in the kept
+ * blocks and the excluded blocks. Priming runs are outside the rule: a failed one excludes nothing, a passed one is no row.
+ */
+export function failedRunRule<T extends RecordedRun>(entries: readonly T[], unit: (entry: T) => boolean): { rows: T[]; excludedBlocks: (number | null)[] } {
+  const runs = scoredRuns(entries).filter(unit)
+  const broken = new Set(runs.filter(entry => entry.status !== 'passed').map(entry => entry.block))
+  return { rows: runs.filter(entry => entry.status === 'passed' && !broken.has(entry.block)), excludedBlocks: [...broken] }
 }
 
 /** Mulberry32: a small seeded generator in [0, 1). The seed is a reproducibility input recorded with every result. */

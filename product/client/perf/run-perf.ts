@@ -6,7 +6,7 @@
 //   node perf/run-perf.ts report   --out <dir> [--pilot]
 //
 // Every run is its own `playwright test --config=perf/playwright.perf.config.ts` invocation (a fresh process), taken
-// in ABBA order for two arms, and kept whatever its outcome. Arm checkouts are detached worktrees at their SHAs; their
+// in ABBA order for two arms after an unscored priming pass (headless, protocol revision 3), and kept whatever its outcome. Arm checkouts are detached worktrees at their SHAs; their
 // client source, lock file and Vite config tree hashes are recorded with every run. Output holds no user paths,
 // hostnames or environment values: environment variables are recorded by name only.
 
@@ -17,7 +17,7 @@ import { arch, cpus, platform, release, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { abbaOrder, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, relativeEffect, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
+import { failedRunRule, headlessSchedule, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -172,30 +172,29 @@ function headless() {
   if (list.length !== 2 || !list.some(a => a.arm === 'A') || !list.some(a => a.arm === 'B')) throw new Error('headless runs need --arm A=... and --arm B=...')
   const blocks = Number(options.blocks)
   const workloads = (options.workloads?.split(',') ?? protocol.headless.workloads.map((w: { id: string }) => w.id))
-  const session = begin(dir, 'headless', { arms: list.map(({ arm, identity }) => ({ arm, ...identity })), blocks, workloads })
-  const order = abbaOrder(blocks), started = Date.now(), blockSeconds: number[] = []
+  const schedule = headlessSchedule(blocks, workloads, protocol.headless.topologies)
+  const priming = schedule.filter(s => s.primed).flatMap(({ slot, arm, runs }) => runs.map(r => ({ primed: true, slot, arm, ...r })))
+  const session = begin(dir, 'headless', { arms: list.map(({ arm, identity }) => ({ arm, ...identity })), blocks, workloads, priming })
+  const started = Date.now(), blockSeconds: number[] = [], primedRuns: { index: number; status: string }[] = []
   let blockStart = started
-  for (let slot = 0; slot < order.length; slot += 1) {
-    const block = Math.floor(slot / 4)
-    if (slot % 4 === 0) {
-      // A cap stops only between blocks, so every block kept is a whole ABBA block.
+  for (const { primed, block, slot, arm: name, runs } of schedule) {
+    if (!primed && slot % 4 === 0) {
+      // A cap stops only between blocks, so every block kept is a whole ABBA block. The priming pass is not a block.
       const average = blockSeconds.length ? blockSeconds.reduce((a, b) => a + b, 0) / blockSeconds.length : 0
-      if (block > 0 && (Date.now() - started) / 1000 + average > hoursCap() * 3600) { console.log(`stopped at the ${hoursCap()} h cap after ${block} blocks`); break }
+      if (block! > 0 && (Date.now() - started) / 1000 + average > hoursCap() * 3600) { console.log(`stopped at the ${hoursCap()} h cap after ${block} blocks`); break }
       blockStart = Date.now()
     }
-    const arm = list.find(a => a.arm === order[slot])!
-    // Topology order alternates by slot, so neither topology always runs first.
-    const topologies = slot % 2 ? ['dual', 'single'] : ['single', 'dual']
-    let position = 0
-    for (const workload of workloads) for (const topology of topologies) {
-      run(dir, { kind: 'headless', block, slot, position: position++, arm: arm.arm, armIdentity: arm.identity, workload, topology }, {
+    const arm = list.find(a => a.arm === name)!
+    for (const { position, workload, topology } of runs) {
+      const entry = run(dir, { kind: 'headless', primed, block, slot, position, arm: arm.arm, armIdentity: arm.identity, workload, topology }, {
         AEROLINK_PERF_MODE: 'headless', AEROLINK_PERF_ARM: join(arm.root, 'product', 'client'), AEROLINK_PERF_WORKLOAD: workload,
         AEROLINK_PERF_TOPOLOGY: topology, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --expose-gc`.trim(),
       })
+      if (primed) primedRuns.push({ index: entry.index, status: entry.status })
     }
-    if (slot % 4 === 3) blockSeconds.push((Date.now() - blockStart) / 1000)
+    if (!primed && slot % 4 === 3) blockSeconds.push((Date.now() - blockStart) / 1000)
   }
-  writeFileSync(join(dir, `session-end-${Date.now()}.json`), JSON.stringify({ ...session, endedAt: new Date().toISOString(), harnessAtEnd: harnessIdentity() }, null, 2))
+  writeFileSync(join(dir, `session-end-${Date.now()}.json`), JSON.stringify({ ...session, endedAt: new Date().toISOString(), harnessAtEnd: harnessIdentity(), primedRuns }, null, 2))
 }
 
 function browser() {
@@ -220,6 +219,7 @@ function browser() {
   if (seed.status !== 0 || !existsSync(seedPath)) throw new Error('seeding the template database failed; see logs/seed.log')
   const template = browserStoragePath(templateId)
 
+  // No priming pass here (protocol.json headless.priming): one arm, so no A/B for a cold arm to bias.
   const started = Date.now(), roundSeconds: number[] = []
   try {
     for (let round = 0; round < rounds; round += 1) {
@@ -264,7 +264,7 @@ function prepare() {
 
 // ------------------------------------------------------------------------------------------------------ report
 
-type Entry = RunRecord & { kind: string; block: number; arm: string; workload?: string; topology?: string; configuration?: string; rate?: number }
+type Entry = RunRecord & { kind: string; primed?: boolean; block: number | null; arm: string; workload?: string; topology?: string; configuration?: string; rate?: number }
 
 const measures: Record<string, (result: Record<string, unknown>) => number> = {
   p50: r => r.p50 as number, p95: r => r.p95 as number, p99: r => r.p99 as number, throughput: r => r.throughput as number,
@@ -290,7 +290,9 @@ const fixed = (value: number, digits = 3) => Number.isFinite(value) ? value.toFi
 
 function report() {
   const dir = out()
-  const entries: Entry[] = readFileSync(join(dir, 'runs.jsonl'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+  const recorded: Entry[] = readFileSync(join(dir, 'runs.jsonl'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+  // Priming runs (protocol revision 3) are counted here and never analysed: every table below uses the scored runs only.
+  const entries = scoredRuns(recorded), priming = recorded.filter(e => !entries.includes(e))
   const { iterations, seed, targetHalfWidthPp, aaFamilyAlpha, aaMeasures, permutations } = protocol.statistics
   const stats = { iterations, seed }
   const testing = { permutations, seed }
@@ -310,10 +312,14 @@ function report() {
   }))
   const declaredFamilySize = protocol.headless.workloads.length * protocol.headless.topologies.length * aaMeasures.length
   const lines: string[] = []
-  const json: Record<string, unknown> = { schema: 'aerolink.fms-perf-report.v1', protocol, runs: entries.length, failedRuns: entries.filter(e => e.status !== 'passed').length }
+  const json: Record<string, unknown> = {
+    schema: 'aerolink.fms-perf-report.v1', protocol, runs: entries.length, failedRuns: entries.filter(e => e.status !== 'passed').length,
+    primedRuns: priming.length, failedPrimedRuns: priming.filter(e => e.status !== 'passed').length,
+  }
   const passed = entries.filter(e => e.status === 'passed' && e.result)
   const notQuiet = entries.filter(e => !(e.host as { quietBefore: { quiet: boolean } }).quietBefore.quiet).length
-  lines.push(`Runs: ${entries.length} (${json.failedRuns} failed, all kept); runs that started on a host above the quiet threshold: ${notQuiet}.`, '')
+  lines.push(`Runs: ${entries.length} scored (${json.failedRuns} failed, all kept); runs that started on a host above the quiet threshold: ${notQuiet}.`,
+    `Priming runs: ${priming.length} (${json.failedPrimedRuns} failed), recorded and never analysed: no table, test, interval or failed-run exclusion below uses them.`, '')
 
   const head = passed.filter(e => e.kind === 'headless')
   if (head.length) {
@@ -325,11 +331,10 @@ function report() {
       const [workload, topology] = cell.split('|')
       // Declared rule (protocol.json statistics.failedRun): a block in which any run of this cell failed is excluded
       // whole from this cell's analysis, both arms, and the exclusion is reported.
-      const broken = new Set(entries.filter(e => e.kind === 'headless' && e.workload === workload && e.topology === topology && e.status !== 'passed').map(e => e.block))
-      broken.forEach(block => excluded.push(`${cell.replace('|', ' ')} block ${block}`))
-      const rows = head.filter(e => e.workload === workload && e.topology === topology && !broken.has(e.block))
+      const { rows, excludedBlocks } = failedRunRule(recorded, e => e.kind === 'headless' && e.workload === workload && e.topology === topology)
+      excludedBlocks.forEach(block => excluded.push(`${cell.replace('|', ' ')} block ${block}`))
       for (const measure of [...aaMeasures, 'heap']) {
-        const runs: RunValue[] = rows.map(e => ({ block: e.block, arm: e.arm as Arm, value: measures[measure](e.result!) }))
+        const runs: RunValue[] = rows.map(e => ({ block: e.block!, arm: e.arm as Arm, value: measures[measure](e.result!) }))
         if (!runs.some(r => r.arm === 'A') || !runs.some(r => r.arm === 'B')) continue
         const effect = relativeEffect(runs, stats)
         aa.push({ cell, measure, rows, effect, test: permutationTest(runs, testing) })
@@ -372,10 +377,10 @@ function report() {
     const excluded5: string[] = []
     lines.push('## Comparison 5: single -> dual topology (arm B; reference single)', '', '| Workload | Measure | single | dual | dual/single - 1 | 95% CI (descriptive) | permutation p | over 5%? |', '|---|---|---|---|---|---|---|---|')
     for (const workload of workloads) {
-      const broken = new Set(entries.filter(e => e.kind === 'headless' && e.arm === 'B' && e.workload === workload && e.status !== 'passed').map(e => e.block))
-      broken.forEach(block => excluded5.push(`${workload} block ${block}`))
+      const { rows, excludedBlocks } = failedRunRule(recorded, e => e.kind === 'headless' && e.arm === 'B' && e.workload === workload)
+      excludedBlocks.forEach(block => excluded5.push(`${workload} block ${block}`))
       for (const measure of ['p50', 'p95', 'p99', 'throughput']) {
-        const runs: RunValue[] = mainRuns.filter(e => e.workload === workload && !broken.has(e.block)).map(e => ({ block: e.block, arm: e.topology === 'single' ? 'A' : 'B', value: measures[measure](e.result!) }))
+        const runs: RunValue[] = rows.map(e => ({ block: e.block!, arm: e.topology === 'single' ? 'A' : 'B', value: measures[measure](e.result!) }))
         if (!runs.some(r => r.arm === 'A') || !runs.some(r => r.arm === 'B')) continue
         const effect = relativeEffect(runs, stats), test = permutationTest(runs, testing)
         const level = (arm: Arm) => medianLevel(runs.filter(r => r.arm === arm).map(r => r.value), stats).estimate
