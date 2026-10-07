@@ -700,11 +700,20 @@ export class FlightSimulator {
   }
 
   /**
-   * A guidance source change (#1502 §19 item 2, decided by Sean, 6 Oct 2026): the AFCS cancels any FMS-coupled
-   * transition in progress (the TDN transition to MRK, the hover join) and holds its current low-speed mode: HOV at the
-   * present position, or ATT when the new computer gives no eligible hover feedback. Each cancellation is annunciated
-   * (FMA amber, plan B3.4) and the crew re-engages against the new computer, as an approach is re-armed. A transition
-   * request the new computer has outstanding at the change (raised in the same step) is not engaged either.
+   * A guidance source change (#1502 §19 item 2, decided by Sean, 6 Oct 2026; edge cases Q1-Q4 decided 7 Oct, #1546):
+   * the AFCS drops only what it was coupling from the FMS, and the modes it flies on its own keep running (CMA-9000
+   * 802p 11-18: the FMS sends a command and the AFCS then flies the descent and deceleration; 11-21: the hover height
+   * is entered on the AFCS).
+   * - TD/H to MRK (Q1): the MRK target is dropped; TD/H flies on to a stop on its own nominal deceleration and holds
+   *   HOV where it stops. In the gate segment, the deceleration and the descent to the hover height start now.
+   * - A crew HOV (Q2): keeps its hover point, shifted by the offset between the two computers' positions, so the point
+   *   stays where it is in the physical world.
+   * - TD with TD/H to MRK armed: TD/H is disarmed and TD goes on to the gate.
+   * - NAV on the hover join or the TDN-MRK leg (Q3), engaged or armed: cancelled to HDG HOLD, or disarmed.
+   * Either hold first passes the receiver-continuity check (D4 6.2a, R3-02); failing it gives ATT ("HOV LOST")
+   * whatever Q1/Q2 would give. Each cancellation is annunciated (FMA amber, plan B3.4) and the crew re-engages against
+   * the new computer (Q4): HOV, or TD/H without a target, and a fresh TDN for a new MRK coupling. A transition request
+   * the new computer has outstanding at the change (raised in the same step) is not engaged either.
    * Returns what was cancelled, for the source-change annunciation.
    */
   private decoupleOnSourceChange(previous: FlightSimulator): string[] {
@@ -717,42 +726,78 @@ export class FlightSimulator {
     const tdh: AxisMode[] = [{ axis: "pitch", mode: "TD/H" }, { axis: "roll", mode: "TD/H" }];
     let reengage = false;
     // The horizontal hold, judged once, here (D4 6.2a, R3-02): the new computer's hover feedback must be continuous
-    // with the AFCS's last sample. Then HOV re-datums at the present position as that computer measures it (as FTR
-    // does; a TD/H cancelled is a stop where it is, not yet an arrival, as when the FMS withdraws its request: F2), and
-    // the continuity check restarts from that sample, so a receiver offset is never judged twice. Otherwise ATT on the
-    // latched air-velocity command. The collective stays (a TD/H descent already started goes on to the hover height,
-    // as in F2).
+    // with the AFCS's last sample, and the continuity check restarts from that sample, so a receiver offset is never
+    // judged twice. Otherwise ATT on the latched air-velocity command. The collective stays (a TD/H descent already
+    // started goes on to the hover height, as in F2).
     const holds = h !== null && (h.mode === "HOV" || (coupled && h.mode === "TDH"));
+    // The last sample the AFCS took was read before the aircraft's last step; the new computer's feedback is of now.
+    // The computer left gives the AFCS its newest sample of the same receiver, of now too, so neither the continuity
+    // check nor the hover point offset (Q2) mistakes the aircraft's own motion over that step for a receiver jump.
+    const leaving = previous.fms.hoverFeedback;
+    if (holds && leaving && this.lastFeedback?.source === leaving.source) this.noteFeedback(leaving);
     const { feedback, reason } = holds ? this.continuousFeedback(0) : { feedback: null, reason: null };
+    let shiftM = 0;
     if (holds && feedback) {
-      this.lowHorizontal = { mode: "HOV", target: feedback.position, speed: 0, track: h.track, captured: h.mode === "HOV" };
+      if (h.mode === "HOV") {
+        const shifted = this.hoverPointForNewComputer(h.target!, feedback.position);
+        shiftM = shifted.metres;
+        this.lowHorizontal = { ...h, target: shifted.target };
+      } else {
+        this.lowHorizontal = { ...h, target: null, holding: false, plannedStop: null };
+        // Still in the gate segment: the deceleration starts now, and with it the descent to the hover height.
+        if (h.holding) this.lowCollective = { mode: "TDH", datum: h.hoverDatum!, rate: -this.profile.tdhDescentRate.value };
+      }
       this.noteFeedback(feedback);
     } else if (holds) {
       this.lowHorizontal = { ...h, mode: "ATT" };
       this.lastFeedback = null;
     }
-    if (coupled && h?.mode === "TDH") {
-      this.record("TD/H CANCELLED", `FMS source changed: the transition to MRK ends; ${feedback ? "HOV where it is" : `ATT: ${reason}`}`, tdh);
-      cancelled.push(`TD/H to MRK cancelled, ${feedback ? "HOV at the present position" : "HOV LOST, ATT"}`); reengage = true;
+    if (coupled && h?.mode === "TDH" && feedback) {
+      this.record("MRK DECOUPLED", "FMS source changed: TD/H flies on to a stop on its own deceleration; HOV where it stops");
+      cancelled.push("TD/H to MRK decoupled, HOV where it stops"); reengage = true;
+    } else if (coupled && h?.mode === "TDH") {
+      this.record("TD/H CANCELLED", `FMS source changed: the transition to MRK ends; ATT: ${reason}`, tdh);
+      cancelled.push("TD/H to MRK cancelled, HOV LOST, ATT"); reengage = true;
     } else if (coupled) {
       this.record("TD/H CANCELLED", "FMS source changed: TD/H to MRK disarmed; TD goes on to the gate", tdh);
       cancelled.push("TD/H to MRK disarmed"); reengage = true;
-    } else if (holds && feedback) cancelled.push("HOV at the present position");
+    } else if (holds && feedback) cancelled.push(shiftM >= 0.1 ? `HOV point kept, shifted ${shiftM.toFixed(1)} m for the new computer` : "HOV point kept");
     else if (holds) {
       this.record("HOV LOST", `FMS source changed: ${reason}; ATT holds the last air-velocity command`, [{ axis: "pitch", mode: "HOV" }, { axis: "roll", mode: "HOV" }]);
       cancelled.push("HOV LOST, ATT"); reengage = true;
     }
-    // The hover join: flown under NAV, or NAV armed to capture it.
-    if (previous.joinPlan !== null && (previous.lateral === "LNAV" || previous.lnavArmed)) {
-      const engaged = previous.lateral === "LNAV";
+    // NAV coupled to the transition: the hover join, or the TDN-MRK leg (Q3), flown under NAV or with NAV armed. Once
+    // TD/H flies the horizontal axes the roll axis is no longer NAV's (axisModes), so there is no NAV to cancel there.
+    const leg = previous.fms.activeRoute.legs[0];
+    const onTransitionLeg = previous.lowHorizontal === null && leg?.kind === "wpt" && leg.ident === "MRK" && leg.special === "HOVER";
+    if ((previous.joinPlan !== null || onTransitionLeg) && (previous.lateral === "LNAV" || previous.lnavArmed)) {
+      const engaged = previous.lateral === "LNAV", what = previous.joinPlan !== null ? "hover join" : "TDN-MRK leg";
       this.lateral = "HDG"; this.lnavArmed = false;
       if (engaged) { this.heading = Math.round(norm360(this.fms.heading)); this.held = true; }
-      this.record("HOVER JOIN CANCELLED", engaged ? `FMS source changed: HDG HOLD ${String(this.heading).padStart(3, "0")}°T` : "FMS source changed: NAV disarmed",
+      this.record(previous.joinPlan !== null ? "HOVER JOIN CANCELLED" : "NAV CANCELLED",
+        `FMS source changed${previous.joinPlan !== null ? "" : ": the TDN-MRK leg is part of the transition"}: ${engaged ? `HDG HOLD ${String(this.heading).padStart(3, "0")}°T` : "NAV disarmed"}`,
         [{ axis: "roll", mode: "NAV" }]);
-      cancelled.push(engaged ? "hover join cancelled, HDG HOLD" : "NAV to the hover join disarmed"); reengage = true;
+      cancelled.push(engaged ? `${what} cancelled, HDG HOLD` : `NAV to the ${what} disarmed`); reengage = true;
     }
     if (reengage) cancelled.push("re-engage on the new computer");
     return cancelled;
+  }
+
+  /**
+   * A crew hover point carried to the new computer (Q2): shifted by the offset between the two computers' positions at
+   * the change (the new computer's against the AFCS's last sample from the computer left, propagated to now), so it
+   * stays at the same place in the physical world. Same receiver, no offset: the point is unchanged.
+   */
+  private hoverPointForNewComputer(target: LatLon, measured: LatLon): { target: LatLon; metres: number } {
+    if (!this.lastFeedback) return { target, metres: 0 };
+    const d = toLocal(this.propagatedSample(this.lastFeedback), measured), nm = Math.hypot(d.x, d.y);
+    return { target: nm > 0 ? offset(target, deg(Math.atan2(d.x, d.y)), nm) : target, metres: nm * 1852 };
+  }
+
+  /** Where the AFCS's last hover feedback sample puts the aircraft now, flown on at its measured velocity. */
+  private propagatedSample(last: NonNullable<FlightSimulator["lastFeedback"]>): LatLon {
+    const seconds = (this.fms.now.getTime() - last.at) / 1000, speed = Math.hypot(last.north, last.east);
+    return speed > 1e-9 ? offset(last.position, deg(Math.atan2(last.east, last.north)), (speed * seconds) / 3600) : last.position;
   }
 
   /** Accepted SYNC copies current procedure progress; each computer subsequently computes its own guidance. */
@@ -1373,9 +1418,7 @@ export class FlightSimulator {
     if (!last || last.source === feedback.source) return { feedback, reason: null };
     const seconds = (this.fms.now.getTime() - last.at) / 1000;
     if (seconds > Math.max(dt, this.profile.hoverTransferTick.value) + 1e-6) return { feedback: null, reason: `GPS${feedback.source} took over ${seconds.toFixed(2)} s after the last sample` };
-    const speed = Math.hypot(last.north, last.east);
-    const predicted = speed > 1e-9 ? offset(last.position, deg(Math.atan2(last.east, last.north)), (speed * seconds) / 3600) : last.position;
-    const jump = distanceNm(predicted, feedback.position) * 1852;
+    const jump = distanceNm(this.propagatedSample(last), feedback.position) * 1852;
     const velocityStep = Math.hypot(feedback.north - last.north, feedback.east - last.east);
     if (jump > this.profile.hoverTransferPosition.value) return { feedback: null, reason: `GPS${feedback.source} position ${jump.toFixed(1)} m from the last sample` };
     if (velocityStep > this.profile.hoverTransferVelocity.value) return { feedback: null, reason: `GPS${feedback.source} velocity ${velocityStep.toFixed(1)} kt from the last sample` };
