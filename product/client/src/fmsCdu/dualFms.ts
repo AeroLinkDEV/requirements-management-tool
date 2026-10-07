@@ -30,6 +30,8 @@ export class DualFmsSystem {
       receivers: one.gps as readonly [GpsReceiver, GpsReceiver], ...(options.userDatabase ? { userDatabase: {
         store: options.userDatabase.store, scope: { ...options.userDatabase.scope, profileId: `${options.userDatabase.scope.profileId}:fms2` },
       } } : {}) });
+    // One system, one computation (#1518): a key, a step or a cross-talk exchange on either computer settles both, once.
+    one.shareComputation(two);
     this.computers = [one, two]; this.flights = [new FlightSimulator(one, undefined, () => this.prepareGuidance(1)), new FlightSimulator(two, undefined, () => this.prepareGuidance(2))];
     const parameters = profile.parameters;
     this.rms = new RadioManagementSystem(() => clock().getTime(), () => this.link, () => this.notify(),
@@ -46,7 +48,9 @@ export class DualFmsSystem {
   get guidanceSide() { return this.driver; }
   get navigationSide() { return this.navSide; }
   get simulator() { return this.flights[this.driver - 1]; }
-  private notify() { this.computers.forEach(unit => unit.notifyComputerState()); }
+  private notify() { this.compute(() => this.computers.forEach(unit => unit.notifyComputerState())); }
+  /** One computation over both computers (ScriptedFms.compute): each settles only when the whole of it has ended. */
+  private compute<T>(work: () => T): T { return this.computers[0].compute(work); }
   private unit(side: FmsSide) { return this.computers[side - 1]; }
   private peer(side: FmsSide) { return this.computers[2 - side]; }
   private port(side: FmsSide): CrossTalkPort {
@@ -59,35 +63,42 @@ export class DualFmsSystem {
       get pendingMode() { return system.pending?.side === side ? system.pending.mode : null; },
       get peerRoute() { return structuredClone(system.peer(side).activeRoute); },
       get navigationSide() { return system.navSide; },
+      // Each exchange is one computation over both computers, however the computer that started it was driven.
       requestMode(mode) {
-        if (system.pending && system.pending.side !== side) { system.unit(side).advisory("!CDU ENTRY CONFLICT"); system.notify(); return; }
-        system.pending = { side, mode }; system.notify();
+        system.compute(() => {
+          if (system.pending && system.pending.side !== side) { system.unit(side).advisory("!CDU ENTRY CONFLICT"); system.notify(); return; }
+          system.pending = { side, mode }; system.notify();
+        });
       },
-      confirmMode(confirm) { system.confirm(side, confirm); },
+      confirmMode(confirm) { system.compute(() => system.confirm(side, confirm)); },
       beginEdit() {
         if (system.operation === "INDEPENDENT" || !system.link) return true;
         if (system.editor !== null && system.editor !== side) return false;
         system.editor = side; return true;
       },
       finishEdit(executed) {
-        if (executed && system.operation === "SYNC" && system.link) {
-          system.peer(side).receiveComputerPlan(system.unit(side).computerPlan, false);
-          system.flights[2 - side].receiveSynchronizedProgress(system.flights[side - 1]);
-        }
-        if (system.editor === side) system.editor = null;
-        system.notify();
+        system.compute(() => {
+          if (executed && system.operation === "SYNC" && system.link) {
+            system.peer(side).receiveComputerPlan(system.unit(side).computerPlan, false);
+            system.flights[2 - side].receiveSynchronizedProgress(system.flights[side - 1]);
+          }
+          if (system.editor === side) system.editor = null;
+          system.notify();
+        });
       },
       crossfill(secondary) { return system.crossfill(side, secondary); },
-      settingsChanged() { system.settingsChanged(side); },
-      healthChanged() { system.reconcile(); system.notify(); },
+      settingsChanged() { system.compute(() => system.settingsChanged(side)); },
+      healthChanged() { system.compute(() => { system.reconcile(); system.notify(); }); },
       broadcastAlert(text) {
-        if (system.operation === "SYNC" && system.link && !system.peer(side).hasCondition("fmsFail")) system.peer(side).receiveComputerAlert(text);
+        system.compute(() => {
+          if (system.operation === "SYNC" && system.link && !system.peer(side).hasCondition("fmsFail")) system.peer(side).receiveComputerAlert(text);
+        });
       },
       acknowledgeMessage(text) {
-        if (system.operation === "SYNC" && system.link) system.peer(side).acknowledgeComputerMessage(text);
+        system.compute(() => { if (system.operation === "SYNC" && system.link) system.peer(side).acknowledgeComputerMessage(text); });
       },
       missedApproachRequested() {
-        if (system.operation === "SYNC" && system.link) system.peer(side).requestMissedApproach(true);
+        system.compute(() => { if (system.operation === "SYNC" && system.link) system.peer(side).requestMissedApproach(true); });
       },
       setIndependent(on) {
         // Bench injection is a link failure; clearing the fault restores communications, never silently overwrites a route.
@@ -136,13 +147,15 @@ export class DualFmsSystem {
     }
     this.editor = null; this.navSide = null; this.pending = null; this.phaseDifferentSince = null; this.notify();
   }
-  setLinkAvailable(available: boolean) {
+  setLinkAvailable(available: boolean) { this.compute(() => this.changeLink(available)); }
+  private changeLink(available: boolean) {
     if (this.link === available) return;
     this.link = available;
     if (!available) this.independent("LINK LOST");
     this.notify();
   }
-  selectGuidance(side: FmsSide) {
+  selectGuidance(side: FmsSide) { this.compute(() => this.changeGuidance(side)); }
+  private changeGuidance(side: FmsSide) {
     if (this.driver === side) return;
     const previous = this.unit(this.driver), next = this.unit(side);
     next.observeAircraft(previous);
@@ -150,7 +163,8 @@ export class DualFmsSystem {
     this.computers.forEach((unit, i) => unit.setReceiverCommandAuthority(i === side - 1));
     this.driver = side; this.notify();
   }
-  crossfill(side: FmsSide, secondary = false): boolean {
+  crossfill(side: FmsSide, secondary = false): boolean { return this.compute(() => this.fill(side, secondary)); }
+  private fill(side: FmsSide, secondary: boolean): boolean {
     const refused = this.compatibility(side, false);
     if (refused) { this.refuse(side, refused); return false; }
     if (this.operation !== "INDEPENDENT") { this.unit(side).advisory("XFILL REQUIRES INDEPENDENT"); return false; }
@@ -205,7 +219,8 @@ export class DualFmsSystem {
     this.peer(side).refreshSensorInput(); this.reconcile();
   }
   /** Only the selected flight controller integrates physics. The other computes guidance/sequence against that aircraft. */
-  step(dt: number) {
+  step(dt: number) { this.compute(() => { this.stepBoth(dt); this.notify(); }); }
+  private stepBoth(dt: number) {
     let remaining = dt;
     while (remaining > 1e-6) {
       const h = Math.min(1, remaining), selected = this.unit(this.driver), other = this.peer(this.driver);
@@ -214,14 +229,14 @@ export class DualFmsSystem {
       other.observeAircraft(selected); this.flights[2 - this.driver].observe(h, this.simulator);
       this.reconcile(); this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator)); remaining -= h;
     }
-    this.notify();
   }
-  tick() {
+  tick() { this.compute(() => { this.tickBoth(); this.notify(); }); }
+  private tickBoth() {
     const selected = this.unit(this.driver), other = this.peer(this.driver);
     if (this.driver === 2) this.unit(1).observeAircraft(selected);
     this.unit(1).refreshSensorInput(); this.unit(1).tick();
     this.unit(2).observeAircraft(selected); this.unit(2).refreshSensorInput(); this.unit(2).tick();
     other.observeAircraft(selected); this.settingsChanged(1); this.settingsChanged(2); this.reconcile();
-    this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator)); this.notify();
+    this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator));
   }
 }

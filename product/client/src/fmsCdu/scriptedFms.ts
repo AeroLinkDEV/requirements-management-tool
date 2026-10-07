@@ -17,6 +17,8 @@ import {
 } from "./fmsModel";
 import { Constellation, seededRandom } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
+import { stimulusFor } from "./gpsStimulus";
+import { asComputations } from "./computation";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
@@ -189,9 +191,47 @@ export type MovingRendezvous = {
 /** The DESELECT 1/1 lines (M300 17-2) of the equipment this profile configures; GPS has its own page. */
 export type DeselectableInput = "TAS" | "HDG" | "DME" | "VOR/DME/TCN" | "DVS" | "KALMAN";
 
+/**
+ * The kernel computation the computers of one system share (#1518): how deep it is, whether observers are running
+ * inside it, and whether its end is settling them. A settle that starts another computation makes it run again, at
+ * most SETTLE_ROUNDS times; one still not at rest after that is a programming fault and throws.
+ */
+type Computation = { depth: number; observing: number; settling: boolean; dirty: boolean; members: ScriptedFms[] };
+const SETTLE_ROUNDS = 4;
+
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
   private changes = 0;
+  /**
+   * Reading the FMS never changes it (#1518): the screen, the bus outputs, the guidance and any digest are observers.
+   * What a read used to latch is settled at a defined point instead: when a kernel computation (a key, a bench
+   * condition, a flight step or tick) ends, and at every change notification outside one. The bench renders after each
+   * of those, so the bench's timing is kept, and a headless run or a digest that never renders sees the same state.
+   */
+  private computation: Computation = { depth: 0, observing: 0, settling: false, dirty: false, members: [this] };
+  private notifyPending = false;
+  private settler: (() => void) | null = null;
+  // The actions the crew, the bench and the scenarios take, each one computation (press and setCondition compute
+  // themselves). The steps' own internals (tick, arrive, updateNavigation, setAircraft...) run inside a step already.
+  static {
+    asComputations(ScriptedFms, [
+      "abeamPoints", "acknowledgeComputerMessage", "activateHover", "activateSar", "activateSecondary", "addMark", "answerCall",
+      "armApproach", "cancelHover", "cancelTdn", "changeHold", "chooseEntry", "completeSar", "copyActiveToSecondary",
+      "createPilot", "createUserWaypoint", "declareQnh", "declareSurface", "defineHold", "defineMoving", "definePoint",
+      "defineTemporary", "deselectRaimSatellite", "designateHoverMark", "designateHoverMarkIdent", "designateHoverMarkOnTop",
+      "directTo", "endCall", "enterManualWind", "enterQnh", "enterWaypoint", "eraseHold", "eraseModification", "executeTdn",
+      "forgetPilot", "goAround", "importUserDatabase", "initializePosition", "interceptCourse", "interruptSar", "loadArinc424",
+      "loadBacktrack", "loadCompanyRoute", "loadMagvar", "loadNavData", "modify", "open", "overrideDiscontinuity",
+      "placeAircraft", "powerOff", "powerOn", "predictRaimAt", "predictRaimEta", "proceedFromPins", "raiseAlert",
+      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "replaceLegs",
+      "requestMissedApproach", "saveCompanyRoute", "selectGpsReceiver", "selectProcedure", "selectRunway", "sequence",
+      "setAirInputFaults", "setApirsFaultBias", "setApproachTemperature", "setBaroError", "setBaroSetting", "setDeselected",
+      "setDmeDeselected", "setDvsInputSurface", "setDvsWindMagnetic", "setFafAltitude", "setFuel", "setGpsBaro",
+      "setInhibited", "setNavRadioMode", "setNdbOffAir", "setOffset", "setRadio", "setRadioFaults", "setRnp", "setScratch",
+      "setSensorHealth", "setStationFault", "setStationOffAir", "setSurfaceDrift", "setUtcTime", "setWaterCurrent", "squawk",
+      "startSelfTest", "swapCycles", "swapRadio", "toggleAngleReference",
+    ], self => self);
+  }
   private page: PageId = "IDENT";
   private index = 0;
   private scratch = "";
@@ -792,19 +832,95 @@ export class ScriptedFms implements CduBackend {
   screen(): CduScreen {
     if (this.powerState === "TEST") return compose(Array.from({ length: 14 }, () => ({ left: { text: " ".repeat(24), color: "white" as const, inverse: true } })));
     if (this.hasCondition("fmsFail")) return compose([]);
-    const page = PAGES[this.page];
-    const count = Math.max(1, page.pages(this));
-    this.index = Math.min(this.index, count - 1);
-    const lines = page.render(this, this.index);
+    // The page shown: the index is settled (settleView) when an action ends, never by drawing the screen.
+    const lines = PAGES[this.page].render(this, Math.min(this.index, this.pageCount() - 1));
     lines[13] = this.scratchLine();
     return compose(lines);
   }
 
+  private pageCount() { return Math.max(1, PAGES[this.page].pages(this)); }
+
+  /** A route or page that shrank under the view leaves it on its last page, as the bench has always shown it. */
+  private settleView() {
+    if (!this.hasCondition("fmsFail")) this.index = Math.min(this.index, this.pageCount() - 1);
+  }
+
   press(fn: CduFunction, options: { held?: boolean } = {}) {
     if (this.hasCondition("fmsFail")) return;
-    this.handle(fn, options);
-    this.crossTalk?.settingsChanged();
-    this.emit();
+    this.compute(() => {
+      // A key acts on the page shown, even when nothing has drawn or settled the view since the route changed.
+      this.settleView();
+      this.handle(fn, options);
+      this.crossTalk?.settingsChanged();
+      this.emit();
+    });
+  }
+
+  /**
+   * One kernel computation: a key, a bench control or condition, a cross-talk operation, or (from the flight and the
+   * dual system) a step or a tick. Its own reads are part of it. Every computer of the system takes part in it
+   * (shareComputation), so when the outermost one ends each computer settles once, after the whole of it, and then its
+   * observers are notified. A change notification outside any computation is a computation of its own.
+   */
+  compute<T>(work: () => T): T {
+    const computation = this.computation;
+    computation.depth += 1;
+    try { return work(); } finally {
+      computation.depth -= 1;
+      if (computation.depth === 0) this.finishComputation();
+    }
+  }
+
+  /**
+   * Runs an observer called from inside a computation: the consumer of the flight's output port. What it reads is never
+   * kept, even though it reads in the middle of a step.
+   */
+  observe<T>(work: () => T): T {
+    this.computation.observing += 1;
+    try { return work(); } finally { this.computation.observing -= 1; }
+  }
+
+  /** The two computers of a dual system take part in each other's computations (#1518). */
+  shareComputation(peer: ScriptedFms) {
+    peer.computation = this.computation;
+    this.computation.members.push(peer);
+  }
+
+  /** The FMS-failure watch of the flight that drives this computer, run as each computation ends; a later flight replaces it. */
+  attachSettle(settle: () => void) { this.settler = settle; }
+
+  /** Whether a read now belongs to the kernel, which keeps what it determines, rather than to an observer. */
+  private get kernelReading() {
+    const computation = this.computation;
+    return computation.settling || (computation.depth > 0 && computation.observing === 0);
+  }
+
+  private finishComputation() {
+    const computation = this.computation;
+    // A computation that a settle starts (an alert it raises, say) is settled by another round of this one.
+    if (computation.settling) { computation.dirty = true; return; }
+    computation.settling = true;
+    try {
+      for (let round = 0; round < SETTLE_ROUNDS && (round === 0 || computation.dirty); round += 1) {
+        computation.dirty = false;
+        for (const member of computation.members) member.settle();
+      }
+      // A settle that keeps starting computations never comes to rest: a programming fault, never a state to carry on in.
+      if (computation.dirty) throw new Error(`FMS settle did not come to rest in ${SETTLE_ROUNDS} rounds (#1518)`);
+    } finally { computation.settling = false; computation.dirty = false; }
+    // The listeners run after the computation, so what they read is not kept; an action one of them takes is a
+    // computation of its own.
+    for (const member of computation.members) {
+      if (!member.notifyPending) continue;
+      member.notifyPending = false;
+      for (const listener of member.listeners) listener();
+    }
+  }
+
+  private settle() {
+    this.settleView();
+    this.settleRendezvous();
+    this.settler?.();
   }
 
   // ------------------------------------------------------------------ test bench
@@ -829,6 +945,10 @@ export class ScriptedFms implements CduBackend {
   }
 
   setCondition(id: ConditionId, on: boolean) {
+    this.compute(() => this.applyCondition(id, on));
+  }
+
+  private applyCondition(id: ConditionId, on: boolean) {
     if (on === this.hasCondition(id)) return;
     if (id === "independent" && this.crossTalk) { this.crossTalk.setIndependent(on); return; }
     switch (id) {
@@ -861,6 +981,9 @@ export class ScriptedFms implements CduBackend {
         if (id === "gpsLost") for (const receiver of this.receivers) receiver.injectFault("RF_INPUT", on);
         // GPS integrity is applied every step while on (applyGpsIntegrityCondition); off clears what it set.
         if (id === "gpsIntegrity" && !on) this.clearGpsIntegrityCondition();
+        // The condition takes the satellite selection, so the bench's masking no longer applies: it is cleared here, when
+        // the condition comes on, not whenever the GPS tab happens to be drawn (#1518).
+        if (id === "gpsIntegrity" && on) stimulusFor(this).clearMasking();
         if (["gpsLost", "gpsIntegrity", "dmeOutage", "apirsFail", "dvsFail"].includes(id)) this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
         // The FMS restarts on its IDENT page when it comes back.
@@ -2458,7 +2581,12 @@ export class ScriptedFms implements CduBackend {
     return route === this.active ? (index === 0 ? 1 : 2) : first ? 4 : 3;
   }
 
-  /** The rendezvous with the moving waypoint at `index` of `route`, as last determined (determined now if it never was). */
+  /**
+   * The rendezvous with the moving waypoint at `index` of `route`, as last determined. One never determined yet is
+   * solved now: inside a kernel computation (a key, a step) that determines it, as its first use always has; an observer
+   * reading between computations gets the same answer without keeping it. Every computation ends by determining the
+   * rest (settleRendezvous), so a read between computations finds them determined.
+   */
   rendezvousFor(route: Route, index: number): MovingRendezvous | null {
     const leg = route.legs[index];
     if (leg?.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return null;
@@ -2466,8 +2594,20 @@ export class ScriptedFms implements CduBackend {
     const cached = this.rendezvousCache.get(key);
     if (cached && cached.condition === this.rendezvousCondition(route, index)) return cached;
     const solved = this.solveRendezvous(route, index, leg.ident);
-    this.rendezvousCache.set(key, solved);
+    if (this.kernelReading) this.rendezvousCache.set(key, solved);
     return solved;
+  }
+
+  /**
+   * M300 11-37: the rendezvous is determined when the action that put the moving waypoint in the route (or changed its
+   * condition) ends: an EXEC, an entry, a direct-to, a sequence. The 10-second schedule then runs from there
+   * (updateRendezvous). The bench used to do this by drawing the route after the action; now no draw is needed.
+   */
+  private settleRendezvous() {
+    for (const route of [this.active, this.modified]) {
+      if (!route) continue;
+      route.legs.forEach((_, index) => { this.rendezvousFor(route, index); });
+    }
   }
 
   /**
@@ -4210,7 +4350,9 @@ export class ScriptedFms implements CduBackend {
 
   private emit() {
     this.changes += 1;
-    for (const listener of this.listeners) listener();
+    // The observers wait for the computation's end, so none of them ever sees, or reads into, a half-done step.
+    this.notifyPending = true;
+    if (this.computation.depth === 0) this.compute(() => undefined);
   }
 
   private scratchLine(): Line {

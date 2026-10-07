@@ -28,9 +28,9 @@ export type GpsView = {
 };
 
 export function fmsGpsView(fms: ScriptedFms, sensorOwner: ScriptedFms = fms): GpsView {
+  // The condition replaces the bench's masking and clears it (ScriptedFms.setCondition, GpsStimulus.apply): drawing
+  // this view never changes the record (#1518).
   const stimulus = stimulusFor(sensorOwner), integrityHeld = sensorOwner.hasCondition("gpsIntegrity");
-  // The condition replaces the bench's masking, and clears it when it ends: the record says so rather than keep it.
-  if (integrityHeld) stimulus.clearMasking();
   return {
     receivers: fms.gps,
     difference: () => {

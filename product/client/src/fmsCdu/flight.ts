@@ -3,6 +3,7 @@ import { defaultLegMinutes, entrySegments, holdGeometry, type HoldSegment } from
 import { groundVelocity, iasFromTas, tasFromIas } from "./kinematics";
 import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
+import { asComputations } from "./computation";
 import { speedCommandIas, verticalArrived, verticalCommand } from "./transition";
 import { altitudeMeets, type AltitudeConstraint, type ProfilePoint, type VerticalPhase } from "./vnav";
 import type { GuidanceOutputPort } from "./sensorPorts";
@@ -232,6 +233,15 @@ export type VerticalPath = { altitude: number; source: "VNAV" | "APPR"; coupled:
 
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
+  // The crew's autopilot selections, the bench's and the scenarios', each one kernel computation of the FMS (#1518).
+  static {
+    asComputations(FlightSimulator, [
+      "adoptAircraftMotion", "armLnav", "engageAltitudeHold", "engageGoAround", "engageGroundSpeed", "engageHover",
+      "engageRadioHeight", "engageTransitionDown", "engageTransitionDownToHover", "engageTransitionUp", "engageVerticalSpeed",
+      "engageVnav", "proceedFromPins", "receiveSynchronizedProgress", "releaseForceTrim", "selectAltitude", "selectHeading",
+      "selectHoverHeight", "selectSpeed",
+    ], self => self.fms);
+  }
   private outputSequence = 0;
   private readonly outputPort: GuidanceOutputPort<Guidance> | null;
   private readonly profile: AircraftProfile["parameters"];
@@ -311,12 +321,26 @@ export class FlightSimulator {
     this.goArounds = fms.goArounds;
     this.phase = fms.verticalPhase;
     this.last = this.guide();
+    fms.attachSettle(() => this.settleFailure());
+    this.settleFailure();
   }
 
-  get guidance() {
-    // Power/table failure is observable even while the plant is paused; reading outputs cannot retain stale LNAV.
+  /** The output port's consumer is an observer (#1518): what it reads, even mid-step, is never kept. */
+  private publish(frame: Parameters<GuidanceOutputPort<Guidance>["write"]>[0]) {
+    const port = this.outputPort;
+    if (port) this.fms.observe(() => port.write(frame));
+  }
+
+  /** The guidance as last computed. Reading it changes nothing (#1518): the failure watch below keeps it current. */
+  get guidance() { return this.last; }
+
+  /**
+   * A power or table failure (or the recovery) takes effect even while the plant is paused, so the outputs never
+   * retain stale LNAV: the reversion latches when the action that failed the FMS ends, at that instant's heading and
+   * altitude, as the bench has always shown it, whether or not anything reads the guidance before the next step.
+   */
+  private settleFailure() {
     if (this.fms.hasCondition("fmsFail") !== this.fmsFailed) { this.watchFailure(); this.last = this.guide(); }
-    return this.last;
   }
   get verticalMode() { return this.vertical; }
   get approachMode() { return this.approach; }
@@ -664,13 +688,14 @@ export class FlightSimulator {
   }
 
   /** An unselected computer computes its own route guidance against the common aircraft, without integrating physics. */
-  observe(dt: number, selected?: FlightSimulator) {
+  observe(dt: number, selected?: FlightSimulator) { this.fms.compute(() => this.observeStep(dt, selected)); }
+  private observeStep(dt: number, selected?: FlightSimulator) {
     const fms = this.fms;
     if (selected) this.adoptAfcsSelections(selected);
     fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
     const computed = this.guide(dt); this.updateApproach(computed.crossTrack);
     this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
-    this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
+    this.publish({ at: fms.now.getTime(), sequence: ++this.outputSequence,
       status: fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
       value: fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
     const final = fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
@@ -679,16 +704,18 @@ export class FlightSimulator {
   }
 
   /** Publish current adopted navigation while paused, without integrating or sequencing another aircraft. */
-  refreshGuidance(selected?: FlightSimulator) {
+  refreshGuidance(selected?: FlightSimulator) { this.fms.compute(() => this.refreshStep(selected)); }
+  private refreshStep(selected?: FlightSimulator) {
     if (selected) this.adoptAfcsSelections(selected);
     this.watchFailure(); this.last = this.guide();
-    this.outputPort?.write({ at: this.fms.now.getTime(), sequence: ++this.outputSequence,
+    this.publish({ at: this.fms.now.getTime(), sequence: ++this.outputSequence,
       status: this.fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
       value: this.fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
   }
 
   /** Flies for dt seconds of simulated time, in steps of at most one second. */
-  step(dt: number) {
+  step(dt: number) { this.fms.compute(() => this.flyStep(dt)); }
+  private flyStep(dt: number) {
     let left = dt;
     while (left > 1e-6) {
       const h = Math.min(1, left);
@@ -713,7 +740,7 @@ export class FlightSimulator {
     // target the hold flies from this first step, not the approach's.
     const guidance = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.last = guidance;
-    this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
+    this.publish({ at: fms.now.getTime(), sequence: ++this.outputSequence,
       status: fms.hasCondition("fmsFail") ? "FAIL" : guidance.desiredTrack === null ? "NCD" : "NORMAL",
       value: fms.hasCondition("fmsFail") ? null : structuredClone(guidance) });
     // The airspeed moves toward the target at the acceleration limit. Bank toward the command at the roll-rate limit,

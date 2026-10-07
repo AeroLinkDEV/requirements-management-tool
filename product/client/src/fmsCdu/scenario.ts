@@ -444,7 +444,8 @@ export class ScenarioRunner {
     // is read after both.
     if (!problems.length && this.scenario.surface) fms.declareSurface(this.scenario.surface);
     if (!problems.length && this.scenario.start) {
-      const set = START_STATES[this.scenario.start].setUp(fms, sim ?? undefined);
+      const start = this.scenario.start;
+      const set = fms.compute(() => START_STATES[start].setUp(fms, sim ?? undefined));
       if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
     }
     this.problems = problems;
@@ -501,7 +502,8 @@ export class ScenarioRunner {
         } else {
           // A fresh alert check counts what the last action itself raised, so the baseline is taken just before it.
           this.previousAlerts = this.fms.recallList.length;
-          this.act(step.action);
+          // Each action is one kernel computation (#1518), settled when it ends as the bench settles a control.
+          this.fms.compute(() => this.act(step.action));
           this.finish({ status: "done", at: now, ...(isSensorStimulus(step.action) ? { actual: describeSensorStimulus(step.action) } : {}) });
         }
       } catch (error) {
