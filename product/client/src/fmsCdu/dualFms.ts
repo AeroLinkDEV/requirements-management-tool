@@ -204,7 +204,7 @@ export class DualFmsSystem {
       // Availability of GPS approach integrity is synchronized (M300 3-24); both computers use the best system
       // sensor (3-25). Settle the phase against that solution before judging a real phase disagreement (#1538).
       // With no usable system sensor, each retains its local degraded solution and still checks approach integrity.
-      this.computers.forEach(unit => unit.refreshSystemApproachIntegrity());
+      this.computers.forEach(unit => unit.refreshSystemNavigationMonitoring());
       const different = one.localFlightPhase !== two.localFlightPhase;
       this.phaseDifferentSince = different ? this.phaseDifferentSince ?? this.clock().getTime() : null;
       if (this.phaseDifferentSince !== null && (this.clock().getTime() - this.phaseDifferentSince) / 1000 > parameters.dualPhaseDisagreementTime.value)

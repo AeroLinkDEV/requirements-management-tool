@@ -430,7 +430,7 @@ export class FlightSimulator {
    * is lost if it is still captured, to the latched altitude hold, and LNAV reverts to the route. Both are recorded, and
    * the EFIS names the new source (lateralSource): never a silent substitute for the GPS deviation.
    */
-  private watchGpsLateral() {
+  private watchGpsLateral(controlsAircraft = true) {
     if (!this.gpsLateral) return;
     const fms = this.fms;
     if (!this.onFinal || fms.hasCondition("fmsFail") || this.lateral !== "LNAV") { this.gpsLateral = false; return; }
@@ -439,7 +439,7 @@ export class FlightSimulator {
     const reason = fms.gpsApproachAuthority.reason;
     if (this.approach === "CAPTURED") {
       this.approach = "OFF";
-      fms.armApproach(false);
+      if (controlsAircraft) fms.armApproach(false);
       this.altitudeHold = Math.round(fms.altitude);
       this.record("APPR LOST", `GPS lateral guidance lost (${reason}); ALT HOLD ${this.altitudeHold} FT; LNAV ON ROUTE`);
     } else this.record("GPS LATERAL LOST", `${reason}; LNAV ON ROUTE`);
@@ -769,7 +769,7 @@ export class FlightSimulator {
   private observeStep(dt: number, selected?: FlightSimulator) {
     const fms = this.fms;
     if (selected) this.adoptAfcsSelections(selected);
-    fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
+    fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(false); this.watchHover();
     // The observing flight computes its own capability, but cannot operate the shared aircraft approach switch.
     const computed = this.guide(dt); this.updateApproach(computed.crossTrack, false);
     this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;

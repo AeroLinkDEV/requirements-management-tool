@@ -223,7 +223,7 @@ export class ScriptedFms implements CduBackend {
       "forgetPilot", "goAround", "importUserDatabase", "initializePosition", "interceptCourse", "interruptSar", "loadArinc424",
       "loadBacktrack", "loadCompanyRoute", "loadMagvar", "loadNavData", "modify", "open", "overrideDiscontinuity",
       "placeAircraft", "powerOff", "powerOn", "predictRaimAt", "predictRaimEta", "proceedFromPins", "raiseAlert",
-      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "refreshSystemApproachIntegrity", "replaceLegs",
+      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "refreshSystemNavigationMonitoring", "replaceLegs",
       "requestMissedApproach", "saveCompanyRoute", "selectGpsReceiver", "selectProcedure", "selectRunway", "sequence",
       "setAirInputFaults", "setApirsFaultBias", "setApproachTemperature", "setBaroError", "setBaroSetting", "setDeselected",
       "setDmeDeselected", "setDvsInputSurface", "setDvsWindMagnetic", "setFafAltitude", "setFuel", "setGpsBaro",
@@ -1784,11 +1784,16 @@ export class ScriptedFms implements CduBackend {
     if (disagree && !this.nav.disagreeAlerted) { this.nav.disagreeAlerted = true; this.alert(alert("GPS DISAGREE")); }
     if (!disagree) this.nav.disagreeAlerted = false;
 
+    // M300 3-24/25: SYNC monitoring uses system navigation, adopted after local selection. Transient onside
+    // integrity must neither latch the approach phase nor raise a false system integrity/performance alert (#1538).
+    if (this.crossTalk?.mode !== "SYNC") this.refreshNavigationMonitoring();
+  }
+
+  private refreshNavigationMonitoring() {
+    const now = this.now.getTime();
     // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
     // effective values as the pages and the lamp (R11).
-    // M300 3-24/25: SYNC approach integrity uses system navigation, adopted by DualFmsSystem after local selection.
-    // Computing it here would latch the onside receiver's phase before that adoption (#1538).
-    if (this.crossTalk?.mode !== "SYNC") this.refreshApproachPhase();
+    this.refreshApproachPhase();
     // M300 A-128: cancel a manual departure QNH on crossing either departure terminal boundary.
     // Crossing, rather than merely being far from origin, preserves a subsequently entered arrival QNH.
     const departure = this.db.airport(this.active.origin);
@@ -1840,11 +1845,11 @@ export class ScriptedFms implements CduBackend {
     // The approach needs the selected receiver's words to permit it (gpsApproachAuthority: a usable receiver, a valid
     // selected approach, a level, 116), and once it has had vertical guidance (LPV or LNAV/VNAV with 117 valid) in the
     // approach phase, losing it is a loss of approach integrity too (3b, the GPS review's GPS-01 and GPS-06).
-    const authority = this.gpsApproachAuthority, vertical = authority.vertical;
+    const authority = this.navigationApproachAuthority, vertical = authority.vertical;
     if (rnavApproach && vertical) this.nav.approachVerticalSeen = true;
     if (!rnavApproach) this.nav.approachVerticalSeen = false;
     const integrityDenied = this.s300Advisory ? this.approachCancelled || !this.onFinalSegment && !this.approachIntegrityEligible
-      : !this.approachIntegrityEligible || selection.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical);
+      : !this.approachIntegrityEligible || this.nav.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical);
     if (rnavApproach && integrityDenied) {
       if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
     } else this.nav.approachIntegrityAlerted = false;
@@ -2043,14 +2048,14 @@ export class ScriptedFms implements CduBackend {
     const prediction = this.approachPrediction;
     const predicted = prediction.faf !== null && prediction.faf <= 0.3 && prediction.map !== null && prediction.map <= 0.3;
     // The FAF prediction is an entry gate, not a new requirement to predict a fix already passed.
-    this.approachIntegrityEligible = current && (this.onFinalSegment ? this.approachPhaseActive : predicted) && this.gpsApproachAuthority.annunciation !== "NO APPR";
+    this.approachIntegrityEligible = current && (this.onFinalSegment ? this.approachPhaseActive : predicted) && this.navigationApproachAuthority.annunciation !== "NO APPR";
     if (this.armedApproach && !this.approachCancelled && !holding && distance <= 2 && this.approachIntegrityEligible) this.approachPhaseActive = true;
     // A later loss on the final is handled by the approach guidance integrity policy, rather than changing RNP to 1.
     if ((!current || !predicted) && !this.onFinalSegment) this.approachPhaseActive = false;
   }
 
-  /** SYNC's approach-integrity computation follows system navigation adoption, including the no-usable-source case. */
-  refreshSystemApproachIntegrity() { this.refreshApproachPhase(); }
+  /** SYNC's phase-dependent monitoring follows system navigation adoption, including the no-usable-source case. */
+  refreshSystemNavigationMonitoring() { this.refreshNavigationMonitoring(); }
 
   /** M300 7-12: five minutes for integrity-only loss after FAF inbound; invalid input/HDOP loss is immediate. */
   private refreshS300Integrity() {
@@ -3110,7 +3115,6 @@ export class ScriptedFms implements CduBackend {
    */
   get gpsApproachAuthority(): ApproachAuthority {
     const approach = findProcedure(this.db, this.active, "APPROACH");
-    const rnav = approach?.approachType === "RNAV";
     if (this.s300Advisory) {
       const source = this.nav.gpsSource, bus = source === null ? null : this.gpsBus(source - 1);
       const assessment = assessReceiver(bus, 0.3), hdop = bus?.["101"];
@@ -3119,9 +3123,18 @@ export class ScriptedFms implements CduBackend {
         && !this.approachCancelled && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4 && (assessment.usable || delayed);
       return { annunciation: valid ? "LNAV" : "NO APPR", lateral: !!valid, vertical: false, reason: valid ? "" : "S300 GPS APPROACH UNAVAILABLE" };
     }
+    return this.laterApproachAuthority(this.gpsAssessment.chosen, this.gpsSelection.qualified);
+  }
+
+  /** Shared integrity availability does not authorize an AFCS 116/117 source transfer (#1538). */
+  private get navigationApproachAuthority(): ApproachAuthority {
+    if (this.crossTalk?.mode !== "SYNC" || this.s300Advisory) return this.gpsApproachAuthority;
+    return this.laterApproachAuthority(this.nav.gpsSource === null ? null : this.nav.gpsSource - 1, this.systemApproachQualified);
+  }
+
+  private laterApproachAuthority(chosen: number | null, qualified: boolean): ApproachAuthority {
+    const approach = findProcedure(this.db, this.active, "APPROACH"), rnav = approach?.approachType === "RNAV";
     if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
-    const chosen = this.crossTalk?.mode === "SYNC" ? this.nav.gpsSource === null ? null : this.nav.gpsSource - 1 : this.gpsAssessment.chosen;
-    const qualified = this.crossTalk?.mode === "SYNC" ? this.systemApproachQualified : this.gpsSelection.qualified;
     if (!qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
     // Only an approach the data declares LNAV only is flown without a FAS block; a missing or unreadable one is NO APPR.
     const bus = chosen === null ? null : this.gpsBus(chosen);
@@ -3137,7 +3150,7 @@ export class ScriptedFms implements CduBackend {
   get gpsApproach(): GpsApproachWords | null {
     if (this.s300Advisory) return null;
     if (findProcedure(this.db, this.active, "APPROACH")?.approachType !== "RNAV" || this.nav.mode !== "GPS") return null;
-    const chosen = this.crossTalk?.mode === "SYNC" ? this.nav.gpsSource === null ? null : this.nav.gpsSource - 1 : this.gpsAssessment.chosen;
+    const chosen = this.gpsAssessment.chosen;
     return chosen === null ? null : approachWords(this.gpsBus(chosen));
   }
 

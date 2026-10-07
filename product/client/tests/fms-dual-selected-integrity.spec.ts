@@ -64,7 +64,8 @@ test('KBTV LPV stays in SYNC with its shared arm when only GPS2 SBAS becomes do-
   expect(one.gps[1].bus()!['305'].value?.level).toBe('LNAV')
   expect(mismatches).toEqual([])
   expect(system.simulator.approachMode).toBe('CAPTURED')
-  expect(system.flights[1].modeEvents.filter(event => event.event === 'APPR LOST')).toEqual([])
+  expect(system.flights[1].modeEvents.some(event => event.event === 'APPR LOST')).toBe(true)
+  expect([one, two].map(unit => unit.recallList.filter(message => message.text === 'NO APPR INTEGRITY'))).toEqual([[], []])
   // Losing the selected receiver's SBAS as well still makes the driving flight disarm the aircraft switch.
   one.gps[0].setSbas({ doNotUse: true })
   for (let n = 0; n < 8; n++) tick()
@@ -73,18 +74,44 @@ test('KBTV LPV stays in SYNC with its shared arm when only GPS2 SBAS becomes do-
   expect(system.simulator.modeEvents.some(event => event.event === 'APPR LOST')).toBe(true)
 })
 
-test('an independent observing flight can lose its own LPV capability without disarming the aircraft switch', () => {
+for (const loss of ['vertical', 'lateral'] as const) test(`an independent observing flight can lose ${loss} LPV capability without disarming the aircraft switch`, () => {
   const { system, one, two, tick } = setup('kbtv-rnav15', LATER_SBAS_PROFILE)
   for (let n = 0; n * TICK_SECONDS <= 1000 && system.flights.some(flight => flight.approachMode !== 'CAPTURED'); n++) tick()
   expect(system.flights.map(flight => flight.approachMode)).toEqual(['CAPTURED', 'CAPTURED'])
   system.setLinkAvailable(false)
-  one.gps[1].setSbas({ doNotUse: true })
+  if (loss === 'vertical') one.gps[1].setSbas({ doNotUse: true })
+  else one.gps[1].override('116', { kind: 'FORCE', value: null, ssm: 'NCD' })
   for (let n = 0; n < 8; n++) tick()
   expect(system.mode).toBe('INDEPENDENT')
   expect(system.flights[1].modeEvents.some(event => event.event === 'APPR LOST')).toBe(true)
   expect(system.simulator.approachMode).toBe('CAPTURED')
   expect([one.approachArmed, two.approachArmed]).toEqual([true, true])
   expect(two.localFlightPhase, 'the observer must not clear the armed final approach phase').toBe('APPROACH')
+})
+
+// Navigation election is not an AFCS approach-source transfer. It must not substitute unqualified 116/117 words
+// merely because the peer already uses that receiver. The single-FMS transfer owner cannot see dual ANP election.
+for (const bias of [0, 60]) test(`navigation election preserves qualified approach words with GPS2 vertical bias ${bias} FT`, () => {
+  const { system, one, tick } = setup('kbtv-rnav15', LATER_SBAS_PROFILE)
+  for (let n = 0; n * TICK_SECONDS < 1000; n++) {
+    tick()
+    const runway = one.coordinates('RW15')
+    if (system.simulator.approachMode === 'CAPTURED' && runway && distanceNm(one.position, runway) <= 3) break
+  }
+  expect(system.simulator.approachMode).toBe('CAPTURED')
+  expect(system.navigationSide).toBe(1)
+  one.gps[1].override('117', { kind: 'BIAS', amount: bias })
+  for (let n = 0; n < 12; n++) tick()
+  const before = one.gpsApproach!
+  expect(before.verticalFt).not.toBeNull()
+  one.gps[0].override('247', { kind: 'FORCE', value: 0.2, ssm: 'NORMAL' })
+  tick()
+  const after = one.gpsApproach!
+  expect(system.navigationSide, 'positive control: the system elected the peer GPS solution').toBe(2)
+  expect(one.navState.gpsSource).toBe(2)
+  expect(Math.abs(after.verticalFt! - before.verticalFt!)).toBeLessThanOrEqual(0.1 * after.scale!.verticalFullScaleFt)
+  expect(system.mode).toBe('SYNC')
+  expect(system.simulator.approachMode).toBe('CAPTURED')
 })
 
 // Negative controls: independent computers still use their own receivers, and system-wide integrity loss still
