@@ -92,7 +92,9 @@
     "fms-perf-stats.spec.ts",
     "fms-pure-observers.spec.ts",
     "fms-dual-approach-phase.spec.ts",
-    "fms-kernel-digest.spec.ts"
+    "fms-kernel-digest.spec.ts",
+    "fms-kernel-phases.spec.ts",
+    "fms-kernel-legacy-equivalence.spec.ts"
   ],
   "rendered": [
     "client-truth-rendered.spec.ts",

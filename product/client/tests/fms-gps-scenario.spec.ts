@@ -1,9 +1,10 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import {
-  ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, parseScenario, procedureText, reportMarkdown, runHeadless, scenarioProblems,
+  ScenarioRecorder, ScenarioRunner, TICK_SECONDS, parseScenario, procedureText, reportMarkdown, runHeadless, scenarioProblems,
   scenarioStart, type Scenario, type ScenarioStep,
 } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
@@ -163,17 +164,17 @@ test('while recording, what the GPS tab applies is recorded with its time, and r
 
 /** Every tick: what both receivers put out and what the FMS made of it. */
 const gpsTimeline = (scenario: Scenario, chunk: number) => {
-  let now = scenarioStart(scenario)!
-  const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) })
-  const sim = new FlightSimulator(fms)
+  const { fms, plant } = singleComposition(scenarioStart(scenario)!, { profile: profileById(scenario.profile) })
   const runner = new ScenarioRunner(scenario, fms)
+  const kernel = new FmsKernel(plant, runner)
   const timeline: string[] = []
   const snapshot = () => timeline.push(JSON.stringify({
-    t: now, assessed: fms.gpsStatus.assessed, chosen: fms.gpsStatus.chosen, source: fms.navState.gpsSource, level: fms.approachType,
+    t: kernel.unitClockMs, assessed: fms.gpsStatus.assessed, chosen: fms.gpsStatus.chosen, source: fms.navState.gpsSource, level: fms.approachType,
     receivers: fms.gps.map(receiver => ({ mode: receiver.mode, satellites: receiver.bus()?.['060'].map(word => word.value) })),
     alerts: fms.recallList.map(message => message.text),
   }))
-  while (!runner.finished) advanceTicks(chunk, ms => { snapshot(); now += ms }, sim, runner)
+  // Each frame is taken as its instant closes, before the step that leads into the next.
+  while (!runner.finished) kernel.advance(chunk, { onInstantClose: snapshot })
   snapshot()
   return { timeline, results: runner.results, report: reportMarkdown(runner) }
 }
@@ -230,14 +231,13 @@ test('the report and the procedure list every GPS stimulus and clear, and name w
 
 test('GPS 1 ramp: FDE excludes the satellite and GPS 1 keeps LPV; its receiver fault moves the FMS to GPS 2 (library)', () => {
   const scenario = library('gps1-fde-then-gps2')
-  let now = scenarioStart(scenario)!
-  const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) })
-  const sim = new FlightSimulator(fms)
+  const { fms, plant } = singleComposition(scenarioStart(scenario)!, { profile: profileById(scenario.profile) })
   const runner = new ScenarioRunner(scenario, fms)
+  const kernel = new FmsKernel(plant, runner)
   const excluded = (index: number) => fms.gps[index].bus()?.['060'].filter(word => word.value!.excluded).map(word => word.value!.prn) ?? []
   let excludedSeen = false
   while (!runner.finished) {
-    advanceTicks(1, ms => { now += ms }, sim, runner)
+    kernel.advance(1)
     if (runner.results[4].status === 'done' && runner.results[8].status === 'pending') excludedSeen ||= excluded(0).includes(24)
   }
   expect(runner.outcome).toBe('passed')

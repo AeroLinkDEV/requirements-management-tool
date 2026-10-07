@@ -3,8 +3,10 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import {
-  ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
+  ScenarioRecorder, ScenarioRunner, TICK_SECONDS, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
   scenarioDigest, scenarioProblems, type Scenario,
 } from '../src/fmsCdu/scenario'
 import { UNMODELLED_CONDITIONS } from '../src/fmsCdu/conditions'
@@ -309,15 +311,13 @@ test('a condition first met after its window does not satisfy the check (N05)', 
 })
 
 test('a step that throws ends the run as an execution error, not a pass or a failed check', () => {
-  let now = START
-  const fms = new ScriptedFms(() => new Date(now))
-  const sim = new FlightSimulator(fms)
+  const { fms, plant } = singleComposition(START)
   fms.press = () => { throw new Error('panel disconnected') }
   const runner = new ScenarioRunner(scenarioOf([
     { when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG'] } },
     { when: { kind: 'start' }, action: { kind: 'expectLamp', lamp: 'MSG', lit: false } },
   ]), fms)
-  advanceTicks(4, ms => { now += ms }, sim, runner)
+  new FmsKernel(plant, runner).advance(4)
   expect(runner.results).toEqual([{ status: 'error', at: 0, actual: 'panel disconnected' }, { status: 'not reached' }])
   expect(runner.outcome).toBe('error')
 })
@@ -333,11 +333,10 @@ test('stopping a run is its own outcome', () => {
 test('the same scenario gives the same timeline however the ticks are grouped, as the bench groups them by rate', () => {
   const scenario = library('gps-lost-before-faf')
   const run = (chunk: number) => {
-    let now = START
-    const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) })
-    const sim = new FlightSimulator(fms)
+    const { fms, plant } = singleComposition(START, { profile: profileById(scenario.profile) })
     const runner = new ScenarioRunner(scenario, fms)
-    while (!runner.finished) advanceTicks(chunk, ms => { now += ms }, sim, runner)
+    const kernel = new FmsKernel(plant, runner)
+    while (!runner.finished) kernel.advance(chunk)
     return { results: runner.results, position: fms.truePosition, altitude: fms.altitude, elapsed: runner.elapsed }
   }
   const oneAtATime = run(1)

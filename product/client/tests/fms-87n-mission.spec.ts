@@ -9,7 +9,9 @@ import {
   COPTER_PINS_SOURCE, FINAL_START_BEFORE_STAYS_NM, MISSION_87N_OFFSHORE_SAR, MISSION_87N_VARIANTS, MISSION_START_SOUTH_NM, setUp87nOffshoreSar, setUp87nRnav190Final,
 } from '../src/fmsCdu/heliDemo'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
-import { ScenarioRunner, advanceTicks, runHeadless, scenarioProblems } from '../src/fmsCdu/scenario'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { ScenarioRunner, runHeadless, scenarioProblems } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -159,14 +161,13 @@ const MISSION_USER = { userId: 'mission.crew', profileId: HELICOPTER_PROFILE.id 
 
 /** Runs a scenario tick by tick, recording each tick, and returns the trace with the final state. */
 function observed(scenario: typeof MISSION_87N_OFFSHORE_SAR) {
-  let now = Date.parse(scenario.startTime!)
   const store = memoryUserDatabaseStore()
-  const fms = new ScriptedFms(() => new Date(now), { userDatabase: { store, scope: MISSION_USER } })
-  const sim = new FlightSimulator(fms)
+  const { fms, sim, plant } = singleComposition(Date.parse(scenario.startTime!), { userDatabase: { store, scope: MISSION_USER } })
   const runner = new ScenarioRunner(scenario, fms, undefined, sim)
+  const kernel = new FmsKernel(plant, runner)
   const ticks: Tick[] = []
   for (let n = 1; !runner.finished; n++) {
-    advanceTicks(1, ms => { now += ms }, sim, runner)
+    kernel.advance(1)
     const leg = fms.activeRoute.legs[0]
     const mrk = fms.coordinates('MRK')
     ticks.push({
