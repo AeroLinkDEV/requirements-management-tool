@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { abbaOrder, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, type RunValue } from '../perf/stats'
+import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
@@ -20,6 +20,58 @@ test('nearest-rank percentiles take the smallest value with at least p% at or be
 
 test('runs are ordered in ABBA blocks', () => {
   expect(abbaOrder(2).join('')).toBe('ABBAABBA')
+})
+
+test('a priming pass, arm A then arm B, runs every workload x topology once before block 0 (protocol revision 3)', () => {
+  // The cold first run of a session is always arm A, the base of an A/B; without priming it biases B/A - 1 toward B
+  // faster (#1536). One slot per arm (slots -2 and -1, so no slot number is shared with a scored slot), topology order
+  // alternating as in the scored blocks, no block.
+  const show = (slots: ReturnType<typeof headlessSchedule>) =>
+    slots.map(s => `${s.primed ? 'P' : s.block}:${s.slot}:${s.arm}:${s.runs.map(r => `${r.position}${r.workload}${r.topology[0]}`).join(',')}`)
+  expect(show(headlessSchedule(2, ['W1', 'W3'], ['single', 'dual']))).toEqual([
+    'P:-2:A:0W1s,1W1d,2W3s,3W3d', 'P:-1:B:0W1d,1W1s,2W3d,3W3s',
+    '0:0:A:0W1s,1W1d,2W3s,3W3d', '0:1:B:0W1d,1W1s,2W3d,3W3s', '0:2:B:0W1s,1W1d,2W3s,3W3d', '0:3:A:0W1d,1W1s,2W3d,3W3s',
+    '1:4:A:0W1s,1W1d,2W3s,3W3d', '1:5:B:0W1d,1W1s,2W3d,3W3s', '1:6:B:0W1s,1W1d,2W3s,3W3d', '1:7:A:0W1d,1W1s,2W3d,3W3s',
+  ])
+  expect(headlessSchedule(1, ['W1'], ['single', 'dual']).filter(s => s.primed).every(s => s.block === null)).toBe(true)
+})
+
+// Two ABBA blocks of one cell after a priming pass. The priming runs of both arms are recorded; the arm A one passed,
+// the arm B one failed. In block 1 an arm A run failed.
+const cell = { kind: 'headless', workload: 'W1', topology: 'single' }
+const recorded = [
+  { ...cell, primed: true, block: null, arm: 'A', status: 'passed', id: 'pA' },
+  { ...cell, primed: true, block: null, arm: 'B', status: 'failed', id: 'pB' },
+  ...(['A', 'B', 'B', 'A'] as const).map((arm, i) => ({ ...cell, primed: false, block: 0, arm, status: 'passed', id: `0${i}` })),
+  ...(['A', 'B', 'B', 'A'] as const).map((arm, i) => ({ ...cell, primed: false, block: 1, arm, status: i === 3 ? 'failed' : 'passed', id: `1${i}` })),
+]
+const ofCell = (entry: { workload?: string; topology?: string }) => entry.workload === 'W1' && entry.topology === 'single'
+
+test('priming runs are never analysed: they are not scored runs and never rows of a cell', () => {
+  expect(scoredRuns(recorded).map(e => e.id)).toEqual(['00', '01', '02', '03', '10', '11', '12', '13'])
+  // Only block 0 is analysed: block 1 lost its failed run, and the passed arm A priming run is not a block's run (also
+  // when no failed priming run is beside it).
+  expect(failedRunRule(recorded, ofCell).rows.map(e => e.id)).toEqual(['00', '01', '02', '03'])
+  expect(failedRunRule(recorded.filter(e => e.id !== 'pB'), ofCell).rows.map(e => e.id)).toEqual(['00', '01', '02', '03'])
+})
+
+test('a failed priming run does not trigger the failed-run rule', () => {
+  // The failed arm B priming run excludes nothing; block 1 is excluded for its own failed scored run only.
+  expect(failedRunRule(recorded, ofCell).excludedBlocks).toEqual([1])
+  expect(failedRunRule(recorded.slice(0, 6), ofCell)).toMatchObject({ excludedBlocks: [], rows: recorded.slice(2, 6) })
+})
+
+test('the block-0 check sets block 0\'s B/A - 1 against the RMS of the later blocks\' (descriptive)', () => {
+  // Block 0: A 10, 10 and B 8, 8, so d0 = -0.2. Block 1: B 11, 11, so +0.1. Block 2: B 7, 7, so -0.3. RMS of the later
+  // blocks: sqrt((0.01 + 0.09) / 2) = sqrt(0.05), about 0.2236; their mean |d| would be 0.2 and their mean d -0.1.
+  // Block 3 has arm A only and gives no d.
+  const block = (n: number, b: number): RunValue[] => [{ block: n, arm: 'A', value: 10 }, { block: n, arm: 'B', value: b }, { block: n, arm: 'B', value: b }, { block: n, arm: 'A', value: 10 }]
+  const check = blockZeroCheck([...block(0, 8), ...block(1, 11), ...block(2, 7), { block: 3, arm: 'A', value: 10 }])
+  expect(check.d0).toBeCloseTo(-0.2, 12)
+  expect(check.rmsLater).toBeCloseTo(Math.sqrt(0.05), 12)
+  expect(check.laterBlocks).toBe(2)
+  expect(blockZeroCheck(block(1, 11))).toMatchObject({ d0: null, laterBlocks: 1 })
+  expect(blockZeroCheck(block(0, 8))).toMatchObject({ rmsLater: null, laterBlocks: 0 })
 })
 
 test('the exact bootstrap of a three-run sample matches its hand enumeration', () => {
@@ -138,8 +190,17 @@ test('an A/A family is judged only when complete, clean and under the statistics
   const statistics = { revision: 2, test: 'within-block permutation', permutations: 19999 }
   const recorded = { permutations: 19999, test: 'within-block permutation', revision: 2 }
   const commit = 'c'.repeat(40)
-  const session = { protocol: { statistics: recorded }, committedStatistics: recorded, harness: { commit, dirtyEntries: 0 }, end: { commit, dirtyEntries: 0 } }
-  const base = { pilot: false, sessions: [session], statistics, alpha: 0.05, declaredFamilySize: 40 }
+  // One headless W1 session that ran the declared priming pass: A single, A dual (slot -2), then B dual, B single (-1).
+  const priming = [
+    { primed: true, slot: -2, arm: 'A', position: 0, workload: 'W1', topology: 'single' }, { primed: true, slot: -2, arm: 'A', position: 1, workload: 'W1', topology: 'dual' },
+    { primed: true, slot: -1, arm: 'B', position: 0, workload: 'W1', topology: 'dual' }, { primed: true, slot: -1, arm: 'B', position: 1, workload: 'W1', topology: 'single' },
+  ]
+  const primedRuns = [0, 1, 2, 3].map(index => ({ index, status: 'passed' }))
+  const session = {
+    kind: 'headless', workloads: ['W1'], priming, primedRuns,
+    protocol: { statistics: recorded }, committedStatistics: recorded, harness: { commit, dirtyEntries: 0 }, end: { commit, dirtyEntries: 0 },
+  }
+  const base = { pilot: false, sessions: [session], statistics, topologies: ['single', 'dual'], alpha: 0.05, declaredFamilySize: 40 }
   const of = (n: number, p: number) => Array.from({ length: n }, () => p)
   // Complete (40 of 40), a reachable floor (1/20000 < 0.05/40): judged; one Holm p at alpha fails it.
   expect(judgeFamily({ ...base, adjusted: of(40, 1), smallestP: of(40, 1 / 20000) }).verdict).toBe('passed')
@@ -163,6 +224,24 @@ test('an A/A family is judged only when complete, clean and under the statistics
   expect(judgedWith([{ ...session, end: null }])).toBe('not judged')
   expect(judgedWith([{ ...session, end: { commit: 'd'.repeat(40), dirtyEntries: 0 } }])).toBe('not judged')
   expect(judgedWith([{ ...session, end: { commit, dirtyEntries: 1 } }])).toBe('not judged')
+  // Revision 3. Not judged: no priming record, priming in another order (B first), a priming run left out of the
+  // record, an end record missing a priming run or listing none, a failed priming run, and two headless sessions in one
+  // run set (each numbers its blocks from 0, so the analysis would merge them). A browser session beside the one
+  // headless session is no second headless session.
+  expect(judgedWith([{ ...session, priming: undefined }])).toBe('not judged')
+  expect(judgedWith([{ ...session, priming: [...priming.slice(2), ...priming.slice(0, 2)] }])).toBe('not judged')
+  expect(judgedWith([{ ...session, priming: priming.slice(1) }])).toBe('not judged')
+  expect(judgedWith([{ ...session, primedRuns: primedRuns.slice(1) }])).toBe('not judged')
+  expect(judgedWith([{ ...session, primedRuns: null }])).toBe('not judged')
+  expect(judgedWith([{ ...session, primedRuns: [...primedRuns.slice(0, 3), { index: 3, status: 'failed' }] }])).toBe('not judged')
+  expect(judgedWith([session, { ...session }])).toBe('not judged')
+  expect(judgedWith([session, { ...session, kind: 'browser', priming: undefined, primedRuns: null }])).toBe('passed')
+  // An end record listing more priming runs than the declared pass is not that pass. A browser session that recorded
+  // other statistics (its committed block being the one in force, so only the recorded-statistics rule can see it) is
+  // not judged: the single-headless-session rule does not count it.
+  expect(judgedWith([{ ...session, primedRuns: [...primedRuns, { index: 4, status: 'passed' }] }])).toBe('not judged')
+  const browserOtherR = { ...session, kind: 'browser', priming: undefined, primedRuns: null, protocol: { statistics: otherR } }
+  expect(judgedWith([session, browserOtherR])).toBe('not judged')
   expect(judgeFamily({ ...base, pilot: true, adjusted: of(40, 0), smallestP: of(40, 1 / 20000) }).verdict).toBe('pilot')
 })
 

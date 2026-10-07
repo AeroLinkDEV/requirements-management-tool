@@ -8,6 +8,7 @@
 // statistic (permutationTest). The bootstrap (relativeEffect, medianLevel) gives descriptive 95% intervals only; it is
 // not a test. Revision 1 took a two-sided bootstrap p from relativeEffect; with two runs per arm per block that p was
 // zero far too often under the null (a 21% family fail rate over ABBA-preserving relabellings of real A/A data).
+// Revision 3 (#1536) adds an unscored priming pass before block 0 (headlessSchedule, scoredRuns); the test is unchanged.
 //
 // Pure functions only: no clock, no randomness except the seeded generator the caller names and records.
 
@@ -39,6 +40,77 @@ export function abbaOrder(blocks: number): Arm[] {
   const order: Arm[] = []
   for (let b = 0; b < blocks; b += 1) order.push('A', 'B', 'B', 'A')
   return order
+}
+
+/** One slot of the headless schedule: one arm's runs, one per workload x topology, each a fresh process. */
+export type ScheduledSlot = {
+  primed: boolean
+  /** The ABBA block; null for a priming slot, which belongs to no block. */
+  block: number | null
+  /** Scored slots count from 0; the two priming slots are -2 (arm A) and -1 (arm B), so no slot number is shared. */
+  slot: number
+  arm: Arm
+  runs: { position: number; workload: string; topology: string }[]
+}
+
+/**
+ * The headless run order (protocol revision 3): a priming pass, then `blocks` ABBA blocks. The topology order alternates
+ * from slot to slot (declared order in even slots, reversed in odd ones), so neither topology always runs first.
+ *
+ * The priming pass is one unscored run per arm per workload x topology: arm A (slot -2, declared topology order), then
+ * arm B (slot -1, reversed). Every session opened on arm A, and in the revision-2 A/A its first three processes were cold
+ * (p50 +36.0% W1 single, +38.8% W1 dual, +68.7% W2 single against that arm and cell's median; about 65 s), while every
+ * later first run of a cell, either arm, was within -2.1% to +2.2%. In an A/B, A is the base, so an unprimed block 0
+ * biases B/A - 1 toward "B faster" and hides slowdowns (#1536). Priming slots belong to no block; scored blocks count from 0.
+ */
+export function headlessSchedule(blocks: number, workloads: readonly string[], topologies: readonly string[]): ScheduledSlot[] {
+  const slotRuns = (reversed: boolean) => {
+    const ordered = reversed ? [...topologies].reverse() : [...topologies]
+    let position = 0
+    return workloads.flatMap(workload => ordered.map(topology => ({ position: position++, workload, topology })))
+  }
+  const priming = (['A', 'B'] as const).map((arm, i) => ({ primed: true, block: null, slot: i - 2, arm, runs: slotRuns(i === 1) }))
+  return [...priming, ...abbaOrder(blocks).map((arm, slot) => ({ primed: false, block: Math.floor(slot / 4), slot, arm, runs: slotRuns(slot % 2 === 1) }))]
+}
+
+/** A session's declared priming pass, as its session record lists it (the run-by-run form of headlessSchedule's priming slots). */
+export function primingPlan(workloads: readonly string[], topologies: readonly string[]) {
+  return headlessSchedule(1, workloads, topologies).filter(slot => slot.primed).flatMap(({ slot, arm, runs }) => runs.map(run => ({ primed: true, slot, arm, ...run })))
+}
+
+/** What the report needs from one recorded run (runs.jsonl). */
+export type RecordedRun = { kind: string; status: string; primed?: boolean; block: number | null; arm: string; workload?: string; topology?: string }
+
+/** The runs an analysis may use: every run but the priming runs (`primed: true`), which are recorded and never analysed. */
+export function scoredRuns<T extends RecordedRun>(entries: readonly T[]): T[] {
+  return entries.filter(entry => entry.primed !== true)
+}
+
+/**
+ * The declared failed-run rule (protocol.json statistics.failedRun) for one analysis unit (`unit` selects its runs): a
+ * block in which any of the unit's runs failed is excluded whole, both arms. Returns the unit's passed runs in the kept
+ * blocks and the excluded blocks. Priming runs are outside the rule: a failed one excludes nothing, a passed one is no row.
+ */
+export function failedRunRule<T extends RecordedRun>(entries: readonly T[], unit: (entry: T) => boolean): { rows: T[]; excludedBlocks: (number | null)[] } {
+  const runs = scoredRuns(entries).filter(unit)
+  const broken = new Set(runs.filter(entry => entry.status !== 'passed').map(entry => entry.block))
+  return { rows: runs.filter(entry => entry.status === 'passed' && !broken.has(entry.block)), excludedBlocks: [...broken] }
+}
+
+/**
+ * Descriptive only, never a test: whether block 0 still stands apart (#1536). For each block holding both arms, d is
+ * B/A - 1 of that block's arm medians. Returns block 0's d (null when block 0 is absent) and the root mean square of the
+ * later blocks' d (null when there are none), with their count.
+ */
+export function blockZeroCheck(runs: readonly RunValue[]): { d0: number | null; rmsLater: number | null; laterBlocks: number } {
+  const d = new Map<number, number>()
+  for (const block of new Set(runs.map(run => run.block))) {
+    const values = (arm: Arm) => runs.filter(run => run.block === block && run.arm === arm).map(run => run.value)
+    const a = values('A'), b = values('B')
+    if (a.length && b.length) d.set(block, median(b) / median(a) - 1)
+  }
+  const later = [...d].filter(([block]) => block !== 0).map(([, value]) => value)
+  return { d0: d.get(0) ?? null, rmsLater: later.length ? Math.sqrt(later.reduce((sum, x) => sum + x * x, 0) / later.length) : null, laterBlocks: later.length }
 }
 
 /** Mulberry32: a small seeded generator in [0, 1). The seed is a reproducibility input recorded with every result. */
@@ -237,18 +309,28 @@ export type SessionEvidence = {
   harness?: { commit?: string; dirtyEntries?: number }
   /** The matching session-end record's harness identity, or null when the session never recorded its end. */
   end?: { commit?: string; dirtyEntries?: number } | null
+  /** The session record's kind ('headless' or 'browser'), workloads and declared priming pass (revision 3). */
+  kind?: string
+  workloads?: readonly string[]
+  priming?: unknown
+  /** The priming runs the session-end record lists (index and status), or null when it lists none. */
+  primedRuns?: readonly { index: number; status: string }[] | null
 }
 
 /**
  * The A/A verdict for a family. It is judged only when every session of the run set recorded exactly the statistics
  * block in force, that block is the one committed at the session's harness commit (so a hand-edited declaration is not
  * judged), the session started and ended at the same commit on a clean tree, and none ran under the smoke override.
+ * The headless runs must come from exactly one session (blocks are numbered from 0 in each session, so two sessions in
+ * one run set would merge their blocks), and that session must have run the declared priming pass (primingPlan of its
+ * workloads and `topologies`) with every priming run recorded at its end and passed: a missing or failed priming run
+ * leaves the cold start in the set (revision 3).
  * A run set declared under another revision keeps its recorded verdict. It is refused when the family is not the
  * complete declared family (every workload x topology x measure; a failed-run exclusion can empty a cell) or when the
  * design cannot reach alpha / m. Otherwise it fails when any Holm-adjusted p is at or below alpha.
  */
 export function judgeFamily(input: {
-  pilot: boolean; sessions: readonly SessionEvidence[]; statistics: unknown
+  pilot: boolean; sessions: readonly SessionEvidence[]; statistics: unknown; topologies: readonly string[]
   adjusted: readonly number[]; smallestP: readonly number[]; alpha: number; declaredFamilySize: number
 }): Judgement {
   const significant = input.adjusted.filter(p => p <= input.alpha).length
@@ -263,6 +345,15 @@ export function judgeFamily(input: {
   if (input.sessions.some(session => (session.harness?.dirtyEntries ?? 1) > 0)) return { verdict: 'not judged', reason: 'a session started on a dirty harness tree', significant }
   if (input.sessions.some(session => !session.end || session.end.commit !== session.harness?.commit || (session.end.dirtyEntries ?? 1) > 0))
     return { verdict: 'not judged', reason: 'a session has no end record, or ended at another commit or on a dirty tree', significant }
+  const headless = input.sessions.filter(session => session.kind === 'headless')
+  if (headless.length !== 1)
+    return { verdict: 'not judged', reason: `the headless runs come from ${headless.length} sessions, not one (blocks are numbered per session)`, significant }
+  const [session] = headless
+  const plan = primingPlan(session.workloads ?? [], input.topologies)
+  if (!session.workloads?.length || canonical(session.priming) !== canonical(plan))
+    return { verdict: 'not judged', reason: 'the session did not record the declared priming pass', significant }
+  if (session.primedRuns?.length !== plan.length || session.primedRuns.some(run => run.status !== 'passed'))
+    return { verdict: 'not judged', reason: 'a priming run is missing or failed, so the cold start may remain in the set', significant }
   const refusals: string[] = []
   if (input.adjusted.length !== input.declaredFamilySize || input.smallestP.length !== input.declaredFamilySize)
     refusals.push(`the family has ${input.adjusted.length} of the ${input.declaredFamilySize} declared comparisons`)
