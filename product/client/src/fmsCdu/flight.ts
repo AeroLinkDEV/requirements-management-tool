@@ -662,6 +662,10 @@ export class FlightSimulator {
     this.lateral = previous.lateral; this.lnavArmed = previous.lnavArmed; this.heading = previous.heading; this.held = previous.held;
     this.lowCollective = structuredClone(previous.lowCollective); this.lowHorizontal = structuredClone(previous.lowHorizontal);
     this.hoverHeading = previous.hoverHeading; this.hoverHeightFt = previous.hoverHeightFt; this.tdSpeed = previous.tdSpeed; this.tdIas = previous.tdIas;
+    // The approach is armed by one instrument-panel switch in a manually armed installation (M300 7-8), and that one
+    // aircraft switch reaches every installed FMS. Without it the other computer never enters the approach phase, and
+    // SYNC falls to INDEPENDENT 30 s after the selected one does (M300 3-25; #1511).
+    if (this.fms.approachArmed !== previous.fms.approachArmed) this.fms.armApproach(previous.fms.approachArmed);
   }
 
   /** The bench changes the selected computer without resetting the single physical aircraft. */
