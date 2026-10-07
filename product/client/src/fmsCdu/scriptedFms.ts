@@ -223,7 +223,7 @@ export class ScriptedFms implements CduBackend {
       "forgetPilot", "goAround", "importUserDatabase", "initializePosition", "interceptCourse", "interruptSar", "loadArinc424",
       "loadBacktrack", "loadCompanyRoute", "loadMagvar", "loadNavData", "modify", "open", "overrideDiscontinuity",
       "placeAircraft", "powerOff", "powerOn", "predictRaimAt", "predictRaimEta", "proceedFromPins", "raiseAlert",
-      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "replaceLegs",
+      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "refreshSystemApproachIntegrity", "replaceLegs",
       "requestMissedApproach", "saveCompanyRoute", "selectGpsReceiver", "selectProcedure", "selectRunway", "sequence",
       "setAirInputFaults", "setApirsFaultBias", "setApproachTemperature", "setBaroError", "setBaroSetting", "setDeselected",
       "setDmeDeselected", "setDvsInputSurface", "setDvsWindMagnetic", "setFafAltitude", "setFuel", "setGpsBaro",
@@ -328,6 +328,7 @@ export class ScriptedFms implements CduBackend {
   /** AUTO receiver selection, approach-aware (gpsSensors.ts, the AeroLink simulator policy), and its last verdict. */
   private autoSelection = new AutoSelection();
   private gpsSelection = { qualified: true, refused: "" };
+  private systemApproachQualified = false;
   private selectionLog = new SelectionLog();
   /** The approach selection last sent to the receivers (its path identifier and CRC), so it is sent once per change. */
   private sentApproach: string | null = null;
@@ -1785,7 +1786,9 @@ export class ScriptedFms implements CduBackend {
 
     // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
     // effective values as the pages and the lamp (R11).
-    this.refreshApproachPhase();
+    // M300 3-24/25: SYNC approach integrity uses system navigation, adopted by DualFmsSystem after local selection.
+    // Computing it here would latch the onside receiver's phase before that adoption (#1538).
+    if (this.crossTalk?.mode !== "SYNC") this.refreshApproachPhase();
     // M300 A-128: cancel a manual departure QNH on crossing either departure terminal boundary.
     // Crossing, rather than merely being far from origin, preserves a subsequently entered arrival QNH.
     const departure = this.db.airport(this.active.origin);
@@ -2045,6 +2048,9 @@ export class ScriptedFms implements CduBackend {
     // A later loss on the final is handled by the approach guidance integrity policy, rather than changing RNP to 1.
     if ((!current || !predicted) && !this.onFinalSegment) this.approachPhaseActive = false;
   }
+
+  /** SYNC's approach-integrity computation follows system navigation adoption, including the no-usable-source case. */
+  refreshSystemApproachIntegrity() { this.refreshApproachPhase(); }
 
   /** M300 7-12: five minutes for integrity-only loss after FAF inbound; invalid input/HDOP loss is immediate. */
   private refreshS300Integrity() {
@@ -3050,9 +3056,10 @@ export class ScriptedFms implements CduBackend {
   }
   get localNavigationSolution() { return this.localSolution ? structuredClone(this.localSolution) : this.navigation.current; }
   get navigationWindEstimate() { return this.navigation.windEstimate; }
-  receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }) {
+  receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }, approachQualified: boolean) {
     if (this.hasCondition("fmsFail")) return;
     this.navigation.accept(solution, wind); this.here = { ...solution.position }; Object.assign(this.nav, solution);
+    this.systemApproachQualified = approachQualified;
     this.updateAngleReference();
   }
   /** A second navigation computer observes the same physical aircraft; it never integrates another aircraft. */
@@ -3113,8 +3120,9 @@ export class ScriptedFms implements CduBackend {
       return { annunciation: valid ? "LNAV" : "NO APPR", lateral: !!valid, vertical: false, reason: valid ? "" : "S300 GPS APPROACH UNAVAILABLE" };
     }
     if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
-    const chosen = this.gpsAssessment.chosen;
-    if (!this.gpsSelection.qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
+    const chosen = this.crossTalk?.mode === "SYNC" ? this.nav.gpsSource === null ? null : this.nav.gpsSource - 1 : this.gpsAssessment.chosen;
+    const qualified = this.crossTalk?.mode === "SYNC" ? this.systemApproachQualified : this.gpsSelection.qualified;
+    if (!qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
     // Only an approach the data declares LNAV only is flown without a FAS block; a missing or unreadable one is NO APPR.
     const bus = chosen === null ? null : this.gpsBus(chosen);
     // Approach acceptance keeps its 0.3-NM integrity limit even when a denied approach leaves the phase terminal.
@@ -3129,7 +3137,7 @@ export class ScriptedFms implements CduBackend {
   get gpsApproach(): GpsApproachWords | null {
     if (this.s300Advisory) return null;
     if (findProcedure(this.db, this.active, "APPROACH")?.approachType !== "RNAV" || this.nav.mode !== "GPS") return null;
-    const chosen = this.gpsAssessment.chosen;
+    const chosen = this.crossTalk?.mode === "SYNC" ? this.nav.gpsSource === null ? null : this.nav.gpsSource - 1 : this.gpsAssessment.chosen;
     return chosen === null ? null : approachWords(this.gpsBus(chosen));
   }
 

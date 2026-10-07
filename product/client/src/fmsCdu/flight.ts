@@ -445,7 +445,7 @@ export class FlightSimulator {
     } else this.record("GPS LATERAL LOST", `${reason}; LNAV ON ROUTE`);
   }
 
-  private updateApproach(crossTrack: number) {
+  private updateApproach(crossTrack: number, controlsAircraft = true) {
     const converging = this.previousCrossTrack === null || Math.abs(crossTrack) <= Math.abs(this.previousCrossTrack) + 1e-6;
     this.previousCrossTrack = crossTrack;
     const fms = this.fms;
@@ -459,7 +459,7 @@ export class FlightSimulator {
       if (cancel) {
         this.approach = "OFF";
         this.gpsLateral = false;
-        fms.armApproach(false);
+        if (controlsAircraft) fms.armApproach(false);
         this.altitudeHold = Math.round(fms.altitude);
         this.record("APPR CANCELLED", `${cancel}; ALT HOLD ${this.altitudeHold} FT`);
         return;
@@ -467,7 +467,7 @@ export class FlightSimulator {
       if (!capable) {
         // Vertical lost: the latched hold. Laterally the GPS's 116 keeps steering while it may (GPS-01).
         this.approach = "OFF";
-        fms.armApproach(false);
+        if (controlsAircraft) fms.armApproach(false);
         this.altitudeHold = Math.round(fms.altitude);
         const lateral = this.gpsLateral ? `; LNAV ON GPS (${fms.gpsApproachAuthority.reason})` : "";
         this.record("APPR LOST", `approach capability lost (${fms.approachType ?? "none"}); ALT HOLD ${this.altitudeHold} FT${lateral}`);
@@ -770,7 +770,8 @@ export class FlightSimulator {
     const fms = this.fms;
     if (selected) this.adoptAfcsSelections(selected);
     fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
-    const computed = this.guide(dt); this.updateApproach(computed.crossTrack);
+    // The observing flight computes its own capability, but cannot operate the shared aircraft approach switch.
+    const computed = this.guide(dt); this.updateApproach(computed.crossTrack, false);
     this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.publish({ at: fms.now.getTime(), sequence: ++this.outputSequence,
       status: fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",

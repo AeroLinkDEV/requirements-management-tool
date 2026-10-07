@@ -185,12 +185,6 @@ export class DualFmsSystem {
     this.rms.tick();
     if (this.operation === "SYNC") {
       if (!this.link || this.computers.some(unit => unit.hasCondition("fmsFail"))) this.independent("COMPUTER UNAVAILABLE");
-      else {
-        const different = one.localFlightPhase !== two.localFlightPhase;
-        this.phaseDifferentSince = different ? this.phaseDifferentSince ?? this.clock().getTime() : null;
-        if (this.phaseDifferentSince !== null && (this.clock().getTime() - this.phaseDifferentSince) / 1000 > parameters.dualPhaseDisagreementTime.value)
-          this.independent("PHASE DISAGREEMENT");
-      }
     }
     if (this.operation === "SYNC") {
       const solutions = this.computers.map(unit => unit.localNavigationSolution);
@@ -204,8 +198,17 @@ export class DualFmsSystem {
           && (selected.solution.anp === null || (selected.solution.anp - candidate.solution.anp) * 1852 >= parameters.dualSensorHysteresis.value))) selected = candidate;
       if (selected) {
         this.navSide = selected.side;
-        this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, this.unit(selected.side).navigationWindEstimate));
+        const source = this.unit(selected.side), approachQualified = source.gpsApproachSource.qualified;
+        this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, source.navigationWindEstimate, approachQualified));
       }
+      // Availability of GPS approach integrity is synchronized (M300 3-24); both computers use the best system
+      // sensor (3-25). Settle the phase against that solution before judging a real phase disagreement (#1538).
+      // With no usable system sensor, each retains its local degraded solution and still checks approach integrity.
+      this.computers.forEach(unit => unit.refreshSystemApproachIntegrity());
+      const different = one.localFlightPhase !== two.localFlightPhase;
+      this.phaseDifferentSince = different ? this.phaseDifferentSince ?? this.clock().getTime() : null;
+      if (this.phaseDifferentSince !== null && (this.clock().getTime() - this.phaseDifferentSince) / 1000 > parameters.dualPhaseDisagreementTime.value)
+        this.independent("PHASE DISAGREEMENT");
     } else {
       const [a, b] = this.computers.map(unit => unit.localNavigationSolution);
       const disagree = !one.hasCondition("fmsFail") && !two.hasCondition("fmsFail") && a.mode === "GPS" && b.mode === "GPS"
