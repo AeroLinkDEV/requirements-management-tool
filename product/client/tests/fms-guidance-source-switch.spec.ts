@@ -2,6 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import type { FmsSide } from '../src/fmsCdu/crossTalk'
 import { distanceNm, type LatLon } from '../src/fmsCdu/fmsModel'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { setUp87nOffshoreSar } from '../src/fmsCdu/heliDemo'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 
@@ -35,11 +36,15 @@ function mission() {
   return { system, one, two, fly, flyUntil, annunciated }
 }
 
-/** Slowed to hover speed and HOV engaged on the given computer, then settled. */
-function hovering(side: FmsSide) {
+/**
+ * Slowed to hover speed and HOV engaged on the given computer, then settled. With `ownReceivers`, the computers run
+ * INDEPENDENT, FMS 1 on GPS 1 and FMS 2 on GPS 2, so each measures the hover on its own receiver.
+ */
+function hovering(side: FmsSide, ownReceivers = false) {
   const setup = mission()
-  const { system, fly, flyUntil } = setup
+  const { system, one, two, fly, flyUntil } = setup
   fly(1)
+  if (ownReceivers) { system.setLinkAvailable(false); one.selectGpsReceiver('GPS1'); two.selectGpsReceiver('GPS2') }
   system.selectGuidance(side)
   system.simulator.selectSpeed(20)
   flyUntil(() => system.simulator.tas < 26, 120)
@@ -49,9 +54,14 @@ function hovering(side: FmsSide) {
   return setup
 }
 
-/** The hover procedure over the sighting, activated and executed on FMS 1 (and so on FMS 2, in SYNC). */
+/**
+ * The hover procedure over the sighting, activated and executed on FMS 1 (and so on FMS 2, in SYNC). FMS 2 is primed
+ * first (selected for 1 s): a computer that has never guided has no AFCS words and refuses TDN, so without it FMS 2
+ * would raise no transition request of its own.
+ */
 function hoverProcedure() {
   const setup = mission()
+  setup.system.selectGuidance(2); setup.fly(1); setup.system.selectGuidance(1)
   setup.fly(1)
   for (const key of ['TACT', 'LSK1R', 'LSK4L', 'LSK6R', 'EXEC'] as const) setup.one.press(key)
   expect(setup.two.hover.status).toBe('ACT')
@@ -114,7 +124,7 @@ test('the TDN transition flying TD/H to MRK is cancelled on a source change: HOV
 })
 
 test('TD with TD/H to MRK armed is disarmed on a source change: TD goes on to the gate, and TD/H does not follow', () => {
-  const { system, one, flyUntil, fly, annunciated } = hoverProcedure()
+  const { system, flyUntil, fly, annunciated } = hoverProcedure()
   flyUntil(() => system.simulator.axisArmed.pitch.includes('TD/H'), 400)
   fly(3)
   expect(system.simulator.axisModes.collective).toBe('TD')
@@ -158,7 +168,7 @@ test('HOV without hover feedback from the new computer becomes ATT at the change
   system.selectGuidance(1)
   expect(system.simulator.axisModes).toEqual({ collective: 'RHT', pitch: 'ATT', roll: 'ATT' })
   expect(system.simulator.modeEvents.at(-2)).toMatchObject({ event: 'HOV LOST', detail: expect.stringContaining('FMS source changed') })
-  expect(annunciated().last).toMatchObject({ event: 'FMS SOURCE CHANGED', detail: expect.stringContaining('HOV lost, ATT') })
+  expect(annunciated().last).toMatchObject({ event: 'FMS SOURCE CHANGED', detail: expect.stringContaining('HOV LOST, ATT; re-engage on the new computer') })
   expect(annunciated().degraded).toMatchObject({ pitch: ['HOV'], roll: ['HOV'] })
   fly(0.25)
   expect(Math.abs(system.simulator.tas - tas), 'ATT holds the air-velocity command, kt').toBeLessThanOrEqual(STEP_KT)
@@ -186,4 +196,100 @@ test('ATT after the feedback was lost stays ATT across a source change, on the s
   expect(Math.abs(one.groundSpeed - groundSpeed)).toBeLessThanOrEqual(STEP_KT)
   fly(30)
   expect(system.simulator.axisModes.pitch).toBe('ATT')
+})
+
+// D4 6.2a (R3-02) at the change: the new computer's feedback is judged once, against the AFCS's last sample.
+test('across receivers, feedback beyond the continuity limit is lost at the change: ATT, annunciated, never HOV first', () => {
+  const { system, two, fly, annunciated } = hovering(1, true)
+  stimulusFor(system.computers[0]).setSpoof(1, { northM: 29.5, driftEastMps: 0 })
+  fly(0.25)
+  expect(two.hoverFeedback?.source).toBe(2)
+  system.selectGuidance(2)
+  expect(system.simulator.axisModes).toEqual({ collective: 'RHT', pitch: 'ATT', roll: 'ATT' })
+  expect(system.simulator.modeEvents.at(-2)).toMatchObject({ event: 'HOV LOST', detail: expect.stringMatching(/FMS source changed: GPS2 position \d+\.\d m from the last sample/) })
+  expect(annunciated().last).toMatchObject({ event: 'FMS SOURCE CHANGED', detail: expect.stringContaining('HOV LOST, ATT; re-engage on the new computer') })
+  fly(5)
+  expect(system.simulator.axisModes.pitch).toBe('ATT')
+})
+
+test('across receivers within the continuity limit, HOV re-datums on the new receiver and is not judged again', () => {
+  const { system, one, two, fly, annunciated } = hovering(1, true)
+  expect(two.hoverFeedback?.source).toBe(2)
+  const at = { ...one.truePosition }
+  system.selectGuidance(2)
+  expect(annunciated().last).toMatchObject({ event: 'FMS SOURCE CHANGED', detail: expect.stringContaining('HOV at the present position') })
+  fly(30)
+  expect(system.simulator.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
+  expect(system.simulator.modeEvents.map(e => e.event)).not.toContain('HOV LOST')
+  expect(metres(one.truePosition, at)).toBeLessThan(15)
+})
+
+test('a TD/H to MRK cancelled across receivers beyond the continuity limit goes to ATT, not HOV', () => {
+  const { system, one, two, fly, flyUntil, annunciated } = hoverProcedure()
+  flyUntil(() => system.simulator.axisModes.pitch === 'TD/H', 400)
+  system.setLinkAvailable(false); one.selectGpsReceiver('GPS1'); two.selectGpsReceiver('GPS2')
+  stimulusFor(one).setSpoof(1, { northM: 29.5, driftEastMps: 0 })
+  fly(1)
+  expect(system.simulator.axisModes.pitch).toBe('TD/H')
+  expect(two.hoverFeedback?.source).toBe(2)
+  system.selectGuidance(2)
+  expect(system.simulator.axisModes.pitch).toBe('ATT')
+  expect(system.simulator.modeEvents.at(-2)).toMatchObject({ event: 'TD/H CANCELLED', detail: expect.stringContaining('ATT: GPS2 position') })
+  expect(annunciated().last).toMatchObject({ event: 'FMS SOURCE CHANGED', detail: expect.stringContaining('TD/H to MRK cancelled, HOV LOST, ATT') })
+})
+
+test('TU with its lateral hold lost keeps LVL lost across a source change: no automatic re-engagement on the new feedback', () => {
+  const { system, one, two, fly, flyUntil } = hovering(1, true)
+  expect(system.simulator.engageTransitionUp()).toBe(true)
+  stimulusFor(one).setFault(0, 'receiver', true)
+  flyUntil(() => system.simulator.axisModes.roll === 'ATT', 5)
+  expect(two.hoverFeedback).not.toBeNull()
+  system.selectGuidance(2)
+  fly(2)
+  expect(system.simulator.axisModes).toMatchObject({ pitch: 'TU', roll: 'ATT' })
+})
+
+test('the one aircraft flies on unchanged: a switched run matches an unswitched twin when the FMS air data disagrees with it', () => {
+  const runs = [mission(), mission()]
+  for (const run of runs) {
+    run.fly(10)
+    // The FMS's own TAS (from its wind) now differs from the aircraft's: the attitude lost, the real wind changed.
+    run.one.setCondition('apirsFail', true); run.system.tick()
+    Object.assign(run.one.wind, { direction: 100, speed: 45 }); run.system.tick()
+  }
+  const [switched, twin] = runs
+  expect(Math.abs((switched.one.trueAirspeed ?? 0) - switched.system.simulator.tas)).toBeGreaterThan(20)
+  switched.system.selectGuidance(2)
+  for (const seconds of [0.25, 5]) {
+    for (const run of runs) run.fly(seconds)
+    expect(Math.abs(switched.system.simulator.tas - twin.system.simulator.tas), 'TAS, kt').toBeLessThan(1e-6)
+    expect(Math.abs(switched.system.simulator.bankAngle - twin.system.simulator.bankAngle), 'bank, °').toBeLessThan(1e-6)
+    expect(metres(switched.one.truePosition, twin.one.truePosition), 'position, m').toBeLessThan(0.01)
+  }
+})
+
+test('a transition request the new computer raised in the step before the change is not engaged by it', () => {
+  const { system, one, two, fly, flyUntil } = hoverProcedure()
+  flyUntil(() => two.hover.request > 0, 400)
+  expect(one.hover.request).toBe(0)
+  expect(system.simulator.transitionInProgress).toBeNull()
+  const switched = system.simulator.modeEvents.length
+  system.selectGuidance(2)
+  fly(20)
+  expect(system.simulator.modeEvents.slice(switched + 1).map(e => e.event)).not.toContain('TRANSITION REQUEST')
+  expect(system.simulator.axisModes.collective).not.toBe('TD')
+})
+
+test('NAV armed toward the hover join is disarmed on a source change, as an armed approach is', () => {
+  const { system, one, fly, annunciated } = hoverProcedure()
+  fly(20)
+  expect(one.activeRoute.legs[0]).toMatchObject({ ident: 'JN' })
+  system.simulator.selectHeading(one.heading)
+  system.simulator.armLnav()
+  expect(system.simulator.lnavIsArmed).toBe(true)
+  system.selectGuidance(2)
+  expect(system.simulator.lnavIsArmed).toBe(false)
+  expect(annunciated().last).toMatchObject({ event: 'FMS SOURCE CHANGED', detail: expect.stringContaining('NAV to the hover join disarmed') })
+  fly(30)
+  expect(system.simulator.axisModes.roll).toBe('HDG')
 })
