@@ -80,16 +80,17 @@ test('nearby answers with the entries in range nearest first, the same whether i
   expect(Object.isFrozen(db.find(again[0].ident))).toBe(true)
 
   // A merged database is another database: it answers with its own entries, not the one it was merged from. Equal
-  // distances keep database order, here the reverse of ident order: two entries at one point, and a pair due east
-  // and due west of the asking position (the same distance by symmetry, checked).
+  // distances keep database order, which is neither ident order nor its reverse: three entries at one point (B, C, A),
+  // and a pair due east and due west of the asking position (the same distance by symmetry, checked).
   const added = (ident: string, position: LatLon) => ({ ...again[0], ident, position }) as NavEntry
   const point = offset(here, 0, 1)
-  const ties = [added('ZZTIEB', point), added('ZZTIEA', point), added('ZZWEST', { lat: here.lat, lon: here.lon - 0.05 }), added('ZZEAST', { lat: here.lat, lon: here.lon + 0.05 })]
-  expect(distanceNm(here, ties[2].position)).toBe(distanceNm(here, ties[3].position))
+  const ties = [added('ZZTIEB', point), added('ZZTIEC', point), added('ZZTIEA', point),
+    added('ZZWEST', { lat: here.lat, lon: here.lon - 0.05 }), added('ZZEAST', { lat: here.lat, lon: here.lon + 0.05 })]
+  expect(distanceNm(here, ties[3].position)).toBe(distanceNm(here, ties[4].position))
   const merged = db.merge({ cycle: db.cycle, entries: ties, airways: [], procedures: [], msa: [] })
   for (const at of [here, here]) {
     expect(merged.nearby(at, 32).map(identity)).toEqual(computedNearby([...entries, ...ties], at, 32).map(identity))
-    expect(merged.nearby(at, 32).map(entry => entry.ident).filter(ident => ident.startsWith('ZZ'))).toEqual(['ZZTIEB', 'ZZTIEA', 'ZZWEST', 'ZZEAST'])
+    expect(merged.nearby(at, 32).map(entry => entry.ident).filter(ident => ident.startsWith('ZZ'))).toEqual(['ZZTIEB', 'ZZTIEC', 'ZZTIEA', 'ZZWEST', 'ZZEAST'])
   }
 })
 
@@ -215,6 +216,8 @@ for (const { id, topology, speed, ndbInRange } of CENSUS)
     expect(shared.steps.findIndex((step, i) => step !== reference.steps[i]), 'first step whose state differs').toBe(-1)
     expect(shared.outcome).toBe(reference.outcome)
     expect(shared.adfFound).toBe(reference.adfFound)
-    // W1 has an NDB in ADF range, so both computers report a bearing every step; the 87N sea area has none.
+    // Coverage pin, not a behaviour check: W1 has an NDB in ADF range, so the lookup finds a station every step; the 87N
+    // sea area has none. If the data or a scenario moves, this says which cases still exercise the ADF lookup. The reads
+    // cover the kept answers on the ADF's own key; the order of equal distances is the nearby test's.
     expect(shared.adfFound > 0).toBe(ndbInRange)
   })
