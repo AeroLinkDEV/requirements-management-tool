@@ -273,10 +273,10 @@ test('a transition request the new computer raised in the step before the change
   flyUntil(() => two.hover.request > 0, 400)
   expect(one.hover.request).toBe(0)
   expect(system.simulator.transitionInProgress).toBeNull()
-  const switched = system.simulator.modeEvents.length
   system.selectGuidance(2)
+  const switched = system.simulator.modeEvents.length
   fly(20)
-  expect(system.simulator.modeEvents.slice(switched + 1).map(e => e.event)).not.toContain('TRANSITION REQUEST')
+  expect(system.simulator.modeEvents.slice(switched).map(e => e.event)).not.toContain('TRANSITION REQUEST')
   expect(system.simulator.axisModes.collective).not.toBe('TD')
 })
 
