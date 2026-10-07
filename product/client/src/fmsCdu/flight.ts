@@ -777,7 +777,9 @@ export class FlightSimulator {
       value: fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
     const final = fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
     this.path = final === null ? null : { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" };
-    this.adoptAircraftMotion(); fms.tick();
+    this.adoptAircraftMotion();
+    // Each computer refreshes its own moving rendezvous against adopted aircraft motion (M300 11-37).
+    fms.updateMovingRendezvous(); fms.tick();
   }
 
   /** Publish current adopted navigation while paused, without integrating or sequencing another aircraft. */

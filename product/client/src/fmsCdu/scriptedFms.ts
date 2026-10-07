@@ -2443,7 +2443,7 @@ export class ScriptedFms implements CduBackend {
   updatePerformance(dt: number) {
     // Moving waypoints follow the simulation clock from their epochs (rev 2 D-R epoch), not the ticks.
     for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
-    this.updateRendezvous();
+    this.updateMovingRendezvous();
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
     if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
@@ -2603,7 +2603,7 @@ export class ScriptedFms implements CduBackend {
   /**
    * M300 11-37: the rendezvous is determined when the action that put the moving waypoint in the route (or changed its
    * condition) ends: an EXEC, an entry, a direct-to, a sequence. The 10-second schedule then runs from there
-   * (updateRendezvous). The bench used to do this by drawing the route after the action; now no draw is needed.
+   * (updateMovingRendezvous). The bench used to do this by drawing the route after the action; now no draw is needed.
    */
   private settleRendezvous() {
     for (const route of [this.active, this.modified]) {
@@ -2673,7 +2673,7 @@ export class ScriptedFms implements CduBackend {
    * time to go is over one minute (then kept). An unachievable one is annunciated once: as the active waypoint
    * (condition 1) the RENDEZVOUS UNACHIEVABLE alert, with the roll command invalid; otherwise as an advisory.
    */
-  private updateRendezvous() {
+  updateMovingRendezvous() {
     const now = this.now.getTime();
     const live = new Set<string>();
     for (const route of [this.active, this.modified]) {
