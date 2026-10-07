@@ -2013,7 +2013,9 @@ export class ScriptedFms implements CduBackend {
     const current = this.nav.mode === "GPS" && assessment.usable && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4;
     const holding = !leavingFafHold && this.holdingAtFaf;
     if (!approach || !this.flownOnFmsGuidance(approach) || !this.armedApproach || holding || distance === null || distance > 2) this.approachPhaseActive = false;
-    if (!approach || distance === null || distance > 6 || !source || this.sensorPort) return;
+    // Only an independent input adapter, with no receivers to predict on, cannot predict approach integrity. A computer
+    // given the installation's receivers (FMS 2 in a dual installation) predicts and enters the approach phase (#1511).
+    if (!approach || distance === null || distance > 6 || !source || !this.benchRaim) return;
     const key = `${this.planRevision}:${source}:${this.raimDeselectedSatellites.join(",")}`;
     const now = this.now.getTime();
     if (this.approachPrediction?.key !== key || now - this.approachPrediction.at >= this.aircraftProfile.parameters.approachPredictionAge.value * 1000) {
