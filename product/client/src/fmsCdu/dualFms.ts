@@ -99,8 +99,17 @@ export class DualFmsSystem {
       acknowledgeMessage(text) {
         system.compute(() => { if (system.operation === "SYNC" && system.link) system.peer(side).acknowledgeComputerMessage(text); });
       },
-      missedApproachRequested() {
-        system.compute(() => { if (system.operation === "SYNC" && system.link) system.peer(side).requestMissedApproach(true); });
+      missedApproachRequested(planChanged = false) {
+        system.compute(() => {
+          if (system.operation !== "SYNC" || !system.link) return;
+          const peer = system.peer(side);
+          // Set the peer's missed state while its approach is still present, then transfer the resulting laboratory plan.
+          // S300's early missed request preserves each computer's lateral continuation to the MAP (M300 7-15/16).
+          if (peer.requestMissedApproach(true) && planChanged) {
+            peer.receiveComputerPlan(system.unit(side).computerPlan, false);
+            system.flights[2 - side].receiveSynchronizedProgress(system.flights[side - 1]);
+          }
+        });
       },
       setIndependent(on) {
         // Bench injection is a link failure; clearing the fault restores communications, never silently overwrites a route.

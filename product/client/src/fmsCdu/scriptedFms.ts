@@ -3253,11 +3253,13 @@ export class ScriptedFms implements CduBackend {
   goAround() {
     const route = this.active;
     const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
-    if (!this.requestMissedApproach()) return false;
+    // Publish the missed request after its resulting plan is complete: the laboratory policy also drops the approach.
+    if (!this.requestMissedApproach(true)) return false;
     if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
       route.legs.splice(0, missed);
       this.legStart = { ...this.here };
     }
+    this.crossTalk?.missedApproachRequested(this.aircraftProfile.verticalPolicy !== "ADVISORY");
     this.goArounds += 1;
     this.emit();
     return true;
