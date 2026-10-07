@@ -13,7 +13,7 @@ import {
   START_POSITION, WAYPOINT, arcLength, bearingDeg, bearingIntersection, courseDeg, distanceNm, formatPosition, fromLocal, toLocal, holdEntry, isOutstanding,
   maxSarGroundSpeed, offset, longitudeDelta,
   type Hold, type HoldEntry, type HoldStatus, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
-  type SarPattern, type Uplink,
+  type SarPattern, type Uplink, type DeepReadonly,
 } from "./fmsModel";
 import { Constellation, seededRandom } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
@@ -1619,6 +1619,8 @@ export class ScriptedFms implements CduBackend {
   /**
    * The published frame itself, for a reader inside the system that reads it every cycle (#1502 D10). Each sample
    * publishes a new frame and nothing edits one once published, so it is a value; the reader must not edit it either.
+   * FMS 2's sensor port hands it over as FMS 2's own frame (an alias, not a copy). Its type stays SensorFrame because
+   * the port and the GPS bus code take mutable bus types; fms-shared-reads.spec.ts deep-freezes it at run time instead.
    */
   peekNavigationInputs(): SensorFrame | null { return this.sensorFrame; }
 
@@ -3023,7 +3025,7 @@ export class ScriptedFms implements CduBackend {
   }
   get localNavigationSolution() { return this.localSolution ? structuredClone(this.localSolution) : this.navigation.current; }
   /** The local solution itself, for a read-only comparison (#1502 D10); a fresh one replaces it, nothing edits it. */
-  peekLocalNavigationSolution(): CivilSolution { return this.localSolution ?? this.navigation.current; }
+  peekLocalNavigationSolution(): DeepReadonly<CivilSolution> { return this.localSolution ?? this.navigation.current; }
   get navigationWindEstimate() { return this.navigation.windEstimate; }
   receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }) {
     if (this.hasCondition("fmsFail")) return;

@@ -75,11 +75,22 @@ test('nearby answers with the entries in range nearest first, the same whether i
   const again = db.nearby(here, 5)
   expect(again.map(identity)).toEqual(computedNearby(entries, here, 5).map(identity))
   expect(again.every(entry => db.find(entry.ident).includes(entry))).toBe(true)
-  // A merged database is another database: it answers with its own entries, not the one it was merged from.
-  const moved = { ...again[0], ident: 'ZZMOVED', position: offset(here, 0, 1) } as NavEntry
-  const merged = db.merge({ cycle: db.cycle, entries: [moved], airways: [], procedures: [], msa: [] })
-  expect(merged.nearby(here, 32).map(identity)).toEqual(computedNearby([...entries, moved], here, 32).map(identity))
-  expect(merged.nearby(here, 32).map(entry => entry.ident)).toContain('ZZMOVED')
+  // The database cannot change under a kept answer: its entries and the lists find hands out are frozen when it is built.
+  expect(again.every(entry => Object.isFrozen(entry) && Object.isFrozen(entry.position))).toBe(true)
+  expect(Object.isFrozen(db.find(again[0].ident))).toBe(true)
+
+  // A merged database is another database: it answers with its own entries, not the one it was merged from. Equal
+  // distances keep database order, here the reverse of ident order: two entries at one point, and a pair due east
+  // and due west of the asking position (the same distance by symmetry, checked).
+  const added = (ident: string, position: LatLon) => ({ ...again[0], ident, position }) as NavEntry
+  const point = offset(here, 0, 1)
+  const ties = [added('ZZTIEB', point), added('ZZTIEA', point), added('ZZWEST', { lat: here.lat, lon: here.lon - 0.05 }), added('ZZEAST', { lat: here.lat, lon: here.lon + 0.05 })]
+  expect(distanceNm(here, ties[2].position)).toBe(distanceNm(here, ties[3].position))
+  const merged = db.merge({ cycle: db.cycle, entries: ties, airways: [], procedures: [], msa: [] })
+  for (const at of [here, here]) {
+    expect(merged.nearby(at, 32).map(identity)).toEqual(computedNearby([...entries, ...ties], at, 32).map(identity))
+    expect(merged.nearby(at, 32).map(entry => entry.ident).filter(ident => ident.startsWith('ZZ'))).toEqual(['ZZTIEB', 'ZZTIEA', 'ZZWEST', 'ZZEAST'])
+  }
 })
 
 /** Freezes a value all the way down, except the database's own entries (shared module data the database check covers). */
@@ -161,31 +172,45 @@ const copying = <T>(run: () => T): T => {
 
 // Owner of the composition: per step, the whole state of a run with the shared reads and kept answers is the state of
 // the same run that copies and recomputes, so the change is bit-identical. The shared run is also frozen: nothing edits
-// a value it was handed, and the database the answers come from ends the run as it started. The digest sees what the
-// freeze and the nearby test cannot, such as a kept answer reused for a nearby but different position the run flies
-// through; the freeze names a writer that leaves no difference behind. A helicopter hover mission in single and dual at one and
-// four ticks per step, and the dual fixed-wing approach the comparison 5 analysis measured (W1). The PR that added this
-// recorded the same census over the whole library against main; a library-wide run here costs minutes per Fast run.
+// a value it was handed (the database's entries are frozen when it is built). The digest sees what the freeze and the
+// nearby test cannot, such as a fast read that returns something other than the copy's value; the freeze names a writer
+// that leaves no difference behind. Each step also reads the ADF bearing, and in dual FMS 2 is acted on between ticks.
+// A helicopter hover mission in single and dual at one and four ticks per step, and the dual fixed-wing approach the
+// comparison 5 analysis measured (W1). The PR that added this recorded the same census over the whole library against
+// main; a library-wide run here would add about 25 CPU-minutes to every Fast run.
 const CENSUS = [
-  ...(['single', 'dual'] as const).flatMap(topology => [1, 4].map(speed => ({ id: '87n-c-hover-feedback-lost', topology, speed }))),
-  { id: 'kbtv-rnav15-advisory', topology: 'dual' as const, speed: 4 },
+  ...(['single', 'dual'] as const).flatMap(topology => [1, 4].map(speed => ({ id: '87n-c-hover-feedback-lost', topology, speed, ndbInRange: false }))),
+  { id: 'kbtv-rnav15-advisory', topology: 'dual' as const, speed: 4, ndbInRange: true },
 ]
-for (const { id, topology, speed } of CENSUS)
+for (const { id, topology, speed, ndbInRange } of CENSUS)
   test(`${id} ${topology} at ${speed}x computes the same state at every step, sharing or copying`, () => {
     test.setTimeout(180_000)
     const record = () => {
       const steps: string[] = []
-      let databases: string[] | null = null
-      const exported = (units: readonly ScriptedFms[]) => units.map(unit => JSON.stringify(unit.navdb.exportData()))
-      const { runner, computers } = flyScenario(library(id), speed, topology, (state, units) => {
-        databases ??= exported(units)
-        steps.push(digest(state))
+      let step = 0, adfFound = 0
+      const { runner } = flyScenario(library(id), speed, topology, (state, units) => {
+        step += 1
+        // The ADF tuned to the NDB nearest the aircraft, when one is in range, so the bearing below has a station to find.
+        if (step === 1) {
+          const ndb = units[0].navdb.nearby(units[0].truePosition, 75).find(entry => entry.kind === 'navaid' && entry.type === 'NDB')
+          if (ndb?.kind === 'navaid' && ndb.frequency) units[0].setRadio('adf', ndb.frequency)
+        }
+        // FMS 2 acted on between ticks: an inhibit re-samples it at once, reading FMS 1's frame again, which it already
+        // holds (the frame is shared, so it is the same object both times). The inhibit is lifted later the same way.
+        if (units.length === 2 && step * speed === 80) units[1].setInhibited(units[1].navdb.nearby(units[1].position, 160).filter(entry => entry.kind === 'navaid').slice(0, 1).map(entry => entry.ident))
+        if (units.length === 2 && step * speed === 240) units[1].setInhibited([])
+        // The ADF bearing: no library scenario reads it, and its NDB lookup is one of the callers that lost a re-sort.
+        const adf = units.map(unit => [unit.adfRelativeBearing('adf'), unit.adfRelativeBearing('adf2')])
+        adfFound += adf.flat().filter(bearing => bearing !== null).length
+        steps.push(digest({ state, adf }))
       })
-      return { steps, outcome: runner.outcome, databases, after: exported(computers) }
+      return { steps, outcome: runner.outcome, adfFound }
     }
     const reference = copying(record), shared = frozen(record)
     expect(shared.steps.length).toBe(reference.steps.length)
     expect(shared.steps.findIndex((step, i) => step !== reference.steps[i]), 'first step whose state differs').toBe(-1)
     expect(shared.outcome).toBe(reference.outcome)
-    expect(shared.after).toEqual(shared.databases)
+    expect(shared.adfFound).toBe(reference.adfFound)
+    // W1 has an NDB in ADF range, so both computers report a bearing every step; the 87N sea area has none.
+    expect(shared.adfFound > 0).toBe(ndbInRange)
   })

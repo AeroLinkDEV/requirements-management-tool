@@ -344,6 +344,14 @@ export const DEMO_COMPANY_ROUTES: StoredRoute[] = [
   { name: "OWUL2", origin: "CYOW", dest: "CYUL", legs: [{ ident: "ELIBA", altitude: "5000" }, { ident: "RDG", via: "T613" }, { ident: "KILLA", via: "T613" }, { ident: "AGBEK", via: "T613", altitude: "3000" }] },
 ];
 
+const deepFreeze = <T>(value: T): T => {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value)) deepFreeze((value as Record<string, unknown>)[key]);
+  }
+  return value;
+};
+
 /** Exact positions whose nearby answer is kept: the navigation position and the ADF's true position, with room to spare. */
 const NEARBY_MEMO_SIZE = 4;
 
@@ -356,7 +364,10 @@ export class NavDatabase {
   readonly counts: { fixes: number; navaids: number; airports: number; runways: number; airways: number; procedures: number };
 
   constructor(data: NavData) {
-    for (const entry of data.entries) this.byIdent.set(entry.ident, [...(this.byIdent.get(entry.ident) ?? []), entry]);
+    // A database never changes once built (merge builds a new one), which is what lets nearby keep its answers: its
+    // entries, and the lists find hands out, are frozen.
+    for (const entry of data.entries) this.byIdent.set(entry.ident, [...(this.byIdent.get(entry.ident) ?? []), deepFreeze(entry)]);
+    for (const entries of this.byIdent.values()) Object.freeze(entries);
     for (const airway of data.airways) this.airwayByIdent.set(airway.ident, airway);
     this.procedures = data.procedures;
     this.msa = data.msa ?? [];
@@ -375,7 +386,7 @@ export class NavDatabase {
   exportData(): NavData { return structuredClone({ cycle: this.cycle, entries: [...this.byIdent.values()].flat(), airways: [...this.airwayByIdent.values()], procedures: this.procedures, msa: this.msa }); }
 
   /** Every entry with an ident: duplicates are possible, as in real data. */
-  find(ident: string): NavEntry[] { return this.byIdent.get(ident) ?? []; }
+  find(ident: string): readonly NavEntry[] { return this.byIdent.get(ident) ?? []; }
 
   airport(ident: string) { return this.find(ident).find((e): e is Airport => e.kind === "airport"); }
 
