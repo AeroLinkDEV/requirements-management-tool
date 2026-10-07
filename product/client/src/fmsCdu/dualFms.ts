@@ -6,6 +6,27 @@ import { ScriptedFms } from "./scriptedFms";
 import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
 import type { GpsReceiver } from "./gps";
 import type { UserDatabaseStore, UserScope } from "./userDatabase";
+import type { MethodRoles, ViewOf } from "./computation";
+import type { FlightView } from "./flight";
+import type { FmsView } from "./scriptedFms";
+import type { RadioView } from "./radioManagement";
+
+/**
+ * Every public method of DualFmsSystem and what it is (computation.ts MethodRole; #1517 I1b's structural guard). Each
+ * state change runs its own computation over both computers; the bench reaches them only by submitting to the kernel.
+ */
+const DUAL_FMS_ROLES = {
+  crossfill: "self-computing", selectGuidance: "self-computing", setLinkAvailable: "self-computing",
+  step: "kernel-internal", tick: "kernel-internal",
+} as const satisfies MethodRoles<DualFmsSystem>;
+
+/** What the bench's components get of the dual system: its state, and its units as read-only views. */
+export type DualFmsView = Omit<ViewOf<DualFmsSystem, typeof DUAL_FMS_ROLES>, "computers" | "flights" | "simulator" | "rms"> & {
+  readonly computers: readonly [FmsView, FmsView];
+  readonly flights: readonly [FlightView, FlightView];
+  readonly simulator: FlightView;
+  readonly rms: RadioView;
+};
 
 /** Two computers, one aircraft and receiver environment. This is a bench link, not an installed bus adapter. */
 export class DualFmsSystem {

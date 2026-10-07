@@ -2,6 +2,8 @@ import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./condition
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, errorProblem, settingProblem } from "./baro";
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
+import type { MethodRoles, ViewOf } from "./computation";
+import type { ActionTarget, KernelOutcome } from "./kernel/actions";
 import { FmsKernel } from "./kernel/kernel";
 import { singleComposition } from "./kernel/legacyPlantAdapter";
 import { FRAME_SECONDS } from "./kernel/time";
@@ -163,6 +165,21 @@ export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed 
 export type RunContext = { variant: string; cycle: string; data?: string; profile?: string; surface?: string };
 
 const isExpectation = (action: Action) => action.kind.startsWith("expect");
+
+/**
+ * A v1 step or check as the runner executed it in the ACTION phase (#1502 D5 7.5), for the kernel to journal with
+ * origin v1-translated: a start state's placement, a step's action, or a check's result when it finished. The kernel
+ * takes them after each poll, in the order they ran, and allocates their submissionSeq then.
+ */
+export type Translation = {
+  readonly kind: "ios.place" | "scenario.step" | "scenario.check";
+  /** The step (1-based) for a step or check; absent for the start state. */
+  readonly step?: number;
+  readonly payload: unknown;
+  readonly outcome: KernelOutcome;
+  readonly target: ActionTarget;
+};
+const NO_TRANSLATIONS: readonly Translation[] = Object.freeze([]);
 
 /** Characters a scenario's text entry can type, as the keys that type them. */
 export const keysFor = (text: string): CduFunction[] =>
@@ -415,6 +432,13 @@ export function scenarioProblems(value: unknown): string[] {
 // ------------------------------------------------------------------ running
 
 /**
+ * Every public method of ScenarioRunner and what it is (computation.ts MethodRole; #1517 I1b's structural guard): the
+ * kernel polls the run, takes what it translated and stops it (`scenario.stop`); the bench reads it through RunView.
+ */
+const SCENARIO_RUNNER_ROLES = { abandon: "kernel-internal", poll: "kernel-internal", takeTranslations: "kernel-internal" } as const satisfies MethodRoles<ScenarioRunner>;
+export type RunView = ViewOf<ScenarioRunner, typeof SCENARIO_RUNNER_ROLES>;
+
+/**
  * Runs a scenario against a simulation. It observes; it does not fly the aircraft or move the clock. The kernel
  * (kernel/kernel.ts) polls it in each frame's ACTION phase, after the step that led into the frame; the bench and
  * runHeadless both advance the kernel.
@@ -438,6 +462,8 @@ export class ScenarioRunner {
   private stopped = false;
   private failure: "error" | null = null;
   private endedAt: number | null = null;
+  /** What ran in ACTION since the kernel last took it (Translation). */
+  private translations: Translation[] = [];
 
   constructor(scenario: Scenario, fms: ScriptedFms, context: RunContext = { variant: "not recorded", cycle: fms.activeCycle.id }, sim: FlightSimulator | null = null) {
     this.scenario = structuredClone(scenario);
@@ -451,6 +477,7 @@ export class ScenarioRunner {
       const start = this.scenario.start;
       const set = fms.compute(() => START_STATES[start].setUp(fms, sim ?? undefined));
       if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
+      this.translations.push({ kind: "ios.place", payload: { kind: "ios.place", startState: start }, outcome: "refused" in set ? { status: "refused", reason: set.refused } : { status: "accepted" }, target: "plant" });
     }
     this.problems = problems;
     this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(fms.aircraftProfile), surface: `${fms.surface.id} (${fms.surface.basis})` };
@@ -461,6 +488,13 @@ export class ScenarioRunner {
   }
 
   get startedAt() { return new Date(this.start); }
+  /** The run's identity for `scenario.stop`: the scenario and the instant it started. */
+  get runId() { return `${this.scenario.id}@${new Date(this.start).toISOString()}`; }
+  /** Kernel-internal: the v1 steps and checks executed since the last call, in order (Translation). */
+  takeTranslations(): readonly Translation[] {
+    if (!this.translations.length) return NO_TRANSLATIONS;
+    const taken = this.translations; this.translations = []; return taken;
+  }
   /** The GPS inputs that, with the start time and the steps, fix the GPS timeline. */
   get gpsSeeds() { return { constellation: this.fms.gps[0].constellationSeed, receivers: this.fms.gps.map(receiver => receiver.seed) }; }
   get elapsed() { return (this.fms.now.getTime() - this.start) / 1000; }
@@ -512,6 +546,7 @@ export class ScenarioRunner {
         }
       } catch (error) {
         this.results[this.next] = { status: "error", at: now, actual: error instanceof Error ? error.message : String(error) };
+        this.translate(this.results[this.next]);
         this.next += 1;
         this.failure = "error";
         this.end("not reached");
@@ -534,7 +569,17 @@ export class ScenarioRunner {
     this.endedAt ??= this.elapsed;
   }
 
+  /** The step at `next` as the kernel journals it: its action and outcome, or its check and result. */
+  private translate(result: StepResult) {
+    const action = this.scenario.steps[this.next].action, check = isExpectation(action);
+    this.translations.push({
+      kind: check ? "scenario.check" : "scenario.step", step: this.next + 1, payload: structuredClone(action), target: "scenario",
+      outcome: result.status === "error" ? { status: "refused", reason: result.actual ?? "error" } : check ? { status: "accepted", detail: { status: result.status, actual: result.actual } } : { status: "accepted" },
+    });
+  }
+
   private finish(result: StepResult) {
+    this.translate(result);
     this.results[this.next] = result;
     this.previousAt = result.at ?? this.elapsed;
     this.next += 1;
@@ -771,7 +816,7 @@ export function scenarioDigest(scenario: Scenario) {
 }
 
 /** A run report in Markdown, from the run as it was: its scenario, context and results are fixed when it starts. */
-export function reportMarkdown(runner: ScenarioRunner) {
+export function reportMarkdown(runner: RunView) {
   const { scenario, results, context } = runner;
   const rows = scenario.steps.map((step, i) => {
     const result = results[i];
@@ -806,7 +851,7 @@ export function reportMarkdown(runner: ScenarioRunner) {
 }
 
 /** The GPS stimuli the run applied, one row each (a clear is a row too), with its receiver, time and values. */
-function gpsRows(runner: ScenarioRunner) {
+function gpsRows(runner: RunView) {
   const cell = (value: string) => value.replace(/\|/g, "\\|");
   const rows = runner.scenario.steps.flatMap((step, i) => {
     const action = step.action, result = runner.results[i];

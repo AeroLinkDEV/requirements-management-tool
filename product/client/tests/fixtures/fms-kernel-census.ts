@@ -220,7 +220,10 @@ type Arm = {
   dual(start: number, scenario: Scenario | null, onInstantClose: () => void): Composed
 }
 
-/** The I1a arm: the legacy plant adapter's compositions on the kernel. */
+/**
+ * The I1a and I1b arm: the legacy plant adapter's compositions on the kernel. From I1b the flight freeze is kernel state,
+ * set by a journaled ios.flightFreeze action at the resting point, as the bench's Fly/Pause button sets it.
+ */
 const ARM: Arm = {
   single(start, scenario, onInstantClose) {
     const { fms, sim, plant } = singleComposition(start, { profile: profileById(scenario.profile) })
@@ -238,11 +241,12 @@ const ARM: Arm = {
     const fms = system.computers[0]
     const runner = scenario ? new ScenarioRunner(scenario, fms, { variant: 'census', cycle: fms.activeCycle.id }, system.flights[0]) : null
     const kernel = new FmsKernel(plant, runner)
+    const freezing = (on: boolean) => { if (kernel.flightFreeze !== on) kernel.submit({ kind: 'ios.flightFreeze', on }, { kind: 'ui', id: 'census', surface: 'main' }) }
     return {
       units: { computers: system.computers, flights: system.flights }, runner, system,
       guidance: () => ({ fms: system.computers[system.guidanceSide - 1], sim: system.simulator }),
-      fly: frames => { kernel.advance(frames, { onInstantClose }) },
-      freeze: () => { kernel.advance(1, { flightFreeze: true, onInstantClose }) },
+      fly: frames => { freezing(false); kernel.advance(frames, { onInstantClose }) },
+      freeze: () => { freezing(true); kernel.advance(1, { onInstantClose }) },
     }
   },
 }

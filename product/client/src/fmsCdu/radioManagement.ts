@@ -1,6 +1,7 @@
 import type { FmsSide, RadioManagementPort } from "./crossTalk";
 import type { Navaid } from "./navData";
 import type { RangeIdentity } from "./sensorPorts";
+import type { MethodRoles, ViewOf } from "./computation";
 
 export type RadioState = { com1: string; com1Stby: string; com2: string; com2Stby: string; nav1: string; nav2: string; adf: string; adfStby: string; adf2: string; adf2Stby: string; tpdr: string; tpdr2: string; tacan: string };
 export type RadioKey = keyof RadioState;
@@ -88,6 +89,19 @@ const TIMEOUT_ROW: Partial<Record<RadioDevice, { row: string; inhibit?: "polarOr
 
 export const DEFAULT_RADIOS: RadioState = { com1: "121.500", com1Stby: "126.700", com2: "119.100", com2Stby: "133.600", nav1: "113.90", nav2: "116.70", adf: "0350", adfStby: "0350", adf2: "0280", adf2Stby: "0280", tpdr: "1200", tpdr2: "1200", tacan: "017X" };
 
+/**
+ * Every public method of the radio management system and what it is (computation.ts MethodRole; #1517 I1b's structural
+ * guard). The computers reach the radios through their ports; the bench reads them through RadioView and changes them
+ * only by submitting `f14.radio` (device feedback, a rejected tune) to the kernel.
+ */
+const RADIO_MANAGEMENT_ROLES = {
+  adf: "query", dmeHold: "query", dmeReceiving: "query", faults: "query", receiving: "query", scanRoster: "query", scanning: "query", testState: "query",
+  dmeTuning: "kernel-internal", injectFailure: "kernel-internal", port: "kernel-internal", presetActive: "kernel-internal", pressTest: "kernel-internal",
+  rejectNext: "kernel-internal", setAdf: "kernel-internal", setDmeHold: "kernel-internal", setFaults: "kernel-internal", setScanRoster: "kernel-internal",
+  tick: "kernel-internal",
+} as const satisfies MethodRoles<RadioManagementSystem>;
+export type RadioView = ViewOf<RadioManagementSystem, typeof RADIO_MANAGEMENT_ROLES>;
+
 /** M300 3-26: shared radio devices remain accessible when the FMS cross-talk link fails.
  * Burst/feedback latency and timeout are declared laboratory parameters, not OEM bus timing. */
 export class RadioManagementSystem {
@@ -149,6 +163,7 @@ export class RadioManagementSystem {
     }
     this.notify();
   }
+  /** Bench stimulus (F14 radio kind): the radio refuses its next tune command (REJECTED). */
   rejectNext(device: RadioDevice) { this.rejecting.add(device); }
   /**
    * The scan roster (plan C3): up to six stations the FMS navigation selected (F6), spread over the four scan channels

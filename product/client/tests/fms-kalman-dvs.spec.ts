@@ -2,6 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { CivilNavigation, KALMAN_COAST_S, type PositionMeasurement } from '../src/fmsCdu/civilNavigation'
 import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { applySensorStimulus } from '../src/fmsCdu/sensorStimulus'
 
 // Stage F plan F11 (DEC-150; M300 1-5, 12-20 to 12-24, 15-4): the AHRS/APIRS KALMAN mode coasts on the GPS-calibrated
 // emulated INS for 2 minutes after GPS loss, then the Doppler (DVS) solution, without integrity and at the lowest
@@ -106,7 +107,7 @@ test('F11: offshore with GPS and radios lost, the FMS goes KALMAN for 2 minutes,
   expect(fms.navState.mode).toBe('DVS')
   expect(fms.recallList.map(message => message.text)).toContain('KALMAN NAV LOST')
   expect(fms.navPerformance.sensor).toMatchObject({ mode: 'DVS', integrity: false })
-  fms.setSensorHealth('DVS', 'FAIL')
+  fms.setCondition('dvsFail', true)
   step(2)
   expect(fms.navState.mode).toBe('DR')
   expect(fms.recallList.map(message => message.text)).toContain('DVS NAV LOST')
@@ -187,7 +188,7 @@ test('C2 (DF-05): an injected APIRS bias is a fault outside the nominal model; o
   const step = (seconds: number) => { for (let i = 0; i < seconds; i++) { now += 1000; fms.updateNavigation(1) } }
   step(90)
   // 0.3 m/s² for 100 s: 0.5 x 0.3 x 100² = 1,500 m (0.81 NM), against a nominal 95% of about 0.5 NM at 100 s.
-  fms.setApirsFaultBias(0.3, 0)
+  applySensorStimulus(fms, { kind: 'apirsBias', northMs2: 0.3, eastMs2: 0 })
   fms.setCondition('gpsLost', true)
   fms.setCondition('dmeOutage', true)
   step(100)

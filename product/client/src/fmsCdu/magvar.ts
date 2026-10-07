@@ -1,6 +1,7 @@
 import { crc32q } from "./gps";
 import type { LatLon } from "./fmsModel";
 import { WMM2025_DATABASE } from "./wmm2025";
+import type { MethodRoles, ViewOf } from "./computation";
 
 export type AngleReference = "MAG" | "TRUE";
 export type MagvarDatabase = { format: "aerolink-magvar-v1"; name: string; epoch: number; released: string; coefficients: string; crc: string };
@@ -70,6 +71,10 @@ function field(coefficients: readonly Coefficient[], epoch: number, position: La
   const horizontal = Math.hypot(north, east);
   return { north, east, down, horizontal, total: Math.hypot(horizontal, down), inclination: Math.atan2(down, horizontal) * degree, declination: Math.atan2(east, north) * degree };
 }
+
+/** Every public method of the magnetic model and what it is (#1517 I1b's structural guard): a load is `config.magvar`. */
+const MAGVAR_ROLES = { field: "query", outOfDate: "query", withinEpoch: "query", load: "kernel-internal" } as const satisfies MethodRoles<MagvarModel>;
+export type MagvarView = ViewOf<MagvarModel, typeof MAGVAR_ROLES>;
 
 /** The consumed table's integrity; replacement is the same boundary used by the bench loader. */
 export class MagvarModel {

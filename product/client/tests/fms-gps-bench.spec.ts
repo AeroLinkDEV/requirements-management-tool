@@ -2,6 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator, trimPitch } from '../src/fmsCdu/flight'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { alertLimits, fmsGpsView, lowSatellites, modeLabel, overrideFor } from '../src/fmsCdu/gpsBench'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // The bench side of the CMA-5024 simulation, joined to the FMS: the FMS owns and feeds GPS1 and GPS2, the GPS sensors
@@ -49,11 +50,11 @@ test('the flight simulation reports its modelled attitude to the FMS: the trim p
 
 test('baro altitude can be lost on one receiver: its air data flag, not the other one\'s', () => {
   const { fms } = setup()
-  const view = fmsGpsView(fms)
-  view.setBaroLost(1, true)
+  const stimulus = stimulusFor(fms)
+  stimulus.apply(1, { op: 'baroLost', on: true })
   expect(fms.gps[0].bus()!['355'].value!.buses.airData).toBe(false)
   expect(fms.gps[1].bus()!['355'].value!.buses.airData).toBe(true)
-  view.setBaroLost(1, false)
+  stimulus.apply(1, { op: 'baroLost', on: false })
   expect(fms.gps[1].bus()!['355'].value!.buses.airData).toBe(false)
 })
 
@@ -66,32 +67,32 @@ test('the view reads the FMS receivers: their position difference, and a fault r
   expect(apart).toBeGreaterThan(0)
   expect(apart).toBeLessThan(20)
   expect(fms.gpsStatus.chosen).toBe(0)
-  view.receivers[0].injectFault('RECEIVER', true)
-  view.updated()
+  fms.gps[0].injectFault('RECEIVER', true)
+  fms.gpsUpdated()
   // No new step of time: the FMS re-read the buses and moved to GPS2.
   expect(fms.gpsStatus.chosen).toBe(1)
   expect(view.difference()).toBeNull()
   expect(fms.navSourceLog[0].source).toBe('GPS2')
   // And the other way round: without GPS 2 there is no difference either.
-  view.receivers[0].injectFault('RECEIVER', false)
-  view.receivers[1].injectFault('RECEIVER', true)
+  fms.gps[0].injectFault('RECEIVER', false)
+  fms.gps[1].injectFault('RECEIVER', true)
   fly(20)
   expect(fms.gpsStatus.chosen).toBe(0)
   expect(view.difference()).toBeNull()
 })
 
-test('the view selects the receiver the FMS navigates on, and says when the integrity condition holds the satellites', () => {
+test('the view shows the receiver selection the FMS navigates on, and says when the integrity condition holds the satellites', () => {
   const { fms } = setup()
   const view = fmsGpsView(fms)
   expect(view.choice).toBe('AUTO')
-  view.select('GPS2')
+  fms.selectGpsReceiver('GPS2')
   expect(fms.gpsReceiverChoice).toBe('GPS2')
   expect(fms.gpsStatus.chosen).toBe(1)
   expect(fmsGpsView(fms).choice).toBe('GPS2')
-  view.select('OFF')
+  fms.selectGpsReceiver('OFF')
   expect(fmsGpsView(fms).choice).toBe('OFF')
   expect(fms.gpsStatus.chosen).toBeNull()
-  view.select('AUTO')
+  fms.selectGpsReceiver('AUTO')
   expect(fmsGpsView(fms).integrityHeld).toBe(false)
   fms.setCondition('gpsIntegrity', true)
   expect(fmsGpsView(fms).integrityHeld).toBe(true)

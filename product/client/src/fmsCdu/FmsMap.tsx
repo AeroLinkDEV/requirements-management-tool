@@ -1,6 +1,6 @@
-import { racetrackOutline, sarTrack, segmentsOutline, type FlightSimulator } from "./flight";
+import { racetrackOutline, sarTrack, segmentsOutline, type FlightView } from "./flight";
 import { arcSweep, bearingDeg, distanceNm, longitudeDelta, offset, type LatLon, type Route } from "./fmsModel";
-import type { ScriptedFms } from "./scriptedFms";
+import type { FmsView } from "./scriptedFms";
 import "./FmsMap.css";
 
 /**
@@ -9,7 +9,7 @@ import "./FmsMap.css";
  * in cyan. It reads the scripted FMS and the flight simulation; it has no state of its own beyond the range.
  */
 
-type Props = { fms: ScriptedFms; sim: FlightSimulator; range: number };
+type Props = { fms: FmsView; sim: FlightView; range: number };
 
 const R = 100; // the map is drawn in a -R..R box; the range ring at R is the selected range
 

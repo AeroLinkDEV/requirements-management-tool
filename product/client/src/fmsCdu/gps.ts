@@ -1,5 +1,6 @@
 import { bearingDeg, distanceNm, type LatLon } from "./fmsModel";
 import { seededRandom, type Attitude, type Constellation, type SkySatellite } from "./gnss";
+import type { MethodRoles, ViewOf } from "./computation";
 
 /**
  * A simulated CMC CMA-5024 GPS/SBAS landing system sensor unit (GLSSU): one receiver, publishing an ARINC 743A-style
@@ -193,6 +194,18 @@ const PROVIDERS = ["WAAS", "EGNOS", "MSAS", "GAGAN", "SDCM"];
  * receivers compute. Change it whenever the model's numbers change for the same inputs.
  */
 export const GPS_MODEL_VERSION = "aerolink-cma5024-sim/1";
+
+/**
+ * Every public method of a GPS receiver and what it is (computation.ts MethodRole; #1517 I1b's structural guard). Its
+ * faults and overrides are set through the bench's stimulus record (GpsStimulus, `f14.gps`) and the FMS steps it.
+ */
+const GPS_RECEIVER_ROLES = {
+  bus: "query", predictRaim: "query", rawBus: "query",
+  deselect: "kernel-internal", injectFault: "kernel-internal", override: "kernel-internal", overrideStatus: "kernel-internal",
+  satelliteFault: "kernel-internal", selectApproach: "kernel-internal", setJamming: "kernel-internal", setSbas: "kernel-internal",
+  setSpoof: "kernel-internal", step: "kernel-internal",
+} as const satisfies MethodRoles<GpsReceiver>;
+export type GpsReceiverView = ViewOf<GpsReceiver, typeof GPS_RECEIVER_ROLES>;
 
 export class GpsReceiver {
   private readonly o: Required<GpsOptions>;

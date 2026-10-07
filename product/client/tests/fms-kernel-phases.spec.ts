@@ -19,6 +19,7 @@ function watched(composition: ReturnType<typeof singleComposition>) {
   let kernel: FmsKernel | null = null
   const plant: LegacyPlant = {
     clock: composition.plant.clock,
+    units: composition.plant.units,
     integrate: () => {
       const kernelBefore = kernel!.now, clockBefore = composition.clock.time
       composition.plant.integrate()
@@ -174,16 +175,20 @@ test('a flight freeze moves the clock a frame at a time and holds the aircraft; 
   const kernel = new FmsKernel(plant)
   const where = () => system.computers.map(fms => fms.truePosition)
   const before = where()
-  expect(kernel.advance(4, { flightFreeze: true })).toBe(4)
+  kernel.submit({ kind: 'ios.flightFreeze', on: true }, { kind: 'ios', id: 'test', surface: 'main' })
+  expect(kernel.advance(4)).toBe(4)
   expect(where()).toEqual(before)
   expect(clock.ms).toBe(START + 1000)
+  kernel.submit({ kind: 'ios.flightFreeze', on: false }, { kind: 'ios', id: 'test', surface: 'main' })
   kernel.advance(1)
   expect(where()).not.toEqual(before)
 
   const single = singleComposition(START)
   const refusing = new FmsKernel(single.plant)
-  expect(() => refusing.advance(1, { flightFreeze: true })).toThrow(/no flight freeze/)
-  expect(refusing.now).toBe(0)
-  expect(single.clock.time).toBe(0)
+  refusing.submit({ kind: 'ios.flightFreeze', on: true }, { kind: 'ios', id: 'test', surface: 'main' })
+  expect(refusing.journal.at(-1)!.outcome).toEqual({ status: 'refused', reason: 'this composition has no flight freeze' })
+  expect(refusing.flightFreeze).toBe(false)
+  expect(refusing.advance(1)).toBe(1)
+  expect(single.clock.time).toBe(2_500_000)
   expect(refusing.faulted).toBe(false)
 })

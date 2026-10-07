@@ -1,7 +1,7 @@
-import type { AxisModeLists, FlightSimulator, VerticalMode } from "./flight";
+import type { AxisModeLists, FlightView, VerticalMode } from "./flight";
 import { formatSetting } from "./baro";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
-import type { ScriptedFms } from "./scriptedFms";
+import type { FmsView } from "./scriptedFms";
 import { ACTIVE_PROFILE } from "./profile";
 import { formatConstraint } from "./vnav";
 import type { IntegrityBasis } from "./sensorState";
@@ -229,7 +229,7 @@ export function cdiFullScaleNm(phase: keyof typeof LATERAL_FULL_SCALE, performan
  * line never bridges geometry the plan does not have. The active marker is on the active leg's fix only (the first leg
  * of the route), so an unresolved active fix leaves nothing marked active.
  */
-function routePoints(fms: ScriptedFms, route: Route): RoutePoint[] {
+function routePoints(fms: FmsView, route: Route): RoutePoint[] {
   const points: RoutePoint[] = [];
   for (const [index, leg] of route.legs.entries()) {
     if (leg.kind === "disco") break;
@@ -255,7 +255,7 @@ function alongPolyline(line: LatLon[], nm: number): LatLon | null {
 type NavigationWords = Pick<FmsOutputs, "accuracy95Nm" | "accuracyBasis" | "gpsDependent" | "integrityBoundNm" | "integrityBasis" | "integrityValid" | "gpsIntegrityAnnunciation" | "positionUncertain" | "naimComparisonNm">;
 
 /** The selected solution's C1 values as words (Stage F C4): FAIL from a failed FMS, NCD for a value it does not have. */
-function navigationWords(fms: ScriptedFms, failed: boolean): NavigationWords {
+function navigationWords(fms: FmsView, failed: boolean): NavigationWords {
   if (failed) return { accuracy95Nm: fail(), accuracyBasis: fail(), gpsDependent: fail(), integrityBoundNm: fail(), integrityBasis: fail(), integrityValid: fail(), gpsIntegrityAnnunciation: fail(), positionUncertain: fail(), naimComparisonNm: fail() };
   const sensor = fms.navPerformance.sensor;
   const word = <T>(value: T | null): Word<T> => (value === null ? ncd() : normal(value));
@@ -275,7 +275,7 @@ type RadioBusWords = Pick<FmsOutputs, "radios" | "radioMeasurements" | "kalman" 
  * when it simply has nothing (no station, no command yet). The TACAN's bearing and distance are NCD: the bench does not
  * measure them yet (F7).
  */
-function radioBusWords(fms: ScriptedFms, failed: boolean): RadioBusWords {
+function radioBusWords(fms: FmsView, failed: boolean): RadioBusWords {
   const port = fms.radioPort;
   const word = <T>(value: T | null | undefined, broken: boolean): Word<T> => (failed || broken ? fail() : value === null || value === undefined ? ncd() : normal(value));
   const broken = (device: RadioDevice | DmeDevice) => { const faults = port?.faults(device); return !!faults && (faults.measurementBus === "LOST" || faults.receiver === "FAILED"); };
@@ -310,7 +310,7 @@ function radioBusWords(fms: ScriptedFms, failed: boolean): RadioBusWords {
   };
 }
 
-export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
+export function fmsOutputs(fms: FmsView, sim: FlightView): FmsOutputs {
   // Dual computers retain their attached side through link loss, independent operation and power changes.
   // A standalone ScriptedFms uses side 1 (its own RMS port); preserve that single-computer identity.
   const side = fms.dualOperation?.side ?? 1;
@@ -389,7 +389,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   };
 }
 
-export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftData {
+export function aircraftData(fms: FmsView, sim: FlightView): AircraftData {
   const track = fms.track;
   const airspeed = sim.tas;
   // The modelled attitude (flight.ts attitudeFor): the one the cameras show and the GPS antennas tilt with.

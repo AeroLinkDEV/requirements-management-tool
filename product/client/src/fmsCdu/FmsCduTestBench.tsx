@@ -19,17 +19,20 @@ import { conditionalLabel } from "./fmsModel";
 import { PROCEDURE_CHARTS } from "./procedureCharts";
 import { findProcedure } from "./procedures";
 import { fmsGpsView } from "./gpsBench";
-import { stimulusFor } from "./gpsStimulus";
+import { stimulusFor, type GpsOp } from "./gpsStimulus";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
-import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } from "./kbtvDemo";
+import { KBTV_SOURCE, START_STATES, type StartStateId } from "./kbtvDemo";
 import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
-import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, scenarioStart, type Scenario } from "./scenario";
-import { FmsKernel } from "./kernel/kernel";
+import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, scenarioStart, type RunView, type Scenario } from "./scenario";
+import type { ActionSource, KernelAction } from "./kernel/actions";
+import { FmsKernel, type OutcomeEvent } from "./kernel/kernel";
 import { dualComposition } from "./kernel/legacyPlantAdapter";
-import type { ScriptedFms } from "./scriptedFms";
+import { SubmissionPort, kernelCdu, type Submit } from "./kernel/submission";
+import type { DualFmsView } from "./dualFms";
+import type { FmsView } from "./scriptedFms";
 import type { FmsSide } from "./crossTalk";
-import { WMM2025_DATABASE } from "./wmm2025";
+import { RADIO_NAMES, type RadioDevice } from "./radioManagement";
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, formatSetting } from "./baro";
 import { browserUserDatabaseStore } from "./userDatabase";
 import { screenText } from "./screen";
@@ -118,6 +121,9 @@ const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.r
  * aircraft along its route, and sets the cockpit lighting. Scenarios run scripted steps against a restarted
  * simulation and check the screen, can be recorded from the bench, and are written out as test procedure text.
  */
+/** A demonstration start state set up on the new session, and what came of its placement. */
+type Started = { id: StartStateId; outcome: { ready: true } | { refused: string } };
+
 export default function FmsCduTestBench({ terrain, imagery, userName }: { terrain?: TerrainSource; imagery?: ImagerySource; userName?: string } = {}) {
   const { layout, failed } = useCduLayout();
   const [variantId, setVariantId] = useState(storedVariant);
@@ -172,7 +178,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const pendingRecording = useRef(false);
   // A demonstration start state (kbtvDemo.ts) also starts on the next session: a restarted simulation, then set up.
   const pendingStart = useRef<StartStateId | null>(null);
-  const { system, kernel, runner, recorder, started } = useMemo(() => {
+  // Which window each surface is in, for the source of what it submits (D5 7.1: main or a pop-out).
+  const surfaces = useRef({ cockpit: false, instructor: false });
+  surfaces.current = { cockpit: cockpitAway, instructor: instructorAway };
+  const { system, kernel, port, runner, recorder, started, listenGps } = useMemo(() => {
     // Simulated time is the kernel's (kernel/time.ts): it starts at the wall clock, or at a scenario's planned start
     // (which fixes the GPS sky), and moves only as the kernel advances.
     const utc0 = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
@@ -183,40 +192,54 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
       : { store: browserUserDatabaseStore(window.localStorage), scope: { userId: userName, profileId: profile.id } };
     const { system, plant } = dualComposition(utc0, { profile, secondaryProfile: profileById(secondaryProfileChoice.current) ?? profile, ...(userDatabase ? { userDatabase } : {}) });
     const fms = system.computers[0], flight = system.flights[0];
+    // The kernel rests in the open ACTION at F_0. A session starts paused or flying as the bench is; paused with no run
+    // is a flight freeze (initial state). Everything below that changes the simulation is submitted to it (#1517 I1b).
+    const kernel = new FmsKernel(plant, null, { flightFreeze: !playing && !pendingScenario.current });
+    const port = new SubmissionPort(kernel);
     const start = pendingStart.current;
-    // A start state and its copy to FMS 2 are one computation over both computers (#1518): both settle once, at the end.
-    const started = start ? fms.compute(() => {
-      const outcome = START_STATES[start].setUp(fms, flight);
-      fms.dualOperation?.settingsChanged(); fms.dualOperation?.finishEdit(true); system.computers[1].observeAircraft(fms);
-      return outcome;
-    }) : null;
-    // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards.
+    // A start state's placement and its copy to FMS 2 are one action in ACTION at F_0 (ios.place).
+    let started = null as Started | null;
+    if (start) {
+      port.submit({ kind: "ios.place", startState: start }, { kind: "ios", id: "navdata.startState", surface: surfaces.current.instructor ? "popout" : "main" },
+        event => { started = { id: start, outcome: event.outcome.status === "refused" ? { refused: event.outcome.reason } : { ready: true } }; });
+    }
+    // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards. Its
+    // surface, start state and t = 0 poll are the rest of ACTION at F_0, journaled as translated v1 steps.
     const chosen = variantById(variantId);
     const runner = pendingScenario.current
       ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id }, flight)
       : null;
+    if (runner) kernel.run(runner);
     const recorder = pendingRecording.current ? new ScenarioRecorder(plant.clock.now) : null;
-    // The surface, the start state and the runner's t = 0 poll above are the ACTION phase at F_0; the kernel rests there.
-    const kernel = new FmsKernel(plant, runner);
+    // The GPS sensors tab's record is the sensor owner's; the recorder listens to what it applies.
+    const gps = stimulusFor(fms);
     pendingScenario.current = null;
     pendingRecording.current = false;
     pendingStart.current = null;
-    return { system, kernel, runner, recorder, started: start && started ? { id: start, outcome: started } : null };
+    // From here the bench holds only read-only views of the units: it changes them by submitting to the kernel.
+    const view: DualFmsView = system;
+    return { system: view, kernel, port, runner: runner as RunView | null, recorder, started, listenGps: (listener: typeof gps.listener) => { gps.listener = listener; } };
   }, [session, userName]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Submits from a surface: the source is completed with the window the control is in. */
+  const submitFrom = (surface: "cockpit" | "instructor"): Submit => (action, source, then) =>
+    port.submit(action, { ...source, surface: surfaces.current[surface] ? "popout" : "main" }, then);
+  const submit = submitFrom("cockpit"), submitIos = submitFrom("instructor");
+  // The CDUs' keys go to the kernel as cdu.key (D5 7.3), from whichever window shows them.
+  const cdus = useMemo(() => ([1, 2] as const).map(side => kernelCdu(system.computers[side - 1], side,
+    (action: KernelAction, source: ActionSource) => port.submit(action, source), () => (surfaces.current.cockpit ? "popout" : "main"))), [system, port]);
   const backend = system.computers[cduSide - 1];
-  const peerBackend = system.computers[2 - cduSide];
   const sharedSensorCondition = (id: ConditionId) => ["gpsLost", "gpsIntegrity", "dmeOutage", "apirsFail", "dvsFail", "raFail"].includes(id);
-  const conditionBackend = (id: ConditionId) => sharedSensorCondition(id) ? system.computers[0] : backend;
+  const conditionSide = (id: ConditionId): FmsSide => (sharedSensorCondition(id) ? 1 : cduSide);
+  const conditionBackend = (id: ConditionId) => system.computers[conditionSide(id) - 1];
   const sim = system.simulator, guidanceBackend = system.computers[system.guidanceSide - 1];
   const [recording, setRecording] = useState(false);
   const recordTo = recording ? recorder : null;
   // While recording, what the GPS sensors tab applies is recorded as scenario steps, when it is applied.
   useEffect(() => {
-    const stimulus = stimulusFor(system.computers[0]);
-    stimulus.listener = recordTo ? (index, op) => recordTo.gps((index + 1) as 1 | 2, op) : null;
-    return () => { stimulus.listener = null; };
-  }, [system, recordTo]);
-  const pausedFor = useRef<ScenarioRunner | null>(null);
+    listenGps(recordTo ? (index: number, op: GpsOp) => recordTo.gps((index + 1) as 1 | 2, op) : null);
+    return () => { listenGps(null); };
+  }, [listenGps, recordTo]);
+  const pausedFor = useRef<RunView | null>(null);
   const subscribe = useCallback((listener: () => void) => { const off = system.computers.map(unit => unit.subscribe(listener)); return () => off.forEach(remove => remove()); }, [system]);
   useSyncExternalStore(subscribe, () => system.computers[0].revision() + system.computers[1].revision());
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -268,25 +291,58 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
 
   // Time moves in kernel frames (kernel/kernel.ts): while flying, each callback advances `rate` frames, each moving the
   // clock and the flight and then running the scenario's steps, so a run sees the same timeline at any rate or callback
-  // pacing. Paused with no run is a flight freeze, one frame per callback: the aircraft stands still but the clock
-  // runs, so timers and a self test complete. Paused during a run halts the kernel: its clock stops, so no deadline or
-  // delayed step is consumed. Between callbacks the kernel rests in the frame's open ACTION, where the controls act.
+  // pacing. Paused with no run is a flight freeze (journaled ios.flightFreeze), one frame per callback: the aircraft
+  // stands still but the clock runs, so timers and a self test complete. Paused during a run halts the kernel (a
+  // control-plane record): its clock stops, so no deadline or delayed step is consumed. Between callbacks the kernel
+  // rests in the frame's open ACTION, where the controls' submissions execute.
   useEffect(() => {
     const interval = TICK_SECONDS * 1000;
     const timer = window.setInterval(() => {
       const running = runner !== null && !runner.finished;
       if (playing) kernel.advance(rate);
-      else if (!running) kernel.advance(1, { flightFreeze: true });
-      // A finished scenario pauses the flight once; flying on afterwards is the engineer's choice.
-      if (runner?.finished && pausedFor.current !== runner) { pausedFor.current = runner; setPlaying(false); }
+      else if (!running) kernel.advance(1);
+      // A finished scenario pauses the flight once, as a flight freeze; flying on afterwards is the engineer's choice.
+      if (runner?.finished && pausedFor.current !== runner) {
+        pausedFor.current = runner;
+        if (playing) port.submit({ kind: "ios.flightFreeze", on: true }, { kind: "ui", id: "flight.runEnded", surface: "main" });
+        setPlaying(false);
+      }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [kernel, runner, playing, rate]);
+  }, [kernel, port, runner, playing, rate]);
+
+  /** Fly or pause: with a run in progress a pause halts the kernel (control plane); without one it is a flight freeze. */
+  const flyOrPause = () => {
+    if (playing) {
+      if (runner && !runner.finished) kernel.control({ kind: "halt" });
+      else submit({ kind: "ios.flightFreeze", on: true }, { kind: "ui", id: "flight.flyPause" });
+    } else {
+      if (kernel.halted) kernel.control({ kind: "resume" });
+      if (kernel.flightFreeze) submit({ kind: "ios.flightFreeze", on: false }, { kind: "ui", id: "flight.flyPause" });
+    }
+    setPlaying(value => !value);
+  };
+  const chooseRate = (value: number) => { kernel.control({ kind: "rate", rate: value }); setRate(value); };
+  /** Every new session ends this one's kernel with a reset record (control plane). */
+  const newSession = () => { kernel.control({ kind: "reset" }); setSession(value => value + 1); };
+  /** Jump (Fly-to-next-waypoint) on the guidance computer: an engineering action, journaled as ios.jump. */
+  const jump = () => submit({ kind: "ios.jump", unit: "guidance", op: "sequence" }, { kind: "ios", id: "flight.jump" },
+    event => setJumpNote(event.outcome.status === "refused" && event.outcome.reason === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null));
+  const overrideDiscontinuity = () => {
+    submit({ kind: "ios.jump", unit: "guidance", op: "overrideDiscontinuity" }, { kind: "ios", id: "flight.overrideDiscontinuity" });
+    setJumpNote("Discontinuity overridden (engineering action, logged).");
+  };
+  const afcs = (selection: Extract<KernelAction, { kind: "afcs.select" }>["selection"], then?: (event: OutcomeEvent) => void) =>
+    submit({ kind: "afcs.select", selection }, { kind: "ui", id: `afcs.${selection.select}` }, then);
+  const exportJournal = () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(kernel.record(), null, 2)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = `fms-kernel-journal-session-${session}.json`; link.click(); URL.revokeObjectURL(url);
+  };
 
   /** A different aircraft profile restarts the simulation in it. */
   const chooseProfile = (id: string) => {
     profileChoice.current = id;
-    setSession(s => s + 1);
+    newSession();
   };
 
   const chooseVariant = (id: string) => {
@@ -322,18 +378,18 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     if (side === 1) recordTo?.key(event.fn, event.held);
   }), [system, recordTo]);
 
-  const reset = () => { setSession(value => value + 1); setLog([]); setPlaying(false); setRecording(false); };
+  const reset = () => { newSession(); setLog([]); setPlaying(false); setRecording(false); };
   const runScenario = (scenario: Scenario) => {
     pendingScenario.current = scenario;
     setCduSide(1);
-    setSession(value => value + 1);
+    newSession();
     setLog([]);
     setRecording(false);
     setPlaying(true);
   };
   const startDemonstration = (id: StartStateId) => {
     pendingStart.current = id;
-    setSession(value => value + 1);
+    newSession();
     setLog([]);
     setRecording(false);
     setPlaying(false);
@@ -342,7 +398,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const startRecording = () => {
     pendingRecording.current = true;
     setCduSide(1);
-    setSession(value => value + 1);
+    newSession();
     setLog([]);
     setPlaying(false);
     setRecording(true);
@@ -497,7 +553,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           {([1, 2] as const).map(side => <div key={side} className={`fmsBenchCduStation mode-${lighting.mode}`} data-side={side}
             data-active={cduSide === side} onFocusCapture={() => { if (!recording && (!runner || runner.finished)) setCduSide(side); }}>
             <div className="fmsBenchCduLabel"><strong>FMS {side} / CDU {side}</strong><span>{cduSide === side ? "Inspected" : ""}</span></div>
-            {layout ? <FmsCduPanel backend={system.computers[side - 1]} variant={variant} layout={layout} lighting={lighting}
+            {layout ? <FmsCduPanel backend={cdus[side - 1]} variant={variant} layout={layout} lighting={lighting}
               onKey={onCockpitKeys[side - 1]} /> : <p role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
           </div>)}
         </>) : (
@@ -512,12 +568,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           <div data-testid="fms-cdu-inspected" aria-label={`CDU ${cduSide}`}>
 
           {layout
-            ? <FmsCduPanel backend={backend} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
+            ? <FmsCduPanel backend={cdus[cduSide - 1]} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
             : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
           </div>
           {showPeer && layout ? <div data-testid="fms-cdu-peer" aria-label={`CDU ${3 - cduSide}`}>
             <h2>FMS {3 - cduSide} / CDU {3 - cduSide}</h2>
-            <FmsCduPanel backend={peerBackend} variant={variant} layout={layout} lighting={lighting} />
+            <FmsCduPanel backend={cdus[2 - cduSide]} variant={variant} layout={layout} lighting={lighting} />
           </div> : null}
         </div>
         )}
@@ -560,7 +616,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         <section className="fmsBenchCard fmsBenchFlight" aria-label="Flight">
           <h2>Flight</h2>
           <label>FMS guidance source <select aria-label="FMS guidance source" value={system.guidanceSide} disabled={recording || !!runner && !runner.finished}
-            onChange={event => system.selectGuidance(Number(event.target.value) as FmsSide)}>
+            onChange={event => submit({ kind: "afcs.sourceSelect", side: Number(event.target.value) as FmsSide }, { kind: "ui", id: "flight.guidanceSource" })}>
             <option value={1}>FMS 1</option><option value={2}>FMS 2</option>
           </select></label>
           <p className="fmsBenchHint">One physical aircraft. EFIS and AFCS use FMS {system.guidanceSide}; computer entries address CDU {cduSide}. Sensor faults affect the shared aircraft inputs.</p>
@@ -571,23 +627,23 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </p>
           <div className="fmsBenchActions">
             {/* Pause is a bench control: it stays usable whatever has failed in the simulated aircraft. */}
-            <button type="button" onClick={() => setPlaying(value => !value)} aria-pressed={playing}>
+            <button type="button" onClick={flyOrPause} aria-pressed={playing}>
               {playing ? "Pause" : "Fly"}
             </button>
             {!playing ? <span className="fmsBenchHint">{runner && !runner.finished ? "Run paused: its clock is stopped." : "Aircraft frozen: the clock runs."}</span> : null}
             <label className="fmsBenchRate">
               <span>Rate</span>
-              <select value={rate} onChange={event => setRate(Number(event.target.value))} aria-label="Simulation rate">
+              <select value={rate} onChange={event => chooseRate(Number(event.target.value))} aria-label="Simulation rate">
                 {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}×</option>)}
               </select>
             </label>
             {!cockpitView ? (<>
             <button type="button" disabled={guidanceBackend.hasCondition("fmsFail")}
-              onClick={() => setJumpNote(guidanceBackend.sequence() === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null)}>
+              onClick={jump}>
               Jump to next waypoint
             </button>
             {next?.kind === "disco" && !guidanceBackend.hasCondition("fmsFail")
-              ? <button type="button" onClick={() => { guidanceBackend.overrideDiscontinuity(); setJumpNote("Discontinuity overridden (engineering action, logged)."); }}>Override discontinuity</button>
+              ? <button type="button" onClick={overrideDiscontinuity}>Override discontinuity</button>
               : null}
             <button type="button" onClick={reset}>Restart the simulation</button>
             </>) : null}
@@ -604,8 +660,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             event.preventDefault();
             const entry = Number(headingInput);
             if (!headingInput || entry < 0 || entry > 360) return;
-            const heading = guidanceBackend.hasCondition("fmsFail") ? entry : guidanceBackend.angleFromEntry(entry);
-            if (heading !== null) sim.selectHeading(heading);
+            // The entry is in the guidance computer's reference; it resolves to TRUE when it executes.
+            afcs({ select: "heading", entry });
           }}>
             <label>
               <span>Heading {guidanceBackend.hasCondition("fmsFail") ? "TRUE" : guidanceBackend.angleReference}</span>
@@ -614,13 +670,13 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </label>
             {/* HDG SEL is the autopilot's basic mode, so it stays available when the FMS has failed. */}
             <button type="submit" aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
-            <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
+            <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => afcs({ select: "lnav" })}>LNAV</button>
             {/* APPR arms the approach; pressed off it disarms, or after capture cancels the approach to an altitude hold. */}
             <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") || !guidanceBackend.approachType} aria-pressed={guidanceBackend.approachArmed || sim.approachMode === "CAPTURED"}
               title={sim.approachMode === "CAPTURED" ? "Approach captured: press to cancel it (the aircraft levels), or TOGA to go around" : guidanceBackend.approachArmed ? "Approach armed: press to disarm" : "Arm the approach"}
-              onClick={() => { const on = !guidanceBackend.approachArmed; recordTo?.armApproach(on); guidanceBackend.armApproach(on); }}>APPR</button>
-            <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") && !sim.advisory} onClick={() => { recordTo?.goAround(); guidanceBackend.goAround(); sim.engageGoAround(); }}>TOGA</button>
-            {sim.advisory ? null : <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>}
+              onClick={() => { recordTo?.armApproach(!guidanceBackend.approachArmed); afcs({ select: "approach", on: "toggle" }); }}>APPR</button>
+            <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") && !sim.advisory} onClick={() => { recordTo?.goAround(); afcs({ select: "toga" }); }}>TOGA</button>
+            {sim.advisory ? null : <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") || sim.altitudeHoldReference === null} onClick={() => afcs({ select: "vnav" })}>VNAV</button>}
           </form>
           {sim.advisory ? (
             // The helicopter profile: the crew flies the vertical axis and the speed; the FMS constraints are advisories.
@@ -630,20 +686,20 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                 <input inputMode="numeric" value={altInput} placeholder={String(sim.selectedAltitude)} maxLength={5} aria-label="Preselected altitude"
                   onChange={event => setAltInput(event.target.value.replace(/\D/g, ""))} />
               </label>
-              <button type="button" disabled={!altInput} onClick={() => { const altitude = Number(altInput); recordTo?.autopilot({ altitude }); sim.selectAltitude(altitude); setAltInput(""); }}>SET</button>
+              <button type="button" disabled={!altInput} onClick={() => { const altitude = Number(altInput); recordTo?.autopilot({ altitude }); afcs({ select: "altitude", altitude }); setAltInput(""); }}>SET</button>
               <label>
                 <span>VS</span>
                 <input inputMode="numeric" value={vsInput} maxLength={5} aria-label="Vertical speed"
                   onChange={event => setVsInput(event.target.value.replace(/[^\d-]/g, ""))} />
               </label>
-              <button type="button" aria-pressed={sim.verticalSpeedTarget !== null} onClick={() => { const verticalSpeed = Number(vsInput) || 0; recordTo?.autopilot({ verticalSpeed }); sim.engageVerticalSpeed(verticalSpeed); }}>VS</button>
-              <button type="button" aria-pressed={sim.verticalMode === "ALT HOLD"} onClick={() => { recordTo?.autopilot({ hold: true }); sim.engageAltitudeHold(); }}>ALT</button>
+              <button type="button" aria-pressed={sim.verticalSpeedTarget !== null} onClick={() => { const verticalSpeed = Number(vsInput) || 0; recordTo?.autopilot({ verticalSpeed }); afcs({ select: "verticalSpeed", fpm: verticalSpeed }); }}>VS</button>
+              <button type="button" aria-pressed={sim.verticalMode === "ALT HOLD"} onClick={() => { recordTo?.autopilot({ hold: true }); afcs({ select: "altitudeHold" }); }}>ALT</button>
               <label>
                 <span>SPD</span>
                 <input inputMode="numeric" value={spdInput} placeholder={String(sim.selectedSpeed)} maxLength={3} aria-label="Selected speed"
                   onChange={event => setSpdInput(event.target.value.replace(/\D/g, ""))} />
               </label>
-              <button type="button" disabled={!spdInput} onClick={() => { const speed = Number(spdInput); recordTo?.autopilot({ speed }); sim.selectSpeed(speed); setSpdInput(""); }}>SET SPD</button>
+              <button type="button" disabled={!spdInput} onClick={() => { const speed = Number(spdInput); recordTo?.autopilot({ speed }); afcs({ select: "speed", knots: speed }); setSpdInput(""); }}>SET SPD</button>
               {/* GSPD: a ground speed held along the heading in the low-speed regime, on the hover feedback (plan B3.1). */}
               <label>
                 <span>GS</span>
@@ -651,9 +707,9 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                   onChange={event => setGsInput(event.target.value.replace(/\D/g, ""))} />
               </label>
               <button type="button" aria-pressed={sim.axisModes.pitch === "GSPD"} disabled={!gsInput}
-                onClick={() => { const groundSpeed = Number(gsInput); if (sim.engageGroundSpeed(groundSpeed)) { recordTo?.autopilot({ groundSpeed }); setGsInput(""); } }}>GSPD</button>
+                onClick={() => { const groundSpeed = Number(gsInput); afcs({ select: "groundSpeed", knots: groundSpeed }, event => { if (event.outcome.status === "accepted") { recordTo?.autopilot({ groundSpeed }); setGsInput(""); } }); }}>GSPD</button>
               {/* The cyclic force-trim release, pressed and let go: the hover references re-datum where the aircraft is. */}
-              <button type="button" title="Cyclic force-trim release" onClick={() => { recordTo?.autopilot({ forceTrimRelease: true }); sim.releaseForceTrim(); }}>FTR</button>
+              <button type="button" title="Cyclic force-trim release" onClick={() => { recordTo?.autopilot({ forceTrimRelease: true }); afcs({ select: "forceTrimRelease" }); }}>FTR</button>
             </form>
           ) : null}
           <dl className="fmsBenchGuidance" aria-label="Guidance">
@@ -679,7 +735,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </>}
             <p className="fmsBenchHint">Crew declaration required. Follow the published chart and fly the visual segment using heading and altitude controls.</p>
             <button type="button" disabled={guidanceBackend.hasCondition("fmsFail") || !guidanceBackend.pinsContinuation.mapPassed || (guidanceBackend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? !crewConditions.basicVfr : !crewConditions.landingAreaVisible || !crewConditions.publishedVisibility)}
-              onClick={() => { if (sim.proceedFromPins(crewConditions)) recordTo?.proceedPins(crewConditions); }}>Continue from MAP</button>
+              onClick={() => { afcs({ select: "pinsContinue", declaration: crewConditions }, event => { if (event.outcome.status === "accepted") recordTo?.proceedPins(crewConditions); }); }}>Continue from MAP</button>
           </fieldset> : null}
         </section>
       </div>
@@ -717,11 +773,11 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <p className="fmsBenchProfile">Aircraft profile: <strong>{backend.aircraftProfile.title}</strong> ({backend.aircraftProfile.id} v{backend.aircraftProfile.version}, {profileFingerprint(backend.aircraftProfile)}).</p>
             {cockpitView ? <div className="fmsBenchActions">
             <button type="button" disabled={guidanceBackend.hasCondition("fmsFail")}
-              onClick={() => setJumpNote(guidanceBackend.sequence() === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null)}>
+              onClick={jump}>
               Jump to next waypoint
             </button>
             {next?.kind === "disco" && !guidanceBackend.hasCondition("fmsFail")
-              ? <button type="button" onClick={() => { guidanceBackend.overrideDiscontinuity(); setJumpNote("Discontinuity overridden (engineering action, logged)."); }}>Override discontinuity</button>
+              ? <button type="button" onClick={overrideDiscontinuity}>Override discontinuity</button>
               : null}
             <button type="button" onClick={reset}>Restart the simulation</button>
             </div> : <p className="fmsBenchHint">The flight controls are beside the displays.</p>}
@@ -734,18 +790,26 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <p className="fmsBenchHint">Scenario playback and recording target CDU 1. CDU 2 input is not recorded. EFIS and AFCS follow the separately selected guidance source.</p>
           </section>
         </>)} />
-        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios" && iosVisible} render={() => (
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios" && iosVisible} render={() => (<>
           <FmsScenarioCard
             runner={runner}
             recording={recording}
             screenLines={screenText(backend.screen())}
             onRun={runScenario}
-            onStop={() => runner?.abandon()}
+            onStop={() => { if (runner) submitIos({ kind: "scenario.stop", runId: runner.runId }, { kind: "ui", id: "scenarios.stop" }); }}
             onRecord={startRecording}
             onFinishRecording={finishRecording}
             onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
           />
-        )} />
+          <section className="fmsBenchCard" aria-label="Kernel journal">
+            <h2>Kernel journal</h2>
+            <p className="fmsBenchReadout">
+              {kernel.journal.length} actions and {kernel.controlRecords.length} control records this session; frame {kernel.frame}.
+            </p>
+            <p className="fmsBenchHint">Every control, key and scenario step that changes the simulation, in the order the kernel executed it, with its outcome (#1502 D5).</p>
+            <button type="button" onClick={exportJournal}>Export journal</button>
+          </section>
+        </>)} />
         <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" shown={tab === "conditions" && iosVisible} render={() => (<>
           <section className="fmsBenchCard">
             <h2>Conditions</h2>
@@ -755,7 +819,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                   <label>
                     <input type="checkbox" checked={condition.id === "independent" ? !system.linked : conditionBackend(condition.id).hasCondition(condition.id)}
                       disabled={failedFms && condition.id !== "fmsFail" && !sharedSensorCondition(condition.id)}
-                      onChange={event => { recordTo?.condition(condition.id, event.target.checked); conditionBackend(condition.id).setCondition(condition.id, event.target.checked); }} />
+                      onChange={event => { recordTo?.condition(condition.id, event.target.checked); submitIos({ kind: "ios.condition", unit: conditionSide(condition.id), condition: condition.id, on: event.target.checked }, { kind: "ios", id: `conditions.${condition.id}` }); }} />
                     <span>
                       <b>{condition.label}</b> <small className={lampNote(condition.lamp).startsWith("no ") ? "absent" : undefined}>{lampNote(condition.lamp)}</small>
                       {condition.id === "independent" ? <span className="fmsBenchHint">Injects a cross-talk fault. Clearing restores the link; confirm SYNC on SETUP to leave independent operation.</span> : null}
@@ -771,19 +835,19 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </p>
           </section>
 
-          <BaroCard backend={backend} sensorOwner={system.computers[0]} recordTo={recordTo} />
-          <FmsSensorFaultCard backend={backend} sensorOwner={system.computers[0]} recordTo={recordTo} />
+          <BaroCard backend={backend} side={cduSide} sensorOwner={system.computers[0]} recordTo={recordTo} submit={submitIos} />
+          <FmsSensorFaultCard backend={backend} side={cduSide} sensorOwner={system.computers[0]} recordTo={recordTo} submit={submitIos} />
 
           <section className="fmsBenchCard">
             <h2>Alerts</h2>
-            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); recordTo?.alert(libraryAlert); backend.raiseAlert(libraryAlert); }}>
+            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); recordTo?.alert(libraryAlert); submitIos({ kind: "ios.alert", unit: cduSide, text: libraryAlert }, { kind: "ios", id: "alerts.library" }); }}>
               <select value={libraryAlert} aria-label="Alert from the manual" onChange={event => setLibraryAlert(event.target.value)}>
                 {ALERTS.map(entry => <option key={entry.text} value={entry.text}>{entry.text}</option>)}
               </select>
               <button type="submit" disabled={failedFms}>Raise</button>
             </form>
             {meaning ? <p className="fmsBenchHint">{meaning}</p> : null}
-            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { recordTo?.alert(alert.trim()); backend.raiseAlert(alert.trim()); setAlert(""); } }}>
+            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { recordTo?.alert(alert.trim()); submitIos({ kind: "ios.alert", unit: cduSide, text: alert.trim() }, { kind: "ios", id: "alerts.other" }); setAlert(""); } }}>
               <input value={alert} maxLength={24} placeholder="Other text, e.g. UNABLE RNP" aria-label="Alert message to raise"
                 onChange={event => setAlert(event.target.value)} />
               <button type="submit" disabled={!alert.trim() || failedFms}>Raise alert</button>
@@ -791,53 +855,55 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </section>
         </>)} />
         <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps"
-          shown={tab === "gps" && iosVisible} render={() => tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} /> : null} />
+          shown={tab === "gps" && iosVisible} render={() => tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} side={cduSide} submit={submitIos} /> : null} />
         <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" shown={tab === "dual" && iosVisible} render={() => (
           <section className="fmsBenchCard" aria-label="Dual computers and radio devices">
             <h2>Dual FMS and civil RMS</h2>
             <label>FMS 2 software profile (restarts the bench) <select aria-label="FMS 2 software profile" value={secondaryProfileChoice.current}
-              onChange={event => { secondaryProfileChoice.current = event.target.value; setSession(value => value + 1); }}>
+              onChange={event => { secondaryProfileChoice.current = event.target.value; newSession(); }}>
               <option value="">Same as FMS 1</option>{PROFILES.map(profile => <option key={profile.id} value={profile.id}>{profile.title}</option>)}
             </select></label>
             <p className="fmsBenchReadout">{system.mode}, cross-talk {system.linked ? "available" : "lost"}; navigation source {system.navigationSide ? `FMS ${system.navigationSide}` : "each computer independently"}.</p>
             <p className="fmsBenchHint">SETUP 5L requests a mode change; 6R confirms, 6L cancels. Independent RTE 4L sends ACT (empty entry) or SEC to the other computer as MOD; its crew must EXEC. A link restoration leaves both routes independent.</p>
-            <button type="button" onClick={() => system.setLinkAvailable(!system.linked)}>{system.linked ? "Fail cross-talk link" : "Restore cross-talk link"}</button>
+            <button type="button" onClick={() => submitIos({ kind: "ios.link", available: "toggle" }, { kind: "ios", id: "dual.link" })}>{system.linked ? "Fail cross-talk link" : "Restore cross-talk link"}</button>
             <h3>Radio devices</h3>
             <p className="fmsBenchHint">Active tuning follows shared device feedback in both modes. Standby entries cross-talk while the link is available. Laboratory feedback delay {backend.aircraftProfile.parameters.rmsFeedbackDelay.value}s; timeout {backend.aircraftProfile.parameters.rmsFeedbackTimeout.value}s.</p>
-            <label>COM1 device feedback <select aria-label="COM1 device feedback" defaultValue="normal" onChange={event => system.rms.injectFailure("com1", event.target.value === "failed")}>
+            <label>COM1 device feedback <select aria-label="COM1 device feedback" defaultValue="normal"
+              onChange={event => submitIos({ kind: "f14.radio", device: "com1", feedback: event.target.value === "failed" ? "FAILED" : "NORMAL" }, { kind: "f14", id: "dual.com1Feedback" })}>
               <option value="normal">Normal</option><option value="failed">No feedback</option>
             </select></label>
+            <RejectNextTune submit={submitIos} />
             <ul aria-label="RMS tuning feedback">{system.rms.requests.slice(0, 6).map(request => <li key={request.id}>FMS {request.side}: {request.device.toUpperCase()} {request.value} — {request.status}</li>)}</ul>
           </section>
         )} />
         <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" shown={tab === "navdata" && iosVisible} render={() => (<>
           <section className="fmsBenchCard" aria-label="FMS initialization and preflight">
             <h2>FMS initialization and preflight</h2>
-            <p className="fmsBenchReadout">FMS power: {backend.powerState}. Receiver power is controlled on GPS sensors.</p>
+            <p className="fmsBenchReadout">FMS power: {backend.powerState}. The GPS receivers are not powered from the bench: they keep running through an FMS power cycle.</p>
             <label><input type="checkbox" checked={restartOnGround} onChange={event => setRestartOnGround(event.target.checked)} /> On ground at power-up (bench input)</label>
             <div className="fmsBenchActions">
-              <button type="button" onClick={() => backend.powerOff()}>FMS power off</button>
-              <button type="button" onClick={() => backend.powerOn("COLD", restartOnGround)}>Cold start FMS</button>
-              <button type="button" onClick={() => backend.powerOn("WARM", restartOnGround)}>Warm start FMS</button>
+              <button type="button" onClick={() => submitIos({ kind: "ios.unitPower", unit: cduSide, mode: "OFF", onGround: restartOnGround }, { kind: "ios", id: "navdata.powerOff" })}>FMS power off</button>
+              <button type="button" onClick={() => submitIos({ kind: "ios.unitPower", unit: cduSide, mode: "COLD", onGround: restartOnGround }, { kind: "ios", id: "navdata.coldStart" })}>Cold start FMS</button>
+              <button type="button" onClick={() => submitIos({ kind: "ios.unitPower", unit: cduSide, mode: "WARM", onGround: restartOnGround }, { kind: "ios", id: "navdata.warmStart" })}>Warm start FMS</button>
             </div>
             <p>Review the active data and aircraft configuration, frequencies, position and UTC, route and leg geometry, angle reference, fuel, and satellite deselection before using the demonstration.</p>
             <div className="fmsBenchActions" aria-label="Preflight pages">
-              {([['IDENT', 'IDENT'], ['RADIO', 'RADIO'], ['POS', 'POS INIT'], ['RTE', 'ROUTE'], ['LEGS', 'LEGS'], ['SETUP', 'SETUP'], ['FUEL', 'FUEL'], ['SAT_DESELECT', 'SAT DESELECT']] as const).map(([page, label]) => <button type="button" key={page} disabled={failedFms} onClick={() => backend.open(page)}>{label}</button>)}
+              {([['IDENT', 'IDENT'], ['RADIO', 'RADIO'], ['POS', 'POS INIT'], ['RTE', 'ROUTE'], ['LEGS', 'LEGS'], ['SETUP', 'SETUP'], ['FUEL', 'FUEL'], ['SAT_DESELECT', 'SAT DESELECT']] as const).map(([page, label]) => <button type="button" key={page} disabled={failedFms} onClick={() => submitIos({ kind: "cdu.open", side: cduSide, page }, { kind: "ios", id: `navdata.preflight.${page}`, side: cduSide })}>{label}</button>)}
             </div>
             <p className="fmsBenchReadout">{backend.magvar.database.name}, epoch {backend.magvar.database.epoch}, released {backend.magvar.database.released}, CRC {backend.magvar.database.crc}: {backend.magvar.valid ? backend.magvar.outOfDate(backend.utcTime) ? 'OUT OF DATE' : 'valid checksum' : 'CRC FAILED'}.</p>
             <label>Load magnetic model package <input type="file" accept=".json" aria-label="Load magnetic model package" onChange={async event => {
               const file = event.target.files?.[0]; event.target.value = '';
               if (!file) return;
-              try {
-                const accepted = backend.loadMagvar(JSON.parse(await file.text()));
-                setMagvarLoad(!accepted ? 'Refused: unsupported model package.' : backend.magvar.valid ? `Loaded ${backend.magvar.database.name}.` : 'MAG VAR CRC FAILED: FMS navigation withdrawn.');
-              } catch { setMagvarLoad('Refused: invalid JSON.'); }
+              let candidate: unknown;
+              try { candidate = JSON.parse(await file.text()); } catch { setMagvarLoad('Refused: invalid JSON.'); return; }
+              submitIos({ kind: "config.magvar", unit: cduSide, op: "load", package: candidate }, { kind: "import", id: "navdata.magvarPackage" }, event =>
+                setMagvarLoad(event.outcome.status === "refused" ? 'Refused: unsupported model package.' : backend.magvar.valid ? `Loaded ${backend.magvar.database.name}.` : 'MAG VAR CRC FAILED: FMS navigation withdrawn.'));
             }} /></label>
             <button type="button" onClick={() => {
               const url = URL.createObjectURL(new Blob([JSON.stringify(backend.magvar.database, null, 2)], { type: "application/json" }));
               const link = document.createElement("a"); link.href = url; link.download = `fms-magvar-${backend.magvar.database.name}.json`; link.click(); URL.revokeObjectURL(url);
             }}>Export MAGVAR package</button>
-            <button type="button" onClick={() => { backend.loadMagvar(WMM2025_DATABASE); setMagvarLoad('Built-in WMM2025 restored.'); }}>Restore WMM2025</button>
+            <button type="button" onClick={() => { submitIos({ kind: "config.magvar", unit: cduSide, op: "restoreWmm2025" }, { kind: "ios", id: "navdata.restoreWmm2025" }); setMagvarLoad('Built-in WMM2025 restored.'); }}>Restore WMM2025</button>
             {magvarLoad ? <p role="status">{magvarLoad}</p> : null}
           </section>
           <section className="fmsBenchCard">
@@ -858,11 +924,9 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               </p>
               <div className="fmsBenchActions">
                 <button type="button" disabled={failedFms || backend.activeCycle.source === KBTV_SOURCE}
-                  onClick={() => {
-                    const outcome = loadKbtvDemonstration(backend);
-                    setNavLoad("refused" in outcome ? `Refused, nothing changed. ${outcome.refused}.`
-                      : `KBTV demonstration loaded and active: cycle ${outcome.loaded}, FAA CIFP 2609 (public domain, not for navigation).`);
-                  }}>Load the KBTV demonstration (FAA CIFP 2609)</button>
+                  onClick={() => submitIos({ kind: "config.navdb", unit: cduSide, op: "loadKbtv" }, { kind: "ios", id: "navdata.kbtv" }, event =>
+                    setNavLoad(event.outcome.status === "refused" ? `Refused, nothing changed. ${event.outcome.reason}.`
+                      : `KBTV demonstration loaded and active: cycle ${(event.outcome.detail as { loaded: string }).loaded}, FAA CIFP 2609 (public domain, not for navigation).`))}>Load the KBTV demonstration (FAA CIFP 2609)</button>
                 <button type="button" onClick={() => startDemonstration("kbtv-rnav15")}
                   title="Restarts the simulation, loads the KBTV data and places the aircraft 8 NM before STAEV at 3200 ft, cleared direct STAEV, approach armed">
                   Set up KBTV RNAV RWY 15
@@ -881,7 +945,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             {backend.inactiveCycle ? (
               <p className="fmsBenchReadout">
                 Inactive <strong>{backend.inactiveCycle.id}</strong> ({backend.inactiveCycle.source}).{" "}
-                <button type="button" disabled={failedFms} onClick={() => backend.swapCycles()}>Activate {backend.inactiveCycle.id}</button>
+                <button type="button" disabled={failedFms} onClick={() => submitIos({ kind: "config.navdb", unit: cduSide, op: "activate" }, { kind: "ios", id: "navdata.activate" })}>Activate {backend.inactiveCycle.id}</button>
               </p>
             ) : null}
             <label className="fmsBenchFile">
@@ -902,11 +966,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                     event.target.value = "";
                     return;
                   }
-                  const outcome = backend.loadArinc424(await file.text(), file.name, airports);
-                  setNavLoad("refused" in outcome
-                    ? `Refused, nothing changed. ${outcome.refused}.`
-                    : `${file.name}: ${outcome.read} records read, ${outcome.skipped} skipped${outcome.errors.length ? `; ${outcome.errors[0]}` : ""}. Loaded as inactive cycle ${outcome.loaded}: activate it on IDENT or here.`);
-                  event.target.value = "";
+                  const name = file.name, input = event.target;
+                  submitIos({ kind: "config.navdb", unit: cduSide, op: "loadArinc424", name, airports, text: await file.text() }, { kind: "import", id: "navdata.arinc424" }, applied => {
+                    const outcome = applied.outcome;
+                    if (outcome.status === "refused") { setNavLoad(`Refused, nothing changed. ${outcome.reason}.`); return; }
+                    const loaded = outcome.detail as { loaded: string; read: number; skipped: number; errors: string[] };
+                    setNavLoad(`${name}: ${loaded.read} records read, ${loaded.skipped} skipped${loaded.errors.length ? `; ${loaded.errors[0]}` : ""}. Loaded as inactive cycle ${loaded.loaded}: activate it on IDENT or here.`);
+                  });
+                  input.value = "";
                 }} />
             </label>
             {navLoad ? <p className="fmsBenchHint" role="status">{navLoad}</p> : null}
@@ -975,11 +1042,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                 onChange={async event => {
                   const file = event.target.files?.[0];
                   if (!file) return;
-                  const outcome = backend.importUserDatabase(await file.text());
-                  setUserDbStatus("refused" in outcome
-                    ? `Refused, nothing changed: ${outcome.refused.join("; ")}.`
-                    : `${file.name}: ${outcome.imported.waypoints} user waypoints and ${outcome.imported.routes} user routes added.`);
-                  event.target.value = "";
+                  const name = file.name, input = event.target;
+                  submitIos({ kind: "config.userdb", unit: cduSide, text: await file.text() }, { kind: "import", id: "navdata.userDatabase" }, applied => {
+                    const outcome = applied.outcome;
+                    if (outcome.status === "refused") { setUserDbStatus(`Refused, nothing changed: ${outcome.reason}.`); return; }
+                    const imported = outcome.detail as { waypoints: number; routes: number };
+                    setUserDbStatus(`${name}: ${imported.waypoints} user waypoints and ${imported.routes} user routes added.`);
+                  });
+                  input.value = "";
                 }} />
             </label>
             {userDbStatus ? <p className="fmsBenchHint" role="status">{userDbStatus}</p> : null}
@@ -1048,7 +1118,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
  * injected baro error. The readout shows the physical height beside what the altimeter reads, so an error or a mis-set
  * altimeter is visible for what it is. None of these moves the aircraft directly or changes the radio height.
  */
-function BaroCard({ backend, sensorOwner, recordTo }: { backend: ScriptedFms; sensorOwner: ScriptedFms; recordTo: ScenarioRecorder | null }) {
+function BaroCard({ backend, side, sensorOwner, recordTo, submit }: { backend: FmsView; side: FmsSide; sensorOwner: FmsView; recordTo: ScenarioRecorder | null; submit: Submit }) {
   const [setting, setSetting] = useState("");
   const [qnh, setQnh] = useState("");
   const [error, setError] = useState("");
@@ -1066,24 +1136,40 @@ function BaroCard({ backend, sensorOwner, recordTo }: { backend: ScriptedFms; se
         indicated <strong>{Math.round(backend.indicatedAltitude)} ft</strong> ({formatSetting(baro.setting)}; declared QNH {environment.declaredQnhHpa} hPa;
         baro error {environment.errorFt >= 0 ? "+" : ""}{environment.errorFt} ft).
       </p>
-      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!settingValid) return; recordTo?.baro({ setting: hpa(setting) }); backend.setBaroSetting({ kind: "QNH", hPa: hpa(setting) }); setSetting(""); }}>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!settingValid) return; recordTo?.baro({ setting: hpa(setting) }); submit({ kind: "fms.baroSetting", unit: side, setting: { kind: "QNH", hPa: hpa(setting) } }, { kind: "ui", id: "baro.setting" }); setSetting(""); }}>
         <input inputMode="numeric" value={setting} maxLength={4} placeholder="QNH hPa" aria-label="Altimeter setting (QNH, hPa)"
           onChange={event => setSetting(event.target.value.replace(/\D/g, ""))} />
         <button type="submit" disabled={!settingValid}>Set QNH</button>
-        <button type="button" aria-pressed={baro.setting.kind === "STD"} onClick={() => { recordTo?.baro({ setting: "STD" }); backend.setBaroSetting({ kind: "STD" }); }}>STD</button>
+        <button type="button" aria-pressed={baro.setting.kind === "STD"} onClick={() => { recordTo?.baro({ setting: "STD" }); submit({ kind: "fms.baroSetting", unit: side, setting: { kind: "STD" } }, { kind: "ui", id: "baro.std" }); }}>STD</button>
       </form>
       <p className="fmsBenchHint">The crew's setting changes what the altimeter indicates; the autopilot and the FMS work on the barometric altitude referenced to the declared QNH.</p>
-      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!qnhValid) return; recordTo?.baro({ declaredQnh: hpa(qnh) }); sensorOwner.declareQnh(hpa(qnh), "bench"); setQnh(""); }}>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!qnhValid) return; recordTo?.baro({ declaredQnh: hpa(qnh) }); submit({ kind: "ios.atmosphere", declaredQnh: hpa(qnh), reason: "bench" }, { kind: "ios", id: "baro.declaredQnh" }); setQnh(""); }}>
         <input inputMode="numeric" value={qnh} maxLength={4} placeholder="QNH hPa" aria-label="Declared QNH (hPa)"
           onChange={event => setQnh(event.target.value.replace(/\D/g, ""))} />
         <button type="submit" disabled={!qnhValid}>Declare the QNH</button>
       </form>
-      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!errorValid) return; recordTo?.baro({ errorFt: Number(error) }); sensorOwner.setBaroError(Number(error), "bench"); setError(""); }}>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!errorValid) return; recordTo?.baro({ errorFt: Number(error) }); submit({ kind: "ios.atmosphere", baroErrorFt: Number(error), reason: "bench" }, { kind: "ios", id: "baro.error" }); setError(""); }}>
         <input inputMode="numeric" value={error} maxLength={5} placeholder="Error ft" aria-label="Baro error (ft)"
           onChange={event => setError(event.target.value.replace(/[^\d-]/g, ""))} />
         <button type="submit" disabled={!errorValid}>Inject the error</button>
       </form>
       <p className="fmsBenchHint">An engineering stimulus, logged: the altimeter reads the physical height plus the error, and the autopilot holding an altitude flies with it, as it would in an aircraft.</p>
     </section>
+  );
+}
+
+/**
+ * A radio that refuses its next tune command (F14 radio kind, plan C3): the RMS answers REJECTED once, which the CDU
+ * shows against the request. Submitted to the kernel as `f14.radio`.
+ */
+function RejectNextTune({ submit }: { submit: Submit }) {
+  const [device, setDevice] = useState<RadioDevice>("nav2");
+  return (
+    <form className="fmsBenchAlert" aria-label="Reject next tune" onSubmit={event => { event.preventDefault(); submit({ kind: "f14.radio", device, rejectNext: true }, { kind: "f14", id: "dual.rejectNext" }); }}>
+      <label>Radio <select aria-label="Radio to reject its next tune" value={device} onChange={event => setDevice(event.target.value as RadioDevice)}>
+        {(["com1", "com2", "nav1", "nav2", "adf", "adf2", "tacan", "tpdr", "tpdr2"] as const).map(id => <option key={id} value={id}>{RADIO_NAMES[id]}</option>)}
+      </select></label>
+      <button type="submit">Reject its next tune</button>
+    </form>
   );
 }
