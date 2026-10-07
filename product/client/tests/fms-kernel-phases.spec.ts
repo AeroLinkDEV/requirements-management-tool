@@ -71,22 +71,37 @@ test('steps run in ACTION: at F_0 on construction, then in each frame after its 
   expect(runner.results[4]).toEqual({ status: 'done', at: 0.75 })
 })
 
+/** What INTEGRATE produces: where the aircraft is and how it flies. */
+const flown = ({ fms, sim }: ReturnType<typeof singleComposition>) => ({ position: fms.truePosition, track: fms.track, bank: sim.bankAngle })
+
 // Owner: the ACTION rule at R_k. Steps due at F_k run in its poll; an input made at the resting point R_k then executes
-// in the still-open ACTION at F_k: after the poll, before F_k's INTEGRATE.
-test('an input at the resting point comes after the steps due at that instant and before its INTEGRATE', () => {
-  const composition = singleComposition(START)
-  const runner = new ScenarioRunner(scenario([
-    { when: { kind: 'time', seconds: 0.5 }, action: { kind: 'expectNoAlert', text: 'INPUT' } },
-    expectAlert('INPUT', { kind: 'after', seconds: 0.25 }),
-  ]), composition.fms, undefined, composition.sim)
-  const kernel = new FmsKernel(composition.plant, runner)
-  kernel.advance(2)
-  expect(runner.results[0]).toEqual({ status: 'pass', at: 0.5, actual: 'not raised' })
-  // R_2: the bench's control acts here, at kernel time F_2, before anything else happens at that instant.
-  expect(kernel.now).toBe(F(2))
-  composition.fms.raiseAlert('INPUT')
-  kernel.advance(1)
-  expect(runner.results[1]).toEqual({ status: 'pass', at: 0.75, actual: 'INPUT' })
+// in the still-open ACTION at F_k: after the poll (a check at F_k does not see it), and before F_k's INTEGRATE, which
+// flies the selection (against a control run with no selection, and one that selects only after that INTEGRATE).
+test('an input at the resting point comes after the steps due at that instant and is flown by its INTEGRATE', () => {
+  const drive = (selectAt: number | null) => {
+    const composition = singleComposition(START)
+    const runner = new ScenarioRunner(scenario([
+      { when: { kind: 'time', seconds: 0.5 }, action: { kind: 'expectNoAlert', text: 'INPUT' } },
+      expectAlert('INPUT', { kind: 'after', seconds: 0.25 }),
+    ]), composition.fms, undefined, composition.sim)
+    const kernel = new FmsKernel(composition.plant, runner)
+    for (let j = 0; j <= 3; j += 1) {
+      if (j === selectAt) {
+        // R_j: the bench's controls act here, at kernel time F_j.
+        expect(kernel.now).toBe(F(j))
+        composition.fms.raiseAlert('INPUT')
+        composition.sim.selectHeading((composition.fms.track + 90) % 360)
+      }
+      if (j < 3) kernel.advance(1)
+    }
+    return { results: runner.results, flown: flown(composition) }
+  }
+  const atR2 = drive(2), control = drive(null), atR3 = drive(3)
+  expect(atR2.results).toEqual([{ status: 'pass', at: 0.5, actual: 'not raised' }, { status: 'pass', at: 0.75, actual: 'INPUT' }])
+  // At R_3 the selection made at R_2 has been flown for [F_2, F_3]. One made at R_3 itself has not: selecting moves
+  // nothing until the INTEGRATE that follows it.
+  expect(atR2.flown).not.toEqual(control.flown)
+  expect(atR3.flown).toEqual(control.flown)
 })
 
 // Owner: the run-end halt. A run that finishes in an ACTION halts that call there: no INTEGRATE follows at F_end, and
@@ -107,36 +122,49 @@ test('a run that ends in an ACTION halts the call there, with no INTEGRATE after
 })
 
 // Owner: an INTEGRATE that throws (#1508 is the known case). Kernel time follows the units' clock to F_{j+1}, the poll
-// at F_{j+1} is skipped and stays skipped, the kernel is faulted, an input then executes before the next INTEGRATE, and
-// the next call starts with that INTEGRATE.
-test('an INTEGRATE that throws leaves the kernel faulted at the next instant with its poll skipped', () => {
-  const composition = singleComposition(START)
-  const { sim, fms } = composition
-  const step = sim.step.bind(sim)
-  let steps = 0
-  sim.step = dt => { steps += 1; if (steps === 3) throw new Error('guidance source switch'); step(dt) }
-  const runner = new ScenarioRunner(scenario([
-    alert('DUE', { kind: 'time', seconds: 0.75 }), expectAlert('INPUT', { kind: 'after', seconds: 0 }),
-  ]), fms, undefined, sim)
-  const kernel = new FmsKernel(composition.plant, runner)
-  kernel.advance(2)
-  expect(kernel.faulted).toBe(false)
-  expect(() => kernel.advance(5)).toThrow('guidance source switch')
-  // The step began at F_2 and moved the units' clock to F_3 before it threw.
-  expect(kernel.faulted).toBe(true)
-  expect(kernel.now).toBe(F(3))
-  expect(kernel.unitClockMs).toBe(START + 750)
-  // The poll at F_3 did not run: the step due at 0.75 is still pending.
-  expect(runner.results[0]).toEqual({ status: 'pending' })
-  // An input now executes in F_3's open ACTION, before the next INTEGRATE; it causes no poll.
-  fms.raiseAlert('INPUT')
-  expect(runner.results[0]).toEqual({ status: 'pending' })
-  // The next call starts with INTEGRATE at F_3; the poll resumes at F_4, where the skipped step finally runs.
-  expect(kernel.advance(1)).toBe(1)
-  expect(kernel.faulted).toBe(false)
-  expect(kernel.now).toBe(F(4))
-  expect(runner.results).toEqual([{ status: 'done', at: 1 }, { status: 'pass', at: 1, actual: 'INPUT' }])
-  expect(steps).toBe(4)
+// at F_{j+1} is skipped and stays skipped, the kernel is faulted, an input then executes in that open ACTION without a
+// poll and is flown by the next INTEGRATE (against a control run with the same fault and no input), and the next call
+// starts with that INTEGRATE.
+test('an INTEGRATE that throws leaves the kernel faulted at the next instant, its poll skipped, an input there flown next', () => {
+  const drive = (input: boolean) => {
+    const composition = singleComposition(START)
+    const { sim, fms } = composition
+    const step = sim.step.bind(sim)
+    let steps = 0
+    sim.step = dt => { steps += 1; if (steps === 3) throw new Error('guidance source switch'); step(dt) }
+    const runner = new ScenarioRunner(scenario([
+      alert('DUE', { kind: 'time', seconds: 0.75 }), expectAlert('INPUT', { kind: 'after', seconds: 0 }),
+    ]), fms, undefined, sim)
+    const kernel = new FmsKernel(composition.plant, runner)
+    kernel.advance(2)
+    expect(kernel.faulted).toBe(false)
+    expect(() => kernel.advance(5)).toThrow('guidance source switch')
+    // The step began at F_2 and moved the units' clock to F_3 before it threw.
+    expect(kernel.faulted).toBe(true)
+    expect(kernel.now).toBe(F(3))
+    expect(kernel.unitClockMs).toBe(START + 750)
+    // The poll at F_3 did not run: the step due at 0.75 is still pending.
+    expect(runner.results[0]).toEqual({ status: 'pending' })
+    const atFault = flown(composition)
+    if (input) {
+      // An input executes in F_3's open ACTION: it causes no poll and moves nothing by itself.
+      fms.raiseAlert('INPUT')
+      sim.selectHeading((fms.track + 90) % 360)
+      expect(runner.results[0]).toEqual({ status: 'pending' })
+      expect(flown(composition)).toEqual(atFault)
+    }
+    // The next call starts with INTEGRATE at F_3; the poll resumes at F_4, where the skipped step finally runs.
+    expect(kernel.advance(1)).toBe(1)
+    expect(kernel.faulted).toBe(false)
+    expect(kernel.now).toBe(F(4))
+    expect(steps).toBe(4)
+    return { results: runner.results, flown: flown(composition) }
+  }
+  const withInput = drive(true), control = drive(false)
+  expect(withInput.results).toEqual([{ status: 'done', at: 1 }, { status: 'pass', at: 1, actual: 'INPUT' }])
+  expect(control.results[0]).toEqual({ status: 'done', at: 1 })
+  // The INTEGRATE at F_3 flew the selection made at the faulted resting point.
+  expect(withInput.flown).not.toEqual(control.flown)
 })
 
 // Owner: a flight freeze INTEGRATE holds the aircraft while the clock moves a frame; a composition without a freeze

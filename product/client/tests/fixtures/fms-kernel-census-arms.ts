@@ -4,7 +4,15 @@
 //        [--shard <k>/<n>] [--port <n>] [--runs <substring>]
 //   node tests/fixtures/fms-kernel-census-arms.ts merge <out.json> <shard.json>...
 //   node tests/fixtures/fms-kernel-census-arms.ts compare <a.json> <b.json>
-//   node tests/fixtures/fms-kernel-census-arms.ts golden <reference result.json> <fms-kernel-golden-digests.ts>
+//   node tests/fixtures/fms-kernel-census-arms.ts golden <reference result.json> <fms-kernel-golden-digests.ts> [--basis <text>]
+//
+// Regenerating the golden fixture, from source, never by hand (the golden command refuses a record that lacks any census
+// run, and writes the runs in census order, so its bytes do not depend on how the record was sharded):
+// (a) An I1 pull request whose base moved: rebase, take the rebased commit that has no kernel change (its I1-0 / golden
+//     commit) as the reference arm, run the whole census there (--node-modes 1h at least), and regenerate. Then compare
+//     that arm with the head as usual.
+// (b) A pull request that changes simulation behaviour: compare its base with its head, classify every difference in that
+//     pull request (#1502 D4 6.3), then run the census on its head and regenerate with --basis naming the pull request.
 //
 // An arm is a worktree at one commit with its own node_modules. Its census, encoder and simulation are loaded from that
 // checkout through its own Vite configuration: in Node by Vite's module loader, and in Chromium on the headless kernel
@@ -20,7 +28,8 @@ import { parseArgs } from 'node:util'
 type Mode = { rate: 1 | 4; rendered: boolean; digest: boolean }
 type Result = { id: string; frames: string[]; end: string; sha256: string; bytes: number; outcome: string | null; results: unknown; endedAfter: number | null; ms: number }
 type Entry = { engine: string; mode: Mode; result: Result }
-type CensusRecord = { schema: string; arm: { commit: string; dirty: string[] }; engines: { node: string; chromium: string | null }; entries: Entry[] }
+type Arm = { commit: string; srcTree: string; dirty: string[] }
+type CensusRecord = { schema: string; arm: Arm; censusIds: string[]; engines: { node: string; chromium: string | null }; entries: Entry[] }
 
 const MODES: Mode[] = [
   { rate: 1, rendered: false, digest: true }, { rate: 4, rendered: false, digest: true },
@@ -41,7 +50,7 @@ const { values: options, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     arm: { type: 'string' }, out: { type: 'string' }, port: { type: 'string' }, runs: { type: 'string' }, shard: { type: 'string' },
-    'node-modes': { type: 'string' }, 'chromium-modes': { type: 'string' },
+    'node-modes': { type: 'string' }, 'chromium-modes': { type: 'string' }, basis: { type: 'string' },
   },
 })
 
@@ -53,8 +62,16 @@ async function run() {
   const nodeModes = modesOf(options['node-modes'], '1h'), chromiumModes = modesOf(options['chromium-modes'], '1h,4r,off')
   const [shard, shards] = (options.shard ?? '1/1').split('/').map(Number)
   if (!(shards >= 1 && shard >= 1 && shard <= shards)) throw new Error(`bad --shard ${options.shard}`)
-  const dirty = git(arm, 'status', '--porcelain', '--', 'src', 'tests/fixtures', 'package-lock.json', 'vite.config.ts').split('\n').filter(Boolean)
-  const record: CensusRecord = { schema: 'aerolink.fms-kernel-census.v1', arm: { commit: git(arm, 'rev-parse', 'HEAD'), dirty }, engines: { node: process.version, chromium: null }, entries: [] }
+  // The arm as it is now; read again when the runs end, and the evidence is refused if it moved meanwhile.
+  const identity = (): Arm => ({
+    commit: git(arm, 'rev-parse', 'HEAD'), srcTree: git(arm, 'rev-parse', 'HEAD:product/client/src'),
+    dirty: git(arm, 'status', '--porcelain', '--', 'src', 'tests/fixtures', 'package-lock.json', 'vite.config.ts').split('\n').filter(Boolean),
+  })
+  const record: CensusRecord = { schema: 'aerolink.fms-kernel-census.v2', arm: identity(), censusIds: [], engines: { node: process.version, chromium: null }, entries: [] }
+  const census = (ids: string[]) => {
+    if (record.censusIds.length && JSON.stringify(record.censusIds) !== JSON.stringify(ids)) throw new Error('Node and Chromium loaded different censuses')
+    record.censusIds = ids
+  }
   const { createServer } = await import('vite')
   const port = Number(options.port ?? 5797)
   const server = await createServer({ root: arm, configFile: resolve(arm, 'vite.config.ts'), logLevel: 'error', server: { host: '127.0.0.1', port, strictPort: true, hmr: false } })
@@ -62,11 +79,12 @@ async function run() {
   const pick = (ids: string[]) => ids.filter((id, i) => i % shards === shard - 1 && (!options.runs || id.includes(options.runs)))
   try {
     if (nodeModes.length) {
-      const census = await server.ssrLoadModule('/tests/fixtures/fms-kernel-census.ts')
-      for (const id of pick(census.CENSUS_RUNS.map((r: { id: string }) => r.id))) {
+      const loaded = await server.ssrLoadModule('/tests/fixtures/fms-kernel-census.ts')
+      census(loaded.CENSUS_RUNS.map((r: { id: string }) => r.id))
+      for (const id of pick(record.censusIds)) {
         for (const mode of nodeModes) {
           const begin = performance.now()
-          const result = census.runCensus(census.CENSUS_RUNS.find((r: { id: string }) => r.id === id), mode)
+          const result = loaded.runCensus(loaded.CENSUS_RUNS.find((r: { id: string }) => r.id === id), mode)
           record.entries.push({ engine: 'node', mode, result: { ...result, ms: performance.now() - begin } })
           console.log(`node ${id} ${modeKey(mode)}: ${result.frames.length} frames ${result.sha256.slice(0, 12)} ${Math.round(performance.now() - begin)} ms`)
         }
@@ -81,8 +99,8 @@ async function run() {
         const page = await browser.newPage()
         await page.goto(`http://127.0.0.1:${port}/tests/fixtures/fms-kernel-headless.html`)
         await page.waitForFunction(() => document.getElementById('status')?.textContent === 'ready', null, { timeout: 120_000 })
-        const ids: string[] = await page.evaluate(() => window.fmsKernelCensus.ids)
-        for (const id of pick(ids)) {
+        census(await page.evaluate(() => window.fmsKernelCensus.ids))
+        for (const id of pick(record.censusIds)) {
           for (const mode of chromiumModes) {
             const result: Result = await page.evaluate(([i, m]) => window.fmsKernelCensus.run(i as string, m as Mode), [id, mode] as const)
             record.entries.push({ engine: 'chromium', mode, result })
@@ -92,12 +110,19 @@ async function run() {
       } finally { await browser.close() }
     }
   } finally { await server.close() }
+  const after = identity()
+  if (JSON.stringify(after) !== JSON.stringify(record.arm)) throw new Error(`the arm changed during the run (${JSON.stringify(record.arm)} -> ${JSON.stringify(after)}); no evidence written`)
   writeFileSync(options.out, JSON.stringify(record))
 }
 
 /** Every difference between two arms, per engine, run and mode; and whether each arm's modes agree with one another. */
 function compare(aPath: string, bPath: string) {
   const a: CensusRecord = JSON.parse(readFileSync(aPath, 'utf8')), b: CensusRecord = JSON.parse(readFileSync(bPath, 'utf8'))
+  // Bit-identity is claimed only within one engine build (#1502 D7 9.5): arms from different builds are not compared.
+  for (const engine of ['node', 'chromium'] as const) {
+    const ran = (record: CensusRecord) => record.entries.some(e => e.engine === engine)
+    if (ran(a) && ran(b) && a.engines[engine] !== b.engines[engine]) throw new Error(`the arms ran in different ${engine} builds: ${a.engines[engine]} vs ${b.engines[engine]}`)
+  }
   const key = (e: Entry) => `${e.engine} | ${e.result.id} | ${modeKey(e.mode)}`
   const bByKey = new Map(b.entries.map(e => [key(e), e]))
   const differences: string[] = []
@@ -143,17 +168,31 @@ function compare(aPath: string, bPath: string) {
 /** The golden fixture: per run, the SHA-256, the frame count, every 100th frame digest and the end digest. */
 function golden(reference: string, target: string) {
   const record: CensusRecord = JSON.parse(readFileSync(reference, 'utf8'))
+  if (record.schema !== 'aerolink.fms-kernel-census.v2' || !record.censusIds?.length) throw new Error('the reference record does not name its census; run it with this tool')
   if (record.arm.dirty.length) throw new Error('the reference arm has local changes')
-  const base = record.entries.filter(e => e.engine === 'node' && e.mode.rate === 1 && !e.mode.rendered && e.mode.digest)
-  const runs = Object.fromEntries(base.map(({ result }) => [result.id, {
+  const base = new Map(record.entries.filter(e => e.engine === 'node' && e.mode.rate === 1 && !e.mode.rendered && e.mode.digest).map(e => [e.result.id, e]))
+  const missing = record.censusIds.filter(id => !base.has(id))
+  if (missing.length) throw new Error(`the reference record lacks ${missing.length} of ${record.censusIds.length} census runs (Node, 1x headless): ${missing.join(', ')}`)
+  // Census order, so the fixture's bytes are the same however the record was sharded.
+  const runs = Object.fromEntries(record.censusIds.map(id => base.get(id)!).map(({ result }) => [result.id, {
     sha256: result.sha256, frames: result.frames.length, every100th: result.frames.filter((_, i) => i % 100 === 0), end: result.end,
     outcome: result.outcome, endedAfter: result.endedAfter,
   }]))
+  const basis = options.basis ?? 'an I1 reference arm with no kernel change (rule (a))'
   const text = [
-    '// GENERATED by tests/fixtures/fms-kernel-census-arms.ts golden from the reference arm\'s Node census (1x, headless).',
-    '// Never edit or merge by hand: regenerate from source when the base moves (#1517 I1-0).',
-    `// Generator: ${record.arm.commit} (Node ${record.engines.node}).`,
+    '// GENERATED by tests/fixtures/fms-kernel-census-arms.ts golden. Never edit or merge by hand (#1517 I1-0).',
+    `// Reference arm: commit ${record.arm.commit}, product/client/src tree ${record.arm.srcTree}; Node ${record.engines.node}; every census run, 1x headless.`,
+    '// The tree identifies the reference once its commit is squashed away.',
+    `// Basis: ${basis}.`,
+    '// Authority: only the entries fms-kernel-legacy-equivalence.spec.ts checks are enforced; they are authoritative. Every',
+    '// other entry is pull-request evidence: true of the reference arm, enforced by nothing, so it may go stale until the',
+    '// next regeneration. (Enforcing all of them costs a whole Node census per CI run, about 31 CPU-minutes locally.)',
+    '// Regenerate from source (the tool refuses a partial record and writes census order):',
+    '// (a) an I1 pull request whose base moved: its rebased commit with no kernel change is the reference arm;',
+    '// (b) a pull request that changes simulation behaviour: compare base with head, classify every difference in that',
+    '//     pull request (#1502 D4 6.3), then regenerate from its head with --basis naming it.',
     `export const GOLDEN_GENERATOR = ${JSON.stringify(record.arm.commit)}`,
+    `export const GOLDEN_SOURCE_TREE = ${JSON.stringify(record.arm.srcTree)}`,
     `export const GOLDEN_DIGESTS: Readonly<Record<string, { sha256: string; frames: number; every100th: readonly string[]; end: string; outcome: string | null; endedAfter: number | null }>> = ${JSON.stringify(runs, null, 2).replaceAll('"', '\'')}`,
     '',
   ].join('\n')
@@ -163,8 +202,8 @@ function golden(reference: string, target: string) {
 /** One record from a run's shards: one arm, one engine build each. */
 function merge(target: string, parts: string[]) {
   const records: CensusRecord[] = parts.map(part => JSON.parse(readFileSync(part, 'utf8')))
-  const key = (r: CensusRecord) => JSON.stringify([r.arm, r.engines.node])
-  if (new Set(records.map(key)).size !== 1) throw new Error('the shards are not from one arm and one Node')
+  const key = (r: CensusRecord) => JSON.stringify([r.schema, r.arm, r.censusIds, r.engines.node])
+  if (new Set(records.map(key)).size !== 1) throw new Error('the shards are not from one arm, one census and one Node')
   const chromium = [...new Set(records.map(r => r.engines.chromium).filter(Boolean))]
   if (chromium.length > 1) throw new Error('the shards ran in different Chromium builds')
   writeFileSync(target, JSON.stringify({ ...records[0], engines: { node: records[0].engines.node, chromium: chromium[0] ?? null }, entries: records.flatMap(r => r.entries) }))
