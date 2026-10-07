@@ -6,9 +6,10 @@
 //   node perf/run-perf.ts report   --out <dir> [--pilot]
 //
 // Every run is its own `playwright test --config=perf/playwright.perf.config.ts` invocation (a fresh process), taken
-// in ABBA order for two arms after an unscored priming pass (headless, protocol revision 3), and kept whatever its outcome. Arm checkouts are detached worktrees at their SHAs; their
-// client source, lock file and Vite config tree hashes are recorded with every run. Output holds no user paths,
-// hostnames or environment values: environment variables are recorded by name only.
+// in ABBA order for two arms after an unscored priming pass (headless, protocol revision 3), and kept whatever its
+// outcome. Arm checkouts are detached worktrees at their SHAs; their client source, lock file and Vite config tree
+// hashes are recorded with every run. Output holds no user paths, hostnames or environment values: environment
+// variables are recorded by name only.
 
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -17,7 +18,7 @@ import { arch, cpus, platform, release, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { failedRunRule, headlessSchedule, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
+import { blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -173,7 +174,7 @@ function headless() {
   const blocks = Number(options.blocks)
   const workloads = (options.workloads?.split(',') ?? protocol.headless.workloads.map((w: { id: string }) => w.id))
   const schedule = headlessSchedule(blocks, workloads, protocol.headless.topologies)
-  const priming = schedule.filter(s => s.primed).flatMap(({ slot, arm, runs }) => runs.map(r => ({ primed: true, slot, arm, ...r })))
+  const priming = primingPlan(workloads, protocol.headless.topologies)
   const session = begin(dir, 'headless', { arms: list.map(({ arm, identity }) => ({ arm, ...identity })), blocks, workloads, priming })
   const started = Date.now(), blockSeconds: number[] = [], primedRuns: { index: number; status: string }[] = []
   let blockStart = started
@@ -306,10 +307,10 @@ function report() {
     if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) return null
     try { return JSON.parse(git(root, 'show', `${commit}:product/client/perf/protocol.json`)).statistics ?? null } catch { return null }
   }
-  const sessions: SessionEvidence[] = records(/^session-\d+\.json$/).map(session => ({
-    ...session, committedStatistics: committed(session.harness?.commit),
-    end: ends.find(end => end.startedAt === session.startedAt && end.kind === session.kind)?.harnessAtEnd ?? null,
-  }))
+  const sessions: SessionEvidence[] = records(/^session-\d+\.json$/).map(session => {
+    const end = ends.find(record => record.startedAt === session.startedAt && record.kind === session.kind)
+    return { ...session, committedStatistics: committed(session.harness?.commit), end: end?.harnessAtEnd ?? null, primedRuns: end?.primedRuns ?? null }
+  })
   const declaredFamilySize = protocol.headless.workloads.length * protocol.headless.topologies.length * aaMeasures.length
   const lines: string[] = []
   const json: Record<string, unknown> = {
@@ -317,9 +318,9 @@ function report() {
     primedRuns: priming.length, failedPrimedRuns: priming.filter(e => e.status !== 'passed').length,
   }
   const passed = entries.filter(e => e.status === 'passed' && e.result)
-  const notQuiet = entries.filter(e => !(e.host as { quietBefore: { quiet: boolean } }).quietBefore.quiet).length
-  lines.push(`Runs: ${entries.length} scored (${json.failedRuns} failed, all kept); runs that started on a host above the quiet threshold: ${notQuiet}.`,
-    `Priming runs: ${priming.length} (${json.failedPrimedRuns} failed), recorded and never analysed: no table, test, interval or failed-run exclusion below uses them.`, '')
+  const loud = (list: Entry[]) => list.filter(e => !(e.host as { quietBefore: { quiet: boolean } }).quietBefore.quiet).length
+  lines.push(`Runs: ${entries.length} scored (${json.failedRuns} failed, all kept); runs that started on a host above the quiet threshold: ${loud(entries)}.`,
+    `Priming runs: ${priming.length} (${json.failedPrimedRuns} failed; ${loud(priming)} started on a host above the quiet threshold), recorded and never analysed: no table, test, interval or failed-run exclusion below uses them.`, '')
 
   const head = passed.filter(e => e.kind === 'headless')
   if (head.length) {
@@ -347,7 +348,7 @@ function report() {
     const family = aa.filter(row => aaMeasures.includes(row.measure))
     const adjusted = holm(family.map(row => row.test.p))
     const smallest = family.length ? Math.max(...family.map(row => row.test.smallestP)) : Infinity
-    const judged = judgeFamily({ pilot: options.pilot === true, sessions, statistics: protocol.statistics, adjusted, smallestP: family.map(row => row.test.smallestP), alpha: aaFamilyAlpha, declaredFamilySize })
+    const judged = judgeFamily({ pilot: options.pilot === true, sessions, statistics: protocol.statistics, topologies: protocol.headless.topologies, adjusted, smallestP: family.map(row => row.test.smallestP), alpha: aaFamilyAlpha, declaredFamilySize })
     const significant = { length: judged.significant }
     const verdict = `${judged.verdict}${judged.reason ? `: ${judged.reason}` : ''}`
     lines.push(`## Headless A/B (B/A - 1 of arm medians; within-block permutation test, R = ${permutations}; Holm across ${family.length} comparisons)`, '',
@@ -363,6 +364,13 @@ function report() {
       lines.push(`| ${workload} | ${topology} | ${row.measure} | ${rows.filter(e => e.arm === 'A').length}/${rows.filter(e => e.arm === 'B').length} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(row.effect.estimate)} | ${pct(row.effect.low)} to ${pct(row.effect.high)} | ${row.effect.halfWidthPp.toFixed(2)} | ${row.test.p.toFixed(4)} | ${i >= 0 ? adjusted[i].toFixed(4) : 'descriptive'} |`)
     }
     lines.push('', 'Frame times in ms; throughput in simulated s per wall s; heap in bytes after GC.', '')
+
+    // Descriptive only (#1536): does block 0 still stand apart once the priming pass has run? Same rows as the test.
+    const zero = family.map(row => ({ cell: row.cell, measure: row.measure, ...blockZeroCheck(row.rows.map(e => ({ block: e.block!, arm: e.arm as Arm, value: measures[row.measure](e.result!) }))) }))
+    lines.push('### Block-0 check (descriptive, not a test)', '', 'd = B/A - 1 of one block\'s arm medians. A cold start left in the set shows as a block-0 d far outside the later blocks\' RMS.', '',
+      '| Workload | Topology | Measure | block 0 d | RMS d, later blocks | later blocks | abs(d0) / RMS |', '|---|---|---|---|---|---|---|',
+      ...zero.map(row => `| ${row.cell.replace('|', ' | ')} | ${row.measure} | ${row.d0 === null ? 'n/a' : pct(row.d0)} | ${row.rmsLater === null ? 'n/a' : `${(row.rmsLater * 100).toFixed(2)}%`} | ${row.laterBlocks} | ${row.d0 !== null && row.rmsLater ? (Math.abs(row.d0) / row.rmsLater).toFixed(2) : 'n/a'} |`), '')
+    json.blockZero = zero
     if (options.pilot) {
       lines.push('### Pilot: runs per arm per cell for a 1 pp half-width (capped)', '', '| Cell | planned N |', '|---|---|', ...Object.entries(planned).map(([cell, n]) => `| ${cell.replace('|', ' ')} | ${n} |`), '')
       json.pilotPlanned = planned
