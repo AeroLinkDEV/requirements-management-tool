@@ -107,6 +107,7 @@
     "fms-station-browser.spec.ts",
     "fms-bench-tick-cost-rendered.spec.ts",
     "fms-route-append-rendered.spec.ts",
+    "fms-map-inspected-computer-rendered.spec.ts",
     "fms-out-the-window-rendered.spec.ts",
     "fms-out-the-window-imagery-rendered.spec.ts",
     "fms-out-the-window-models-rendered.spec.ts"
