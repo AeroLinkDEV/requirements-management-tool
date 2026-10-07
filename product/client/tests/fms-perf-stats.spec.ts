@@ -62,12 +62,13 @@ test('a failed priming run does not trigger the failed-run rule', () => {
 })
 
 test('the block-0 check sets block 0\'s B/A - 1 against the RMS of the later blocks\' (descriptive)', () => {
-  // Block 0: A 10, 10 and B 8, 8, so d0 = -0.2. Block 1: B 11, 11, so +0.1. Block 2: B 9, 9, so -0.1. RMS of the later
-  // blocks: sqrt((0.01 + 0.01) / 2) = 0.1. Block 3 has arm A only and gives no d.
+  // Block 0: A 10, 10 and B 8, 8, so d0 = -0.2. Block 1: B 11, 11, so +0.1. Block 2: B 7, 7, so -0.3. RMS of the later
+  // blocks: sqrt((0.01 + 0.09) / 2) = sqrt(0.05), about 0.2236; their mean |d| would be 0.2 and their mean d -0.1.
+  // Block 3 has arm A only and gives no d.
   const block = (n: number, b: number): RunValue[] => [{ block: n, arm: 'A', value: 10 }, { block: n, arm: 'B', value: b }, { block: n, arm: 'B', value: b }, { block: n, arm: 'A', value: 10 }]
-  const check = blockZeroCheck([...block(0, 8), ...block(1, 11), ...block(2, 9), { block: 3, arm: 'A', value: 10 }])
+  const check = blockZeroCheck([...block(0, 8), ...block(1, 11), ...block(2, 7), { block: 3, arm: 'A', value: 10 }])
   expect(check.d0).toBeCloseTo(-0.2, 12)
-  expect(check.rmsLater).toBeCloseTo(0.1, 12)
+  expect(check.rmsLater).toBeCloseTo(Math.sqrt(0.05), 12)
   expect(check.laterBlocks).toBe(2)
   expect(blockZeroCheck(block(1, 11))).toMatchObject({ d0: null, laterBlocks: 1 })
   expect(blockZeroCheck(block(0, 8))).toMatchObject({ rmsLater: null, laterBlocks: 0 })
@@ -235,6 +236,12 @@ test('an A/A family is judged only when complete, clean and under the statistics
   expect(judgedWith([{ ...session, primedRuns: [...primedRuns.slice(0, 3), { index: 3, status: 'failed' }] }])).toBe('not judged')
   expect(judgedWith([session, { ...session }])).toBe('not judged')
   expect(judgedWith([session, { ...session, kind: 'browser', priming: undefined, primedRuns: null }])).toBe('passed')
+  // An end record listing more priming runs than the declared pass is not that pass. A browser session that recorded
+  // other statistics (its committed block being the one in force, so only the recorded-statistics rule can see it) is
+  // not judged: the single-headless-session rule does not count it.
+  expect(judgedWith([{ ...session, primedRuns: [...primedRuns, { index: 4, status: 'passed' }] }])).toBe('not judged')
+  const browserOtherR = { ...session, kind: 'browser', priming: undefined, primedRuns: null, protocol: { statistics: otherR } }
+  expect(judgedWith([session, browserOtherR])).toBe('not judged')
   expect(judgeFamily({ ...base, pilot: true, adjusted: of(40, 0), smallestP: of(40, 1 / 20000) }).verdict).toBe('pilot')
 })
 

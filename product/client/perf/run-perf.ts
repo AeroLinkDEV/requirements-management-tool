@@ -177,12 +177,23 @@ function headless() {
   const priming = primingPlan(workloads, protocol.headless.topologies)
   const session = begin(dir, 'headless', { arms: list.map(({ arm, identity }) => ({ arm, ...identity })), blocks, workloads, priming })
   const started = Date.now(), blockSeconds: number[] = [], primedRuns: { index: number; status: string }[] = []
-  let blockStart = started
+  let blockStart = started, stopped: string | null = null
   for (const { primed, block, slot, arm: name, runs } of schedule) {
+    // A failed priming run leaves the set not judged (judgeFamily) and is never retried, so the scored blocks would spend
+    // the quiet window on a set that cannot be judged: the session ends after the priming pass and says why.
+    if (!primed && slot === 0 && primedRuns.some(r => r.status !== 'passed')) {
+      stopped = `priming run(s) ${primedRuns.filter(r => r.status !== 'passed').map(r => r.index).join(', ')} failed; no scored block was run, and the set is not judged`
+      console.log(`stopped after the priming pass: ${stopped}`)
+      break
+    }
     if (!primed && slot % 4 === 0) {
       // A cap stops only between blocks, so every block kept is a whole ABBA block. The priming pass is not a block.
       const average = blockSeconds.length ? blockSeconds.reduce((a, b) => a + b, 0) / blockSeconds.length : 0
-      if (block! > 0 && (Date.now() - started) / 1000 + average > hoursCap() * 3600) { console.log(`stopped at the ${hoursCap()} h cap after ${block} blocks`); break }
+      if (block! > 0 && (Date.now() - started) / 1000 + average > hoursCap() * 3600) {
+        stopped = `the ${hoursCap()} h cap after ${block} blocks`
+        console.log(`stopped at ${stopped}`)
+        break
+      }
       blockStart = Date.now()
     }
     const arm = list.find(a => a.arm === name)!
@@ -195,7 +206,7 @@ function headless() {
     }
     if (!primed && slot % 4 === 3) blockSeconds.push((Date.now() - blockStart) / 1000)
   }
-  writeFileSync(join(dir, `session-end-${Date.now()}.json`), JSON.stringify({ ...session, endedAt: new Date().toISOString(), harnessAtEnd: harnessIdentity(), primedRuns }, null, 2))
+  writeFileSync(join(dir, `session-end-${Date.now()}.json`), JSON.stringify({ ...session, endedAt: new Date().toISOString(), harnessAtEnd: harnessIdentity(), primedRuns, stopped }, null, 2))
 }
 
 function browser() {
@@ -320,7 +331,8 @@ function report() {
   const passed = entries.filter(e => e.status === 'passed' && e.result)
   const loud = (list: Entry[]) => list.filter(e => !(e.host as { quietBefore: { quiet: boolean } }).quietBefore.quiet).length
   lines.push(`Runs: ${entries.length} scored (${json.failedRuns} failed, all kept); runs that started on a host above the quiet threshold: ${loud(entries)}.`,
-    `Priming runs: ${priming.length} (${json.failedPrimedRuns} failed; ${loud(priming)} started on a host above the quiet threshold), recorded and never analysed: no table, test, interval or failed-run exclusion below uses them.`, '')
+    `Priming runs: ${priming.length} (${json.failedPrimedRuns} failed; ${loud(priming)} started on a host above the quiet threshold), recorded and never analysed: no table, test, interval or failed-run exclusion below uses them.`,
+    ...ends.filter(end => end.stopped).map(end => `Session ${end.startedAt} stopped early: ${end.stopped}.`), '')
 
   const head = passed.filter(e => e.kind === 'headless')
   if (head.length) {
