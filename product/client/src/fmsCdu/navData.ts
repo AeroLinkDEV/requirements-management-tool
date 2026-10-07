@@ -344,8 +344,11 @@ export const DEMO_COMPANY_ROUTES: StoredRoute[] = [
   { name: "OWUL2", origin: "CYOW", dest: "CYUL", legs: [{ ident: "ELIBA", altitude: "5000" }, { ident: "RDG", via: "T613" }, { ident: "KILLA", via: "T613" }, { ident: "AGBEK", via: "T613", altitude: "3000" }] },
 ];
 
+/** Exact positions whose nearby answer is kept: the navigation position and the ADF's true position, with room to spare. */
+const NEARBY_MEMO_SIZE = 4;
+
 export class NavDatabase {
-  private byIdent = new Map<string, NavEntry[]>();
+  private readonly byIdent = new Map<string, NavEntry[]>();
   private airwayByIdent = new Map<string, Airway>();
   readonly procedures: Procedure[];
   readonly msa: Msa[];
@@ -402,12 +405,26 @@ export class NavDatabase {
     return a < b ? airway.fixes.slice(a + 1, b + 1) : airway.fixes.slice(b, a).reverse();
   }
 
-  /** Entries within a distance of a position, nearest first. */
+  /**
+   * Entries within a distance of a position, nearest first (equal distances keep database order). A navigation update
+   * asks this about a dozen times from one position, so the answer is kept for the last few exact (lat, lon, nm) keys
+   * (#1502 D10). The memo is derived state: the database never changes after construction (merge builds a new one), so
+   * an answer is a function of its key alone. It is never serialized; a restored database rebuilds it on first use.
+   */
   nearby(at: LatLon, nm: number): NavEntry[] {
+    for (const kept of this.nearbyMemo)
+      if (Object.is(kept.lat, at.lat) && Object.is(kept.lon, at.lon) && Object.is(kept.nm, nm)) return kept.entries.slice();
     const close = (p: LatLon) => Math.abs(p.lat - at.lat) * 60 < nm && Math.abs(longitudeDelta(at.lon, p.lon)) * 60 * Math.cos((at.lat * Math.PI) / 180) < nm;
-    return [...this.byIdent.values()].flat().filter(e => close(e.position))
-      .sort((a, b) => distanceNm(at, a.position) - distanceNm(at, b.position));
+    this.allEntries ??= [...this.byIdent.values()].flat();
+    // Each distance once: the same doubles as a comparator that recomputes them, so the stable sort gives the same order.
+    const entries = this.allEntries.filter(e => close(e.position)).map(entry => ({ entry, d: distanceNm(at, entry.position) }))
+      .sort((a, b) => a.d - b.d).map(keyed => keyed.entry);
+    this.nearbyMemo.unshift({ lat: at.lat, lon: at.lon, nm, entries });
+    if (this.nearbyMemo.length > NEARBY_MEMO_SIZE) this.nearbyMemo.pop();
+    return entries.slice();
   }
+  private allEntries: NavEntry[] | null = null;
+  private readonly nearbyMemo: { lat: number; lon: number; nm: number; entries: NavEntry[] }[] = [];
 
   /** Merges another database over this one: entries with the same ident and kind are replaced. */
   merge(other: NavData): NavDatabase {

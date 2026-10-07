@@ -26,7 +26,8 @@ export class DualFmsSystem {
     this.clock = clock;
     const profile = options.profile ?? ACTIVE_PROFILE;
     const one = new ScriptedFms(clock, options);
-    const two = new ScriptedFms(clock, { profile: options.secondaryProfile ?? profile, preferredGps: 1, sensors: { read: () => one.navigationInputs },
+    // FMS 2 reads the frame FMS 1 published, not a copy of it: a published frame is a value neither computer edits (#1502 D10).
+    const two = new ScriptedFms(clock, { profile: options.secondaryProfile ?? profile, preferredGps: 1, sensors: { read: () => one.peekNavigationInputs() },
       receivers: one.gps as readonly [GpsReceiver, GpsReceiver], ...(options.userDatabase ? { userDatabase: {
         store: options.userDatabase.store, scope: { ...options.userDatabase.scope, profileId: `${options.userDatabase.scope.profileId}:fms2` },
       } } : {}) });
@@ -193,7 +194,8 @@ export class DualFmsSystem {
       }
     }
     if (this.operation === "SYNC") {
-      const solutions = this.computers.map(unit => unit.localNavigationSolution);
+      // Compared in place; only the solution handed on is copied (#1502 D10).
+      const solutions = this.computers.map(unit => unit.peekLocalNavigationSolution());
       const usable = solutions.map((solution, index) => ({ solution, side: (index + 1) as FmsSide }))
         .filter(({ solution, side }) => !this.unit(side).hasCondition("fmsFail") && solution.mode !== "DR" && !solution.uncertain
           && this.computers.every(unit => solution.mode !== "GPS" || unit.gpsNavSelected));
@@ -204,10 +206,11 @@ export class DualFmsSystem {
           && (selected.solution.anp === null || (selected.solution.anp - candidate.solution.anp) * 1852 >= parameters.dualSensorHysteresis.value))) selected = candidate;
       if (selected) {
         this.navSide = selected.side;
-        this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, this.unit(selected.side).navigationWindEstimate));
+        const handed = this.unit(selected.side).localNavigationSolution;
+        this.computers.forEach(unit => unit.receiveSystemNavigation(handed, this.unit(selected.side).navigationWindEstimate));
       }
     } else {
-      const [a, b] = this.computers.map(unit => unit.localNavigationSolution);
+      const [a, b] = this.computers.map(unit => unit.peekLocalNavigationSolution());
       const disagree = !one.hasCondition("fmsFail") && !two.hasCondition("fmsFail") && a.mode === "GPS" && b.mode === "GPS"
         && distanceNm(a.position, b.position) > parameters.dualPositionDisagreement.value;
       if (disagree && !this.disagreement) this.computers.forEach(unit => unit.raiseAlert("GPS-GPS POS DISAGREE"));
