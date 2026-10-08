@@ -779,7 +779,7 @@ export class FlightSimulator {
     this.path = final === null ? null : { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" };
     this.adoptAircraftMotion();
     // Each computer refreshes its own moving rendezvous against adopted aircraft motion (M300 11-37).
-    fms.updateMovingRendezvous(); fms.tick();
+    fms.updateRendezvous(); fms.tick();
   }
 
   /** Publish current adopted navigation while paused, without integrating or sequencing another aircraft. */

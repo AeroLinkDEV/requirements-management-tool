@@ -789,6 +789,7 @@ export class ScriptedFms implements CduBackend {
     this.modified = null; this.directPending = false; this.directBypassed = []; this.pendingHoverPoints = null; this.pendingJoin = null;
     this.pendingApproachTemperature = null; this.approachSelectionPending = false;
     this.scratch = ""; this.message = null; this.pendingAlert = null; this.recall = [];
+    this.rendezvousWarned.clear();
     this.armedApproach = false; this.restartNeedsLeg = !onGround;
     this.inhibited = []; this.raimExcluded.clear();
     if (kind === "COLD" && onGround) { this.planData.cruiseWind = { direction: 0, speed: 0 }; this.reference = this.aircraftProfile.defaultAngleReference; }
@@ -2443,7 +2444,7 @@ export class ScriptedFms implements CduBackend {
   updatePerformance(dt: number) {
     // Moving waypoints follow the simulation clock from their epochs (rev 2 D-R epoch), not the ticks.
     for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
-    this.updateMovingRendezvous();
+    this.updateRendezvous();
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
     if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
@@ -2574,6 +2575,16 @@ export class ScriptedFms implements CduBackend {
    */
   private rendezvousCache = new Map<string, MovingRendezvous>();
   private rendezvousWarned = new Set<string>();
+  private rendezvousRecoveryPending = false;
+
+  /** Failed/OFF/TEST computations retain predictions; the first healthy computation determines them anew. */
+  private rendezvousAvailable() {
+    if (this.hasCondition("fmsFail")) { this.rendezvousRecoveryPending = true; return false; }
+    if (this.rendezvousRecoveryPending) {
+      this.rendezvousCache.clear(); this.rendezvousRecoveryPending = false;
+    }
+    return true;
+  }
 
   private rendezvousKey(route: Route, ident: string) { return (route === this.active ? "ACT:" : "MOD:") + ident; }
 
@@ -2594,6 +2605,7 @@ export class ScriptedFms implements CduBackend {
     if (leg?.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return null;
     const key = this.rendezvousKey(route, leg.ident);
     const cached = this.rendezvousCache.get(key);
+    if (this.hasCondition("fmsFail")) return cached ?? null;
     if (cached && cached.condition === this.rendezvousCondition(route, index)) return cached;
     const solved = this.solveRendezvous(route, index, leg.ident);
     if (this.kernelReading) this.rendezvousCache.set(key, solved);
@@ -2603,9 +2615,10 @@ export class ScriptedFms implements CduBackend {
   /**
    * M300 11-37: the rendezvous is determined when the action that put the moving waypoint in the route (or changed its
    * condition) ends: an EXEC, an entry, a direct-to, a sequence. The 10-second schedule then runs from there
-   * (updateMovingRendezvous). The bench used to do this by drawing the route after the action; now no draw is needed.
+   * (updateRendezvous). The bench used to do this by drawing the route after the action; now no draw is needed.
    */
   private settleRendezvous() {
+    if (!this.rendezvousAvailable()) return;
     for (const route of [this.active, this.modified]) {
       if (!route) continue;
       route.legs.forEach((_, index) => { this.rendezvousFor(route, index); });
@@ -2673,7 +2686,8 @@ export class ScriptedFms implements CduBackend {
    * time to go is over one minute (then kept). An unachievable one is annunciated once: as the active waypoint
    * (condition 1) the RENDEZVOUS UNACHIEVABLE alert, with the roll command invalid; otherwise as an advisory.
    */
-  updateMovingRendezvous() {
+  updateRendezvous() {
+    if (!this.rendezvousAvailable()) return;
     const now = this.now.getTime();
     const live = new Set<string>();
     for (const route of [this.active, this.modified]) {
@@ -2692,7 +2706,12 @@ export class ScriptedFms implements CduBackend {
         if (solved.achievable) { this.rendezvousWarned.delete(warned); return; }
         if (this.rendezvousWarned.has(warned)) return;
         this.rendezvousWarned.add(warned);
-        if (solved.condition === 1) this.alert(alert("RENDEZVOUS UNACHIEVABLE"));
+        if (solved.condition === 1) {
+          const text = alert("RENDEZVOUS UNACHIEVABLE");
+          // A synchronized peer already annunciated this pending alert. The local warned key above still consumes
+          // the episode, including after CLR, without changing the general cross-talk alert policy (#1564).
+          if (this.crossTalk?.mode !== "SYNC" || this.pendingAlert?.text !== text) this.alert(text);
+        }
         else this.advisory("RENDEZVOUS UNACHIEVABLE");
       });
     }
