@@ -1,5 +1,5 @@
 import { test } from '@playwright/test'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { frameSummary } from './stats.ts'
@@ -7,10 +7,13 @@ import { frameSummary } from './stats.ts'
 // One headless run (#1510 I0a): one workload in one topology, in a fresh process the orchestrator (run-perf.ts)
 // spawned. The arm's own modules are loaded from its checkout, so both arms run under this one harness and toolchain.
 //
-// The unit is one advanceTicks(1, ...) frame. runHeadless has no per-tick hook, so its loop is copied here as the
-// measurement point: `single` is runHeadless's composition (scenario.ts), `dual` is the bench's scenario composition
-// (FmsCduTestBench.tsx: a DualFmsSystem whose first computer and flight carry the runner). Entry contract for later
-// stages: keep these module paths and exports, or declare an adapter per arm.
+// The unit is one frame. runHeadless has no per-frame hook, so its loop is copied here as the measurement point:
+// `single` is runHeadless's composition (scenario.ts), `dual` is the bench's scenario composition (FmsCduTestBench.tsx:
+// a DualFmsSystem whose first computer and flight carry the runner). Entry contract for later stages: keep these module
+// paths and exports, or declare an adapter per arm.
+//
+// Declared arm adapter (#1517 I1a): an arm with the kernel (src/fmsCdu/kernel/) measures kernel.advance(1) on the legacy
+// plant adapter's compositions; an arm before it measures advanceTicks(1, ...) on the same compositions built directly.
 
 const arm = process.env.AEROLINK_PERF_ARM
 const workloadId = process.env.AEROLINK_PERF_WORKLOAD
@@ -43,7 +46,26 @@ test('headless frame cost', async () => {
   const moveClock = (ms: number) => { now += ms }
   let sim: { step(dt: number): void }, runner: Runner
   let system: { mode: string; computers: readonly unknown[] } | null = null
-  if (topology === 'single') {
+  let frame: () => void = () => scenarioModule.advanceTicks(1, moveClock, sim, runner)
+  let simulatedMs = () => now - start
+  if (existsSync(join(arm, 'src', 'fmsCdu', 'kernel', 'kernel.ts'))) {
+    const [kernelModule, adapter] = await Promise.all([join('kernel', 'kernel.ts'), join('kernel', 'legacyPlantAdapter.ts')].map(load))
+    const profile = profiles.profileById(scenario.profile)
+    const composed = topology === 'single'
+      ? adapter.singleComposition(start, { profile })
+      : adapter.dualComposition(start, { profile: profile ?? profiles.ACTIVE_PROFILE, secondaryProfile: profile ?? profiles.ACTIVE_PROFILE })
+    if (topology === 'single') {
+      sim = composed.sim
+      runner = new scenarioModule.ScenarioRunner(scenario, composed.fms, undefined, composed.sim)
+    } else {
+      system = composed.system
+      sim = composed.system
+      runner = new scenarioModule.ScenarioRunner(scenario, composed.system.computers[0], { variant: 'perf harness', cycle: composed.system.computers[0].activeCycle.id }, composed.system.flights[0])
+    }
+    const kernel = new kernelModule.FmsKernel(composed.plant, runner)
+    frame = () => kernel.advance(1)
+    simulatedMs = () => kernel.unitClockMs - start
+  } else if (topology === 'single') {
     const fms = new scripted.ScriptedFms(clock, { profile: profiles.profileById(scenario.profile) })
     sim = new flight.FlightSimulator(fms)
     runner = new scenarioModule.ScenarioRunner(scenario, fms, undefined, sim)
@@ -67,7 +89,7 @@ test('headless frame cost', async () => {
     if (windowTicks === null && runner.finished) break
     if (t === warmupTicks) measuredWallStart = performance.now()
     const begin = performance.now()
-    scenarioModule.advanceTicks(1, moveClock, sim, runner)
+    frame()
     const duration = performance.now() - begin
     if (t >= warmupTicks) frames.push(duration)
     if (system) {
@@ -79,7 +101,7 @@ test('headless frame cost', async () => {
     }
   }
   const measuredWall = (performance.now() - measuredWallStart) / 1000
-  const simulated = (now - start) / 1000
+  const simulated = simulatedMs() / 1000
   gc(); gc()
   const heapUsed = process.memoryUsage().heapUsed
   const summary = {

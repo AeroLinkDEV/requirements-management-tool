@@ -11,7 +11,9 @@ import { NAV_PAGES } from '../src/fmsCdu/navPages'
 import { PLANNING_PAGES } from '../src/fmsCdu/planningPages'
 import { profileById } from '../src/fmsCdu/profile'
 import { RADIO_PAGES } from '../src/fmsCdu/radioPages'
-import { ScenarioRunner, TICK_SECONDS, advanceTicks, runHeadless, scenarioStart, type Scenario } from '../src/fmsCdu/scenario'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { dualComposition, singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { ScenarioRunner, TICK_SECONDS, runHeadless, scenarioStart, type Scenario } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { TACTICAL_PAGES } from '../src/fmsCdu/tacticalPages'
@@ -123,13 +125,13 @@ test('the rendezvous with a moving waypoint is determined at the EXEC, rendered 
     ],
   }
   const procedure = (rendered: boolean, run = scenario) => {
-    let now = START
-    const system = new DualFmsSystem(() => new Date(now))
+    const { system, plant } = dualComposition(START)
     const one = system.computers[0]
     Object.assign(one.wind, { direction: 0, speed: 0 })
     one.defineMoving('SHIP1', offset(one.position, 30, 12), 90, 40); one.directTo('SHIP1'); one.press('EXEC')
     const runner = new ScenarioRunner(run, one, undefined, system.flights[0])
-    while (!runner.finished) { advanceTicks(1, ms => { now += ms }, system, runner); if (rendered) render(one, system.simulator) }
+    const kernel = new FmsKernel(plant, runner)
+    while (!runner.finished) { kernel.advance(1); if (rendered) render(one, system.simulator) }
     return { status: one.routeStatus, rendezvous: one.rendezvousFor(one.route, 0) }
   }
   const stepped = procedure(false)
@@ -211,11 +213,10 @@ test('an FMS failure latches its reversion at the toggle without a render, pause
     ],
   }
   const rendered = (() => {
-    let now = START
-    const fms = new ScriptedFms(() => new Date(now))
-    const sim = new FlightSimulator(fms)
+    const { fms, sim, plant } = singleComposition(START)
     const runner = new ScenarioRunner(scenario, fms, undefined, sim)
-    while (!runner.finished) { advanceTicks(1, ms => { now += ms }, sim, runner); render(fms, sim) }
+    const kernel = new FmsKernel(plant, runner)
+    while (!runner.finished) { kernel.advance(1); render(fms, sim) }
     return failure(sim)
   })()
   const headless = failure(runHeadless(scenario, START).sim)
@@ -226,10 +227,10 @@ test('an FMS failure latches its reversion at the toggle without a render, pause
   // the end of the callback, so a run's timeline does not depend on its rate (the scenario run contract).
   const midCallback: Scenario = { ...scenario, steps: [{ ...scenario.steps[0], when: { kind: 'time', seconds: 2.25 } }, scenario.steps[1]] }
   const paced = (rate: number) => {
-    let now = START
-    const system = new DualFmsSystem(() => new Date(now))
+    const { system, plant } = dualComposition(START)
     const runner = new ScenarioRunner(midCallback, system.computers[0], undefined, system.flights[0])
-    while (!runner.finished) { advanceTicks(rate, ms => { now += ms }, system, runner); render(system.computers[0], system.simulator) }
+    const kernel = new FmsKernel(plant, runner)
+    while (!runner.finished) { kernel.advance(rate); render(system.computers[0], system.simulator) }
     return failure(system.flights[0])
   }
   const once = paced(1)
@@ -323,26 +324,37 @@ test('reading the whole dual system between computations changes none of its sta
   // Changing a part of the state directly, past every action, leaves one unsettled: a LEGS view whose modification
   // shrinks under page 3/3, and a magnetic table that fails the FMS. Reading must leave both exactly as they are.
   one.replaceLegs(legs(12, one)); press(one, 'LEGS', 'NEXT', 'NEXT')
-  one.route.legs.splice(7); rest('legs-unsettled', system)
+  one.route.legs.splice(7)
+  // Each forced state is checked before it is read, so a rest point cannot pass by not being the state it names.
+  expect(one.route.legs).toHaveLength(7)
+  expect(one as unknown as { page: string; index: number }).toMatchObject({ page: 'LEGS', index: 2 })
+  rest('legs-unsettled', system)
   one.press('LSK6L')
   // A moving waypoint spliced into the active route: its rendezvous was never determined, and a read must not keep it.
   one.defineMoving('SHIP2', offset(one.position, 90, 20), 0, 30)
-  one.activeRoute.legs.splice(1, 0, { kind: 'wpt', ident: 'SHIP2' }); rest('rendezvous-unsettled', system)
+  one.activeRoute.legs.splice(1, 0, { kind: 'wpt', ident: 'SHIP2' })
+  expect(one.activeRoute.legs[1]).toEqual({ kind: 'wpt', ident: 'SHIP2' })
+  rest('rendezvous-unsettled', system)
   one.activeRoute.legs.splice(1, 1)
   // Masking held while the integrity condition is on. No action can leave that state behind (the condition clears the
   // masking), so the condition is injected into the private condition set directly; drawing the GPS tab must not clear it.
   const stimulus = stimulusFor(one), injected = (one as unknown as { injected: Set<string> }).injected
-  stimulus.toggleMasked(0, 7); injected.add('gpsIntegrity'); rest('masking-unsettled', system)
+  stimulus.toggleMasked(0, 7); injected.add('gpsIntegrity')
+  expect(one.hasCondition('gpsIntegrity')).toBe(true)
+  expect(stimulus.state(0).masked).toEqual([7])
+  rest('masking-unsettled', system)
   injected.delete('gpsIntegrity'); stimulus.toggleMasked(0, 7)
-  one.magvar.load({ ...WMM2025_DATABASE, coefficients: `${WMM2025_DATABASE.coefficients} ` }); rest('fail-unsettled', system)
+  one.magvar.load({ ...WMM2025_DATABASE, coefficients: `${WMM2025_DATABASE.coefficients} ` })
+  expect(one.magvar.valid).toBe(false)
+  rest('fail-unsettled', system)
 
   // And one short library scenario, read at a few of its ticks.
   const scenario = SCENARIO_LIBRARY.find(s => s.id === 'manual-rnp')!
-  let at = scenarioStart(scenario) ?? START
-  const run = new DualFmsSystem(() => new Date(at), { profile: profileById(scenario.profile) })
+  const { system: run, plant } = dualComposition(scenarioStart(scenario) ?? START, { profile: profileById(scenario.profile) })
   const runner = new ScenarioRunner(scenario, run.computers[0], undefined, run.flights[0])
+  const kernel = new FmsKernel(plant, runner)
   for (let t = 0; !runner.finished && t < 400; t += 1) {
-    advanceTicks(1, ms => { at += ms }, run, runner)
+    kernel.advance(1)
     if (t % 100 === 0) rest(`${scenario.id}@${t}`, run)
   }
   expect(changed.slice(0, 20)).toEqual([])

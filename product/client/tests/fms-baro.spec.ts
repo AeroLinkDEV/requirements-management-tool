@@ -1,10 +1,10 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { STANDARD_HPA, indicatedAltitudeFt, pressureAltitudeFt } from '../src/fmsCdu/baro'
 import { aircraftData } from '../src/fmsCdu/efis'
-import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import { setUp87nOffshoreSar } from '../src/fmsCdu/heliDemo'
-import { ScenarioRunner, advanceTicks, scenarioProblems, type Scenario } from '../src/fmsCdu/scenario'
-import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { ScenarioRunner, scenarioProblems, type Scenario } from '../src/fmsCdu/scenario'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 
 // Plan rev 3 B1.1: the truth is the physical height; the barometric altitude is derived from it (plus an injectable
@@ -36,14 +36,12 @@ test('both FMSs consume the shared barometric error and FMS 2 ALT changes physic
 
 /** The 87N mission start (500 ft over the declared sea, ALT, NAV), stepped by quarter seconds. */
 function offshore() {
-  let now = START
-  const unit = new ScriptedFms(() => new Date(now))
-  const sim = new FlightSimulator(unit)
+  const { fms: unit, sim, plant } = singleComposition(START)
   expect(setUp87nOffshoreSar(unit, sim)).toEqual({ ready: true })
-  const step = () => { now += 250; sim.step(0.25) }
+  // One quarter second: the clock moves, then the flight steps (the legacy composite the kernel runs as INTEGRATE).
+  const step = () => plant.integrate()
   const fly = (seconds: number) => { for (let t = 0; t < seconds * 4; t++) step() }
-  const moveClock = (ms: number) => { now += ms }
-  return { unit, sim, step, fly, moveClock }
+  return { unit, sim, step, fly, plant }
 }
 /** The same start, slowed and holding a hover: the collective on the radio height (RHT), no barometric reference. */
 function hovering() {
@@ -171,7 +169,7 @@ test('B1.1: a setting or an error out of range is refused and changes nothing; e
 })
 
 test('B1.1: a scenario sets the altimeter, injects an error and declares the QNH; a bad baro step is refused at admission', () => {
-  const { unit, sim, moveClock } = offshore()
+  const { unit, sim, plant } = offshore()
   const scenarioOf = (steps: unknown[]): Scenario => ({ id: 'baro', title: 'Baro', objective: '', maxSeconds: 30, steps: steps as Scenario['steps'] })
   const scenario = scenarioOf([
     { when: { kind: 'start' }, action: { kind: 'baro', declaredQnh: 1005, errorFt: 60, setting: 'STD' } },
@@ -179,7 +177,7 @@ test('B1.1: a scenario sets the altimeter, injects an error and declares the QNH
   ])
   expect(scenarioProblems(scenario)).toEqual([])
   const runner = new ScenarioRunner(scenario, unit, undefined, sim)
-  advanceTicks(40, moveClock, sim, runner)
+  new FmsKernel(plant, runner).advance(40)
   expect(runner.finished).toBe(true)
   expect(unit.baro).toEqual({ errorFt: 60, declaredQnhHpa: 1005, setting: { kind: 'QNH', hPa: 1005 } })
   expect(unit.indicatedAltitude).toBeCloseTo(unit.physicalAltitude + 60, 6)
@@ -197,9 +195,9 @@ test('B1.1: a scenario sets the altimeter, injects an error and declares the QNH
 test('B1.1: a scenario\'s "below" trigger and aircraft checks read the physical height; its "above" trigger reads the altimeter', () => {
   const scenarioOf = (steps: unknown[]): Scenario => ({ id: 'baro-frames', title: 'Frames', objective: '', maxSeconds: 120, steps: steps as Scenario['steps'] })
   const run = (steps: unknown[]) => {
-    const { unit, sim, moveClock } = offshore()
+    const { unit, sim, plant } = offshore()
     const runner = new ScenarioRunner(scenarioOf(steps), unit, undefined, sim)
-    advanceTicks(4 * 120, moveClock, sim, runner)
+    new FmsKernel(plant, runner).advance(4 * 120)
     return runner.results.map(result => result.status)
   }
   // The altimeter reads 300 ft high: the aircraft's physical height is still 500 ft, and a check of it passes.

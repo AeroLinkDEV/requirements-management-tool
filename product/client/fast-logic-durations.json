@@ -42,6 +42,8 @@
  "fms-integrity-alerts.spec.ts": 0.2,
  "fms-kalman-dvs.spec.ts": 1,
  "fms-kbtv-demo.spec.ts": 28.8,
+ "fms-kernel-digest.spec.ts": 21.9,
+ "fms-kernel-legacy-equivalence.spec.ts": 59.2,
  "fms-lab-controls.spec.ts": 6.9,
  "fms-modes.spec.ts": 115.3,
  "fms-nav-radio.spec.ts": 0.1,
