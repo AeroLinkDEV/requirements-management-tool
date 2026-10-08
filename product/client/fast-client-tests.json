@@ -28,6 +28,7 @@
     "fms-demo-cycle.spec.ts",
     "fms-scenario.spec.ts",
     "fms-dual-scenario.spec.ts",
+      "fms-dual-missed-edit.spec.ts",
     "fms-scenario-recorded-keys.spec.ts",
     "fms-authority.spec.ts",
     "fms-predictions.spec.ts",

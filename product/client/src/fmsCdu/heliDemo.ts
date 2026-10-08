@@ -281,6 +281,7 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "expectAlert", text: "TDN NOT POSSIBLE", fresh: true }, within: 60 },
     // In the dual composition the shared alert may originate on the peer observing the just-integrated aircraft.
     // The runner's own computer evaluates that same crossing on the next 0.25 s tick; no extra geometry allowance.
+    // Remove this SYNC legacy-composite tolerance at I3 (D5 §7.5); single/INDEPENDENT owners require the same tick.
     { when: S, action: { kind: "expectHover", refused: "TDN NOT POSSIBLE", reason: "OFF FINAL TRACK" }, within: 0.25 },
     // Abeam TDN when refused: more than the 0.2 NM limit off it, and not far past it.
     { when: S, action: { kind: "expectAircraft", near: "TDN", nearMetres: 835, minNearMetres: 371 } },

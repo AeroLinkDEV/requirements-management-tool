@@ -1,47 +1,21 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
-import { START_STATES } from '../src/fmsCdu/kbtvDemo'
 import { profileById } from '../src/fmsCdu/profile'
-import { advanceTicks, ScenarioRunner, scenarioStart, TICK_SECONDS, type Scenario } from '../src/fmsCdu/scenario'
+import { ScenarioRunner } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
+import { runDual } from './fixtures/fms-dual-scenario'
 
-// The single-computer library owner cannot detect peer progress/alert ordering or a missed request that leaves
-// the synchronized peer on the approach route (#1533). Exercise the bench's actual two-computer composition.
-function runDual(scenario: Scenario, side: 1 | 2 = 1, independent = false) {
-  let now = scenarioStart(scenario) ?? Date.UTC(2026, 8, 27, 14)
-  const system = new DualFmsSystem(() => new Date(now), { profile: profileById(scenario.profile) })
-  let playback = scenario
-  if (side === 2 && scenario.start) {
-    // The bench starts the common generator/aircraft on FMS1, then transfers the completed setup before choosing FMS2.
-    const [one, two] = system.computers
-    expect(one.compute(() => {
-      const result = START_STATES[scenario.start!].setUp(one, system.flights[0])
-      one.dualOperation?.settingsChanged(); one.dualOperation?.finishEdit(true); two.observeAircraft(one)
-      return result
-    })).toEqual({ ready: true })
-    playback = { ...scenario, start: undefined }
-  }
-  system.selectGuidance(side)
-  const fms = system.computers[side - 1]
-  const runner = new ScenarioRunner(playback, fms, undefined, system.simulator)
-  if (independent) fms.setCondition('independent', true)
-  const limit = Math.ceil(scenario.maxSeconds / TICK_SECONDS) + 2
-  for (let tick = 0; !runner.finished && tick < limit; tick++) {
-    advanceTicks(1, ms => { now += ms }, system, runner)
-  }
-  return { system, runner }
-}
-
-for (const scenario of SCENARIO_LIBRARY) {
-  test(`built-in scenario ${scenario.id} passes with two synchronized computers`, () => {
-    const { runner } = runDual(scenario)
-    expect(runner.results.filter(result => result.status !== 'done' && result.status !== 'pass'), scenario.id).toEqual([])
-    expect(runner.passed, scenario.id).toBe(true)
+// Fast retains the two previously failing cases; the complete admission sweep is Full-only.
+for (const id of ['gps-lost-before-faf', '87n-b-tdn-off-track']) {
+  test(`dual regression ${id} passes with synchronized computers`, () => {
+    const { runner } = runDual(SCENARIO_LIBRARY.find(entry => entry.id === id)!)
+    expect(runner.results.filter(result => result.status !== 'done' && result.status !== 'pass')).toEqual([])
+    expect(runner.passed).toBe(true)
   })
 }
 
-// The library owns FMS1/SYNC. These additional selections protect the local refusal/roll-withdrawal boundary,
-// including INDEPENDENT where the valid peer alert is not broadcast (M300 E-17, 3-24/25).
+// The Full library owns FMS1/SYNC. These selections protect refusal/roll withdrawal; INDEPENDENT already passes
+// main and is a same-tick preservation control, not an original #1533 reproduction (M300 E-17, 3-24/25).
 for (const [side, independent] of [[2, false], [1, true], [2, true]] as const) {
   test(`off-track TDN refusal on FMS${side} ${independent ? 'independent' : 'synchronized'} retains its geometry and heading checks`, () => {
     const scenario = SCENARIO_LIBRARY.find(entry => entry.id === '87n-b-tdn-off-track')!
@@ -49,6 +23,11 @@ for (const [side, independent] of [[2, false], [1, true], [2, true]] as const) {
     expect(runner.results.filter(result => result.status !== 'done' && result.status !== 'pass')).toEqual([])
     expect(runner.passed).toBe(true)
     expect(system.computers[side - 1].hover.refusedReason).toBe('OFF FINAL TRACK')
+    const alert = scenario.steps.findIndex(step => step.action.kind === 'expectAlert' && step.action.text === 'TDN NOT POSSIBLE')
+    const refusal = scenario.steps.findIndex(step => step.action.kind === 'expectHover' && step.action.reason === 'OFF FINAL TRACK')
+    expect(runner.results[alert].status).toBe('pass')
+    expect(runner.results[refusal].status).toBe('pass')
+    if (independent) expect(runner.results[refusal].at).toBe(runner.results[alert].at)
     expect(system.mode).toBe(independent ? 'INDEPENDENT' : 'SYNC')
   })
 }
