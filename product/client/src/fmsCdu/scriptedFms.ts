@@ -1042,6 +1042,10 @@ export class ScriptedFms implements CduBackend {
     // Crabbed into the wind so the given track is the one flown (the heading when the track cannot be held is the track).
     const hold = holdTrack(this.targetSpeed, state.track, this.wind);
     this.setAircraft({ ...state, tas: this.targetSpeed, heading: hold.feasible ? hold.heading : state.track, groundSpeed: hold.feasible ? hold.groundSpeed : 0, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
+    // An instructor reposition is not physical acceleration. Start the measured interval from the new truth,
+    // including when the command arrives in a later epoch, so old velocity cannot be promoted as its baseline.
+    this.truthVelocity = null;
+    this.previousTruthVelocity = null;
     this.engineering = [...this.engineering, {
       at: this.now, action: "PLACE AIRCRAFT",
       detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
