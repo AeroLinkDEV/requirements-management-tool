@@ -21,6 +21,9 @@ test('fingerprint distinguishes absent, empty, added, removed and renamed eviden
   const evidence = join(root, 'evidence')
   const absent = snapshotEvidence(evidence)
   mkdirSync(evidence)
+  // Directory timestamps are quantized; separate the initial snapshot from real child mutations.
+  const past = new Date('2000-01-01T00:00:00.000Z')
+  utimesSync(evidence, past, past)
   const empty = snapshotEvidence(evidence)
   assert.notDeepEqual(empty, absent)
   writeFileSync(join(evidence, 'one'), 'ab')
@@ -32,8 +35,7 @@ test('fingerprint distinguishes absent, empty, added, removed and renamed eviden
   assert.notDeepEqual(renamed, added)
   rmSync(join(evidence, 'two'))
   const removed = snapshotEvidence(evidence)
-  // A rapid create/remove cycle can leave directory metadata unchanged on Windows.
-  assert.notDeepEqual(removed, renamed, 'removal withdraws the file entry')
+  assert.notDeepEqual(removed, empty, 'directory metadata records the create/remove mutation')
   assert.equal(removed.length, 1)
 }))
 
