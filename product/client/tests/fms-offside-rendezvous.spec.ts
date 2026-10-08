@@ -107,7 +107,7 @@ for (const side of [1, 2] as const) for (const independent of [false, true]) {
 
 for (const side of [1, 2] as const) for (const role of ['driver', 'observer'] as const) {
   for (const unavailable of ['failure', 'OFF', 'TEST'] as const) {
-    test(`FMS${side} ${role} retains its rendezvous while ${unavailable}`, () => {
+    test(`FMS${role === 'driver' ? side : 3 - side} ${role} retains its rendezvous while ${unavailable}`, () => {
       const { selected, own, fly } = setup(side, true)
       const unit = role === 'driver' ? selected : own
       const initial = structuredClone(unit.rendezvousFor(unit.activeRoute, 0)!)
@@ -126,7 +126,7 @@ for (const side of [1, 2] as const) for (const role of ['driver', 'observer'] as
     })
   }
 
-  test(`FMS${side} ${role} re-determines a frozen rendezvous after a short failure`, () => {
+  test(`FMS${role === 'driver' ? side : 3 - side} ${role} re-determines a frozen rendezvous after a short failure`, () => {
     const { selected, own, fly } = setup(side, true)
     const unit = role === 'driver' ? selected : own
     unit.defineMoving('NEAR1', offset(unit.position, 0, 0.5), 0, 0)
@@ -144,7 +144,7 @@ for (const side of [1, 2] as const) for (const role of ['driver', 'observer'] as
     expect(recovered.distanceNm).toBeCloseTo(distanceNm(unit.position, recovered.position!), 7)
   })
 
-  for (const previouslyWarned of [false, true]) test(`FMS${side} ${role} power cycle annunciates an unachievable rendezvous after TEST ${previouslyWarned ? 'with prior warning' : 'before its first refresh'}`, () => {
+  for (const previouslyWarned of [false, true]) test(`FMS${role === 'driver' ? side : 3 - side} ${role} power cycle annunciates an unachievable rendezvous after TEST ${previouslyWarned ? 'with prior warning' : 'before its first refresh'}`, () => {
     const { selected, own, fly } = setup(side, true)
     const unit = role === 'driver' ? selected : own
     far(unit)
