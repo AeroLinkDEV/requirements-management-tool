@@ -110,7 +110,7 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   const [firstLeg, ...laterFirst] = first ?? [];
   // Heading selection does not hide a valid managed leg. In a hold or search pattern the
   // guidance leg is active; the route resumes from the fix. Invalid managed guidance stays withdrawn.
-  const onRoute = g.mode === "LNAV" || g.mode === "HDG" && g.desiredTrack !== null;
+  const onRoute = g.mode === "LNAV" || g.mode === "HDG" && g.desiredTrack !== null && !sim.holdProgress && !sim.sarPath;
   // The offset track actually flown, parallel to the active leg.
   const offsetLeg = offsetTrack(g, active.offset?.nm ?? 0);
   const activeLeg = onRoute && firstLeg && activeTo ? [firstLeg, laterFirst[0]] : null;

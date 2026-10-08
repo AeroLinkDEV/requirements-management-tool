@@ -99,3 +99,41 @@ test('SYNC FMS2 observer inspected while FMS1 guides HDG retains its own managed
   await managedLeg(page, 'MUN')
   await page.locator('.fmsMap').screenshot({ path: info.outputPath('fms2-observer-managed-route.png') })
 })
+
+for (const pattern of ['HOLD', 'SAR'] as const) test(`${pattern} managed pattern segment remains unchanged when paused HDG is selected`, async ({ page }, info) => {
+  test.setTimeout(120_000)
+  await open(page)
+  if (pattern === 'SAR') {
+    await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')
+    const scenarios = page.getByRole('region', { name: 'Scenarios' })
+    const scenario = { id: 'managed-sar', title: 'Search pattern display', objective: 'Inspect the active search segment', maxSeconds: 2, start: '87n-offshore-sar', steps: [
+      { when: { kind: 'time', seconds: 1 }, action: { kind: 'expectAircraft', minAltitude: 490, maxAltitude: 510 } },
+    ] }
+    await scenarios.getByLabel('Scenario file').setInputFiles({ name: 'managed-sar.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+    await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
+    await expect(scenarios.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+    for (const id of ['F2_2', 'LSK4L', 'LSK6R', 'EXEC']) await key(page, id)
+  } else {
+    for (const id of ['F2_4', 'LSK2L', 'EXEC']) await key(page, id)
+  }
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await expect(map(page)).toHaveAttribute('aria-label', new RegExp(`${pattern} mode`), { timeout: 95_000 })
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  const snapshot = () => page.locator('.fmsMap').evaluate(svg => ({
+    active: [...svg.querySelectorAll('path.active')].map(p => ({ path: p.getAttribute('d'), stroke: getComputedStyle(p).stroke, dash: getComputedStyle(p).strokeDasharray })),
+    pattern: [...svg.querySelectorAll('path.hold,path.sar')].map(p => ({ kind: p.getAttribute('class'), path: p.getAttribute('d') })),
+    waypoint: svg.querySelector('g.activeWpt')?.textContent,
+  }))
+  const before = await snapshot()
+  expect(before.pattern.some(p => p.kind === pattern.toLowerCase())).toBe(true)
+  // SAR has a straight current segment; hold turns legitimately have no straight active segment.
+  if (pattern === 'SAR') expect(before.active).toHaveLength(1)
+  await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
+  await expect(map(page)).toHaveAttribute('aria-label', /HDG mode/)
+  await expect(page.getByTestId('fma-roll')).toHaveText('HDG')
+  const after = await snapshot()
+  await info.attach('managed-pattern-transition', { body: JSON.stringify({ pattern, before, after }), contentType: 'application/json' })
+  expect(after).toEqual(before)
+  await page.locator('.fmsMap').screenshot({ path: info.outputPath(`${pattern.toLowerCase()}-hdg-managed-pattern.png`) })
+})
