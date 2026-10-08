@@ -5,7 +5,7 @@ import type { ScriptedFms } from "./scriptedFms";
 import "./FmsMap.css";
 
 /**
- * A moving map of what the FMS is flying, drawn the way a navigation display shows it: north up and centred on the
+ * A moving map of the inspected FMS's managed route, independent of AFCS coupling: north up and centred on the
  * aircraft, the active leg in magenta, later legs in white, a pending modification dashed, holds and search patterns
  * in cyan. It reads the scripted FMS and the flight simulation; it has no state of its own beyond the range.
  *
@@ -76,7 +76,11 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
 
   const active = fms.activeRoute;
   const activeTo = active.legs[0]?.kind === "wpt" ? fms.coordinates(active.legs[0].ident) : undefined;
-  const [first, ...later] = routeLines(fms.activeLegStart, active);
+  const activeWaypoint = active.legs[0];
+  // A CF is the inbound course into its fix, not the chord from the aircraft's leg-activation position.
+  const routeStart = activeTo && activeWaypoint?.kind === "wpt" && activeWaypoint.path === "CF" && activeWaypoint.course !== undefined
+    ? offset(activeTo, activeWaypoint.course + 180, 30) : fms.activeLegStart;
+  const [first, ...later] = routeLines(routeStart, active);
   const waypoints = active.legs.flatMap((leg, i) => {
     if (leg.kind !== "wpt") return [];
     const at = leg.position ?? fms.coordinates(leg.ident);
@@ -104,8 +108,9 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
 
   const g = sim.guidance;
   const [firstLeg, ...laterFirst] = first ?? [];
-  // In a hold or search pattern the guidance leg is the active one; the route resumes from the fix.
-  const onRoute = g.mode === "LNAV";
+  // Heading selection does not hide a valid managed leg. In a hold or search pattern the
+  // guidance leg is active; the route resumes from the fix. Invalid managed guidance stays withdrawn.
+  const onRoute = g.mode === "LNAV" || g.mode === "HDG" && g.desiredTrack !== null;
   // The offset track actually flown, parallel to the active leg.
   const offsetLeg = offsetTrack(g, active.offset?.nm ?? 0);
   const activeLeg = onRoute && firstLeg && activeTo ? [firstLeg, laterFirst[0]] : null;
@@ -153,7 +158,7 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
         {later.map((line, i) => <path key={`l${i}`} className="later" d={path(line)} />)}
         {activeLeg ? <path className="active" d={path(activeLeg)} /> : null}
         {offsetLeg ? <path className="offset" d={path(offsetLeg)} /> : null}
-        {g.legFrom && g.legTo && g.mode !== "LNAV" ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
+        {g.legFrom && g.legTo && !onRoute ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
         {waypoints.map(({ ident, at, active: isActive }) => {
           const q = project(at);
           return (

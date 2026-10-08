@@ -60,7 +60,7 @@ const ALT_HOLD_GAIN = 10;
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
 export type Guidance = {
   mode: GuidanceMode;
-  /** The computed path's endpoints for the engineering flown-path overlay; null in HDG, even with an active route. */
+  /** Active managed-path endpoints when available; the AFCS lateral mode separately states whether it is flown. */
   legFrom: LatLon | null;
   legTo: LatLon | null;
   desiredTrack: number | null;
@@ -1652,8 +1652,7 @@ export class FlightSimulator {
       this.lnavArmed = false;
       return managed;
     }
-    // Retain managed geometry/DTG for route computations, but no flown-path endpoints while steering a selected heading.
-    return { ...managed, mode: "HDG", legFrom: null, legTo: null, bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -this.bankLimit, this.bankLimit) };
+    return { ...managed, mode: "HDG", bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -this.bankLimit, this.bankLimit) };
   }
 
   /** The guidance LNAV would fly. With dt > 0 (and LNAV engaged) it also sequences what the aircraft has reached. */
