@@ -1,24 +1,26 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { DualFmsSystem } from '../src/fmsCdu/dualFms'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
 import { MISSION_87N_OFFSHORE_SAR } from '../src/fmsCdu/heliDemo'
 import { START_STATES } from '../src/fmsCdu/kbtvDemo'
 import { LATER_SBAS_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
-import { TICK_SECONDS, advanceTicks } from '../src/fmsCdu/scenario'
+import { TICK_SECONDS } from '../src/fmsCdu/scenario'
 
 // #1538 owner: M300 3-24 synchronizes GPS approach-integrity availability; 3-25 uses the best system sensor.
 // Local receiver degradation must not give the offside computer a different approach phase or disarm the aircraft's
 // panel approach switch. fms-dual-approach-phase covers healthy inputs, not these asymmetric receiver failures.
 function setup(start: '87n-rnav190-final' | 'kbtv-rnav15', profile?: AircraftProfile) {
-  let now = start === '87n-rnav190-final' ? Date.parse(MISSION_87N_OFFSHORE_SAR.startTime!) : Date.UTC(2026, 8, 27, 14)
-  const system = new DualFmsSystem(() => new Date(now), { profile })
+  const now = start === '87n-rnav190-final' ? Date.parse(MISSION_87N_OFFSHORE_SAR.startTime!) : Date.UTC(2026, 8, 27, 14)
+  const { system, plant } = dualComposition(now, { profile })
   const [one, two] = system.computers
   expect(one.compute(() => {
     const result = START_STATES[start].setUp(one, system.flights[0])
     one.dualOperation?.settingsChanged(); one.dualOperation?.finishEdit(true); two.observeAircraft(one)
     return result
   })).toEqual({ ready: true })
-  return { system, one, two, tick: () => advanceTicks(1, ms => { now += ms }, system, null) }
+  const kernel = new FmsKernel(plant)
+  return { system, one, two, tick: () => { kernel.advance(1) } }
 }
 
 for (const [guidanceSide, degradedGps] of [[1, 2], [2, 2], [2, 1]] as const) test(`87N stays in SYNC with FMS${guidanceSide} guiding when only GPS${degradedGps} HIL exceeds the approach limit`, () => {
@@ -39,8 +41,8 @@ for (const [guidanceSide, degradedGps] of [[1, 2], [2, 2], [2, 1]] as const) tes
   }
   expect(approachAt, 'positive control: the healthy selected GPS reaches approach phase').not.toBeNull()
   expect(one.gps[degradedGps - 1].bus()!['130']).toEqual({ value: 0.5, ssm: 'NORMAL' })
-  expect(system.navigationSide).toBe(degradedGps === 1 ? 2 : 1)
   expect(mismatches).toEqual([])
+  expect(system.navigationSide).toBe(degradedGps === 1 ? 2 : 1)
   expect([one.localFlightPhase, two.localFlightPhase]).toEqual(['APPROACH', 'APPROACH'])
 })
 
@@ -64,7 +66,6 @@ test('KBTV LPV stays in SYNC with its shared arm when only GPS2 SBAS becomes do-
   expect(one.gps[1].bus()!['305'].value?.level).toBe('LNAV')
   expect(mismatches).toEqual([])
   expect(system.simulator.approachMode).toBe('CAPTURED')
-  expect(system.flights[1].modeEvents.some(event => event.event === 'APPR LOST')).toBe(true)
   expect([one, two].map(unit => unit.recallList.filter(message => message.text === 'NO APPR INTEGRITY'))).toEqual([[], []])
   // Losing the selected receiver's SBAS as well still makes the driving flight disarm the aircraft switch.
   one.gps[0].setSbas({ doNotUse: true })
@@ -112,6 +113,54 @@ for (const bias of [0, 60]) test(`navigation election preserves qualified approa
   expect(Math.abs(after.verticalFt! - before.verticalFt!)).toBeLessThanOrEqual(0.1 * after.scale!.verticalFullScaleFt)
   expect(system.mode).toBe('SYNC')
   expect(system.simulator.approachMode).toBe('CAPTURED')
+})
+
+// A healthy elected navigation receiver cannot mask loss of the receiver still flying the approach after a refused
+// 116/117 transfer. Until #1563 shares qualified guidance itself, shared monitoring follows the guiding computer.
+for (const [guidanceSide, navigationSide] of [[1, 2], [2, 1], [1, 1]] as const) test(`real LPV loss alerts both computers with FMS${guidanceSide} guiding and FMS${navigationSide} navigation`, () => {
+  const { system, one, two, tick } = setup('kbtv-rnav15', LATER_SBAS_PROFILE)
+  system.selectGuidance(guidanceSide)
+  const guiding = system.computers[guidanceSide - 1], flownGps = guidanceSide - 1, otherGps = 1 - flownGps
+  guiding.armApproach(true)
+  for (let n = 0; n * TICK_SECONDS < 1000; n++) {
+    tick()
+    const runway = guiding.coordinates('RW15')
+    if (system.simulator.approachMode === 'CAPTURED' && runway && distanceNm(guiding.position, runway) <= 3) break
+  }
+  expect(system.simulator.approachMode).toBe('CAPTURED')
+  expect(guiding.gpsStatus.chosen).toBe(flownGps)
+  expect([one, two].map(unit => unit.recallList.some(message => message.text === 'NO APPR INTEGRITY'))).toEqual([false, false])
+  one.gps[otherGps].override('117', { kind: 'BIAS', amount: 60 })
+  for (let n = 0; n < 12; n++) tick()
+  if (navigationSide === 2) one.gps[0].override('247', { kind: 'FORCE', value: 0.2, ssm: 'NORMAL' })
+  tick()
+  expect(system.navigationSide).toBe(navigationSide)
+  one.gps[flownGps].setSbas({ doNotUse: true })
+  one.gpsUpdated() // FMS1 publishes the shared receiver frame before FMS2 consumes it.
+  guiding.gpsUpdated()
+  expect(guiding.gpsStatus.chosen, 'a refused transfer keeps the flown receiver').toBe(flownGps)
+  expect(guiding.gpsApproachSource.refused).toContain('VERTICAL JUMP')
+  tick()
+  expect(system.simulator.modeEvents.some(event => event.event === 'APPR LOST')).toBe(true)
+  expect(system.simulator.verticalMode).toBe('ALT HOLD')
+  expect([one, two].map(unit => unit.recallList.some(message => message.text === 'NO APPR INTEGRITY'))).toEqual([true, true])
+  expect(system.mode).toBe('SYNC')
+})
+
+for (const guidanceSide of [1, 2] as const) test(`zero-time GPS input settles shared navigation while FMS${guidanceSide} guides`, () => {
+  const { system, one, two, tick } = setup('87n-rnav190-final')
+  system.selectGuidance(guidanceSide)
+  system.computers[guidanceSide - 1].armApproach(true)
+  for (let n = 0; n * TICK_SECONDS < 80; n++) tick()
+  expect([one.localFlightPhase, two.localFlightPhase]).toEqual(['APPROACH', 'APPROACH'])
+  const utc = one.utcTime.getTime()
+  one.gps[1].override('130', { kind: 'FORCE', value: 0.5, ssm: 'NORMAL' })
+  two.gpsUpdated()
+  expect(two.utcTime.getTime()).toBe(utc)
+  expect(system.navigationSide).toBe(1)
+  expect([one.navState.gpsSource, two.navState.gpsSource]).toEqual([1, 1])
+  expect([one.localFlightPhase, two.localFlightPhase]).toEqual(['APPROACH', 'APPROACH'])
+  expect([one, two].map(unit => unit.recallList.some(message => message.text === 'NO APPR INTEGRITY'))).toEqual([false, false])
 })
 
 // Negative controls: independent computers still use their own receivers, and system-wide integrity loss still

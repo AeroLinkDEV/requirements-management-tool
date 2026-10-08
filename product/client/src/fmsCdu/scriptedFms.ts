@@ -328,7 +328,7 @@ export class ScriptedFms implements CduBackend {
   /** AUTO receiver selection, approach-aware (gpsSensors.ts, the AeroLink simulator policy), and its last verdict. */
   private autoSelection = new AutoSelection();
   private gpsSelection = { qualified: true, refused: "" };
-  private systemApproachQualified = false;
+  private systemApproachSource: { chosen: number | null; qualified: boolean } | null = null;
   private selectionLog = new SelectionLog();
   /** The approach selection last sent to the receivers (its path identifier and CRC), so it is sent once per change. */
   private sentApproach: string | null = null;
@@ -1633,7 +1633,7 @@ export class ScriptedFms implements CduBackend {
   get navigationInputs(): SensorFrame | null { return this.sensorFrame ? structuredClone(this.sensorFrame) : null; }
 
   /** Read a connected simulator before computing guidance so an expired input cannot command one extra step. */
-  refreshSensorInput() { this.updateNavigation(0); }
+  refreshSensorInput() { this.updateLocalNavigation(0); }
 
   get raimDeselectedSatellites() { return [...this.raimExcluded].sort((a, b) => a - b); }
   deselectRaimSatellite(prn: number, deselected: boolean) {
@@ -1686,6 +1686,12 @@ export class ScriptedFms implements CduBackend {
    * against RNP. A returning position source can cause a reported POSITION SHIFT.
    */
   updateNavigation(dt: number) {
+    this.updateLocalNavigation(dt);
+    if (dt === 0) this.crossTalk?.navigationChanged();
+  }
+
+  /** In-step sampling stays local until the dual system's existing guidance/adoption boundary. */
+  private updateLocalNavigation(dt: number) {
     this.stepRadios();
     this.sensorFrame = this.sampleSensors();
     if (!this.powered) return;
@@ -2055,7 +2061,10 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** SYNC's phase-dependent monitoring follows system navigation adoption, including the no-usable-source case. */
-  refreshSystemNavigationMonitoring() { this.refreshNavigationMonitoring(); }
+  refreshSystemNavigationMonitoring(approachSource: { chosen: number | null; qualified: boolean } | null) {
+    this.systemApproachSource = approachSource;
+    this.refreshNavigationMonitoring();
+  }
 
   /** M300 7-12: five minutes for integrity-only loss after FAF inbound; invalid input/HDOP loss is immediate. */
   private refreshS300Integrity() {
@@ -3061,10 +3070,9 @@ export class ScriptedFms implements CduBackend {
   }
   get localNavigationSolution() { return this.localSolution ? structuredClone(this.localSolution) : this.navigation.current; }
   get navigationWindEstimate() { return this.navigation.windEstimate; }
-  receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }, approachQualified: boolean) {
+  receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }) {
     if (this.hasCondition("fmsFail")) return;
     this.navigation.accept(solution, wind); this.here = { ...solution.position }; Object.assign(this.nav, solution);
-    this.systemApproachQualified = approachQualified;
     this.updateAngleReference();
   }
   /** A second navigation computer observes the same physical aircraft; it never integrates another aircraft. */
@@ -3128,8 +3136,8 @@ export class ScriptedFms implements CduBackend {
 
   /** Shared integrity availability does not authorize an AFCS 116/117 source transfer (#1538). */
   private get navigationApproachAuthority(): ApproachAuthority {
-    if (this.crossTalk?.mode !== "SYNC" || this.s300Advisory) return this.gpsApproachAuthority;
-    return this.laterApproachAuthority(this.nav.gpsSource === null ? null : this.nav.gpsSource - 1, this.systemApproachQualified);
+    if (this.crossTalk?.mode !== "SYNC" || this.s300Advisory || this.systemApproachSource === null) return this.gpsApproachAuthority;
+    return this.laterApproachAuthority(this.systemApproachSource.chosen, this.systemApproachSource.qualified);
   }
 
   private laterApproachAuthority(chosen: number | null, qualified: boolean): ApproachAuthority {
