@@ -1686,8 +1686,8 @@ export class ScriptedFms implements CduBackend {
    * against RNP. A returning position source can cause a reported POSITION SHIFT.
    */
   updateNavigation(dt: number) {
+    if (dt === 0 && this.crossTalk) { this.crossTalk.navigationChanged(); return; }
     this.updateLocalNavigation(dt);
-    if (dt === 0) this.crossTalk?.navigationChanged();
   }
 
   /** In-step sampling stays local until the dual system's existing guidance/adoption boundary. */

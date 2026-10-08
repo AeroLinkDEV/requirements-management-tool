@@ -23,6 +23,25 @@ function setup(start: '87n-rnav190-final' | 'kbtv-rnav15', profile?: AircraftPro
   return { system, one, two, tick: () => { kernel.advance(1) } }
 }
 
+// Public Sample.sequence identifies a producer frame. One crew input must publish one new frame, then both
+// computers consume that frame; a duplicate native sample or an old FMS2 frame changes real sensor provenance.
+for (const side of [1, 2] as const) for (const origin of [1, 2] as const)
+  test(`one FMS${origin} zero-time input publishes one coherent sensor frame with FMS${side} guiding`, () => {
+    const { system, one, two } = setup('87n-rnav190-final')
+    system.selectGuidance(side)
+    one.gpsUpdated()
+    const before = one.navigationInputs!
+    const time = one.now.getTime()
+    const aircraft = system.computers.map(unit => structuredClone(unit.truePosition))
+    system.computers[origin - 1].gpsUpdated()
+    const published = one.navigationInputs!, consumed = two.navigationInputs!
+    expect(published.air.sequence).toBe(before.air.sequence + 1)
+    expect(consumed).toEqual(published)
+    expect(published.air.at).toBe(time)
+    expect(system.computers.map(unit => unit.now.getTime())).toEqual([time, time])
+    expect(system.computers.map(unit => unit.truePosition)).toEqual(aircraft)
+  })
+
 for (const [guidanceSide, degradedGps] of [[1, 2], [2, 2], [2, 1]] as const) test(`87N stays in SYNC with FMS${guidanceSide} guiding when only GPS${degradedGps} HIL exceeds the approach limit`, () => {
   const { system, one, two, tick } = setup('87n-rnav190-final')
   system.selectGuidance(guidanceSide)
