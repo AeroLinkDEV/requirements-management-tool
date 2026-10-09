@@ -695,7 +695,7 @@ export class FlightSimulator {
     // Laboratory source change cancels a captured approach; the crew must re-arm against the new computer's authority.
     this.approach = "OFF"; this.gpsLateral = false; this.fms.armApproach(false);
     const cancelled = this.decoupleOnSourceChange(previous);
-    this.watchFailure(); this.last = this.guide();
+    this.watchFailure(); this.watchRendezvous(); this.last = this.guide();
     this.record("FMS SOURCE CHANGED", ["AFCS selections retained; approach requires re-arming", ...cancelled].join("; "));
   }
 
@@ -1160,15 +1160,14 @@ export class FlightSimulator {
    */
   private watchRendezvous() {
     const invalid = this.fms.rendezvousRollInvalid;
-    if (invalid && !this.rendezvousRollInvalid && this.lateral === "LNAV") {
+    // Current selected authority, not an old computer-local edge: HDG already withdrawn cannot re-annunciate.
+    if (invalid && this.lateral === "LNAV") {
       this.lateral = "HDG";
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
       this.record("NAV REMOVED", "RENDEZVOUS UNACHIEVABLE: the roll command is invalid; HDG HOLD " + String(this.heading).padStart(3, "0") + "°T");
     }
-    this.rendezvousRollInvalid = invalid;
   }
-  private rendezvousRollInvalid = false;
 
   private watchHover() {
     const hover = this.fms.hover;
@@ -1647,7 +1646,7 @@ export class FlightSimulator {
     }
     if (this.lateral === "LNAV") return managed;
     // Capture during a flight step when the path is close; a paused guidance refresh leaves NAV armed.
-    if (dt > 0 && this.lnavArmed && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
+    if (dt > 0 && this.lnavArmed && !this.fms.rendezvousRollInvalid && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
       this.lateral = "LNAV";
       this.lnavArmed = false;
       return managed;
