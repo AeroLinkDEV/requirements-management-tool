@@ -1,4 +1,5 @@
 import { expect, renderedTest as test, type Page } from './isolated-client-test'
+import { MAP_CF_EXTENT_NM, MAP_DEFAULT_RANGE_NM, MAP_RADIUS_UNITS } from '../src/fmsCdu/mapDrawing'
 
 // #1545 corrected primary owner: C-6 managed route visibility is independent of AFCS coupling.
 // #1504 owns the separate guiding marker and inspected-computer wiring. Geometry here identifies
@@ -31,8 +32,9 @@ async function managedLeg(page: Page, ident: string, course?: number) {
     body: JSON.stringify({ ident, expectedCourse: course ?? null, map: await map(page).getAttribute('aria-label'), witness }),
     contentType: 'application/json',
   })
-  const candidate = course === undefined ? witness[0] : witness.find(w => Math.abs(w.course - course) < 0.5 && Math.abs(w.length - 150) < 3)
-  expect(candidate, `solid managed leg into ${ident}${course === undefined ? '' : ` on ${course}° true, 30 NM at 20 NM range`}`).toBeDefined()
+  const extent = MAP_CF_EXTENT_NM * MAP_RADIUS_UNITS / MAP_DEFAULT_RANGE_NM
+  const candidate = course === undefined ? witness[0] : witness.find(w => Math.abs(w.course - course) < 0.5 && Math.abs(w.length - extent) < 3)
+  expect(candidate, `solid managed leg into ${ident}${course === undefined ? '' : ` on ${course}° true, ${MAP_CF_EXTENT_NM} NM at ${MAP_DEFAULT_RANGE_NM} NM range`}`).toBeDefined()
   expect(candidate!.stroke).toBe('rgb(255, 92, 240)')
   expect(candidate!.dash).toBe('none')
 }
@@ -100,6 +102,70 @@ test('SYNC FMS2 observer inspected while FMS1 guides HDG retains its own managed
   await page.locator('.fmsMap').screenshot({ path: info.outputPath('fms2-observer-managed-route.png') })
 })
 
+for (const side of [1, 2]) test(`FMS${side} committed JN join has no unflown CF extension`, async ({ page }, info) => {
+  await open(page)
+  await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')
+  const scenarios = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: `committed-join-${side}`, title: 'Committed joining path', objective: 'Inspect JN before it is sequenced', maxSeconds: 2, start: '87n-offshore-sar', steps: [
+    { when: { kind: 'time', seconds: 1 }, action: { kind: 'expectAircraft', minAltitude: 490, maxAltitude: 510 } },
+  ] }
+  await scenarios.getByLabel('Scenario file').setInputFiles({ name: 'committed-join.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(scenarios.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  await page.getByLabel('FMS guidance source', { exact: true }).selectOption(String(side))
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption(String(side))
+  if (side === 2) {
+    // Source handover needs an actual selected-side input/computation before its hover entry.
+    await page.getByRole('button', { name: 'Fly', exact: true }).click()
+    await page.clock.runFor(250)
+    await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  }
+  for (const id of ['F2_2', 'LSK1R', 'LSK4L', 'LSK6R', 'EXEC']) await key(page, id)
+  await expect(page.locator('.fmsMap g.activeWpt')).toHaveText('JN')
+  await expect(page.getByTestId('hover-join')).toHaveAttribute('class', 'active')
+  await expect(page.getByTestId('fma-roll')).toHaveText('NAV')
+  const paths = await page.locator('.fmsMap path.active:not([data-testid="hover-join"])').evaluateAll(nodes => nodes.map(node => {
+    const points = (node.getAttribute('d') ?? '').match(/[-\d.]+,[-\d.]+/g)?.map(s => s.split(',').map(Number)) ?? []
+    return { d: node.getAttribute('d'), length: points.length === 2 ? Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]) : null }
+  }))
+  await info.attach('committed-join-geometry', { body: JSON.stringify({ side, paths, join: await page.getByTestId('hover-join').getAttribute('d'), map: await map(page).getAttribute('aria-label') }), contentType: 'application/json' })
+  // #1561 separately owns removing this short chord. This row rejects the unflown CF extent.
+  expect(paths).toHaveLength(1)
+  expect(paths[0].length).not.toBeNull()
+  expect(paths[0].length!).toBeLessThan(MAP_CF_EXTENT_NM * MAP_RADIUS_UNITS / MAP_DEFAULT_RANGE_NM / 2)
+  await page.locator('.fmsMap').screenshot({ path: info.outputPath(`fms${side}-committed-join.png`) })
+})
+
+for (const side of [1, 2]) test(`FMS${side} managed offset remains drawn through HDG and NAV capture`, async ({ page }, info) => {
+  await open(page)
+  await page.getByLabel('FMS guidance source', { exact: true }).selectOption(String(side))
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption(String(side))
+  for (const id of ['PROG', 'PREV', 'R', '0', 'DOT', '5', 'LSK1L', 'EXEC']) await key(page, id)
+  const offset = page.locator('.fmsMap path.offset')
+  await expect(offset).toHaveCount(1)
+  const pathBefore = await offset.getAttribute('d')
+  expect(pathBefore).toMatch(/^M[-\d.]+,[-\d.]+L[-\d.]+,[-\d.]+$/)
+  await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
+  await expect(page.getByTestId('fma-roll')).toHaveText('HDG')
+  await expect(offset).toHaveCount(1)
+  await expect(offset).toHaveAttribute('d', pathBefore!)
+  await page.getByRole('button', { name: 'LNAV', exact: true }).click()
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await expect(page.getByTestId('fma-roll')).toHaveText('NAV')
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await expect(offset).toHaveCount(1)
+  const pathCaptured = await offset.getAttribute('d')
+  await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
+  await expect(page.getByTestId('fma-roll')).toHaveText('HDG')
+  await expect(offset).toHaveAttribute('d', pathCaptured!)
+  // The other computer's actual-flown marker is still hidden while the selected driver is HDG.
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption(String(3 - side))
+  await expect(page.getByTestId('guiding-leg')).toHaveCount(0)
+  await expect(page.locator('.fmsMap path.offset')).toHaveCount(1)
+  await info.attach('managed-offset-transition', { body: JSON.stringify({ side, pathBefore, pathCaptured, final: await map(page).getAttribute('aria-label') }), contentType: 'application/json' })
+  await page.locator('.fmsMap').screenshot({ path: info.outputPath(`fms${side}-hdg-offset.png`) })
+})
+
 for (const pattern of ['HOLD', 'SAR'] as const) test(`${pattern} managed pattern segment remains unchanged when paused HDG is selected`, async ({ page }, info) => {
   test.setTimeout(120_000)
   await open(page)
@@ -115,6 +181,12 @@ for (const pattern of ['HOLD', 'SAR'] as const) test(`${pattern} managed pattern
     for (const id of ['F2_2', 'LSK4L', 'LSK6R', 'EXEC']) await key(page, id)
   } else {
     for (const id of ['F2_4', 'LSK2L', 'EXEC']) await key(page, id)
+    // Existing instructor Jump reaches RDG and enters its executed hold. A real frame below
+    // still computes the actual hold geometry before the preservation snapshot.
+    await page.getByRole('button', { name: 'Jump to next waypoint', exact: true }).click()
+    await expect(page.locator('.fmsMap g.activeWpt')).toHaveText('RDG')
+    await page.getByRole('button', { name: 'Jump to next waypoint', exact: true }).click()
+    await expect(page.getByTestId('fms-cdu-inspected')).toContainText('IN PROGRESS')
   }
   await page.getByLabel('Simulation rate').selectOption('64')
   await page.getByRole('button', { name: 'Fly', exact: true }).click()
