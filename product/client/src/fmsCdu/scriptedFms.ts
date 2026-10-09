@@ -1,5 +1,5 @@
 import { alert } from "./alerts";
-import type { CrossTalkPort, RadioManagementPort } from "./crossTalk";
+import type { AlertCauseOwner, CrossTalkPort, RadioManagementPort } from "./crossTalk";
 import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey, type StandbyKey, adfFrequency } from "./radioManagement";
 import type { CivilSolution } from "./civilNavigation";
 import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
@@ -30,7 +30,7 @@ import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
 import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from "./civilNavigation";
 import type { SensorSolution } from "./sensorState";
 import { BenchRadioReceiver, radioFixes, type DmeStationStatus, type RadioFix, type RadioMotion } from "./radioNavigation";
-import { transitionAlert } from "./sensorTransitions";
+import { transitionAlert, usable } from "./sensorTransitions";
 import { MAX_ACCEPTED_TAS_KT, sampled, sampledDoppler, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
 import { RADIO_PAGES } from "./radioPages";
@@ -763,7 +763,9 @@ export class ScriptedFms implements CduBackend {
     const message = { text, alert: false }; this.recall.unshift(message); this.message = message;
   }
   private checkMagvar() {
-    if (!this.magvar.valid) { this.alert("SYSTEM FAILED"); this.alert("MAG VAR CRC FAILED"); }
+    this.crossTalk?.reportAlertCause("MAGVAR:SYSTEM_FAILED", !this.magvar.valid);
+    this.crossTalk?.reportAlertCause("MAGVAR:CRC_FAILED", !this.magvar.valid);
+    if (!this.magvar.valid) { this.alert("SYSTEM FAILED", "MAGVAR:SYSTEM_FAILED"); this.alert("MAG VAR CRC FAILED", "MAGVAR:CRC_FAILED"); }
     else if (this.magvar.outOfDate(this.utcTime)) this.statusAdvisory("MAG VAR OUT OF DATE");
   }
   loadMagvar(candidate: unknown) {
@@ -975,7 +977,7 @@ export class ScriptedFms implements CduBackend {
         }
         // Forcing RNP exceeded raises CHECK ANP at once, and that counts as this episode's alert (R11).
         if (on && id === "rnpExceeded") {
-          this.alert(alert("CHECK ANP"));
+          this.alert(alert("CHECK ANP"), "NAV:ANP_EXCEEDED");
           this.nav = { ...this.nav, unableSince: this.now.getTime(), unableAlerted: true };
         }
         // GPS lost is a shortcut for an RF input fault (antenna or cable) on both receivers (3a.5).
@@ -1061,7 +1063,7 @@ export class ScriptedFms implements CduBackend {
   arrive(completedCircuit = false): "route" | "hold" | "sar" | "map" | "end" {
     const route = this.active;
     const leg = route.legs[0];
-    if (!leg || leg.kind === "disco") { this.alert(alert("END OF ROUTE")); return "end"; }
+    if (!leg || leg.kind === "disco") { this.alert(alert("END OF ROUTE"), "ROUTE:END"); return "end"; }
     // A conditional leg ends where its event happened: the next leg starts from here.
     if (leg.kind === "cond") { this.passLeg(null); return "route"; }
     this.recordPassage(leg);
@@ -1087,7 +1089,7 @@ export class ScriptedFms implements CduBackend {
     // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
     // HIGH HOLDING SPEED at each fly-over of the fix after the first (M300 10-8), the pattern rebuilt at the speed now.
-    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"), this.holdPassageSpeedCause(hold));
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
@@ -1099,7 +1101,7 @@ export class ScriptedFms implements CduBackend {
         Object.assign(hold, this.entryDefaults(hold));
         delete hold.defaults;
         // Entered without the minute's notice (the hold made within it): checked at the fix.
-        if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+        if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"), this.holdEntrySpeedCause(hold));
         this.holdSpeedChecked = hold;
         // Established in the hold, FROM and TO are the holding fix; its ATA is this first crossing, kept while holding.
         this.overflown = { ident: leg.ident, altitude: this.altitude, ata: this.now.getTime() };
@@ -1145,7 +1147,7 @@ export class ScriptedFms implements CduBackend {
     if (!ident) {
       const pendingCond = this.modified?.legs[0];
       if (pendingCond?.kind === "cond") this.modified?.legs.shift();
-      if (!route.legs.some(l => l.kind !== "disco")) this.alert(alert("END OF ROUTE"));
+      if (!route.legs.some(l => l.kind !== "disco")) this.alert(alert("END OF ROUTE"), "ROUTE:END");
       return;
     }
     // Passing the instrument end (the runway, or a point-in-space approach's MAP) starts the missed approach; its hold
@@ -1154,7 +1156,7 @@ export class ScriptedFms implements CduBackend {
     if (passed?.kind === "wpt" && passed.source === "APPR" && (end ? ident === end : /^RW\d{2}/.test(ident))) this.armMissedHold(route);
     const pending = this.modified?.legs[0];
     if (pending?.kind === "wpt" && pending.ident === ident) this.modified?.legs.shift();
-    if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"));
+    if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"), "ROUTE:END");
   }
 
   /** The flight simulation reports the aircraft's state after each step. */
@@ -1743,8 +1745,9 @@ export class ScriptedFms implements CduBackend {
     // A computed wind supersedes a crew entry; scenario UTC remains independent of display offset.
     if (this.nav.windComputed) { this.lastComputedWind = { ...this.wind }; this.manualWind = null; }
     const choice = this.gpsSelected ? this.gpsChoice : "OFF";
+    gps.assessed.forEach((assessment, index) => this.crossTalk?.reportAlertCause(`GPS_RECEIVER:${index + 1}:UNUSABLE`, this.gpsSelected && !assessment.usable));
     for (const index of this.selectionLog.update(this.now, gps.assessed, gpsSource === null ? null : gpsSource - 1, choice, gps.transferred)) {
-      if (this.gpsSelected && !(selection.uncertain && gpsSource === index + 1)) this.alert(alert(`GPS${index + 1} NOT USABLE`));
+      if (this.gpsSelected && !(selection.uncertain && gpsSource === index + 1)) this.alert(alert(`GPS${index + 1} NOT USABLE`), `GPS_RECEIVER:${index + 1}:UNUSABLE`);
     }
     if (selection.mode !== previous || gpsSource !== previousSource) {
       this.sourceLog = [{ at: this.now, source: gpsSource !== null ? `GPS${gpsSource}` : selection.mode }, ...this.sourceLog].slice(0, 50);
@@ -1759,19 +1762,23 @@ export class ScriptedFms implements CduBackend {
     const vorDmeReceiversFailed = rms !== null && (receiverFailed("nav1") && receiverFailed("nav2")
       || receiverFailed("dme1") && receiverFailed("dme2"));
     const lost = transitionAlert(previous, selection.mode, selection.sensors, { vorDmeReceiversFailed });
-    if (lost) this.alert(alert(lost));
+    for (const sensor of selection.sensors) this.crossTalk?.reportAlertCause(`NAV_LOST:${sensor.mode}`,
+      sensor.mode === "VOR/DME" ? vorDmeReceiversFailed : !usable(sensor));
+    if (lost) this.alert(alert(lost), `NAV_LOST:${previous}`);
     // The GPS integrity annunciator (plan F3's annunciation contract; M300 1-4): lit while GPS is navigated without
     // integrity, and after a reversion away from GPS that its loss forced; cleared when GPS with integrity is selected
     // again. The crew selecting GPS out is not a loss: it lights nothing (simulator policy, the manual is silent).
     if (selection.mode === "GPS") this.gpsIntegrityAnnunciator = selection.uncertain;
     else if (lost === "GPS NAV LOST" && this.gpsSelected) this.gpsIntegrityAnnunciator = true;
     // A receiver the FMS may use has a fix but not the integrity for the phase: GPS POS UNCERTAIN, once per episode.
-    if (gps.integrityLost && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN")); }
+    this.crossTalk?.reportAlertCause("NAV:GPS_INTEGRITY", gps.integrityLost);
+    if (gps.integrityLost && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN"), "NAV:GPS_INTEGRITY"); }
     if (!gps.integrityLost) this.nav.integrityAlerted = false;
     // GPS1 and GPS2 both give a fix, whatever their integrity (a spoof passes it), and they differ: GPS DISAGREE.
     const [one, two] = gps.assessed.map(a => a.fix);
     const disagree = one !== null && two !== null && distanceNm(one, two) > GPS_DISAGREE_NM;
-    if (disagree && !this.nav.disagreeAlerted) { this.nav.disagreeAlerted = true; this.alert(alert("GPS DISAGREE")); }
+    this.crossTalk?.reportAlertCause("NAV:GPS_DISAGREE", disagree);
+    if (disagree && !this.nav.disagreeAlerted) { this.nav.disagreeAlerted = true; this.alert(alert("GPS DISAGREE"), "NAV:GPS_DISAGREE"); }
     if (!disagree) this.nav.disagreeAlerted = false;
 
     // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
@@ -1787,9 +1794,11 @@ export class ScriptedFms implements CduBackend {
     const { alertSeconds } = RNP_DEFAULTS[this.flightPhase];
     const performance = this.navPerformance;
     // An unavailable ANP counts as exceeding the RNP (plan C1).
-    if (performance.anp === null || performance.anp > performance.rnp) {
+    const anpExceeded = performance.anp === null || performance.anp > performance.rnp;
+    this.crossTalk?.reportAlertCause("NAV:ANP_EXCEEDED", anpExceeded);
+    if (anpExceeded) {
       this.nav.unableSince ??= now;
-      if (!this.nav.unableAlerted && now - this.nav.unableSince >= alertSeconds * 1000) { this.nav.unableAlerted = true; this.alert(alert("CHECK ANP")); }
+      if (!this.nav.unableAlerted && now - this.nav.unableSince >= alertSeconds * 1000) { this.nav.unableAlerted = true; this.alert(alert("CHECK ANP"), "NAV:ANP_EXCEEDED"); }
     } else { this.nav.unableSince = null; this.nav.unableAlerted = false; }
 
     const faf = findProcedure(this.db, this.active, "APPROACH")?.faf;
@@ -1805,23 +1814,32 @@ export class ScriptedFms implements CduBackend {
     }
     const advisoryWindow = toFaf !== null && toFaf <= 3 && !this.onFinalSegment && this.flightPhase === "TERMINAL"
       && findProcedure(this.db, this.active, "APPROACH")?.approachType === "RNAV";
+    // A synchronized plan copy/local cache generation is not a new executed approach cause.
+    const approachCause = JSON.stringify([this.active.dest, this.active.approach?.ident ?? null, this.active.approach?.transition ?? null]);
+    const armCause = `APPROACH:${approachCause}:ARM`, tempCause = `APPROACH:${approachCause}:TEMPERATURE`;
+    const integrityCause = `APPROACH:${approachCause}:INTEGRITY`;
     // M300 7-10; the bench displays the scale advisory once per executed approach, not every simulation tick.
     if (advisoryWindow && !this.holdingAtFaf && this.scaleAdvisorySession !== this.approachSession) {
       this.scaleAdvisorySession = this.approachSession;
       this.advisory("HSI SCALE TO CHANGE");
     }
+    this.crossTalk?.reportAlertCause(armCause, advisoryWindow && !this.armedApproach);
     if (advisoryWindow && !this.armedApproach) {
-      if (!this.nav.armAlerted) { this.nav.armAlerted = true; this.alert(alert("ARM APPROACH")); }
+      if (!this.nav.armAlerted) { this.nav.armAlerted = true; this.alert(alert("ARM APPROACH"), armCause); }
     } else this.nav.armAlerted = false;
 
     const advisory = this.advisoryVertical;
-    if (advisory && this.active.approach && this.flightPhase !== "EN ROUTE" && this.vnav.destTemp === null && this.aircraftProfile.temperatureEntry !== "OPTIONAL"
-      && this.temperatureAlertSession !== this.approachSession) {
+    const temperatureMissing = !!advisory && !!this.active.approach && this.flightPhase !== "EN ROUTE"
+      && this.vnav.destTemp === null && this.aircraftProfile.temperatureEntry !== "OPTIONAL";
+    this.crossTalk?.reportAlertCause(tempCause, temperatureMissing);
+    if (temperatureMissing && this.temperatureAlertSession !== this.approachSession) {
       this.temperatureAlertSession = this.approachSession;
-      this.alert(alert("SET AIRPORT TEMP"));
+      this.alert(alert("SET AIRPORT TEMP"), tempCause);
     }
     const angleKey = advisory?.angleAlert ? `${this.approachSession}:${advisory.angleDeg}:${this.vnav.destTemp}` : null;
-    if (angleKey && angleKey !== this.angleAlertSession) { this.angleAlertSession = angleKey; this.alert(alert(advisory!.angleAlert!)); }
+    const angleCause = `APPROACH:${approachCause}:ANGLE:${JSON.stringify([advisory?.angleAlert ?? null, advisory?.angleDeg ?? null, this.vnav.destTemp])}`;
+    this.crossTalk?.reportAlertCause(angleCause, angleKey !== null);
+    if (angleKey && angleKey !== this.angleAlertSession) { this.angleAlertSession = angleKey; this.alert(alert(advisory!.angleAlert!), angleCause); }
     // S300 retains valid uncertain GPS guidance for the manual's post-FAF delay; the later SBAS profile has no delay.
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const rnavApproach = !!approach && this.flownOnFmsGuidance(approach) && (this.flightPhase === "APPROACH" || this.armedApproach && nearFaf);
@@ -1833,9 +1851,11 @@ export class ScriptedFms implements CduBackend {
     if (!rnavApproach) this.nav.approachVerticalSeen = false;
     const integrityDenied = this.s300Advisory ? this.approachCancelled || !this.onFinalSegment && !this.approachIntegrityEligible
       : !this.approachIntegrityEligible || selection.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical);
+    this.crossTalk?.reportAlertCause(integrityCause, rnavApproach && integrityDenied);
     if (rnavApproach && integrityDenied) {
-      if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
+      if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY"), integrityCause); }
     } else this.nav.approachIntegrityAlerted = false;
+    this.crossTalk?.retainAlertCauses("APPROACH:", [armCause, tempCause, angleCause, integrityCause]);
   }
 
   // ------------------------------------------------------------------ GPS receivers (GPS phase 3a)
@@ -2446,18 +2466,29 @@ export class ScriptedFms implements CduBackend {
     for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
     this.updateRendezvous();
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
-    if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
+    const timedRendezvousDenied = !!rendezvous && rendezvous.required !== null && !rendezvous.achievable;
+    const timedCause = `TIMED_RENDEZVOUS:${JSON.stringify([this.rndz.wpt, this.rndz.time, this.rndz.minSpeed, this.rndz.maxSpeed, this.rndz.wind])}`;
+    this.crossTalk?.reportAlertCause(timedCause, timedRendezvousDenied, "GUIDANCE");
+    this.crossTalk?.retainAlertCauses("TIMED_RENDEZVOUS:", [timedCause]);
+    if (timedRendezvousDenied && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE"), timedCause, false, "GUIDANCE"); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
     // At the target altitude the descent ends and the aircraft levels there until the crew cancels it.
     if (this.tdn.active && this.altitude <= this.tdn.targetAltitude + 20) { this.tdn.active = false; this.tdn.level = true; }
     const before = this.fuel.quantity;
     this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
-    if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"));
+    const reserveCause = `FUEL_RESERVE:${this.fuel.reserve}`;
+    this.crossTalk?.reportAlertCause(reserveCause, this.fuel.quantity <= this.fuel.reserve, "GUIDANCE");
+    this.crossTalk?.retainAlertCauses("FUEL_RESERVE:", [reserveCause]);
+    if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"), reserveCause, false, "GUIDANCE");
     this.updateVerticalPhase();
     const profile = this.profile();
     const atDestination = profile.destination?.fuel ?? null;
-    if (atDestination !== null && atDestination < this.fuel.reserve) {
-      if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL")); }
+    const fuelDenied = atDestination !== null && atDestination < this.fuel.reserve;
+    const fuelCause = `FUEL_DESTINATION:${JSON.stringify([this.active.dest, this.fuel.reserve])}`;
+    this.crossTalk?.reportAlertCause(fuelCause, fuelDenied, "GUIDANCE");
+    this.crossTalk?.retainAlertCauses("FUEL_DESTINATION:", [fuelCause]);
+    if (fuelDenied) {
+      if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL"), fuelCause, false, "GUIDANCE"); }
     } else this.perf.notEnoughAlerted = false;
     if (profile.unableNext && profile.unableNext !== this.perf.unableAlertedFor) { this.perf.unableAlertedFor = profile.unableNext; this.advisory("UNABLE NEXT ALT"); }
     if (!profile.unableNext) this.perf.unableAlertedFor = null;
@@ -2689,7 +2720,7 @@ export class ScriptedFms implements CduBackend {
   updateRendezvous() {
     if (!this.rendezvousAvailable()) return;
     const now = this.now.getTime();
-    const live = new Set<string>();
+    const live = new Set<string>(), causes: string[] = [];
     for (const route of [this.active, this.modified]) {
       if (!route) continue;
       route.legs.forEach((leg, index) => {
@@ -2703,19 +2734,22 @@ export class ScriptedFms implements CduBackend {
         const solved = due ? this.solveRendezvous(route, index, leg.ident) : cached!;
         if (due) this.rendezvousCache.set(key, solved);
         const warned = key + ":" + solved.condition;
+        const cause = `RENDEZVOUS:${warned}`;
+        if (solved.condition === 1) {
+          causes.push(cause);
+          this.crossTalk?.reportAlertCause(cause, !solved.achievable);
+        }
         if (solved.achievable) { this.rendezvousWarned.delete(warned); return; }
         if (this.rendezvousWarned.has(warned)) return;
         this.rendezvousWarned.add(warned);
         if (solved.condition === 1) {
-          const text = alert("RENDEZVOUS UNACHIEVABLE");
-          // A synchronized peer already annunciated this pending alert. The local warned key above still consumes
-          // the episode, including after CLR, without changing the general cross-talk alert policy (#1564).
-          if (this.crossTalk?.mode !== "SYNC" || this.pendingAlert?.text !== text) this.alert(text);
+          this.alert(alert("RENDEZVOUS UNACHIEVABLE"), cause);
         }
         else this.advisory("RENDEZVOUS UNACHIEVABLE");
       });
     }
     for (const key of [...this.rendezvousCache.keys()]) if (!live.has(key)) this.rendezvousCache.delete(key);
+    this.crossTalk?.retainAlertCauses("RENDEZVOUS:", causes);
   }
 
   /**
@@ -3319,7 +3353,7 @@ export class ScriptedFms implements CduBackend {
     this.nav.rnpManual = rnp;
     // A new entry above the default is announced again, even while the last one's alert stands.
     if (rnp !== null && rnp > RNP_DEFAULTS[this.flightPhase].rnp) this.verifyRnpRaised = false;
-    this.checkRnpEntry();
+    this.checkRnpEntry(true);
     this.updateNavigation(0);
   }
 
@@ -3328,9 +3362,12 @@ export class ScriptedFms implements CduBackend {
    * the phase of flight is in use. It is raised when that starts, on entry or when the phase changes under the entry,
    * and goes by itself when it ends (Appendix E, E-1), on reverting to the default or when the phase's default rises.
    */
-  private checkRnpEntry() {
+  private checkRnpEntry(crewEntry = false) {
     const above = this.nav.rnpManual !== null && this.nav.rnpManual > RNP_DEFAULTS[this.flightPhase].rnp;
-    if (above && !this.verifyRnpRaised) { this.verifyRnpRaised = true; this.alert(alert("VERIFY RNP VALUE")); }
+    const cause = `RNP_ENTRY:${this.flightPhase}:${this.nav.rnpManual}`;
+    this.crossTalk?.reportAlertCause(cause, above);
+    this.crossTalk?.retainAlertCauses("RNP_ENTRY:", [cause]);
+    if (above && !this.verifyRnpRaised) { this.verifyRnpRaised = true; this.alert(alert("VERIFY RNP VALUE"), cause, crewEntry); }
     else if (!above && this.verifyRnpRaised) { this.verifyRnpRaised = false; this.withdrawAlert("VERIFY RNP VALUE"); }
   }
 
@@ -3339,6 +3376,7 @@ export class ScriptedFms implements CduBackend {
 
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {
+    this.crossTalk?.reportAlertCause("ROUTE:END", !this.active.legs.some(leg => leg.kind === "wpt"));
     const now = this.now.getTime();
     if (!this.powered) { this.emit(); return; }
     if (this.bootUntil !== null && now >= this.bootUntil) {
@@ -3350,7 +3388,11 @@ export class ScriptedFms implements CduBackend {
     this.watchHoldSpeed();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
-    if (this.activeCycle.to !== null && this.utcTime.getTime() > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
+    const cycleExpired = this.activeCycle.to !== null && this.utcTime.getTime() > this.activeCycle.to;
+    const cycleCause = `DATABASE:${this.activeCycle.id}:${this.activeCycle.from}:${this.activeCycle.to}`;
+    this.crossTalk?.reportAlertCause(cycleCause, cycleExpired);
+    this.crossTalk?.retainAlertCauses("DATABASE:", [cycleCause]);
+    if (cycleExpired && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE"), cycleCause); }
     if (this.selfTest.startedAt !== null && this.selfTest.result === null && now - this.selfTest.startedAt >= this.aircraftProfile.parameters.fmsPowerTestTime.value * 1000) {
       const failing = ["fmsFail", "gpsLost", "dmeOutage"].some(id => this.injected.has(id as ConditionId));
       this.selfTest = { ...this.selfTest, result: failing ? "FAIL" : "PASS" };
@@ -3814,15 +3856,33 @@ export class ScriptedFms implements CduBackend {
   /** The hold whose entry HIGH HOLDING SPEED has been judged for, a minute before its fix. */
   private holdSpeedChecked: Hold | null = null;
 
+  private holdEntrySpeedCause(hold: Hold) {
+    // Shared executed entry identity, independent of local object copies, CLR and the defaults frozen at entry.
+    // Later physical fix passages remain distinct actual arrive() occurrences.
+    return `HOLD_SPEED:ENTRY:${JSON.stringify([hold.fix, hold.inbound, hold.turn, hold.exit])}`;
+  }
+
+  private holdPassageSpeedCause(hold: Hold) {
+    // The existing completed-circuit count identifies the physical fix passage, including the first post-entry
+    // passage (zero). A delayed offside observation consumes that same passage; a later circuit is a new one.
+    return `HOLD_SPEED:PASSAGE:${JSON.stringify([hold.fix, hold.inbound, hold.turn, hold.exit, hold.circuits ?? 0])}`;
+  }
+
   /** HIGH HOLDING SPEED on entry: judged once, one minute before the holding fix (M300 10-8). */
   private watchHoldSpeed() {
     const route = this.active, hold = route.hold, leg = route.legs[0];
-    if (!hold || hold.status !== "ARMED" || this.holdSpeedChecked === hold || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
-    const fix = this.coordinates(hold.fix);
-    if (!fix || this.groundSpeed <= 1 || (distanceNm(this.here, fix) / this.groundSpeed) * 3600 > 60) return;
+    const cause = hold ? this.holdEntrySpeedCause(hold) : null;
+    const armed = hold?.status === "ARMED" && leg?.kind === "wpt" && leg.ident === hold.fix;
+    const fix = armed ? this.coordinates(hold.fix) : null;
+    const imminent = !!fix && this.groundSpeed > 1 && (distanceNm(this.here, fix) / this.groundSpeed) * 3600 <= 60;
+    const excessive = hold !== undefined && imminent && this.holdExceedsProtection({ ...hold, ...this.entryDefaults(hold) });
+    if (cause) this.crossTalk?.reportAlertCause(cause, excessive);
+    this.crossTalk?.retainAlertCauses("HOLD_SPEED:ENTRY:", cause ? [cause] : []);
+    this.crossTalk?.retainAlertCauses("HOLD_SPEED:PASSAGE:", hold?.status === "IN PROGRESS" || hold?.status === "EXIT ARMED" ? [this.holdPassageSpeedCause(hold)] : []);
+    if (!armed || !imminent || this.holdSpeedChecked === hold) return;
     this.holdSpeedChecked = hold;
     // Judged as the entry will begin, with its defaults taken from the altitude now (M300 10-9).
-    if (this.holdExceedsProtection({ ...hold, ...this.entryDefaults(hold) })) this.alert(alert("HIGH HOLDING SPEED"));
+    if (excessive) this.alert(alert("HIGH HOLDING SPEED"), cause!);
   }
 
   /**
@@ -4004,18 +4064,17 @@ export class ScriptedFms implements CduBackend {
   }
   advisory(text: string) { this.message = { text, alert: false }; }
 
-  alert(text: string) {
+  alert(text: string, cause?: string, newCrewOccurrence = false, owner: AlertCauseOwner = "BOTH") {
+    if (this.crossTalk?.publishAlert(text, cause, newCrewOccurrence, owner)) return;
     const message = { text: text.toUpperCase().slice(0, COLUMNS), alert: true };
     this.recall.unshift(message);
     this.message = message;
     this.pendingAlert = message;
-    this.crossTalk?.broadcastAlert(message.text);
   }
 
   /** Received alerts share their source text, while each CDU retains its own scratch entry and page. */
   receiveComputerAlert(text: string) {
-    if (this.pendingAlert?.text === text) return;
-    const message = { text, alert: true };
+    const message = { text: text.toUpperCase().slice(0, COLUMNS), alert: true };
     this.recall.unshift(message); this.message = message; this.pendingAlert = message; this.emit();
   }
   acknowledgeComputerMessage(text: string) {
