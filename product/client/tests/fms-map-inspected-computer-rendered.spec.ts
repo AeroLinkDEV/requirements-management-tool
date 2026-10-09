@@ -111,7 +111,7 @@ test('INDEPENDENT: inspecting FMS 1 while FMS 2 guides shows FMS 1 direct CYUL a
 // The issue's overlay case: a search pattern flown by FMS 2 must not be drawn over FMS 1's route, nor FMS 1 called SAR.
 test('INDEPENDENT: FMS 2 flying a sector search is not drawn as FMS 1 guidance; inspecting FMS 2 shows its pattern', async ({ page }) => {
   await installPausedClock(page, new Date('2026-09-29T15:00:00Z'))
-  // Preserve this main owner's fixed Date with running timers; the paused helper only makes setup race-free.
+  // Restore this main owner's original fixed Date with running timers after the shared paused setup.
   await page.clock.setFixedTime(new Date('2026-09-29T15:00:00Z'))
   await page.clock.resume()
   await open(page)
