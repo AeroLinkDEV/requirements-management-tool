@@ -284,6 +284,116 @@ test('two computers retain independent CDU and MOD state, synchronize EXEC and r
 // #1564 general-layer owner: the rendezvous owner cannot see a simultaneous non-RV cause, display truncation,
 // or prospective SYNC history. Existing one-message/CLR checks cannot catch duplicate recall or lost new events.
 for (const side of [1, 2] as const) {
+  test(`SYNC FMS${side} actual MAGVAR failure retains local and peer fault records after a valid reload and recurrence`, () => {
+    const { system, one, two } = dualSetup()
+    const origin = [one, two][side - 1]
+    const counts = () => [one, two].map(unit => structuredClone(unit.recallList).filter(message => message.text === 'MAG VAR CRC FAILED').length)
+    origin.setCondition('magvarCrc', true)
+    expect(origin.magvar.valid).toBe(false)
+    expect(origin.hasCondition('fmsFail')).toBe(true)
+    expect(system.mode).toBe('INDEPENDENT')
+    expect(counts()).toEqual([1, 1])
+    for (const unit of [one, two]) expect(structuredClone(unit.recallList).some(message => message.text === 'SYSTEM FAILED')).toBe(true)
+    origin.setCondition('magvarCrc', false)
+    expect(origin.magvar.valid).toBe(true)
+    expect(origin.hasCondition('fmsFail')).toBe(false)
+    mode(origin)
+    expect(system.mode).toBe('SYNC')
+    origin.setCondition('magvarCrc', true)
+    expect(counts()).toEqual([2, 2])
+  })
+
+  test(`SYNC FMS${side} shared armed hold entry has one HIGH HOLDING SPEED episode and later fix passage reannunciates`, () => {
+    const { system, one, two, fly } = dualSetup()
+    system.selectGuidance(side)
+    const origin = [one, two][side - 1], rdg = origin.coordinates('RDG')!
+    for (const unit of [one, two]) {
+      unit.placeAircraft({ position: offset(rdg, 270, 0.5), altitude: 1500, track: 90 }, 'shared hold entry setup')
+      unit.setAircraft({ tas: 120, groundSpeed: 120, track: 90, heading: 90 })
+      Object.assign(unit.wind, { direction: 90, speed: 70 })
+    }
+    origin.replaceLegs([{ kind: 'wpt', ident: 'RDG' }])
+    origin.defineHold('RDG')
+    expect(origin.route.hold?.fix).toBe('RDG')
+    origin.changeHold(hold => { hold.speed = 120 })
+    origin.press('EXEC')
+    for (const unit of [one, two]) {
+      expect(unit.activeRoute.legs[0]).toMatchObject({ kind: 'wpt', ident: 'RDG' })
+      expect(unit.activeRoute.hold?.status).toBe('ARMED')
+      expect(unit.holdExceedsProtection(unit.activeRoute.hold!)).toBe(true)
+    }
+    const counts = () => [one, two].map(unit => structuredClone(unit.recallList).filter(message => message.text === 'HIGH HOLDING SPEED').length)
+    system.tick()
+    expect(counts()).toEqual([1, 1])
+    // The independent HOLD ENTRY advisory may occupy one scratchpad; acknowledge both actual CDU messages.
+    one.press('CLR'); two.press('CLR')
+    expect([one, two].map(unit => unit.lamps().has('MSG'))).toEqual([false, false])
+    system.tick()
+    expect(counts()).toEqual([1, 1])
+    expect([one, two].map(unit => unit.lamps().has('MSG'))).toEqual([false, false])
+    for (let elapsed = 0; elapsed < 1800 && counts()[side - 1] < 2; elapsed++) fly(1)
+    expect(origin.activeRoute.hold?.status).toBe('IN PROGRESS')
+    expect(counts()).toEqual([2, 2])
+    fly(0.25) // Both observation and integration complete after the actual published fix passage.
+    expect([one, two].map(unit => unit.activeRoute.hold?.status)).toEqual(['IN PROGRESS', 'IN PROGRESS'])
+    expect(one.activeRoute.hold?.circuits).toBe(two.activeRoute.hold?.circuits)
+    expect(counts()).toEqual([2, 2])
+    one.press('CLR'); two.press('CLR')
+    for (let elapsed = 0; elapsed < 1800 && counts()[side - 1] < 3; elapsed++) fly(1)
+    expect(origin.activeRoute.hold?.circuits).toBeGreaterThan(0)
+    expect(counts()).toEqual([3, 3])
+    fly(0.25)
+    expect(one.activeRoute.hold?.circuits).toBe(two.activeRoute.hold?.circuits)
+    expect(counts()).toEqual([3, 3])
+  })
+
+  test(`SYNC FMS${side} selected fuel producer can end its cause and annunciate a second real reserve crossing`, () => {
+    const { system, one, two, fly } = dualSetup()
+    system.selectGuidance(side)
+    const selected = [one, two][side - 1]
+    selected.setFuel('reserve', 100); selected.setFuel('flow', 3600); selected.setFuel('quantity', 100.2)
+    const recalls = () => [one, two].map(unit => structuredClone(unit.recallList).filter(message => message.text === 'FUEL RESERVE'))
+    fly(0.25)
+    expect(selected.fuelState.quantity).toBeCloseTo(99.95, 8)
+    expect(recalls().map(messages => messages.length)).toEqual([1, 1])
+    selected.press('CLR')
+    selected.setFuel('quantity', 101)
+    fly(0.25)
+    expect(selected.fuelState.quantity).toBeCloseTo(100.75, 8)
+    expect(recalls().map(messages => messages.length)).toEqual([1, 1])
+    selected.setFuel('quantity', 100.2)
+    fly(0.25)
+    expect(selected.fuelState.quantity).toBeCloseTo(99.95, 8)
+    expect(recalls().map(messages => messages.length)).toEqual([2, 2])
+    expect([one, two].map(unit => unit.lamps().has('MSG'))).toEqual([true, true])
+  })
+
+  test(`SYNC FMS${side} fuel cause survives a handover and ends only at the new producer's healthy computation`, () => {
+    const { system, one, two, fly } = dualSetup()
+    system.selectGuidance(side)
+    const selected = [one, two][side - 1], next = [one, two][2 - side]
+    for (const unit of [selected, next]) { unit.setFuel('reserve', 100); unit.setFuel('flow', 3600) }
+    selected.setFuel('quantity', 100.2); next.setFuel('quantity', 99.95)
+    const recalls = () => [one, two].map(unit => structuredClone(unit.recallList).filter(message => message.text === 'FUEL RESERVE'))
+    fly(0.25)
+    expect(recalls().map(messages => messages.length)).toEqual([1, 1])
+    selected.press('CLR')
+    system.selectGuidance(side === 1 ? 2 : 1)
+    expect(system.guidanceSide).toBe(side === 1 ? 2 : 1)
+    expect(next.fuelState.quantity).toBeCloseTo(99.95, 8)
+    expect(recalls().map(messages => messages.length)).toEqual([1, 1])
+    fly(0.25)
+    expect(next.fuelState.quantity).toBeCloseTo(99.7, 8)
+    expect(recalls().map(messages => messages.length), JSON.stringify([one, two].map(unit => structuredClone(unit.recallList)))).toEqual([1, 1])
+    expect([one, two].map(unit => unit.lamps().has('MSG')), JSON.stringify([one, two].map(unit => ({ scratch: scratch(unit), recall: structuredClone(unit.recallList) })))).toEqual([false, false])
+    next.setFuel('quantity', 101); fly(0.25)
+    expect(next.fuelState.quantity).toBeCloseTo(100.75, 8)
+    next.setFuel('quantity', 100.2); fly(0.25)
+    expect(next.fuelState.quantity).toBeCloseTo(99.95, 8)
+    expect(recalls().map(messages => messages.length)).toEqual([2, 2])
+    expect([one, two].map(unit => unit.lamps().has('MSG'))).toEqual([true, true])
+  })
+
   test(`SYNC FMS${side} CHECK ANP has one acknowledged cause episode and a later genuine recurrence`, () => {
     const { system, one, two } = dualSetup()
     const units = [one, two], origin = units[side - 1], peer = units[2 - side]

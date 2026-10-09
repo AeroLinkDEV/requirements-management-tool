@@ -1,6 +1,6 @@
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
-import type { CrossTalkPort, DualMode, FmsSide } from "./crossTalk";
+import type { AlertCauseOwner, CrossTalkPort, DualMode, FmsSide } from "./crossTalk";
 import { RadioManagementSystem } from "./radioManagement";
 import { ScriptedFms } from "./scriptedFms";
 import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
@@ -22,7 +22,7 @@ export class DualFmsSystem {
   private disagreement = false;
   // Synchronized episode history does not rewrite either computer's recall. Mode changes and unavailable
   // contributors are not cause clears: a delayed contributor cannot reopen an acknowledged episode.
-  private alertCauses = new Map<string, { active: [boolean | null, boolean | null]; published: boolean }>();
+  private alertCauses = new Map<string, { owner: AlertCauseOwner; active: [boolean | null, boolean | null]; published: boolean }>();
   private settings: string[];
   private readonly clock: () => Date;
   constructor(clock: () => Date, options: { profile?: AircraftProfile; secondaryProfile?: AircraftProfile; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
@@ -92,8 +92,8 @@ export class DualFmsSystem {
       crossfill(secondary) { return system.crossfill(side, secondary); },
       settingsChanged() { system.compute(() => system.settingsChanged(side)); },
       healthChanged() { system.compute(() => { system.reconcile(); system.notify(); }); },
-      publishAlert(text, cause, newCrewOccurrence) { return system.compute(() => system.publishAlert(side, text, cause, newCrewOccurrence)); },
-      reportAlertCause(cause, active) { system.reportAlertCause(side, cause, active); },
+      publishAlert(text, cause, newCrewOccurrence, owner) { return system.compute(() => system.publishAlert(side, text, cause, newCrewOccurrence, owner)); },
+      reportAlertCause(cause, active, owner) { system.reportAlertCause(side, cause, active, owner); },
       retainAlertCauses(group, present) {
         for (const cause of system.alertCauses.keys()) if (cause.startsWith(group) && !present.includes(cause))
           system.reportAlertCause(side, cause, false);
@@ -110,22 +110,35 @@ export class DualFmsSystem {
       },
     };
   }
-  private reportAlertCause(side: FmsSide, cause: string, active: boolean) {
+  private reportAlertCause(side: FmsSide, cause: string, active: boolean, owner: AlertCauseOwner = "BOTH") {
+    if (this.unit(side).hasCondition("fmsFail")) return;
     let episode = this.alertCauses.get(cause);
+    const producer = episode?.owner ?? owner;
+    if (producer === "GUIDANCE" && side !== this.driver) return;
     if (!episode) {
       // Independent causes remain local. Previously synchronized causes can still end through healthy,
       // explicit declarations while independent; an outage alone cannot end one.
       if (this.operation !== "SYNC" || !this.link) return;
       if (!active) return;
-      episode = { active: [null, null], published: false }; this.alertCauses.set(cause, episode);
+      episode = { owner: producer, active: [null, null], published: false }; this.alertCauses.set(cause, episode);
     }
+    // Performance belongs only to Flight.integrate's actual selected producer. Its next healthy computation,
+    // including after handover, can end the cause; no offside performance computation is fabricated.
+    if (episode.owner === "GUIDANCE") episode.active = [false, false];
     episode.active[side - 1] = active;
     if (episode.active.every(value => value === false)) this.alertCauses.delete(cause);
   }
-  private publishAlert(side: FmsSide, text: string, cause?: string, newCrewOccurrence = false): boolean {
+  private publishAlert(side: FmsSide, text: string, cause?: string, newCrewOccurrence = false, owner: AlertCauseOwner = "BOTH"): boolean {
     if (this.operation !== "SYNC" || !this.link) return false;
+    if (this.unit(side).hasCondition("fmsFail")) {
+      // The event explaining an actual failure still belongs in the origin's local recall and healthy peer's
+      // recall. An unavailable origin supplies no authoritative cause declaration or shared episode clear.
+      if (!this.peer(side).hasCondition("fmsFail")) this.peer(side).receiveComputerAlert(text);
+      return false;
+    }
     if (cause !== undefined) {
-      this.reportAlertCause(side, cause, true);
+      if ((this.alertCauses.get(cause)?.owner ?? owner) === "GUIDANCE" && side !== this.driver) return false;
+      this.reportAlertCause(side, cause, true, owner);
       const episode = this.alertCauses.get(cause)!;
       if (episode.published && !newCrewOccurrence) return true;
       episode.published = true;

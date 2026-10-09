@@ -1,5 +1,5 @@
 import { alert } from "./alerts";
-import type { CrossTalkPort, RadioManagementPort } from "./crossTalk";
+import type { AlertCauseOwner, CrossTalkPort, RadioManagementPort } from "./crossTalk";
 import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey, type StandbyKey, adfFrequency } from "./radioManagement";
 import type { CivilSolution } from "./civilNavigation";
 import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
@@ -1089,7 +1089,7 @@ export class ScriptedFms implements CduBackend {
     // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
     // HIGH HOLDING SPEED at each fly-over of the fix after the first (M300 10-8), the pattern rebuilt at the speed now.
-    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"), this.holdPassageSpeedCause(hold));
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
@@ -1101,7 +1101,7 @@ export class ScriptedFms implements CduBackend {
         Object.assign(hold, this.entryDefaults(hold));
         delete hold.defaults;
         // Entered without the minute's notice (the hold made within it): checked at the fix.
-        if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+        if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"), this.holdEntrySpeedCause(hold));
         this.holdSpeedChecked = hold;
         // Established in the hold, FROM and TO are the holding fix; its ATA is this first crossing, kept while holding.
         this.overflown = { ident: leg.ident, altitude: this.altitude, ata: this.now.getTime() };
@@ -2462,34 +2462,33 @@ export class ScriptedFms implements CduBackend {
    * the alert list, so the advisory is used) when a climb constraint cannot be made.
    */
   updatePerformance(dt: number) {
-    this.crossTalk?.reportAlertCause("ROUTE:END", !this.active.legs.some(leg => leg.kind === "wpt"));
     // Moving waypoints follow the simulation clock from their epochs (rev 2 D-R epoch), not the ticks.
     for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
     this.updateRendezvous();
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
     const timedRendezvousDenied = !!rendezvous && rendezvous.required !== null && !rendezvous.achievable;
     const timedCause = `TIMED_RENDEZVOUS:${JSON.stringify([this.rndz.wpt, this.rndz.time, this.rndz.minSpeed, this.rndz.maxSpeed, this.rndz.wind])}`;
-    this.crossTalk?.reportAlertCause(timedCause, timedRendezvousDenied);
+    this.crossTalk?.reportAlertCause(timedCause, timedRendezvousDenied, "GUIDANCE");
     this.crossTalk?.retainAlertCauses("TIMED_RENDEZVOUS:", [timedCause]);
-    if (timedRendezvousDenied && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE"), timedCause); }
+    if (timedRendezvousDenied && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE"), timedCause, false, "GUIDANCE"); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
     // At the target altitude the descent ends and the aircraft levels there until the crew cancels it.
     if (this.tdn.active && this.altitude <= this.tdn.targetAltitude + 20) { this.tdn.active = false; this.tdn.level = true; }
     const before = this.fuel.quantity;
     this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
     const reserveCause = `FUEL_RESERVE:${this.fuel.reserve}`;
-    this.crossTalk?.reportAlertCause(reserveCause, this.fuel.quantity <= this.fuel.reserve);
+    this.crossTalk?.reportAlertCause(reserveCause, this.fuel.quantity <= this.fuel.reserve, "GUIDANCE");
     this.crossTalk?.retainAlertCauses("FUEL_RESERVE:", [reserveCause]);
-    if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"), reserveCause);
+    if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"), reserveCause, false, "GUIDANCE");
     this.updateVerticalPhase();
     const profile = this.profile();
     const atDestination = profile.destination?.fuel ?? null;
     const fuelDenied = atDestination !== null && atDestination < this.fuel.reserve;
     const fuelCause = `FUEL_DESTINATION:${JSON.stringify([this.active.dest, this.fuel.reserve])}`;
-    this.crossTalk?.reportAlertCause(fuelCause, fuelDenied);
+    this.crossTalk?.reportAlertCause(fuelCause, fuelDenied, "GUIDANCE");
     this.crossTalk?.retainAlertCauses("FUEL_DESTINATION:", [fuelCause]);
     if (fuelDenied) {
-      if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL"), fuelCause); }
+      if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL"), fuelCause, false, "GUIDANCE"); }
     } else this.perf.notEnoughAlerted = false;
     if (profile.unableNext && profile.unableNext !== this.perf.unableAlertedFor) { this.perf.unableAlertedFor = profile.unableNext; this.advisory("UNABLE NEXT ALT"); }
     if (!profile.unableNext) this.perf.unableAlertedFor = null;
@@ -3377,6 +3376,7 @@ export class ScriptedFms implements CduBackend {
 
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {
+    this.crossTalk?.reportAlertCause("ROUTE:END", !this.active.legs.some(leg => leg.kind === "wpt"));
     const now = this.now.getTime();
     if (!this.powered) { this.emit(); return; }
     if (this.bootUntil !== null && now >= this.bootUntil) {
@@ -3856,15 +3856,33 @@ export class ScriptedFms implements CduBackend {
   /** The hold whose entry HIGH HOLDING SPEED has been judged for, a minute before its fix. */
   private holdSpeedChecked: Hold | null = null;
 
+  private holdEntrySpeedCause(hold: Hold) {
+    // Shared executed entry identity, independent of local object copies, CLR and the defaults frozen at entry.
+    // Later physical fix passages remain distinct actual arrive() occurrences.
+    return `HOLD_SPEED:ENTRY:${JSON.stringify([hold.fix, hold.inbound, hold.turn, hold.exit])}`;
+  }
+
+  private holdPassageSpeedCause(hold: Hold) {
+    // The existing completed-circuit count identifies the physical fix passage, including the first post-entry
+    // passage (zero). A delayed offside observation consumes that same passage; a later circuit is a new one.
+    return `HOLD_SPEED:PASSAGE:${JSON.stringify([hold.fix, hold.inbound, hold.turn, hold.exit, hold.circuits ?? 0])}`;
+  }
+
   /** HIGH HOLDING SPEED on entry: judged once, one minute before the holding fix (M300 10-8). */
   private watchHoldSpeed() {
     const route = this.active, hold = route.hold, leg = route.legs[0];
-    if (!hold || hold.status !== "ARMED" || this.holdSpeedChecked === hold || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
-    const fix = this.coordinates(hold.fix);
-    if (!fix || this.groundSpeed <= 1 || (distanceNm(this.here, fix) / this.groundSpeed) * 3600 > 60) return;
+    const cause = hold ? this.holdEntrySpeedCause(hold) : null;
+    const armed = hold?.status === "ARMED" && leg?.kind === "wpt" && leg.ident === hold.fix;
+    const fix = armed ? this.coordinates(hold.fix) : null;
+    const imminent = !!fix && this.groundSpeed > 1 && (distanceNm(this.here, fix) / this.groundSpeed) * 3600 <= 60;
+    const excessive = hold !== undefined && imminent && this.holdExceedsProtection({ ...hold, ...this.entryDefaults(hold) });
+    if (cause) this.crossTalk?.reportAlertCause(cause, excessive);
+    this.crossTalk?.retainAlertCauses("HOLD_SPEED:ENTRY:", cause ? [cause] : []);
+    this.crossTalk?.retainAlertCauses("HOLD_SPEED:PASSAGE:", hold?.status === "IN PROGRESS" || hold?.status === "EXIT ARMED" ? [this.holdPassageSpeedCause(hold)] : []);
+    if (!armed || !imminent || this.holdSpeedChecked === hold) return;
     this.holdSpeedChecked = hold;
     // Judged as the entry will begin, with its defaults taken from the altitude now (M300 10-9).
-    if (this.holdExceedsProtection({ ...hold, ...this.entryDefaults(hold) })) this.alert(alert("HIGH HOLDING SPEED"));
+    if (excessive) this.alert(alert("HIGH HOLDING SPEED"), cause!);
   }
 
   /**
@@ -4046,8 +4064,8 @@ export class ScriptedFms implements CduBackend {
   }
   advisory(text: string) { this.message = { text, alert: false }; }
 
-  alert(text: string, cause?: string, newCrewOccurrence = false) {
-    if (this.crossTalk?.publishAlert(text, cause, newCrewOccurrence)) return;
+  alert(text: string, cause?: string, newCrewOccurrence = false, owner: AlertCauseOwner = "BOTH") {
+    if (this.crossTalk?.publishAlert(text, cause, newCrewOccurrence, owner)) return;
     const message = { text: text.toUpperCase().slice(0, COLUMNS), alert: true };
     this.recall.unshift(message);
     this.message = message;

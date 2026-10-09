@@ -5,6 +5,7 @@ import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFau
 
 export type FmsSide = 1 | 2;
 export type DualMode = "SYNC" | "INDEPENDENT";
+export type AlertCauseOwner = "BOTH" | "GUIDANCE";
 /** Modelled computer-to-computer link. Device radio feedback uses a separate RMS port. */
 export interface CrossTalkPort {
   readonly side: FmsSide;
@@ -21,8 +22,8 @@ export interface CrossTalkPort {
   settingsChanged(): void;
   healthChanged(): void;
   /** Persistent causes are full model identities, independent of display text and crew acknowledgment. */
-  publishAlert(text: string, cause?: string, newCrewOccurrence?: boolean): boolean;
-  reportAlertCause(cause: string, active: boolean): void;
+  publishAlert(text: string, cause?: string, newCrewOccurrence?: boolean, owner?: AlertCauseOwner): boolean;
+  reportAlertCause(cause: string, active: boolean, owner?: AlertCauseOwner): void;
   retainAlertCauses(group: string, present: readonly string[]): void;
   acknowledgeMessage(text: string): void;
   missedApproachRequested(): void;

@@ -170,12 +170,20 @@ reflecting surface, not the physical aircraft; it provides no installed Doppler 
 
 The dual system owns publication of synchronized alerts to both CDUs. Persistent producers declare a full cause
 identity and their actual active/clear state; display truncation and CLR do not identify or end an episode. A delayed
-peer computation consumes the same published cause. Both computers must explicitly observe its end before another
-episode can annunciate. A link, mode or availability change alone does not declare recovery. Independent alerts remain
+peer computation consumes the same published cause. Causes computed by both computers end only after both explicitly
+observe recovery. Fuel and timed-performance causes instead follow their actual sole guidance producer; its next healthy
+computation can end them, including after guidance handover, without running offside performance. A link, mode or
+availability change alone does not declare recovery. Independent alerts remain
 local, and re-SYNC does not overwrite either computer's existing recall history. Actual crew requests, timer expiries,
 radio-request timeouts and other event-style calls remain separate occurrences, even when their displayed text matches.
+Unavailable computers cannot supply authoritative declarations or clears. The actual alert explaining a MAGVAR
+failure still enters that origin's local recall and the healthy peer's recall; a valid reload followed by another
+failure is another fault occurrence. Shared HIGH HOLDING SPEED entry warnings use the executed entry identity;
+later physical fix passages use the existing completed-circuit ordinal, including the first post-entry passage.
+Delayed offside observation consumes the same passage, while a later circuit remains a new occurrence. Actual
+hold removal or progression clears old passage membership, independently of CLR and synchronized object copies.
 
-`DualFmsSystem.alertCauses` is authoritative episode bookkeeping: full keys, nullable per-side declarations and
+`DualFmsSystem.alertCauses` is authoritative episode bookkeeping: full keys, producer ownership, nullable per-side declarations and
 publication state in Map order. It is outside the current canonical observable census projection and must be included
 in any future complete snapshot inventory. Canonical equivalence alone does not establish episode-ledger or complete
 recall-history equivalence. This is laboratory cross-talk behavior, without installed bus qualification.
