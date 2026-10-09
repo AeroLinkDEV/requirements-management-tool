@@ -144,8 +144,10 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
   const altTicks = Array.from({ length: 13 }, (_, i) => Math.round(air.altitude / 100) * 100 + (i - 6) * 100);
   const lateralDots = bus.crossTrack.status === "NORMAL" ? clamp(bus.crossTrack.value! / bus.lateralFullScaleNm, -1.1, 1.1) : null;
   const verticalDots = bus.verticalDeviation.status === "NORMAL" ? clamp(bus.verticalDeviation.value! / bus.verticalFullScaleFt, -1.1, 1.1) : null;
-  // Flight director: roll from the FMS roll command (label 121) when LNAV guides; pitch toward the path or the target.
-  const fdRoll = bus.rollCommand.status === "NORMAL" ? clamp(bus.rollCommand.value! - air.bank, -20, 20) : null;
+  // Valid FMS NAV data can be advisory in HDG. The roll cue belongs only to engaged NAV,
+  // including its managed HOLD/SAR paths, rather than to every NORMAL steering word.
+  const navEngaged = heli ? heli.axes.roll === "NAV" : ["LNAV", "HOLD", "SAR"].includes(bus.lateralMode);
+  const fdRoll = navEngaged && bus.rollCommand.status === "NORMAL" ? clamp(bus.rollCommand.value! - air.bank, -20, 20) : null;
   const fdPitch = bus.failed ? null
     : verticalDots !== null && bus.verticalCoupled ? clamp(-verticalDots * 4, -6, 6)
     : bus.targetAltitude.status === "NORMAL" ? clamp((bus.targetAltitude.value! - air.altitude) / 150 - air.pitch, -6, 6) : null;

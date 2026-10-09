@@ -6,6 +6,9 @@ import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
 import { AIRCRAFT_DATA_TAGS, FMS_OUTPUT_TAGS, HELICOPTER_DATA_TAGS, outputEngagement, type OutputTag } from '../src/fmsCdu/outputTags'
 import { LAB_AIRLINE_VNAV_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { singleComposition, dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { offset } from '../src/fmsCdu/fmsModel'
 
 // Plan rev 3 A5: provenance, validity, selection and engagement kept distinct, for every output the displays take. The
 // catalogues (outputTags.ts) are typed over every key, so an untagged output does not compile; these tests hold the
@@ -89,16 +92,76 @@ test('A5: selection: under the helicopter profile the crew selects altitude and 
   expect(lab.engagement.targetAltitude).toBe(lab.outputs.verticalMode?.startsWith('VNAV') ? 'coupled' : 'advisory')
 })
 
-test('A5: coupling follows the engaged mode: NAV consumes the roll command; on a heading the FMS publishes none', () => {
+test('A5: coupling follows the engaged mode: NAV consumes the roll command; a heading leaves valid FMS NAV data advisory', () => {
   const heli = run(setUp87nOffshoreSar)
   expect(heli.sim.axisModes.roll).toBe('NAV')
   expect(heli.snapshot().engagement.rollCommand).toBe('coupled')
   heli.sim.selectHeading(200)
   heli.step()
   const onHeading = heli.snapshot()
-  expect(onHeading.outputs.rollCommand.status).toBe('NCD')
-  expect(onHeading.engagement.rollCommand).toBe('no data')
+  expect(onHeading.outputs.rollCommand.status).toBe('NORMAL')
+  expect(onHeading.engagement.rollCommand).toBe('advisory')
 })
+
+// #1562 primary data owner: a northbound leg from a southbound aircraft needs a right route turn,
+// while the selected 110-degree heading requires a left physical turn. This rejects publishing HDG
+// steering as label 121, independently of the bus/encoder and without recomputing guidance in a read.
+for (const side of ['single', 1, 2] as const) for (const armed of [false, true]) {
+  test(`FMS NAV course data remains valid in HDG ${armed ? 'with NAV armed' : 'uncoupled'} on ${side}`, () => {
+    const single = side === 'single' ? singleComposition(START) : null
+    const dual = side === 'single' ? null : dualComposition(START)
+    const unit = single?.fms ?? dual!.system.computers[side === 2 ? 1 : 0]
+    const sim = single?.sim ?? dual!.system.flights[side === 2 ? 1 : 0]
+    const kernel = new FmsKernel(single?.plant ?? dual!.plant)
+    if (dual) dual.system.selectGuidance(side === 2 ? 2 : 1)
+    Object.assign(unit.wind, { direction: 0, speed: 0 })
+    unit.placeAircraft({ position: unit.truePosition, track: 200, altitude: 3000 }, 'NAV data in HDG control')
+    const ident = unit.createPilot('NORTH', offset(unit.position, 0, 12))
+    unit.directTo(ident); unit.press('EXEC')
+    sim.selectHeading(110)
+    if (armed) sim.armLnav()
+    sim.refreshGuidance()
+    const assertBus = () => {
+      const bus = fmsOutputs(unit, sim)
+      expect(sim.lateralMode).toBe('HDG')
+      expect(sim.lnavIsArmed).toBe(armed)
+      expect(bus.desiredTrack.status).toBe('NORMAL')
+      expect(Math.min(Math.abs(bus.desiredTrack.value!), Math.abs(bus.desiredTrack.value! - 360))).toBeLessThan(0.1)
+      expect(bus.crossTrack.status).toBe('NORMAL')
+      expect(Math.abs(bus.crossTrack.value!)).toBeLessThan(0.02)
+      expect(bus.rollCommand.status).toBe('NORMAL')
+      expect(bus.rollCommand.value).toBe(30)
+      expect(sim.guidance.bankCommand).toBe(-30)
+      expect(outputEngagement(bus, unit, sim).rollCommand).toBe('advisory')
+      const before = structuredClone({ bus, guidance: sim.guidance, position: unit.truePosition, clock: unit.now })
+      for (let i = 0; i < 3; i++) expect(fmsOutputs(unit, sim)).toEqual(before.bus)
+      expect({ bus: fmsOutputs(unit, sim), guidance: sim.guidance, position: unit.truePosition, clock: unit.now }).toEqual(before)
+    }
+    assertBus()
+    kernel.advance(1)
+    // The aircraft still banks LEFT under HDG; advisory route steering does not take the plant.
+    expect(unit.attitude.bank).toBeLessThan(0)
+    assertBus()
+    unit.setCondition('fmsFail', true)
+    expect(fmsOutputs(unit, sim)).toMatchObject({ desiredTrack: { status: 'FAIL' }, crossTrack: { status: 'FAIL' }, rollCommand: { status: 'FAIL' } })
+    unit.setCondition('fmsFail', false)
+    sim.refreshGuidance()
+    expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NORMAL')
+    unit.modify(route => { route.legs = [] }); unit.press('EXEC'); sim.refreshGuidance()
+    expect(fmsOutputs(unit, sim)).toMatchObject({ desiredTrack: { status: 'NCD' }, crossTrack: { status: 'NCD' }, rollCommand: { status: 'NCD' } })
+    expect(sim.routeRollCommand).toBeNull()
+    unit.directTo(ident); unit.press('EXEC'); sim.refreshGuidance()
+    expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NORMAL')
+    unit.powerOff()
+    expect(unit.powerState).toBe('OFF')
+    expect(fmsOutputs(unit, sim).rollCommand.status).toBe('FAIL')
+    expect(sim.routeRollCommand).toBeNull()
+    unit.powerOn('WARM', true)
+    expect(unit.powerState).toBe('TEST')
+    expect(fmsOutputs(unit, sim).rollCommand.status).toBe('FAIL')
+    expect(sim.routeRollCommand).toBeNull()
+  })
+}
 
 test('A5: the FMS transition request is coupled while the autopilot flies it (TD, the gate segment, TD/H) and advisory otherwise', () => {
   const heli = run(setUp87nOffshoreSar)

@@ -334,7 +334,9 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   // autopilot's (basic heading and altitude hold after the reversion).
   if (failed) return empty;
 
-  const managed = !fms.needsActiveLeg && sim.lateralMode === "LNAV" && g.desiredTrack !== null;
+  // This generic installation displays FMS NAV course data. It has no ILS/VOR course-selector model:
+  // coupling to NAV is separate from the validity of the path (S300 C-12, items 2, 5 and 6).
+  const managed = !fms.needsActiveLeg && g.desiredTrack !== null;
   const path = sim.verticalPath;
   const advisory = fms.advisoryVertical;
   const profile = fms.profile();
@@ -366,7 +368,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     verticalSource: advisory?.available ? "VNAV" : path?.source ?? null,
     verticalCoupled: advisory ? false : path?.coupled ?? false,
     // Invalid with the active waypoint a moving one whose rendezvous is unachievable (M300 11-37, condition 1).
-    rollCommand: managed && !fms.rendezvousRollInvalid ? normal(g.bankCommand) : ncd(),
+    rollCommand: managed && !fms.rendezvousRollInvalid && sim.routeRollCommand !== null ? normal(sim.routeRollCommand) : ncd(),
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
     // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood. In a manual hold,
