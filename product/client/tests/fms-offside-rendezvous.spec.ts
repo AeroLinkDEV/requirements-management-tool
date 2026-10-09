@@ -27,6 +27,66 @@ const far = (unit: ScriptedFms) => {
   unit.directTo('FAR1'); unit.press('EXEC')
 }
 
+// #1564 primary delayed-episode regression: the existing same-deadline rows below cannot see a peer whose
+// first healthy computation establishes a different 10-second phase. CLR acknowledges the synchronized alert,
+// but is not the end of the still-unachievable cause. No private warning/cache state is used as an oracle.
+for (const side of [1, 2] as const) {
+  test(`SYNC FMS${side} CLR does not reopen the same rendezvous episode at its recovered peer's later deadline`, () => {
+    const { system, plant } = dualComposition(START)
+    const kernel = new FmsKernel(plant)
+    const origin = system.computers[side - 1], peer = system.computers[2 - side]
+    const fly = (seconds: number) => { kernel.advance(seconds * 4) }
+    system.selectGuidance(side)
+    system.simulator.selectHeading(270)
+    origin.defineMoving('FAR1', offset(origin.position, 0, 480), 0, 0)
+    origin.directTo('FAR1'); origin.press('EXEC')
+    expect(system.mode).toBe('SYNC')
+    expect(origin.rendezvousFor(origin.activeRoute, 0)).toMatchObject({ achievable: true, computedAt: START })
+    expect(peer.rendezvousFor(peer.activeRoute, 0)).toMatchObject({ achievable: true, computedAt: START })
+    fly(3)
+    peer.setCondition('fmsFail', true)
+    expect(system.mode).toBe('INDEPENDENT')
+    fly(1)
+    peer.setCondition('fmsFail', false)
+    origin.dualOperation!.requestMode('SYNC'); origin.dualOperation!.confirmMode(true)
+    expect(system.mode).toBe('SYNC')
+    expect(origin.rendezvousFor(origin.activeRoute, 0)).toMatchObject({ achievable: true, computedAt: START })
+    expect(peer.rendezvousFor(peer.activeRoute, 0)).toMatchObject({ achievable: true, computedAt: START + 4_000 })
+    fly(1)
+    for (const unit of system.computers) unit.defineMoving('FAR1', offset(unit.position, 0, 600), 0, 0)
+    fly(5)
+    expect(origin.now.getTime()).toBe(START + 10_000)
+    expect(origin.rendezvousFor(origin.activeRoute, 0)).toMatchObject({ achievable: false, computedAt: START + 10_000 })
+    expect(peer.rendezvousFor(peer.activeRoute, 0)).toMatchObject({ achievable: true, computedAt: START + 4_000 })
+    for (const unit of system.computers) {
+      expect(recalled(unit)).toHaveLength(1)
+      expect(unit.lamps().has('MSG')).toBe(true)
+    }
+    const acknowledged = system.computers.map(unit => structuredClone(recalled(unit)))
+    origin.press('CLR')
+    for (const unit of system.computers) expect(unit.lamps().has('MSG')).toBe(false)
+    // A crew mode transition before the delayed peer's deadline is not physical recovery.
+    origin.dualOperation!.requestMode('INDEPENDENT'); origin.dualOperation!.confirmMode(true)
+    expect(system.mode).toBe('INDEPENDENT')
+    origin.press('CLR'); peer.press('CLR')
+    origin.dualOperation!.requestMode('SYNC'); origin.dualOperation!.confirmMode(true)
+    expect(system.mode).toBe('SYNC')
+    expect(peer.rendezvousFor(peer.activeRoute, 0)).toMatchObject({ achievable: true, computedAt: START + 4_000 })
+    fly(4)
+    expect(peer.rendezvousFor(peer.activeRoute, 0)).toMatchObject({ achievable: false, computedAt: START + 14_000 })
+    for (let index = 0; index < 2; index++) {
+      expect(recalled(system.computers[index])).toEqual(acknowledged[index])
+      expect(system.computers[index].lamps().has('MSG')).toBe(false)
+    }
+    // Later deadlines do not turn acknowledgment into recurrence either.
+    fly(20)
+    for (let index = 0; index < 2; index++) {
+      expect(recalled(system.computers[index])).toEqual(acknowledged[index])
+      expect(system.computers[index].lamps().has('MSG')).toBe(false)
+    }
+  })
+}
+
 // Primary owner: periodic offside rendezvous computations (#1523, M300 11-37). Existing single/EXEC-purity owners
 // do not fly an unselected computer through successive refresh deadlines. Different independent targets and EXEC
 // epochs also reject borrowing the selected computer's cache instead of computing the receiving computer's plan.

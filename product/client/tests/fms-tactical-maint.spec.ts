@@ -281,6 +281,68 @@ test('two computers retain independent CDU and MOD state, synchronize EXEC and r
   expect(new ScriptedFms().otherFms).toBeNull()
 })
 
+// #1564 general-layer owner: the rendezvous owner cannot see a simultaneous non-RV cause, display truncation,
+// or prospective SYNC history. Existing one-message/CLR checks cannot catch duplicate recall or lost new events.
+for (const side of [1, 2] as const) {
+  test(`SYNC FMS${side} CHECK ANP has one acknowledged cause episode and a later genuine recurrence`, () => {
+    const { system, one, two } = dualSetup()
+    const units = [one, two], origin = units[side - 1], peer = units[2 - side]
+    const recalls = () => units.map(unit => structuredClone(unit.recallList).filter(message => message.text === 'CHECK ANP'))
+    expect(system.mode).toBe('SYNC')
+    origin.setCondition('rnpExceeded', true); peer.setCondition('rnpExceeded', true)
+    expect(units.map(unit => unit.hasCondition('rnpExceeded'))).toEqual([true, true])
+    expect(recalls().map(messages => messages.length)).toEqual([1, 1])
+    origin.press('CLR')
+    expect(units.map(unit => unit.lamps().has('MSG'))).toEqual([false, false])
+    system.tick()
+    expect(recalls().map(messages => messages.length)).toEqual([1, 1])
+    origin.setCondition('rnpExceeded', false); peer.setCondition('rnpExceeded', false)
+    expect(units.map(unit => unit.hasCondition('rnpExceeded'))).toEqual([false, false])
+    system.tick() // Both actual navigation computations must observe recovery before another episode is asserted.
+    for (const unit of units) {
+      expect(unit.navPerformance.anp).not.toBeNull()
+      expect(unit.navPerformance.anp!).toBeLessThan(unit.navPerformance.rnp)
+    }
+    origin.setCondition('rnpExceeded', true); peer.setCondition('rnpExceeded', true)
+    expect(recalls().map(messages => messages.length)).toEqual([2, 2])
+    expect(units.map(unit => unit.lamps().has('MSG'))).toEqual([true, true])
+  })
+
+  test(`SYNC FMS${side} distinct event messages survive equal display text and CLR`, () => {
+    const { one, two } = dualSetup()
+    const units = [one, two], origin = units[side - 1], peer = units[2 - side]
+    const text = 'ABCDEFGHIJKLMNOPQRSTUVWX'
+    origin.raiseAlert(text + ':first physical event')
+    peer.raiseAlert(text + ':second physical event')
+    for (const unit of units) expect(structuredClone(unit.recallList).filter(message => message.text === text)).toHaveLength(2)
+    origin.press('CLR')
+    origin.raiseAlert(text + ':third physical event')
+    for (const unit of units) {
+      expect(structuredClone(unit.recallList).filter(message => message.text === text)).toHaveLength(3)
+      expect(unit.lamps().has('MSG')).toBe(true)
+    }
+  })
+}
+
+test('new SYNC episode bookkeeping preserves independent recall prefixes and later local isolation', () => {
+  const { system, one, two } = dualSetup()
+  one.dualOperation!.requestMode('INDEPENDENT'); one.dualOperation!.confirmMode(true)
+  expect(system.mode).toBe('INDEPENDENT')
+  expect(system.linked).toBe(true)
+  one.raiseAlert('ONSIDE HISTORY'); two.raiseAlert('OFFSIDE HISTORY')
+  const histories = [one, two].map(unit => structuredClone(unit.recallList))
+  one.dualOperation!.requestMode('SYNC'); one.dualOperation!.confirmMode(true)
+  expect(system.mode).toBe('SYNC')
+  expect([one, two].map(unit => structuredClone(unit.recallList))).toEqual(histories)
+  one.raiseAlert('NEW COMMON EVENT')
+  for (let index = 0; index < 2; index++) expect(structuredClone([one, two][index].recallList)).toEqual([{ text: 'NEW COMMON EVENT', alert: true }, ...histories[index]])
+  one.dualOperation!.requestMode('INDEPENDENT'); one.dualOperation!.confirmMode(true)
+  const peerHistory = structuredClone(two.recallList)
+  one.raiseAlert('ONLY THIS COMPUTER')
+  expect(structuredClone(two.recallList)).toEqual(peerHistory)
+  expect(one.recallList[0].text).toBe('ONLY THIS COMPUTER')
+})
+
 // Owner: committed helicopter procedure geometry crosses the link; preview/ERASE cannot change receiver guidance.
 test('SAR and hover committed data follow synchronized EXEC and receiving crossfill EXEC', () => {
   const { system, one, two, tick, fly } = dualSetup()

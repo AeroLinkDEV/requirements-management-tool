@@ -166,6 +166,20 @@ retain LAND semantics and receive no water-current correction. Malformed velocit
 future or replayed epochs cannot renew Doppler authority. The native operation changes the producer's reported
 reflecting surface, not the physical aircraft; it provides no installed Doppler or sea-state qualification.
 
+### Synchronized alert causes
+
+The dual system owns publication of synchronized alerts to both CDUs. Persistent producers declare a full cause
+identity and their actual active/clear state; display truncation and CLR do not identify or end an episode. A delayed
+peer computation consumes the same published cause. Both computers must explicitly observe its end before another
+episode can annunciate. A link, mode or availability change alone does not declare recovery. Independent alerts remain
+local, and re-SYNC does not overwrite either computer's existing recall history. Actual crew requests, timer expiries,
+radio-request timeouts and other event-style calls remain separate occurrences, even when their displayed text matches.
+
+`DualFmsSystem.alertCauses` is authoritative episode bookkeeping: full keys, nullable per-side declarations and
+publication state in Map order. It is outside the current canonical observable census projection and must be included
+in any future complete snapshot inventory. Canonical equivalence alone does not establish episode-ledger or complete
+recall-history equivalence. This is laboratory cross-talk behavior, without installed bus qualification.
+
 ### Magnetic reference and preflight
 
 The civil helicopter profile defaults to **MAG**. INIT/REF → SETUP selects MAG/TRUE; angular entry and CDU/EFIS/HUD display use the consumed NOAA WMM2025 model, while plant/navigation geometry and wind remain true. Above N73 or below S60 the selection is forced TRUE and cannot be toggled. Leaving the polar region retains TRUE with CHECK TRUE/MAG REF. IDENT 2/2 identifies the model, epoch, release and checksum. The Nav data tab exports/loads the simulator MAGVAR package and restores the bundled table. A consumed CRC failure withdraws FMS navigation; age above five years is a maintenance advisory, with extrapolated accuracy explicitly unqualified. Height without valid GPS HAE is approximated at 0 km above the ellipsoid.

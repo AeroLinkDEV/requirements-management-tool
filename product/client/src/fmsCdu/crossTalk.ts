@@ -20,7 +20,10 @@ export interface CrossTalkPort {
   crossfill(secondary: boolean): boolean;
   settingsChanged(): void;
   healthChanged(): void;
-  broadcastAlert(text: string): void;
+  /** Persistent causes are full model identities, independent of display text and crew acknowledgment. */
+  publishAlert(text: string, cause?: string, newCrewOccurrence?: boolean): boolean;
+  reportAlertCause(cause: string, active: boolean): void;
+  retainAlertCauses(group: string, present: readonly string[]): void;
   acknowledgeMessage(text: string): void;
   missedApproachRequested(): void;
   setIndependent(on: boolean): void;

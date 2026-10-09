@@ -20,6 +20,9 @@ export class DualFmsSystem {
   private navSide: FmsSide | null = null;
   private phaseDifferentSince: number | null = null;
   private disagreement = false;
+  // Synchronized episode history does not rewrite either computer's recall. Mode changes and unavailable
+  // contributors are not cause clears: a delayed contributor cannot reopen an acknowledged episode.
+  private alertCauses = new Map<string, { active: [boolean | null, boolean | null]; published: boolean }>();
   private settings: string[];
   private readonly clock: () => Date;
   constructor(clock: () => Date, options: { profile?: AircraftProfile; secondaryProfile?: AircraftProfile; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
@@ -89,10 +92,11 @@ export class DualFmsSystem {
       crossfill(secondary) { return system.crossfill(side, secondary); },
       settingsChanged() { system.compute(() => system.settingsChanged(side)); },
       healthChanged() { system.compute(() => { system.reconcile(); system.notify(); }); },
-      broadcastAlert(text) {
-        system.compute(() => {
-          if (system.operation === "SYNC" && system.link && !system.peer(side).hasCondition("fmsFail")) system.peer(side).receiveComputerAlert(text);
-        });
+      publishAlert(text, cause, newCrewOccurrence) { return system.compute(() => system.publishAlert(side, text, cause, newCrewOccurrence)); },
+      reportAlertCause(cause, active) { system.reportAlertCause(side, cause, active); },
+      retainAlertCauses(group, present) {
+        for (const cause of system.alertCauses.keys()) if (cause.startsWith(group) && !present.includes(cause))
+          system.reportAlertCause(side, cause, false);
       },
       acknowledgeMessage(text) {
         system.compute(() => { if (system.operation === "SYNC" && system.link) system.peer(side).acknowledgeComputerMessage(text); });
@@ -105,6 +109,31 @@ export class DualFmsSystem {
         system.setLinkAvailable(!on);
       },
     };
+  }
+  private reportAlertCause(side: FmsSide, cause: string, active: boolean) {
+    let episode = this.alertCauses.get(cause);
+    if (!episode) {
+      // Independent causes remain local. Previously synchronized causes can still end through healthy,
+      // explicit declarations while independent; an outage alone cannot end one.
+      if (this.operation !== "SYNC" || !this.link) return;
+      if (!active) return;
+      episode = { active: [null, null], published: false }; this.alertCauses.set(cause, episode);
+    }
+    episode.active[side - 1] = active;
+    if (episode.active.every(value => value === false)) this.alertCauses.delete(cause);
+  }
+  private publishAlert(side: FmsSide, text: string, cause?: string, newCrewOccurrence = false): boolean {
+    if (this.operation !== "SYNC" || !this.link) return false;
+    if (cause !== undefined) {
+      this.reportAlertCause(side, cause, true);
+      const episode = this.alertCauses.get(cause)!;
+      if (episode.published && !newCrewOccurrence) return true;
+      episode.published = true;
+    }
+    // An event-style call is one occurrence, delivered to both units once. Distinct calls remain distinct,
+    // even if their display text is identical. Persistent producers instead share their full cause identity.
+    for (const unit of this.computers) if (!unit.hasCondition("fmsFail")) unit.receiveComputerAlert(text);
+    return true;
   }
   private compatibility(side: FmsSide, operational = true): string | null {
     const own = this.unit(side), peer = this.peer(side);
