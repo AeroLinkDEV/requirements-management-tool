@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { installPausedClock } from './paused-clock'
 
 // A owns wire validation in workspace-contract; this bounded composition catches loss of
 // qualification between that decoder and the actual build card, which a rule assertion cannot see.
@@ -24,8 +25,7 @@ const alice: Person = { id: 'alice', userName: 'alice', displayName: 'Alice Smit
 const bob: Person = { ...alice, id: 'bob', userName: 'bob', displayName: 'Bob Jones' }
 
 async function picker(page: Page) {
-  await page.clock.install({ time: new Date('2026-10-02T12:00:00Z') })
-  await page.clock.pauseAt(new Date('2026-10-02T12:01:00Z'))
+  await installPausedClock(page, new Date('2026-10-02T12:01:00Z'))
   // Control only the transport, never suggestion ownership. Production PersonPicker owns
   // debounce, request ordering, parsing, filtering and state. No backend or persistent state.
   await page.addInitScript(() => {
