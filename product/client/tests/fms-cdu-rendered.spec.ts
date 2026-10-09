@@ -1898,3 +1898,42 @@ test('hover join geometry replaces the straight chord to active JN while keeping
   await expect(join).toHaveAttribute('d', shape)
   await expect(page.locator('.fmsMap path.active:not([data-testid="hover-join"])')).toHaveCount(0)
 })
+
+test('hover join valid MOD preview preserves the existing ACT representation and ERASE restores its curve', async ({ page }) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch)
+  await page.clock.pauseAt(epoch)
+  await page.clock.setSystemTime(epoch)
+  await open(page)
+  await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'join-preview-priority', title: 'MOD over existing ACT', objective: 'Preserve both route representations under existing preview priority',
+    maxSeconds: 2, start: '87n-offshore-sar', startTime: epoch.toISOString(), steps: [
+      { when: { kind: 'time', seconds: 1 }, action: { kind: 'keys', keys: ['TACT', 'LSK1R', 'LSK4L', 'LSK6R', 'EXEC'] } },
+      { when: { kind: 'time', seconds: 1.25 }, action: { kind: 'expectActive', waypoint: 'JN' } },
+    ] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'join-preview-priority.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await page.clock.runFor(1500)
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  await expect(page.getByTestId('fma-roll')).toHaveText('NAV')
+  const join = page.getByTestId('hover-join')
+  await expect(join).toHaveClass('active')
+  const committed = (await join.getAttribute('d'))!
+  await expectLine(page, 0, /ACT HOVER/)
+  for (const id of ['LSK4L', 'LSK6R']) await key(page, id).click()
+  await expect(join).toHaveClass('modified')
+  const preview = (await join.getAttribute('d'))!
+  await expect(page.locator('.fmsMap path.active:not([data-testid="hover-join"])')).toHaveCount(1)
+  const end = preview.split(/[ML]/).filter(Boolean).at(-1)!
+  const modified = (await page.locator('.fmsMap path.modified:not([data-testid="hover-join"])').first().getAttribute('d'))!
+  expect(modified.startsWith(`M${end}L`)).toBe(true)
+  await key(page, 'LEGS').click()
+  await expectLine(page, 0, /MOD/)
+  await expectLine(page, 2, /JN/)
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /ACT/)
+  await expectLine(page, 2, /JN/)
+  await expect(join).toHaveClass('active')
+  await expect(join).toHaveAttribute('d', committed)
+})
