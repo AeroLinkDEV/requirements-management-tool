@@ -417,6 +417,28 @@ test('NVG lighting backlights the legends green and holds the display in the NVG
   await expect.poll(luminance).toBe(day)
 })
 
+test('FMS NAV deviation stays visible in HDG without a coupled roll cue, then NAV capture shows the cue', async ({ page }, testInfo) => {
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  await open(page)
+  const pfd = page.locator('.efisPfd')
+  await expect(pfd.getByTestId('ldev')).toBeVisible()
+  await expect(pfd.getByTestId('fd-roll')).toHaveCount(1)
+  await page.getByLabel('Selected heading').fill('110')
+  await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
+  await expect(pfd.getByTestId('fma-roll')).toHaveText('HDG')
+  await expect(pfd.getByTestId('ldev')).toBeVisible()
+  await expect(pfd.getByTestId('fd-roll')).toHaveCount(0)
+  await pfd.screenshot({ path: testInfo.outputPath('advisory-nav-in-hdg.png') })
+  await page.getByRole('button', { name: 'LNAV', exact: true }).click()
+  await expect(pfd.getByTestId('fma-roll-armed')).toHaveText('NAV')
+  await expect(pfd.getByTestId('ldev')).toBeVisible()
+  await expect(pfd.getByTestId('fd-roll')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await expect(pfd.getByTestId('fma-roll')).toHaveText('NAV')
+  await expect(pfd.getByTestId('fd-roll')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+})
+
 test('Fly moves the aircraft along the route on the map at the chosen rate, and Pause stops it', async ({ page }) => {
   await open(page)
   // The engineering map shares the lower display beside the CDU with the ND; the ND is shown first.

@@ -298,6 +298,8 @@ export class FlightSimulator {
   get holdProgress() { return this.holdPlan ? { segments: this.holdPlan.segments, index: this.holdPlan.index, entryEnd: this.holdPlan.entryEnd } : null; }
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
+  /** Managed steering retained at the computation boundary, before the AFCS's HDG override. */
+  private managedRoll: number | null = null;
 
   private readonly beforeGuidance: (() => void) | null;
   constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>, beforeGuidance?: () => void) {
@@ -333,6 +335,8 @@ export class FlightSimulator {
 
   /** The guidance as last computed. Reading it changes nothing (#1518): the failure watch below keeps it current. */
   get guidance() { return this.last; }
+  /** FMS NAV steering remains advisory in HDG; reading it never computes or sequences a path. */
+  get routeRollCommand() { return this.managedRoll; }
 
   /**
    * A power or table failure (or the recovery) takes effect even while the plant is paused, so the outputs never
@@ -1631,12 +1635,14 @@ export class FlightSimulator {
   private guide(dt = 0): Guidance {
     // With the FMS failed there is no managed guidance to consume: basic heading hold only.
     if (this.fms.hasCondition("fmsFail")) {
+      this.managedRoll = null;
       return {
         mode: "HDG", legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null,
         bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -this.bankLimit, this.bankLimit), targetAltitude: this.altitudeHold ?? this.fms.altitude,
       };
     }
     const managed = this.managedGuidance(dt);
+    this.managedRoll = managed.desiredTrack === null ? null : managed.bankCommand;
     // LNAV with no leg to fly (a discontinuity or the end of the route) is lost: heading hold on the current track.
     if (this.lateral === "LNAV" && managed.mode === "HDG" && managed.desiredTrack === null) {
       this.lateral = "HDG";
