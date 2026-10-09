@@ -53,7 +53,7 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   const path = (points: LatLon[]) => points.map((p, i) => { const q = project(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join("");
 
   /** Polylines of a route from a starting point; a discontinuity breaks the line. */
-  const routeLines = (start: LatLon, route: Route) => {
+  const routeLines = (start: LatLon, route: Route, joining = false) => {
     const legs = route.legs;
     const lines: LatLon[][] = [];
     let current: LatLon[] = [start];
@@ -62,6 +62,8 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
       if (leg.kind !== "wpt") { if (current.length > 1) lines.push(current); current = []; continue; }
       const at = leg.position ?? fms.coordinates(leg.ident, route);
       if (!at) continue;
+      // The joining curve replaces the shortcut to initial JN; the route resumes at that waypoint.
+      if (joining && leg === legs[0]) { current = [at]; continue; }
       // An RF leg is drawn as its arc, not as the chord.
       const previous = current.at(-1);
       if ((leg.path === "RF" || leg.path === "AF") && leg.arc && previous) {
@@ -75,21 +77,27 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   };
 
   const active = fms.activeRoute;
+  const hasJoin = (route: Route) => route.legs.some(leg => leg.kind === "wpt" && leg.ident === "JN");
+  const previewJoin = fms.routeStatus === "MOD" && hasJoin(fms.route) ? fms.hoverJoinPreview : null;
+  const committedJoin = hasJoin(active) ? fms.hoverJoin : null;
+  // Preserve the existing MOD-preview priority: replace the ACT chord only when its ACT curve is displayed.
+  const activeJoining = !!committedJoin && !previewJoin && active.legs[0]?.kind === "wpt" && active.legs[0].ident === "JN";
+  const modifiedJoining = !!previewJoin && fms.route.legs[0]?.kind === "wpt" && fms.route.legs[0].ident === "JN";
   const activeTo = active.legs[0]?.kind === "wpt" ? fms.coordinates(active.legs[0].ident) : undefined;
-  const [first, ...later] = routeLines(fms.activeLegStart, active);
+  const [first, ...later] = routeLines(fms.activeLegStart, active, activeJoining);
   const waypoints = active.legs.flatMap((leg, i) => {
     if (leg.kind !== "wpt") return [];
     const at = leg.position ?? fms.coordinates(leg.ident);
     return at ? [{ ident: leg.ident, at, active: i === 0 }] : [];
   });
-  const modified = fms.routeStatus === "MOD" ? routeLines(fms.position, fms.route) : [];
+  const modified = fms.routeStatus === "MOD" ? routeLines(fms.position, fms.route, modifiedJoining) : [];
 
   const hold = active.hold ?? (fms.routeStatus === "MOD" ? fms.route.hold : undefined);
   const holdFix = hold ? fms.coordinates(hold.fix) : undefined;
   const racetrack = hold && holdFix ? racetrackOutline(holdFix, hold, fms.groundSpeed, sim.tas, fms.wind.speed) : null;
 
   // Phase 1 of a hover procedure: its joining path, previewed while in MOD, then the committed one.
-  const join = fms.hoverJoinPreview ?? fms.hoverJoin;
+  const join = previewJoin ?? committedJoin;
   const joinPath = join ? segmentsOutline(join.from, join.segments) : null;
 
   const sarStart = active.legs.find(leg => leg.kind === "wpt" && leg.qualifier === "/S");
@@ -108,7 +116,7 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   const onRoute = g.mode === "LNAV";
   // The offset track actually flown, parallel to the active leg.
   const offsetLeg = offsetTrack(g, active.offset?.nm ?? 0);
-  const activeLeg = onRoute && firstLeg && activeTo ? [firstLeg, laterFirst[0]] : null;
+  const activeLeg = !activeJoining && onRoute && firstLeg && activeTo ? [firstLeg, laterFirst[0]] : null;
 
   // The other computer, when it is the one guiding the aircraft: only its flown path and its label.
   const other = guiding && guiding.side !== side ? guiding : null;
@@ -147,13 +155,13 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
         ) : null}
         {racetrack ? <path className="hold" d={path(racetrack)} /> : null}
         {sarPath ? <path className="sar" d={path(sarPath)} /> : null}
-        {joinPath ? <path className={fms.hoverJoinPreview ? "modified" : "active"} d={path(joinPath)} data-testid="hover-join" /> : null}
+        {joinPath ? <path className={previewJoin ? "modified" : "active"} d={path(joinPath)} data-testid="hover-join" /> : null}
         {modified.map((line, i) => <path key={`m${i}`} className="modified" d={path(line)} />)}
-        {first && first.length > 2 ? <path className="later" d={path(first.slice(1))} /> : null}
+        {first && (activeJoining ? first.length > 1 : first.length > 2) ? <path className="later" d={path(activeJoining ? first : first.slice(1))} /> : null}
         {later.map((line, i) => <path key={`l${i}`} className="later" d={path(line)} />)}
         {activeLeg ? <path className="active" d={path(activeLeg)} /> : null}
         {offsetLeg ? <path className="offset" d={path(offsetLeg)} /> : null}
-        {g.legFrom && g.legTo && g.mode !== "LNAV" ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
+        {!activeJoining && g.legFrom && g.legTo && g.mode !== "LNAV" ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
         {waypoints.map(({ ident, at, active: isActive }) => {
           const q = project(at);
           return (
