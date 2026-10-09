@@ -91,6 +91,7 @@
     "fms-nav-status-pages.spec.ts",
     "fms-perf-stats.spec.ts",
     "fms-pure-observers.spec.ts",
+    "fms-offside-rendezvous.spec.ts",
     "fms-dual-approach-phase.spec.ts",
     "fms-kernel-digest.spec.ts",
     "fms-kernel-phases.spec.ts",
