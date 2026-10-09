@@ -263,6 +263,10 @@ It also publishes the active waypoint, target speed and altitude, and mode and v
 
 The bench follows the same structure. `efis.ts` defines the only data the displays may take from the FMS, and `FmsEfis.tsx` draws a generic primary flight display (PFD) and navigation display (ND) from it. A future FMS under test (Sean's embedded software) would drive the displays by producing the same bus.
 
+The generic bench displays FMS NAV course data; it has no modeled installation ILS/VOR/NAV course-selector. Valid desired track, cross-track and route roll steering remain available in HDG and while NAV is armed (S300 C-12, items 2, 5 and 6). Data validity is separate from AFCS engagement. The PFD's roll flight-director cue requires engaged NAV, including managed holds and searches; a valid advisory word alone does not draw that cue. `lateralSource` distinguishes route versus GPS-final deviation provenance, not the installation's course selector.
+
+`FlightSimulator` retains the managed roll command at its existing guidance computation boundary before substituting physical HDG steering. The read-only `routeRollCommand` exposes this authoritative cache to `efis.ts`; getters do not recompute or sequence a path. Failed and absent-path computations clear it. It is additional state for future snapshot ownership: the current frozen census records its bus effect, but does not directly serialize the private cache. Physical HDG control and its bank limit remain separate from the advisory FMS command.
+
 ### Conventions used
 
 **Colours:**
