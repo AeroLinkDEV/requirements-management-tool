@@ -81,7 +81,7 @@ test('ending commanded deceleration returns the native word to bias at constant 
   const bias = word(unit)
   advance(4)
   expect(word(unit).northMs2 - bias.northMs2).toBeCloseTo(-2 * 1852 / 3600, 5)
-  // S300 speed selection is IAS; let the existing80KIAS command reach steady flight rather than treating TAS as IAS.
+  // S300 speed selection is IAS; let the existing 80 KIAS command reach steady flight rather than treating TAS as IAS.
   advance(240)
   const tas = flight.tas
   advance(4)
@@ -90,7 +90,7 @@ test('ending commanded deceleration returns the native word to bias at constant 
 })
 
 // Defensive clock case only: production kernel clocks do not rewind. Two distinct intervals reach the branch;
-// exact physical1852/3600 expectations elsewhere use precision5 for the producer's truncated0.514444 conversion.
+// Exact physical 1852/3600 expectations elsewhere use precision 5 for the producer's truncated 0.514444 conversion.
 test('defensive backwards-clock sampling inside a prior interval rebaselines without a fabricated impulse', () => {
   let now = START
   const unit = new ScriptedFms(() => new Date(now))
