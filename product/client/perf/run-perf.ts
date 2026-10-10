@@ -212,8 +212,17 @@ function browser() {
   const dir = out(), list = arms()
   if (list.length !== 1) throw new Error('browser runs take one arm (--arm B=<checkout>)')
   // Deliberate compatibility refusal before session/seeding/API work, independent of a timer-count assertion.
-  writeFileSync(join(dir, 'browser-accounting-refusal.json'), JSON.stringify({ ...browserScoringRefusal(protocol),
-    arm: { name: list[0].arm, ...list[0].identity }, harness: harnessIdentity() }, null, 2))
+  const refusalPath = join(dir, 'browser-accounting-refusal.json')
+  try {
+    // Refusal evidence is immutable: a reused output directory must not replace the earlier arm/harness record.
+    writeFileSync(refusalPath, JSON.stringify({ ...browserScoringRefusal(protocol),
+      arm: { name: list[0].arm, ...list[0].identity }, harness: harnessIdentity() }, null, 2), { flag: 'wx' })
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+      throw new Error(`FMS_BROWSER_REFUSAL_EVIDENCE_EXISTS: prior refusal evidence retained at ${refusalPath}; choose a fresh --out directory.`)
+    }
+    throw error
+  }
   assertBrowserScoringAvailable(protocol)
 }
 

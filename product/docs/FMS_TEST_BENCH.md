@@ -385,7 +385,8 @@ Sources: CMC Electronics CMA-5024 datasheets ([current](https://cmcelectronics.c
 
 The performance harness's browser accounting compatibility revision 1 fails closed while no completed-frame and
 continuation-cost schema is qualified. `perf/run-perf.ts browser` writes an attributable refusal before seeding or
-starting an API; the direct performance configuration and browser owner also refuse. Report output retains browser
+starting an API. Refusal records are created exclusively: reusing `--out` refuses before replacing an existing
+arm/harness record and requires a fresh output directory. The direct performance configuration and browser owner also refuse. Report output retains browser
 record identities and marks them `NOT_QUALIFIED`, without computing browser metric levels, confidence intervals,
 sample counts or budget verdicts. Historical raw records and their original reports retain their actual source and
 protocol identities; this revision does not requalify them. Headless statistics revision 3 is unchanged.

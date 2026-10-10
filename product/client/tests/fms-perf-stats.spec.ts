@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
 
@@ -64,6 +65,22 @@ test('the browser command refuses explicitly before seeding or starting an API',
   expect(child.stderr).toContain('FMS_BROWSER_ACCOUNTING_UNAVAILABLE')
   const refusal = JSON.parse(readFileSync(join(out, 'browser-accounting-refusal.json'), 'utf8'))
   expect(refusal).toMatchObject({ status: 'REFUSED', accountingIssue: '#1557', metrics: null })
+  expect(refusal.arm.name).toBe('B')
+  const firstBytes = readFileSync(join(out, 'browser-accounting-refusal.json'))
+  const firstSHA = createHash('sha256').update(firstBytes).digest('hex')
+  writeFileSync(testInfo.outputPath('first-refusal.json'), firstBytes)
+  // Reusing --out with another arm must not rewrite the previous committed-harness refusal evidence.
+  const repeated = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser', '--out', out,
+    '--arm', `A=${resolve('../..')}`, '--rounds', '1', '--dirty-smoke'], { cwd: process.cwd(), encoding: 'utf8', timeout: 30_000 })
+  writeFileSync(testInfo.outputPath('repeated-browser-command.log'), `${repeated.stdout ?? ''}\n${repeated.stderr ?? ''}`)
+  const afterBytes = readFileSync(join(out, 'browser-accounting-refusal.json'))
+  writeFileSync(testInfo.outputPath('after-repeated-refusal.json'), afterBytes)
+  expect(afterBytes, 'the first refusal evidence must survive another arm using the same output directory').toEqual(firstBytes)
+  expect(createHash('sha256').update(afterBytes).digest('hex')).toBe(firstSHA)
+  expect(JSON.parse(afterBytes.toString('utf8')).arm.name).toBe('B')
+  expect(repeated.status).not.toBe(0)
+  expect(repeated.stderr).toContain('FMS_BROWSER_REFUSAL_EVIDENCE_EXISTS')
+  expect(readdirSync(out)).toEqual(['browser-accounting-refusal.json'])
   expect(existsSync(join(out, 'seed.json'))).toBe(false)
   expect(existsSync(join(out, 'logs', 'seed.log'))).toBe(false)
   expect(existsSync(join(out, 'runs.jsonl'))).toBe(false)
