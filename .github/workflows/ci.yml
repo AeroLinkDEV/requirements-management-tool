@@ -317,6 +317,7 @@ jobs:
       METRICS_JOB_ID: backend-api
       METRICS_JOB_NAME: API test suite (${{ matrix.shard }}/${{ strategy.job-total }})
       METRICS_MATRIX: ${{ toJson(matrix) }}
+      AEROLINK_DEPENDENCY_CACHE: ${{ github.workspace }}/.cache/integrity-extractor
     strategy:
       # Independently, for the same reason as the browser shards: a cancelled sibling reports nothing, and
       # buying that nothing costs a full gate to re-run.
@@ -338,6 +339,14 @@ jobs:
           printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-backend-api-${{ matrix.shard }}.json"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache verified Integrity extractor dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/integrity-extractor/gson-2.13.2.jar
+            .cache/integrity-extractor/mksapi-4.16.2671.jar
+          key: integrity-extractor-v1-dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0-7a64d5c9c0c5cb76b57cb9328fab82743b879c975ddcfc03f15a8754ccaed4d3
+          enableCrossOsArchive: true
       - name: Install .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
         with:
@@ -700,6 +709,7 @@ jobs:
     env:
       METRICS_JOB_ID: backend-core-infrastructure
       METRICS_JOB_NAME: Infrastructure test suite
+      AEROLINK_DEPENDENCY_CACHE: ${{ github.workspace }}/.cache/integrity-extractor
     steps:
       - name: Capture job start
         continue-on-error: true
@@ -711,6 +721,14 @@ jobs:
           printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-backend-core-infrastructure.json"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache verified Integrity extractor dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/integrity-extractor/gson-2.13.2.jar
+            .cache/integrity-extractor/mksapi-4.16.2671.jar
+          key: integrity-extractor-v1-dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0-7a64d5c9c0c5cb76b57cb9328fab82743b879c975ddcfc03f15a8754ccaed4d3
+          enableCrossOsArchive: true
       - name: Install .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
         with:
@@ -1616,6 +1634,7 @@ jobs:
     env:
       METRICS_JOB_ID: postgresql-smoke
       METRICS_JOB_NAME: PostgreSQL migrations and secure bootstrap
+      AEROLINK_DEPENDENCY_CACHE: ${{ github.workspace }}/.cache/integrity-extractor
     services:
       postgres:
         image: postgres:17
@@ -1641,6 +1660,14 @@ jobs:
           printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-postgresql-smoke.json"
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache verified Integrity extractor dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/integrity-extractor/gson-2.13.2.jar
+            .cache/integrity-extractor/mksapi-4.16.2671.jar
+          key: integrity-extractor-v1-dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0-7a64d5c9c0c5cb76b57cb9328fab82743b879c975ddcfc03f15a8754ccaed4d3
+          enableCrossOsArchive: true
       - name: Install .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
         with:

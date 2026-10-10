@@ -58,6 +58,46 @@ test('scoped backend jobs build their graphs while retained owners build the ful
   assert.match(postgresql, /runs-on: ubuntu-latest/)
   assert.match(postgresql, /dotnet restore product\/AeroLink\.slnx/)
   assert.match(postgresql, /dotnet build product\/AeroLink\.slnx --configuration Release --no-restore/)
+
+  const extractorBuilder = readFileSync(join(repoRoot, 'product/tools/integrity-extractor/Build-Extractor.ps1'), 'utf8')
+  // The builder owns dependency identity. Reject missing, duplicate or unparsed declarations rather than keeping a
+  // second manifest green when the builder changes a version or checksum.
+  const dependencyRows = extractorBuilder.split(/\r?\n/).filter(line =>
+    !/^\s*#/.test(line) && !/^\s*function Get-VerifiedDependency\(/.test(line) && /\bGet-VerifiedDependency\b/.test(line))
+  assert.equal(dependencyRows.length, 2, 'the extractor must declare exactly two cache dependencies')
+  const dependencies = dependencyRows.map(line => {
+    const row = /^\s*\$\w+ = Get-VerifiedDependency '([^']+)' '[^']+' '([^']+)'\s*$/.exec(line)
+    assert.ok(row, `extractor dependency declaration must be a supported literal: ${line}`)
+    const [, name, sha256] = row
+    assert.match(name, /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.jar$/)
+    assert.match(sha256, /^[a-f0-9]{64}$/)
+    return { name, sha256 }
+  })
+  assert.equal(new Set(dependencies.map(dependency => dependency.name)).size, 2, 'extractor cache filenames must be unique')
+  const dependencyPaths = dependencies.map(dependency => `            .cache/integrity-extractor/${dependency.name}`).join('\n')
+  const dependencyKey = `integrity-extractor-v1-${dependencies.map(dependency => dependency.sha256).join('-')}`
+
+  // These are the actual extractor consumers, including every dynamic API shard.
+  // Pin both files together; the shipped builder still verifies each restored JAR.
+  for (const [job, body, ownerStep] of [
+    ['backend-api', api, 'Run this shard of the API test suite'],
+    ['backend-core-infrastructure', infrastructure, 'Run the infrastructure test suite'],
+    ['postgresql-smoke', postgresql, 'Qualify every PostgreSQL-dependent contract against PostgreSQL'],
+  ]) {
+    const jobConfig = body.slice(0, body.indexOf('    steps:'))
+    assert.match(jobConfig, /^      AEROLINK_DEPENDENCY_CACHE: \$\{\{ github\.workspace \}\}\/\.cache\/integrity-extractor$/m, `${job}: extractor uses the restored cache`)
+    const cacheStart = body.indexOf('      - name: Cache verified Integrity extractor dependencies\n')
+    assert.ok(cacheStart >= 0, `${job}: pinned extractor cache is missing`)
+    const nextStep = body.indexOf('\n      - name:', cacheStart + 1)
+    const cache = body.slice(cacheStart, nextStep >= 0 ? nextStep : body.length)
+    assert.match(cache, /^        uses: actions\/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9(?: #.*)?$/m)
+    assert.ok(cache.includes(`          path: |\n${dependencyPaths}\n          key:`), `${job}: cache includes exactly the builder's two pinned JARs`)
+    assert.ok(cache.split('\n').includes(`          key: ${dependencyKey}`), `${job}: cache key contains both authoritative full hashes in declaration order`)
+    assert.match(cache, /^          enableCrossOsArchive: true$/m)
+    assert.doesNotMatch(cache, /restore-keys:|continue-on-error:|^        if:/m)
+    assert.ok(cacheStart > body.indexOf('      - name: Check out repository\n'), `${job}: cache restore follows checkout`)
+    assert.ok(cacheStart < body.indexOf(`      - name: ${ownerStep}\n`), `${job}: cache restore precedes the native extractor owner`)
+  }
 })
 
 test('every supported backend mode selects the scoped jobs with their whole-solution owner', () => {
