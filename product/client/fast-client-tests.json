@@ -99,7 +99,8 @@
     "fms-kernel-digest.spec.ts",
     "fms-kernel-phases.spec.ts",
     "fms-kernel-legacy-equivalence.spec.ts",
-    "fms-dual-selected-integrity.spec.ts"
+    "fms-dual-selected-integrity.spec.ts",
+    "fms-bench-pacing.spec.ts"
   ],
   "rendered": [
     "client-truth-rendered.spec.ts",
@@ -115,6 +116,7 @@
     "fms-bench-held-key-recording-rendered.spec.ts",
     "fms-station-browser.spec.ts",
     "fms-bench-tick-cost-rendered.spec.ts",
+    "fms-bench-pacing-rendered.spec.ts",
     "fms-route-append-rendered.spec.ts",
     "fms-map-inspected-computer-rendered.spec.ts",
     "fms-managed-route-rendered.spec.ts",

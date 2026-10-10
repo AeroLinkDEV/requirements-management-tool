@@ -439,7 +439,7 @@ export class ScenarioRunner {
   private failure: "error" | null = null;
   private endedAt: number | null = null;
 
-  constructor(scenario: Scenario, fms: ScriptedFms, context: RunContext = { variant: "not recorded", cycle: fms.activeCycle.id }, sim: FlightSimulator | null = null) {
+  constructor(scenario: Scenario, fms: ScriptedFms, context: RunContext = { variant: "not recorded", cycle: fms.activeCycle.id }, sim: FlightSimulator | null = null, settleStart: () => void = () => sim?.observe(0)) {
     this.scenario = structuredClone(scenario);
     this.fms = fms;
     this.sim = sim;
@@ -451,6 +451,7 @@ export class ScenarioRunner {
       const start = this.scenario.start;
       const set = fms.compute(() => START_STATES[start].setUp(fms, sim ?? undefined));
       if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
+      else settleStart();
     }
     this.problems = problems;
     this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(fms.aircraftProfile), surface: `${fms.surface.id} (${fms.surface.basis})` };
@@ -714,8 +715,8 @@ export const scenarioStart = (scenario: Scenario) => (scenario.startTime && Numb
  * single-computer composition until the headless switch to the dual one (#1517 I1d).
  */
 export function runHeadless(scenario: Scenario, start = scenarioStart(scenario) ?? Date.UTC(2026, 8, 27, 14, 0, 0), context?: RunContext) {
-  const { fms, sim, plant } = singleComposition(start, { profile: profileById(scenario.profile) });
-  const runner = new ScenarioRunner(scenario, fms, context, sim);
+  const { fms, sim, plant, settleStart } = singleComposition(start, { profile: profileById(scenario.profile) });
+  const runner = new ScenarioRunner(scenario, fms, context, sim, settleStart);
   const kernel = new FmsKernel(plant, runner);
   // The runner ends itself at maxSeconds; the bound only keeps a broken runner from looping forever.
   const limit = Math.ceil((Number.isFinite(scenario.maxSeconds) ? scenario.maxSeconds : 0) / TICK_SECONDS) + 2;
