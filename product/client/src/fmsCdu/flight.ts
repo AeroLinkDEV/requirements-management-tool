@@ -221,6 +221,14 @@ export type AxisMode = { axis: Axis; mode: string };
  * (the B3.5 table), the modes it took away, which the FMA shows amber for a while (plan B4.1, B3.4).
  */
 export type ModeEvent = { at: Date; event: string; detail: string; lost?: AxisMode[] };
+/**
+ * How many mode events the simulator keeps (#1506): the newest 256, oldest first. Nothing reads further back than a
+ * whole run's history: the bench shows the latest event, the FMA's amber modes come from the per-axis losses kept apart
+ * from this log (so its window does not depend on the bound), and the longest history any test or library scenario
+ * reaches is 34 events. A crew re-selecting a target can add one event per selection, which an unbounded log copied on
+ * every append.
+ */
+const MODE_EVENT_LOG_CAPACITY = 256;
 /** Per axis, the modes armed or degraded (plan B3.4): each column of the helicopter FMA. */
 export type AxisModeLists = Record<Axis, string[]>;
 
@@ -268,7 +276,15 @@ export class FlightSimulator {
   private approach: "OFF" | "ARMED" | "CAPTURED" = "OFF";
   /** The FMS's go-around count at the last step, to take each accepted TOGA as a transition (watchGoAround). */
   private goArounds: number;
-  private events: ModeEvent[] = [];
+  /**
+   * The mode-event history, authoritative and bounded (#1506; a #1502 D7 snapshot keeps all three as they are, since
+   * none can be derived from other state): the log is a ring of at most MODE_EVENT_LOG_CAPACITY events, the next slot
+   * being recorded % capacity once it is full; recorded counts every event ever made; lostAt holds, per axis, the time
+   * each mode was last taken away by a failure, ordered by that loss (an event's own losses in reverse, see record).
+   */
+  private readonly eventLog: ModeEvent[] = [];
+  private eventsRecorded = 0;
+  private readonly lostAt: Record<Axis, Map<string, Date>> = { collective: new Map(), pitch: new Map(), roll: new Map() };
   /**
    * The crew's selections on the autopilot, which command the vertical axis and the speed under the ADVISORY policy
    * (the helicopter profile, plan A4): the preselected altitude, an engaged vertical speed (null when not in VS), a go-
@@ -484,11 +500,31 @@ export class FlightSimulator {
     }
     this.approach = fms.approachArmed ? "ARMED" : "OFF";
   }
-  /** Mode and authority changes, oldest first: failure, reversion, recovery, LNAV lost. */
-  get modeEvents(): readonly ModeEvent[] { return this.events; }
+  /**
+   * Mode and authority changes, oldest first: failure, reversion, recovery, LNAV lost. The newest MODE_EVENT_LOG_CAPACITY
+   * of them, as a new array that later events do not change.
+   */
+  get modeEvents(): readonly ModeEvent[] {
+    const log = this.eventLog, next = this.eventsRecorded % MODE_EVENT_LOG_CAPACITY;
+    return log.length < MODE_EVENT_LOG_CAPACITY || next === 0 ? log.slice() : [...log.slice(next), ...log.slice(0, next)];
+  }
+  /** The latest mode change, if any (what the bench shows). */
+  get latestModeEvent(): ModeEvent | null {
+    return this.eventsRecorded ? this.eventLog[(this.eventsRecorded - 1) % MODE_EVENT_LOG_CAPACITY] : null;
+  }
 
   private record(event: string, detail: string, lost?: AxisMode[]) {
-    this.events = [...this.events, { at: this.fms.now, event, detail, ...(lost?.length ? { lost } : {}) }];
+    const entry: ModeEvent = { at: this.fms.now, event, detail, ...(lost?.length ? { lost } : {}) };
+    if (this.eventLog.length < MODE_EVENT_LOG_CAPACITY) this.eventLog.push(entry);
+    else this.eventLog[this.eventsRecorded % MODE_EVENT_LOG_CAPACITY] = entry;
+    this.eventsRecorded += 1;
+    // Each mode lost moves to the newest end of its axis. An event's own losses go in reverse, so that reading an axis
+    // newest first gives them in the event's order (axisDegraded).
+    for (let i = (entry.lost?.length ?? 0) - 1; i >= 0; i -= 1) {
+      const { axis, mode } = entry.lost![i];
+      this.lostAt[axis].delete(mode);
+      this.lostAt[axis].set(mode, entry.at);
+    }
   }
 
   /**
@@ -1137,16 +1173,21 @@ export class FlightSimulator {
 
   /**
    * The modes a failure took away in the last `seconds` (plan B3.4, B4.1, B3.5: amber, as HOV goes amber and then ATT),
-   * newest first, from the recorded reversions.
+   * newest first, from the recorded reversions. It reads each axis's latest losses (record), never the event log, so the
+   * EFIS's per-frame read costs the same however many events there are. The simulator's clock only runs forward, so
+   * the losses are in time order as well.
    */
   axisDegraded(seconds: number): AxisModeLists {
     const since = this.fms.now.getTime() - seconds * 1000;
-    const out: AxisModeLists = { collective: [], pitch: [], roll: [] };
-    for (const event of [...this.events].reverse()) {
-      if (event.at.getTime() < since) break;
-      for (const { axis, mode } of event.lost ?? []) if (!out[axis].includes(mode)) out[axis].push(mode);
-    }
-    return out;
+    const newestFirst = (losses: Map<string, Date>) => {
+      const out: string[] = [];
+      for (const [mode, at] of [...losses].reverse()) {
+        if (at.getTime() < since) break;
+        out.push(mode);
+      }
+      return out;
+    };
+    return { collective: newestFirst(this.lostAt.collective), pitch: newestFirst(this.lostAt.pitch), roll: newestFirst(this.lostAt.roll) };
   }
 
   /**
