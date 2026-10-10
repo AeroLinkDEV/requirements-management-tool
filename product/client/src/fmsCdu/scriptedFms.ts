@@ -305,6 +305,7 @@ export class ScriptedFms implements CduBackend {
   private waterCurrent: { northKt: number; eastKt: number } | null = null;
   private surfaceDrift = { northKt: 0, eastKt: 0 };
   private truthVelocity: { north: number; east: number; at: number } | null = null;
+  private previousTruthVelocity: { north: number; east: number; at: number } | null = null;
   readonly predictiveRaim = { ident: null as string | null, eta: null as number | null, requestedAt: null as number | null };
   private readonly raimExcluded = new Set<number>();
   private automaticRaimFor: string | null = null;
@@ -1041,6 +1042,10 @@ export class ScriptedFms implements CduBackend {
     // Crabbed into the wind so the given track is the one flown (the heading when the track cannot be held is the track).
     const hold = holdTrack(this.targetSpeed, state.track, this.wind);
     this.setAircraft({ ...state, tas: this.targetSpeed, heading: hold.feasible ? hold.heading : state.track, groundSpeed: hold.feasible ? hold.groundSpeed : 0, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
+    // An instructor reposition is not physical acceleration. Clear both truth samples so old velocity cannot
+    // be promoted as the new measured interval's baseline.
+    this.truthVelocity = null;
+    this.previousTruthVelocity = null;
     this.engineering = [...this.engineering, {
       at: this.now, action: "PLACE AIRCRAFT",
       detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
@@ -1530,8 +1535,12 @@ export class ScriptedFms implements CduBackend {
   private inertialAndDoppler(now: number, sequence: number): Pick<SensorFrame, "apirs" | "dvs"> {
     const track = (this.aircraft.track ?? 0) * Math.PI / 180, speed = this.aircraft.groundSpeed ?? 0;
     const north = speed * Math.cos(track), east = speed * Math.sin(track);
-    const previous = this.truthVelocity;
+    // Guidance refresh and post-motion sampling share an epoch. Keep the preceding distinct epoch so the second
+    // sample measures that interval rather than replacing the acceleration with a zero-duration difference.
+    if (!this.truthVelocity || now < this.truthVelocity.at) this.previousTruthVelocity = null;
+    else if (now > this.truthVelocity.at) this.previousTruthVelocity = this.truthVelocity;
     this.truthVelocity = { north, east, at: now };
+    const previous = this.previousTruthVelocity;
     const dt = previous ? (now - previous.at) / 1000 : 0;
     const accel = (value: number, before: number | undefined, bias: number) => (dt > 0 && before !== undefined ? (value - before) * 0.514444 / dt : 0) + bias;
     const bias = { north: this.apirsBias.north + this.apirsFaultBias.north, east: this.apirsBias.east + this.apirsFaultBias.east };
