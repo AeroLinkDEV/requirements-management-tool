@@ -99,8 +99,13 @@ export class DualFmsSystem {
       acknowledgeMessage(text) {
         system.compute(() => { if (system.operation === "SYNC" && system.link) system.peer(side).acknowledgeComputerMessage(text); });
       },
-      missedApproachRequested() {
-        system.compute(() => { if (system.operation === "SYNC" && system.link) system.peer(side).requestMissedApproach(true); });
+      missedApproachRequested(dropApproach = false) {
+        system.compute(() => {
+          if (system.operation !== "SYNC" || !system.link) return;
+          // Synchronize the request, not an EXEC: each computer updates ACT without discarding its pending MOD
+          // or releasing the crew's edit lock (M300 3-24). Only the originating computer commands physical TOGA.
+          system.peer(side).requestMissedApproach(true, dropApproach);
+        });
       },
       setIndependent(on) {
         // Bench injection is a link failure; clearing the fault restores communications, never silently overwrites a route.

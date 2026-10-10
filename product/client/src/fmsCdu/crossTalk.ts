@@ -24,7 +24,7 @@ export interface CrossTalkPort {
   navigationChanged(): void;
   broadcastAlert(text: string): void;
   acknowledgeMessage(text: string): void;
-  missedApproachRequested(): void;
+  missedApproachRequested(dropApproach?: boolean): void;
   setIndependent(on: boolean): void;
 }
 

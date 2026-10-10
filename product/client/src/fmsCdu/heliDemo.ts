@@ -279,7 +279,10 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     // NAV armed late, within 0.6 NM of TDN while still about 0.4 NM off the final track: it captures and is still correcting.
     { when: { kind: "distance", waypoint: "TDN", nm: 0.6 }, action: { kind: "autopilot", lnav: true } },
     { when: S, action: { kind: "expectAlert", text: "TDN NOT POSSIBLE", fresh: true }, within: 60 },
-    { when: S, action: { kind: "expectHover", refused: "TDN NOT POSSIBLE", reason: "OFF FINAL TRACK" } },
+    // In the dual composition the shared alert may originate on the peer observing the just-integrated aircraft.
+    // The runner's own computer evaluates that same crossing on the next 0.25 s tick; no extra geometry allowance.
+    // Remove this SYNC legacy-composite tolerance at I3 (D5 §7.5); single/INDEPENDENT owners require the same tick.
+    { when: S, action: { kind: "expectHover", refused: "TDN NOT POSSIBLE", reason: "OFF FINAL TRACK" }, within: 0.25 },
     // Abeam TDN when refused: more than the 0.2 NM limit off it, and not far past it.
     { when: S, action: { kind: "expectAircraft", near: "TDN", nearMetres: 835, minNearMetres: 371 } },
     { when: S, action: { kind: "expectAfcs", roll: "HDG" }, within: 2 },

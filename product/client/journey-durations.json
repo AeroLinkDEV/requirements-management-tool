@@ -78,6 +78,7 @@
  "fms-dead-reckoning.spec.ts": 0.374,
  "fms-demo-cycle.spec.ts": 0.046,
  "fms-dme-dme.spec.ts": 0.059,
+ "fms-dual-library.spec.ts": 372,
  "fms-efis.spec.ts": 10.798,
  "fms-flight.spec.ts": 85.094,
  "fms-fuel-pages.spec.ts": 0.092,

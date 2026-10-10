@@ -3217,7 +3217,7 @@ export class ScriptedFms implements CduBackend {
    * the missed approach legs (7-16 item 4; plan R2-03 MA-EARLY). Refused with the FMS failed, or with no missed
    * approach ahead (once it is being flown there is nothing left to go around from).
    */
-  requestMissedApproach(fromPeer = false) {
+  requestMissedApproach(suppressBroadcast = false, dropApproach = false) {
     if (this.hasCondition("fmsFail")) return false;
     const missed = this.active.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     if (missed <= 0) return false;
@@ -3229,7 +3229,12 @@ export class ScriptedFms implements CduBackend {
     this.armedApproach = false;
     this.armMissedHold(this.active);
     this.withdrawAlert("NO APPR INTEGRITY");
-    if (!fromPeer) this.crossTalk?.missedApproachRequested();
+    // Laboratory TOGA policy affects only ACT. An in-progress MOD remains the crew's edit until EXEC/ERASE.
+    if (dropApproach && this.aircraftProfile.verticalPolicy !== "ADVISORY") {
+      this.active.legs.splice(0, missed);
+      this.legStart = { ...this.here };
+    }
+    if (!suppressBroadcast) this.crossTalk?.missedApproachRequested(dropApproach);
     this.emit();
     return true;
   }
@@ -3251,13 +3256,8 @@ export class ScriptedFms implements CduBackend {
    * laboratory airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once.
    */
   goAround() {
-    const route = this.active;
-    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
-    if (!this.requestMissedApproach()) return false;
-    if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
-      route.legs.splice(0, missed);
-      this.legStart = { ...this.here };
-    }
+    if (!this.requestMissedApproach(true, this.aircraftProfile.verticalPolicy !== "ADVISORY")) return false;
+    this.crossTalk?.missedApproachRequested(this.aircraftProfile.verticalPolicy !== "ADVISORY");
     this.goArounds += 1;
     this.emit();
     return true;

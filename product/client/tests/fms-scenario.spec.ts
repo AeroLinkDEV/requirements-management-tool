@@ -82,6 +82,12 @@ for (const scenario of SCENARIO_LIBRARY) {
     const { runner } = runHeadless(scenario)
     expect(runner.results.filter(result => result.status !== 'done' && result.status !== 'pass'), scenario.id).toEqual([])
     expect(runner.passed).toBe(true)
+    if (scenario.id === '87n-b-tdn-off-track') {
+      // Only synchronized legacy composition admits the 0.25 s skew; remove its tolerance at I3.
+      const alert = scenario.steps.findIndex(step => step.action.kind === 'expectAlert' && step.action.text === 'TDN NOT POSSIBLE')
+      const refusal = scenario.steps.findIndex(step => step.action.kind === 'expectHover' && step.action.reason === 'OFF FINAL TRACK')
+      expect(runner.results[refusal].at).toBe(runner.results[alert].at)
+    }
   })
 }
 
