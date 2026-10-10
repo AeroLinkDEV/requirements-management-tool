@@ -20,6 +20,7 @@ export class DualFmsSystem {
   private navSide: FmsSide | null = null;
   private phaseDifferentSince: number | null = null;
   private disagreement = false;
+  private refreshingNavigation = false;
   private settings: string[];
   private readonly clock: () => Date;
   constructor(clock: () => Date, options: { profile?: AircraftProfile; secondaryProfile?: AircraftProfile; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
@@ -89,6 +90,7 @@ export class DualFmsSystem {
       crossfill(secondary) { return system.crossfill(side, secondary); },
       settingsChanged() { system.compute(() => system.settingsChanged(side)); },
       healthChanged() { system.compute(() => { system.reconcile(); system.notify(); }); },
+      navigationChanged() { system.refreshNavigation(); },
       broadcastAlert(text) {
         system.compute(() => {
           if (system.operation === "SYNC" && system.link && !system.peer(side).hasCondition("fmsFail")) system.peer(side).receiveComputerAlert(text);
@@ -161,7 +163,7 @@ export class DualFmsSystem {
     next.observeAircraft(previous);
     this.flights[side - 1].adoptAircraftMotion(this.flights[this.driver - 1]);
     this.computers.forEach((unit, i) => unit.setReceiverCommandAuthority(i === side - 1));
-    this.driver = side; this.notify();
+    this.driver = side; this.reconcile(); this.notify();
   }
   crossfill(side: FmsSide, secondary = false): boolean { return this.compute(() => this.fill(side, secondary)); }
   private fill(side: FmsSide, secondary: boolean): boolean {
@@ -185,12 +187,6 @@ export class DualFmsSystem {
     this.rms.tick();
     if (this.operation === "SYNC") {
       if (!this.link || this.computers.some(unit => unit.hasCondition("fmsFail"))) this.independent("COMPUTER UNAVAILABLE");
-      else {
-        const different = one.localFlightPhase !== two.localFlightPhase;
-        this.phaseDifferentSince = different ? this.phaseDifferentSince ?? this.clock().getTime() : null;
-        if (this.phaseDifferentSince !== null && (this.clock().getTime() - this.phaseDifferentSince) / 1000 > parameters.dualPhaseDisagreementTime.value)
-          this.independent("PHASE DISAGREEMENT");
-      }
     }
     if (this.operation === "SYNC") {
       const solutions = this.computers.map(unit => unit.localNavigationSolution);
@@ -204,8 +200,20 @@ export class DualFmsSystem {
           && (selected.solution.anp === null || (selected.solution.anp - candidate.solution.anp) * 1852 >= parameters.dualSensorHysteresis.value))) selected = candidate;
       if (selected) {
         this.navSide = selected.side;
-        this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, this.unit(selected.side).navigationWindEstimate));
+        const source = this.unit(selected.side);
+        this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, source.navigationWindEstimate));
       }
+      // M300 3-24 synchronizes approach integrity. Until qualified approach guidance itself is shared (#1563), use
+      // the guiding computer's receiver AND transfer qualification for both computers' approach alerts/admission.
+      // Current/predicted RAIM still uses the best system navigation sensor (3-25); no usable adoption falls back
+      // to each computer's local approach authority instead of retaining a stale shared qualification.
+      const guiding = this.unit(this.driver);
+      const approachSource = selected ? { chosen: guiding.gpsStatus.chosen, qualified: guiding.gpsApproachSource.qualified } : null;
+      this.computers.forEach(unit => unit.refreshSystemNavigationMonitoring(approachSource));
+      const different = one.localFlightPhase !== two.localFlightPhase;
+      this.phaseDifferentSince = different ? this.phaseDifferentSince ?? this.clock().getTime() : null;
+      if (this.phaseDifferentSince !== null && (this.clock().getTime() - this.phaseDifferentSince) / 1000 > parameters.dualPhaseDisagreementTime.value)
+        this.independent("PHASE DISAGREEMENT");
     } else {
       const [a, b] = this.computers.map(unit => unit.localNavigationSolution);
       const disagree = !one.hasCondition("fmsFail") && !two.hasCondition("fmsFail") && a.mode === "GPS" && b.mode === "GPS"
@@ -213,6 +221,18 @@ export class DualFmsSystem {
       if (disagree && !this.disagreement) this.computers.forEach(unit => unit.raiseAlert("GPS-GPS POS DISAGREE"));
       this.disagreement = disagree;
     }
+  }
+  private refreshNavigation() {
+    if (this.refreshingNavigation) return;
+    this.compute(() => {
+      this.refreshingNavigation = true;
+      try {
+        // FMS1 publishes the shared frame; then FMS2 computes its own selection before system adoption. Internal
+        // refreshSensorInput does not re-enter this operator-input exchange or move the clock/aircraft.
+        this.computers.forEach(unit => unit.refreshSensorInput());
+        this.reconcile(); this.notify();
+      } finally { this.refreshingNavigation = false; }
+    });
   }
   private prepareGuidance(side: FmsSide) {
     // Each guidance computation consumes the selected system measurement, not a transient local estimate.
