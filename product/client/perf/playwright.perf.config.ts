@@ -1,24 +1,25 @@
 import { defineConfig, devices } from '@playwright/test'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createBrowserStorage } from '../scripts/browser-storage.mjs'
+import { assertBrowserScoringAvailable } from './browser-accounting.ts'
 
 /**
  * The FMS performance harness (#1510 I0a). Outside tests/, so neither the Full nor the production config discovers it.
  * One invocation is one run; the orchestrator (run-perf.ts) spawns each run in ABBA order and never uses --repeat-each.
  *
  * AEROLINK_PERF_MODE=headless runs headless.perf.ts in this process tree with no server.
- * AEROLINK_PERF_MODE=browser runs browser.perf.ts against one API built from the harness checkout, serving the arm's
- * production build (AEROLINK_PERF_DIST) through Client__StaticFiles, with a disposable SQLite database and the terrain
- * relay off, as playwright.production.config.ts does. Each browser run gets a fresh API process on its own copy of
- * one disposable database the orchestrator seeds once per session (AEROLINK_PERF_MODE=seed runs seed.perf.ts to make it), so
- * every run starts from identical state without paying for the showcase seed each time.
+ * AEROLINK_PERF_MODE=browser refuses before storage, authentication or API creation while accounting is unqualified.
+ * AEROLINK_PERF_MODE=seed remains available for independently scoped disposable fixture diagnostics, serving a built
+ * arm through Client__StaticFiles with the terrain relay off. It does not admit or qualify a browser scored window.
  */
 const clientDir = fileURLToPath(new URL('..', import.meta.url))
 const mode = process.env.AEROLINK_PERF_MODE ?? 'headless'
 if (!['headless', 'browser', 'seed'].includes(mode)) throw new Error(`unknown AEROLINK_PERF_MODE ${mode}`)
+// Refuse before constructing storage/global setup/webServer when this config is invoked without run-perf.ts.
+if (mode === 'browser') assertBrowserScoringAvailable(JSON.parse(readFileSync(new URL('./protocol.json', import.meta.url), 'utf8')))
 const outputDir = process.env.AEROLINK_PERF_OUTPUT_DIR ?? join(clientDir, 'test-results', 'perf')
 const browser = mode !== 'headless'
 

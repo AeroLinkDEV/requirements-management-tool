@@ -395,7 +395,12 @@ test('SETUP transfers configured settings and sync refuses link, software, data,
 test('synchronized navigation retains its sensor until the peer is 100 metres better and independent estimates can disagree', () => {
   const { system, one, two, tick } = dualSetup()
   const stimulus = stimulusFor(one)
+  stimulus.apply(1, { op: 'override', label: '247', kind: 'FORCE', amount: 0.25 }) // Establish side 1 before each input settles.
   stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.2 })
+  system.tick()
+  expect(one.localNavigationSolution.anp).toBeCloseTo(0.2, 6)
+  expect(two.localNavigationSolution.anp).toBeCloseTo(0.25, 6)
+  expect(system.navigationSide).toBe(1)
   stimulus.apply(1, { op: 'override', label: '247', kind: 'FORCE', amount: 0.15 }); tick()
   expect(one.localNavigationSolution.anp).toBeCloseTo(0.2, 6)
   expect(two.localNavigationSolution.anp).toBeCloseTo(0.15, 6)
@@ -425,15 +430,20 @@ test('synchronized navigation retains its sensor until the peer is 100 metres be
     phaseStimulus.apply(index, { op: 'override', label: '120', kind: 'FORCE', amount: 0 })
     phaseStimulus.apply(index, { op: 'override', label: '121', kind: 'FORCE', amount: 0 })
   }
-  phases.tick()
+  phases.system.tick() // Settle the disagreement at t0; public navigation inputs may already have settled it.
+  expect(phases.one.utcTime.getTime()).toBe(START)
+  expect(phases.one.localFlightPhase).toBe('TERMINAL')
+  expect(phases.two.localFlightPhase).toBe('EN ROUTE')
   const departure = phases.one.navdb.airport('CYOW')!.position
   expect(distanceNm(phases.one.localNavigationSolution.position, departure)).toBeLessThan(33)
   expect(distanceNm(phases.two.localNavigationSolution.position, departure)).toBeGreaterThan(33)
   phases.tick(20)
   phases.one.setCondition('rnpExceeded', true) // A healthy-computer condition notification must not reset local phase history.
   phases.tick(10)
+  expect(phases.one.utcTime.getTime() - START).toBe(30_000)
   expect(phases.system.mode).toBe('SYNC') // Exactly 30 seconds is not "more than 30".
   phases.tick()
+  expect(phases.one.utcTime.getTime() - START).toBe(31_000)
   expect(phases.system.mode).toBe('INDEPENDENT')
   expect(phases.one.faultLog.some(fault => fault.text.includes('PHASE DISAGREEMENT'))).toBe(true)
 })

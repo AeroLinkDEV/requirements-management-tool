@@ -223,7 +223,7 @@ export class ScriptedFms implements CduBackend {
       "forgetPilot", "goAround", "importUserDatabase", "initializePosition", "interceptCourse", "interruptSar", "loadArinc424",
       "loadBacktrack", "loadCompanyRoute", "loadMagvar", "loadNavData", "modify", "open", "overrideDiscontinuity",
       "placeAircraft", "powerOff", "powerOn", "predictRaimAt", "predictRaimEta", "proceedFromPins", "raiseAlert",
-      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "replaceLegs",
+      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "refreshSystemNavigationMonitoring", "replaceLegs",
       "requestMissedApproach", "saveCompanyRoute", "selectGpsReceiver", "selectProcedure", "selectRunway", "sequence",
       "setAirInputFaults", "setApirsFaultBias", "setApproachTemperature", "setBaroError", "setBaroSetting", "setDeselected",
       "setDmeDeselected", "setDvsInputSurface", "setDvsWindMagnetic", "setFafAltitude", "setFuel", "setGpsBaro",
@@ -305,6 +305,7 @@ export class ScriptedFms implements CduBackend {
   private waterCurrent: { northKt: number; eastKt: number } | null = null;
   private surfaceDrift = { northKt: 0, eastKt: 0 };
   private truthVelocity: { north: number; east: number; at: number } | null = null;
+  private previousTruthVelocity: { north: number; east: number; at: number } | null = null;
   readonly predictiveRaim = { ident: null as string | null, eta: null as number | null, requestedAt: null as number | null };
   private readonly raimExcluded = new Set<number>();
   private automaticRaimFor: string | null = null;
@@ -327,6 +328,7 @@ export class ScriptedFms implements CduBackend {
   /** AUTO receiver selection, approach-aware (gpsSensors.ts, the AeroLink simulator policy), and its last verdict. */
   private autoSelection = new AutoSelection();
   private gpsSelection = { qualified: true, refused: "" };
+  private systemApproachSource: { chosen: number | null; qualified: boolean } | null = null;
   private selectionLog = new SelectionLog();
   /** The approach selection last sent to the receivers (its path identifier and CRC), so it is sent once per change. */
   private sentApproach: string | null = null;
@@ -1041,6 +1043,10 @@ export class ScriptedFms implements CduBackend {
     // Crabbed into the wind so the given track is the one flown (the heading when the track cannot be held is the track).
     const hold = holdTrack(this.targetSpeed, state.track, this.wind);
     this.setAircraft({ ...state, tas: this.targetSpeed, heading: hold.feasible ? hold.heading : state.track, groundSpeed: hold.feasible ? hold.groundSpeed : 0, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
+    // An instructor reposition is not physical acceleration. Clear both truth samples so old velocity cannot
+    // be promoted as the new measured interval's baseline.
+    this.truthVelocity = null;
+    this.previousTruthVelocity = null;
     this.engineering = [...this.engineering, {
       at: this.now, action: "PLACE AIRCRAFT",
       detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
@@ -1530,8 +1536,12 @@ export class ScriptedFms implements CduBackend {
   private inertialAndDoppler(now: number, sequence: number): Pick<SensorFrame, "apirs" | "dvs"> {
     const track = (this.aircraft.track ?? 0) * Math.PI / 180, speed = this.aircraft.groundSpeed ?? 0;
     const north = speed * Math.cos(track), east = speed * Math.sin(track);
-    const previous = this.truthVelocity;
+    // Guidance refresh and post-motion sampling share an epoch. Keep the preceding distinct epoch so the second
+    // sample measures that interval rather than replacing the acceleration with a zero-duration difference.
+    if (!this.truthVelocity || now < this.truthVelocity.at) this.previousTruthVelocity = null;
+    else if (now > this.truthVelocity.at) this.previousTruthVelocity = this.truthVelocity;
     this.truthVelocity = { north, east, at: now };
+    const previous = this.previousTruthVelocity;
     const dt = previous ? (now - previous.at) / 1000 : 0;
     const accel = (value: number, before: number | undefined, bias: number) => (dt > 0 && before !== undefined ? (value - before) * 0.514444 / dt : 0) + bias;
     const bias = { north: this.apirsBias.north + this.apirsFaultBias.north, east: this.apirsBias.east + this.apirsFaultBias.east };
@@ -1623,7 +1633,7 @@ export class ScriptedFms implements CduBackend {
   get navigationInputs(): SensorFrame | null { return this.sensorFrame ? structuredClone(this.sensorFrame) : null; }
 
   /** Read a connected simulator before computing guidance so an expired input cannot command one extra step. */
-  refreshSensorInput() { this.updateNavigation(0); }
+  refreshSensorInput() { this.updateLocalNavigation(0); }
 
   get raimDeselectedSatellites() { return [...this.raimExcluded].sort((a, b) => a - b); }
   deselectRaimSatellite(prn: number, deselected: boolean) {
@@ -1676,6 +1686,12 @@ export class ScriptedFms implements CduBackend {
    * against RNP. A returning position source can cause a reported POSITION SHIFT.
    */
   updateNavigation(dt: number) {
+    if (dt === 0 && this.crossTalk) { this.crossTalk.navigationChanged(); return; }
+    this.updateLocalNavigation(dt);
+  }
+
+  /** In-step sampling stays local until the dual system's existing guidance/adoption boundary. */
+  private updateLocalNavigation(dt: number) {
     this.stepRadios();
     this.sensorFrame = this.sampleSensors();
     if (!this.powered) return;
@@ -1774,6 +1790,13 @@ export class ScriptedFms implements CduBackend {
     if (disagree && !this.nav.disagreeAlerted) { this.nav.disagreeAlerted = true; this.alert(alert("GPS DISAGREE")); }
     if (!disagree) this.nav.disagreeAlerted = false;
 
+    // M300 3-24/25: SYNC monitoring uses system navigation, adopted after local selection. Transient onside
+    // integrity must neither latch the approach phase nor raise a false system integrity/performance alert (#1538).
+    if (this.crossTalk?.mode !== "SYNC") this.refreshNavigationMonitoring();
+  }
+
+  private refreshNavigationMonitoring() {
+    const now = this.now.getTime();
     // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
     // effective values as the pages and the lamp (R11).
     this.refreshApproachPhase();
@@ -1828,11 +1851,11 @@ export class ScriptedFms implements CduBackend {
     // The approach needs the selected receiver's words to permit it (gpsApproachAuthority: a usable receiver, a valid
     // selected approach, a level, 116), and once it has had vertical guidance (LPV or LNAV/VNAV with 117 valid) in the
     // approach phase, losing it is a loss of approach integrity too (3b, the GPS review's GPS-01 and GPS-06).
-    const authority = this.gpsApproachAuthority, vertical = authority.vertical;
+    const authority = this.navigationApproachAuthority, vertical = authority.vertical;
     if (rnavApproach && vertical) this.nav.approachVerticalSeen = true;
     if (!rnavApproach) this.nav.approachVerticalSeen = false;
     const integrityDenied = this.s300Advisory ? this.approachCancelled || !this.onFinalSegment && !this.approachIntegrityEligible
-      : !this.approachIntegrityEligible || selection.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical);
+      : !this.approachIntegrityEligible || this.nav.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical);
     if (rnavApproach && integrityDenied) {
       if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
     } else this.nav.approachIntegrityAlerted = false;
@@ -2031,10 +2054,16 @@ export class ScriptedFms implements CduBackend {
     const prediction = this.approachPrediction;
     const predicted = prediction.faf !== null && prediction.faf <= 0.3 && prediction.map !== null && prediction.map <= 0.3;
     // The FAF prediction is an entry gate, not a new requirement to predict a fix already passed.
-    this.approachIntegrityEligible = current && (this.onFinalSegment ? this.approachPhaseActive : predicted) && this.gpsApproachAuthority.annunciation !== "NO APPR";
+    this.approachIntegrityEligible = current && (this.onFinalSegment ? this.approachPhaseActive : predicted) && this.navigationApproachAuthority.annunciation !== "NO APPR";
     if (this.armedApproach && !this.approachCancelled && !holding && distance <= 2 && this.approachIntegrityEligible) this.approachPhaseActive = true;
     // A later loss on the final is handled by the approach guidance integrity policy, rather than changing RNP to 1.
     if ((!current || !predicted) && !this.onFinalSegment) this.approachPhaseActive = false;
+  }
+
+  /** SYNC's phase-dependent monitoring follows system navigation adoption, including the no-usable-source case. */
+  refreshSystemNavigationMonitoring(approachSource: { chosen: number | null; qualified: boolean } | null) {
+    this.systemApproachSource = approachSource;
+    this.refreshNavigationMonitoring();
   }
 
   /** M300 7-12: five minutes for integrity-only loss after FAF inbound; invalid input/HDOP loss is immediate. */
@@ -3094,7 +3123,6 @@ export class ScriptedFms implements CduBackend {
    */
   get gpsApproachAuthority(): ApproachAuthority {
     const approach = findProcedure(this.db, this.active, "APPROACH");
-    const rnav = approach?.approachType === "RNAV";
     if (this.s300Advisory) {
       const source = this.nav.gpsSource, bus = source === null ? null : this.gpsBus(source - 1);
       const assessment = assessReceiver(bus, 0.3), hdop = bus?.["101"];
@@ -3103,9 +3131,19 @@ export class ScriptedFms implements CduBackend {
         && !this.approachCancelled && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4 && (assessment.usable || delayed);
       return { annunciation: valid ? "LNAV" : "NO APPR", lateral: !!valid, vertical: false, reason: valid ? "" : "S300 GPS APPROACH UNAVAILABLE" };
     }
+    return this.laterApproachAuthority(this.gpsAssessment.chosen, this.gpsSelection.qualified);
+  }
+
+  /** Shared integrity availability does not authorize an AFCS 116/117 source transfer (#1538). */
+  private get navigationApproachAuthority(): ApproachAuthority {
+    if (this.crossTalk?.mode !== "SYNC" || this.s300Advisory || this.systemApproachSource === null) return this.gpsApproachAuthority;
+    return this.laterApproachAuthority(this.systemApproachSource.chosen, this.systemApproachSource.qualified);
+  }
+
+  private laterApproachAuthority(chosen: number | null, qualified: boolean): ApproachAuthority {
+    const approach = findProcedure(this.db, this.active, "APPROACH"), rnav = approach?.approachType === "RNAV";
     if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
-    const chosen = this.gpsAssessment.chosen;
-    if (!this.gpsSelection.qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
+    if (!qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
     // Only an approach the data declares LNAV only is flown without a FAS block; a missing or unreadable one is NO APPR.
     const bus = chosen === null ? null : this.gpsBus(chosen);
     // Approach acceptance keeps its 0.3-NM integrity limit even when a denied approach leaves the phase terminal.

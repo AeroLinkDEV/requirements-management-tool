@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { expect, renderedTest as test } from './isolated-client-test'
 import type { Locator, Page } from '@playwright/test'
+import { installPausedClock } from './paused-clock'
 
 // The bench hands each CDU key event to the recorder with its held flag (#1505): a key pressed on the bench panel or
 // on cockpit CDU 1 is recorded at its own tick, a held CLR is recorded held, and the saved scenario replays it as one.
@@ -33,7 +34,7 @@ const rows: { name: string; setUp: (page: Page) => Promise<Station> }[] = [
 
 for (const row of rows) {
   test(`keys on ${row.name} are recorded at their own ticks and a held CLR is recorded and replayed held`, async ({ page }) => {
-    await page.clock.install({ time: START }); await page.clock.pauseAt(START)
+    await installPausedClock(page, START)
     await page.addInitScript(() => { try { window.localStorage.clear() } catch { /* private mode */ } })
     await page.goto('/tests/fixtures/fms-cdu.html')
     await expect(page.locator('.fmsCdu').first()).toBeVisible()

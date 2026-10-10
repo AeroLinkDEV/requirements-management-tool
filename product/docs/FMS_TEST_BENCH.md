@@ -381,6 +381,23 @@ These receiver/FAS contracts apply to `cma9000-later-sbas-heli` and the laborato
 
 Sources: CMC Electronics CMA-5024 datasheets ([current](https://cmcelectronics.ca/wp-content/uploads/2022/09/4.1.3-CMC-CMA5024-GPS-19-011.pdf), [earlier](http://jproc.ca/rrp/rrp3/ch148_cma5024.pdf)); the CMA-5024 GLSSU Installation Manual as hosted on [ManualsLib](https://www.manualslib.com/manual/2035147/Cmc-Electronic-Esterline-Cma-5024.html) (operating modes p. 49, outputs and SSM pp. 110–111, output tables pp. 113–122, labels 060 p. 134, 156 p. 139, 273 p. 148, 305 p. 150, 355 p. 154, FAS block p. 196); ARINC 743A label summaries ([GlobalSpec](https://standards.globalspec.com/std/10392102/arinc-743a)); FAA [AC 20-138D](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_20-138D_Change_1.pdf). RTCA DO-229D is cited through these, not read directly.
 
+## Browser performance accounting
+
+The performance harness's browser accounting compatibility revision 1 fails closed while no completed-frame and
+continuation-cost schema is qualified. `perf/run-perf.ts browser` writes an attributable refusal before seeding or
+starting an API. Refusal records are created exclusively: reusing `--out` refuses before replacing an existing
+arm/harness record and requires a fresh output directory. The direct performance configuration and browser owner also refuse. Report output retains browser
+record identities and marks them `NOT_QUALIFIED`, without computing browser metric levels, confidence intervals,
+sample counts or budget verdicts. Historical raw records and their original reports retain their actual source and
+protocol identities; this revision does not requalify them. Headless statistics revision 3 is unchanged.
+
+[Issue #1557](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1557) still owns actual completed
+frames, outstanding work across warmup/scored boundaries and continuation/React attribution. The separate
+[#1542](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1542) browser warm-up/host-drift mechanism
+and quiet-host protocol qualification also remain open. This compatibility protection permits pacing integration
+under the reviewed refusal alternative; it is neither browser budget qualification nor completion of the I0/D10
+performance obligations. Direct completed-frame functional pacing observations remain separate evidence.
+
 ## Cockpit and station arrangements
 
 Engineering view remains the initial layout and immediate fallback. Cockpit view places the two physical CDUs

@@ -542,10 +542,14 @@ test('when GPS returns after dead reckoning the position jumps back, and the FMS
   const { unit, fly } = setup()
   // DME first, then GPS: the aircraft goes straight from a GPS fix to dead reckoning.
   unit.setCondition('dmeOutage', true)
+  // DEC-150 equips KALMAN and DVS; fail both so this owner actually exercises DR.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   unit.setCondition('gpsLost', true)
+  expect(unit.navState.mode).toBe('DR')
   // A changed wind cannot be computed without a valid position/velocity source: DR keeps its last measured wind.
   unit.wind.speed += 6
   fly(30 * 60)
+  expect(unit.navState.mode).toBe('DR')
   expect(recalled(unit, 'POSITION SHIFT')).toBe(false)
   unit.setCondition('gpsLost', false)
   expect(recalled(unit, 'POSITION SHIFT')).toBe(true)
@@ -557,12 +561,16 @@ test('the aircraft flies the FMS position, so in dead reckoning it really is off
   const { unit, fly } = setup()
   // DME first, then GPS: the aircraft goes straight from a GPS fix to dead reckoning.
   unit.setCondition('dmeOutage', true)
+  // DEC-150 equips KALMAN and DVS; fail both so this owner actually exercises DR.
+  unit.setCondition('apirsFail', true); unit.setCondition('dvsFail', true)
   unit.setCondition('gpsLost', true)
+  expect(unit.navState.mode).toBe('DR')
   unit.wind.speed += 6
   let offAtRdg = 0
   fly(3600, () => {
     if (active(unit) === 'TOLGU') { offAtRdg = distanceNm(unit.truePosition, unit.coordinates('RDG')!); return true }
   })
+  expect(unit.navState.mode).toBe('DR')
   // Sequenced where the FMS believed RDG was: really a few tenths of a mile away.
   expect(offAtRdg).toBeGreaterThan(0.3)
 })

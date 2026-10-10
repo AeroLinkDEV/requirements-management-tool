@@ -2,10 +2,11 @@ import type { FmsSide } from "./crossTalk";
 import { racetrackOutline, sarTrack, segmentsOutline, type FlightSimulator, type Guidance } from "./flight";
 import { arcSweep, bearingDeg, distanceNm, longitudeDelta, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
+import { MAP_CF_EXTENT_NM, MAP_RADIUS_UNITS } from "./mapDrawing";
 import "./FmsMap.css";
 
 /**
- * A moving map of what the FMS is flying, drawn the way a navigation display shows it: north up and centred on the
+ * A moving map of the inspected FMS's managed route, independent of AFCS coupling: north up and centred on the
  * aircraft, the active leg in magenta, later legs in white, a pending modification dashed, holds and search patterns
  * in cyan. It reads the scripted FMS and the flight simulation; it has no state of its own beyond the range.
  *
@@ -17,7 +18,7 @@ import "./FmsMap.css";
 type Computer = { side: FmsSide; fms: ScriptedFms; sim: FlightSimulator };
 type Props = { fms: ScriptedFms; sim: FlightSimulator; side: FmsSide; guiding: Computer | null; range: number };
 
-const R = 100; // the map is drawn in a -R..R box; the range ring at R is the selected range
+const R = MAP_RADIUS_UNITS; // the map is drawn in a -R..R box; the range ring at R is the selected range
 
 /** What the guiding computer is flying, in words: its active waypoint on a route leg, otherwise its mode. */
 function guidingLabel({ side, fms, sim }: Computer, arrow: string) {
@@ -25,9 +26,9 @@ function guidingLabel({ side, fms, sim }: Computer, arrow: string) {
   return sim.guidance.mode === "LNAV" && to?.kind === "wpt" ? `FMS ${side} guiding ${arrow} ${to.ident}` : `FMS ${side} guiding, ${sim.guidance.mode} mode`;
 }
 
-/** The track actually flown on an LNAV leg with a lateral offset: the leg moved sideways by the offset distance. */
+/** The managed offset track: the leg moved sideways by the offset distance, independent of AFCS coupling. */
 function offsetTrack(g: Guidance, shift: number): LatLon[] | null {
-  if (!shift || !g.legFrom || !g.legTo || g.desiredTrack === null || g.mode !== "LNAV") return null;
+  if (!shift || !g.legFrom || !g.legTo || g.desiredTrack === null) return null;
   const side = g.desiredTrack + (shift > 0 ? 90 : -90);
   return [offset(g.legFrom, side, Math.abs(shift)), offset(g.legTo, side, Math.abs(shift))];
 }
@@ -40,7 +41,8 @@ function guidingPath({ fms, sim }: Computer): LatLon[] | null {
   const g = sim.guidance, leg = fms.activeRoute.legs[0];
   if (g.mode === "HDG" || !g.legFrom || !g.legTo) return null;
   if (g.mode === "LNAV" && leg?.kind === "wpt" && (leg.path === "RF" || leg.path === "AF")) return null;
-  return offsetTrack(g, fms.activeRoute.offset?.nm ?? 0) ?? [g.legFrom, g.legTo];
+  // The separate guiding marker represents the flown pattern, not an offset of retained HOLD/SAR geometry.
+  return (g.mode === "LNAV" ? offsetTrack(g, fms.activeRoute.offset?.nm ?? 0) : null) ?? [g.legFrom, g.legTo];
 }
 
 export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
@@ -84,7 +86,12 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   const activeJoining = !!committedJoin && !previewJoin && active.legs[0]?.kind === "wpt" && active.legs[0].ident === "JN";
   const modifiedJoining = !!previewJoin && fms.route.legs[0]?.kind === "wpt" && fms.route.legs[0].ident === "JN";
   const activeTo = active.legs[0]?.kind === "wpt" ? fms.coordinates(active.legs[0].ident) : undefined;
-  const [first, ...later] = routeLines(fms.activeLegStart, active, activeJoining);
+  const activeWaypoint = active.legs[0];
+  // A CF is the inbound course into its fix, except when the actual committed JN joining path is flown.
+  const routeStart = activeTo && activeWaypoint?.kind === "wpt" && activeWaypoint.path === "CF" && activeWaypoint.course !== undefined
+    && !(activeWaypoint.ident === "JN" && fms.hoverJoin)
+    ? offset(activeTo, activeWaypoint.course + 180, MAP_CF_EXTENT_NM) : fms.activeLegStart;
+  const [first, ...later] = routeLines(routeStart, active, activeJoining);
   const waypoints = active.legs.flatMap((leg, i) => {
     if (leg.kind !== "wpt") return [];
     const at = leg.position ?? fms.coordinates(leg.ident);
@@ -112,8 +119,9 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
 
   const g = sim.guidance;
   const [firstLeg, ...laterFirst] = first ?? [];
-  // In a hold or search pattern the guidance leg is the active one; the route resumes from the fix.
-  const onRoute = g.mode === "LNAV";
+  // Heading selection does not hide a valid managed leg. In a hold or search pattern the
+  // guidance leg is active; the route resumes from the fix. Invalid managed guidance stays withdrawn.
+  const onRoute = g.mode === "LNAV" || g.mode === "HDG" && g.desiredTrack !== null && !sim.holdProgress && !sim.sarPath;
   // The offset track actually flown, parallel to the active leg.
   const offsetLeg = offsetTrack(g, active.offset?.nm ?? 0);
   const activeLeg = !activeJoining && onRoute && firstLeg && activeTo ? [firstLeg, laterFirst[0]] : null;
@@ -161,7 +169,7 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
         {later.map((line, i) => <path key={`l${i}`} className="later" d={path(line)} />)}
         {activeLeg ? <path className="active" d={path(activeLeg)} /> : null}
         {offsetLeg ? <path className="offset" d={path(offsetLeg)} /> : null}
-        {!activeJoining && g.legFrom && g.legTo && g.mode !== "LNAV" ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
+        {!activeJoining && g.legFrom && g.legTo && !onRoute ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
         {waypoints.map(({ ident, at, active: isActive }) => {
           const q = project(at);
           return (

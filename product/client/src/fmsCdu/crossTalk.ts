@@ -20,6 +20,8 @@ export interface CrossTalkPort {
   crossfill(secondary: boolean): boolean;
   settingsChanged(): void;
   healthChanged(): void;
+  /** Settle a crew/bench navigation input at the same instant, without integrating the aircraft. */
+  navigationChanged(): void;
   broadcastAlert(text: string): void;
   acknowledgeMessage(text: string): void;
   missedApproachRequested(): void;
