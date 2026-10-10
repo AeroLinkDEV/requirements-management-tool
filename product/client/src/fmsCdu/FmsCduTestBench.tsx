@@ -665,7 +665,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             {modes.armed.map(mode => <span key={mode} className="armed">{mode}</span>)}
             <span className="engaged">{modes.vertical}</span>
           </div>
-          {sim.modeEvents.length ? <p className="fmsBenchHint">Last mode change: {sim.modeEvents.at(-1)!.event}, {sim.modeEvents.at(-1)!.detail}</p> : null}
+          {sim.latestModeEvent ? <p className="fmsBenchHint">Last mode change: {sim.latestModeEvent.event}, {sim.latestModeEvent.detail}</p> : null}
           <form className="fmsBenchAutopilot" onSubmit={event => {
             event.preventDefault();
             const entry = Number(headingInput);
