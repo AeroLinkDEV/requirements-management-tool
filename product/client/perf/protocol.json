@@ -32,6 +32,12 @@
     ]
   },
   "browser": {
+    "accounting": {
+      "revision": 1,
+      "mode": "fail-closed-unavailable",
+      "issue": "#1557",
+      "declared": "Browser accounting compatibility revision 1, declared before new runs: scored browser sessions refuse before seed/API startup; direct configuration/owner invocation also refuses. No completed-frame/continuation accounting schema is qualified. Report output retains historical/unknown browser identities with NOT_QUALIFIED and emits no browser metric levels, intervals, planned sample counts or budget verdicts. Historical raw records and their original verdicts remain under their original revisions; this revision does not requalify them. Headless statistics revision 3 and its priming and failed-run rules are unchanged. Actual completed frames, outstanding work at warmup/scored boundaries and continuation/React attribution remain open in #1557; #1542 warm-up/host drift and quiet-host A/A are separate qualifications."
+    },
     "scenario": "87n-offshore-sar",
     "rates": [1, 64],
     "windowSimSeconds": { "1": 60, "64": 2400 },

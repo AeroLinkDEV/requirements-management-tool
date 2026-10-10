@@ -1,10 +1,85 @@
 import { expect, logicTest as test } from './isolated-client-test'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
 // order, the exact bootstrap of a three-run sample, blocking, the within-block permutation test (protocol revision 2)
 // and its calibration under a null with block effects, and Holm's step-down adjustment.
+
+// #1557 compatibility protection, not completed-frame accounting or a performance experiment. Exercise the real
+// commands: interval-derived records must remain historical inputs, never current browser budget evidence.
+test('the report retains unsupported browser identities without scoring them and keeps headless output', ({ browserName: _browserName }, testInfo) => {
+  const out = testInfo.outputPath('mixed-records')
+  mkdirSync(out, { recursive: true })
+  const host = { quietBefore: { quiet: true } }
+  const browserResult = {
+    schema: 'aerolink.fms-perf-browser-run.v1', windowSimSeconds: 336, throughput: 42,
+    callbacks: { p50: 1, p95: 2, p99: 3 }, longTasks: { count: 0 }, raf: null,
+    interaction: { entries: [], resolutionStepMs: null }, heapUsedBytesAfterGc: 1024,
+    browser: { version: 'historical fixture', headless: true, renderer: 'fixture', viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } },
+  }
+  // Literal #1557 busy/partial observations: 1,067 completed frames meant 266.75 s, whereas 21 callbacks at64x
+  // inferred336 s. In the second window no interval-admitted frame completed: 26 continuation frames meant6.5 s,
+  // whereas13 callbacks inferred208 s. These are recorded functional examples, not budget measurements.
+  const rows = [
+    { index: 0, kind: 'browser', status: 'passed', block: 0, arm: 'B', configuration: 'view-off-svs-off', rate: 64, host,
+      armIdentity: { commit: 'a'.repeat(40) }, completedFrameWitness: 1067, result: browserResult },
+    { index: 1, kind: 'browser', status: 'passed', block: 1, arm: 'B', configuration: 'view-off-svs-off', rate: 64, host,
+      armIdentity: { commit: 'b'.repeat(40) }, completedFrameWitness: 26, result: { ...browserResult, windowSimSeconds: 208 } },
+    { index: 2, kind: 'browser', status: 'failed', block: 2, arm: 'B', configuration: 'view-off-svs-off', rate: 64, host,
+      armIdentity: { commit: 'c'.repeat(40) }, result: { schema: 'unreviewed-completed-frames-v99', throughput: 999 } },
+    { index: 3, kind: 'headless', status: 'passed', block: 0, arm: 'B', workload: 'W1', topology: 'single', host,
+      result: { p50: 1, p95: 2, p99: 3, throughput: 250, heapUsedBytesAfterGc: 1024, sync: null } },
+  ]
+  const input = rows.map(row => JSON.stringify(row)).join('\n') + '\n'
+  writeFileSync(join(out, 'runs.jsonl'), input)
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
+  expect(report.browserQualification).toMatchObject({ status: 'NOT_QUALIFIED', accountingIssue: '#1557',
+    policyRevision: 1, declaredMode: 'fail-closed-unavailable', metrics: null, supportedAccountingSchemas: [], records: [
+    { index: 0, status: 'passed', arm: 'B', commit: 'a'.repeat(40) },
+    { index: 1, status: 'passed', arm: 'B', commit: 'b'.repeat(40) },
+    { index: 2, status: 'failed', arm: 'B', commit: 'c'.repeat(40), compatibility: 'unsupported-or-missing' },
+  ] })
+  expect(report).not.toHaveProperty('browser')
+  expect(report).not.toHaveProperty('browserPilotPlanned')
+  const prose = readFileSync(join(out, 'report.md'), 'utf8')
+  expect(prose).not.toContain('## Browser matrix')
+  expect(prose).toContain('NOT_QUALIFIED')
+  expect(prose).toContain('| W1 | single | 1 | 1.000')
+  expect(prose).toContain('250.000')
+  expect(readFileSync(join(out, 'runs.jsonl'), 'utf8')).toBe(input)
+})
+
+test('the browser command refuses explicitly before seeding or starting an API', ({ browserName: _browserName }, testInfo) => {
+  const out = testInfo.outputPath('refused-browser')
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser', '--out', out,
+    '--arm', `B=${resolve('../..')}`, '--rounds', '1', '--dirty-smoke'], { cwd: process.cwd(), encoding: 'utf8', timeout: 30_000 })
+  writeFileSync(testInfo.outputPath('browser-command.log'), `${child.stdout ?? ''}\n${child.stderr ?? ''}`)
+  expect(child.status).not.toBe(0)
+  expect(child.stderr).toContain('FMS_BROWSER_ACCOUNTING_UNAVAILABLE')
+  const refusal = JSON.parse(readFileSync(join(out, 'browser-accounting-refusal.json'), 'utf8'))
+  expect(refusal).toMatchObject({ status: 'REFUSED', accountingIssue: '#1557', metrics: null })
+  expect(existsSync(join(out, 'seed.json'))).toBe(false)
+  expect(existsSync(join(out, 'logs', 'seed.log'))).toBe(false)
+  expect(existsSync(join(out, 'runs.jsonl'))).toBe(false)
+})
+
+test('direct browser harness configuration refuses before fixture or server creation', ({ browserName: _browserName }, testInfo) => {
+  const out = testInfo.outputPath('direct-browser')
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./perf/playwright.perf.config.ts')"], {
+    cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, AEROLINK_PERF_MODE: 'browser',
+      AEROLINK_PERF_OUTPUT_DIR: out, AEROLINK_PERF_DIST: join(out, 'deliberately-absent-dist') },
+  })
+  writeFileSync(testInfo.outputPath('direct-command.log'), `${child.stdout ?? ''}\n${child.stderr ?? ''}`)
+  expect(child.status).not.toBe(0)
+  expect(child.stderr).toContain('FMS_BROWSER_ACCOUNTING_UNAVAILABLE')
+  expect(existsSync(out)).toBe(false)
+})
 
 test('nearest-rank percentiles take the smallest value with at least p% at or below it', () => {
   // ceil(p/100 * n): p5 of 5 -> rank 1, p30 -> 2, p40 -> 2, p50 -> 3, p100 -> 5.

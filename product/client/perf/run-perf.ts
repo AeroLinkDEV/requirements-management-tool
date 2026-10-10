@@ -5,7 +5,7 @@
 //   node perf/run-perf.ts browser  --out <dir> --arm B=<checkout> --rounds <n> [--rates 1,64] [--configurations ...]
 //   node perf/run-perf.ts report   --out <dir> [--pilot]
 //
-// Every run is its own `playwright test --config=perf/playwright.perf.config.ts` invocation (a fresh process), taken
+// Every admitted headless run is its own `playwright test --config=perf/playwright.perf.config.ts` invocation (a fresh process), taken
 // in ABBA order for two arms after an unscored priming pass (headless, protocol revision 3), and kept whatever its
 // outcome. Arm checkouts are detached worktrees at their SHAs; their client source, lock file and Vite config tree
 // hashes are recorded with every run. Output holds no user paths, hostnames or environment values: environment
@@ -13,14 +13,13 @@
 
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { arch, cpus, platform, release, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
-// @ts-expect-error a JavaScript module without declarations
-import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
+import { blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, medianLevel, permutationTest, plannedRuns, primingPlan, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
+import { assertBrowserScoringAvailable, browserQualification, browserScoringRefusal } from './browser-accounting.ts'
 
 const client = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const protocol = JSON.parse(readFileSync(join(client, 'perf', 'protocol.json'), 'utf8'))
@@ -56,7 +55,7 @@ function armIdentity(root: string) {
 
 function harnessIdentity() {
   const root = git(client, 'rev-parse', '--show-toplevel')
-  // The browser runs start the API with --no-build, so they run whatever binaries the harness checkout last built. The
+  // The optional seed configuration starts the API with --no-build, so it runs the last harness build. The
   // commit and source tree are recorded with the hash of the built assembly; the hash identifies the binary, but it
   // cannot by itself prove that binary was built from that tree: build it from this checkout before a session.
   const release = join(root, 'product', 'src', 'AeroLink.Api', 'bin', 'Release')
@@ -212,53 +211,10 @@ function headless() {
 function browser() {
   const dir = out(), list = arms()
   if (list.length !== 1) throw new Error('browser runs take one arm (--arm B=<checkout>)')
-  const [arm] = list
-  const dist = join(arm.root, 'product', 'client', 'dist')
-  const rounds = Number(options.rounds)
-  const rates: number[] = options.rates?.split(',').map(Number) ?? protocol.browser.rates
-  const configurations: string[] = options.configurations?.split(',') ?? protocol.browser.configurations.map((c: { id: string }) => c.id)
-  const cells = configurations.flatMap(configuration => rates.map(rate => ({ configuration, rate })))
-  const session = begin(dir, 'browser', { arms: [{ arm: arm.arm, ...arm.identity }], rounds, cells })
-
-  // One template database, seeded once per session; every run's fresh API process starts on its own copy of it.
-  const templateId = `perf-template-${Date.now()}`
-  const seedPath = join(dir, 'seed.json')
-  const seed = spawnSync(process.execPath, [cli, 'test', '--config=perf/playwright.perf.config.ts'], {
-    cwd: client, encoding: 'utf8', timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, AEROLINK_PERF_MODE: 'seed', AEROLINK_PERF_DIST: dist, AEROLINK_E2E_RUN_ID: templateId, AEROLINK_PERF_RESULT: seedPath, AEROLINK_PERF_OUTPUT_DIR: join(dir, 'logs', 'seed') },
-  })
-  writeFileSync(join(dir, 'logs', 'seed.log'), `${seed.stdout ?? ''}\n${seed.stderr ?? ''}`)
-  if (seed.status !== 0 || !existsSync(seedPath)) throw new Error('seeding the template database failed; see logs/seed.log')
-  const template = browserStoragePath(templateId)
-
-  // No priming pass here (protocol.json headless.priming): one arm, so no A/B for a cold arm to bias.
-  const started = Date.now(), roundSeconds: number[] = []
-  try {
-    for (let round = 0; round < rounds; round += 1) {
-      if (round > 0) {
-        const average = roundSeconds.reduce((a, b) => a + b, 0) / roundSeconds.length
-        if ((Date.now() - started) / 1000 + average > hoursCap() * 3600) { console.log(`stopped at the ${hoursCap()} h cap after ${round} rounds`); break }
-      }
-      const roundStart = Date.now()
-      // Each round starts one cell later, and odd rounds run backwards, so no cell always runs first or last.
-      const rotated = cells.map((_, i) => cells[(i + round) % cells.length])
-      const order = round % 2 ? rotated.reverse() : rotated
-      order.forEach(({ configuration, rate }, position) => {
-        const runId = `perf-${Date.now()}-${round}-${position}`
-        const storage = createBrowserStorage(runId)
-        for (const file of readdirSync(template)) if (file.startsWith('aerolink.db')) cpSync(join(template, file), join(storage.root, file))
-        cpSync(join(template, 'evidence'), storage.evidence, { recursive: true })
-        try {
-          run(dir, { kind: 'browser', block: round, round, position, arm: arm.arm, armIdentity: arm.identity, configuration, rate }, {
-            AEROLINK_PERF_MODE: 'browser', AEROLINK_PERF_DIST: dist, AEROLINK_E2E_RUN_ID: runId,
-            AEROLINK_SHOWCASE_SEED: readFileSync(seedPath, 'utf8'), AEROLINK_PERF_RATE: String(rate), AEROLINK_PERF_CONFIGURATION: configuration,
-          })
-        } finally { removeBrowserStorage(runId) }
-      })
-      roundSeconds.push((Date.now() - roundStart) / 1000)
-    }
-  } finally { removeBrowserStorage(templateId) }
-  writeFileSync(join(dir, `session-end-${Date.now()}.json`), JSON.stringify({ ...session, endedAt: new Date().toISOString(), harnessAtEnd: harnessIdentity() }, null, 2))
+  // Deliberate compatibility refusal before session/seeding/API work, independent of a timer-count assertion.
+  writeFileSync(join(dir, 'browser-accounting-refusal.json'), JSON.stringify({ ...browserScoringRefusal(protocol),
+    arm: { name: list[0].arm, ...list[0].identity }, harness: harnessIdentity() }, null, 2))
+  assertBrowserScoringAvailable(protocol)
 }
 
 function prepare() {
@@ -282,20 +238,6 @@ const measures: Record<string, (result: Record<string, unknown>) => number> = {
   p50: r => r.p50 as number, p95: r => r.p95 as number, p99: r => r.p99 as number, throughput: r => r.throughput as number,
   heap: r => r.heapUsedBytesAfterGc as number,
 }
-const browserMeasures: Record<string, (result: Record<string, any>) => number> = {
-  'callback p50': r => r.callbacks.p50, 'callback p95': r => r.callbacks.p95, 'callback p99': r => r.callbacks.p99,
-  throughput: r => r.throughput, 'long tasks': r => r.longTasks.count, 'rAF interval p95': r => r.raf?.p95 ?? NaN,
-  'interaction p50': r => interactionDurations(r)[0], 'interaction max': r => interactionDurations(r)[1], heap: r => r.heapUsedBytesAfterGc,
-}
-
-/** Event Timing per interaction (interactionId > 0): the longest entry of each; returns [nearest-rank p50, max] over interactions. */
-function interactionDurations(result: Record<string, any>): [number, number] {
-  const longest = new Map<number, number>()
-  for (const entry of result.interaction.entries) if (entry.interaction > 0) longest.set(entry.interaction, Math.max(longest.get(entry.interaction) ?? 0, entry.duration))
-  const values = [...longest.values()].sort((a, b) => a - b)
-  return values.length ? [nearestRank(values, 50), values[values.length - 1]] : [NaN, NaN]
-}
-
 const width = (level: { halfWidthPct: number | null }, digits: number) => level.halfWidthPct === null ? 'n/a' : `${level.halfWidthPct.toFixed(digits)}%`
 const pct = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%`
 const fixed = (value: number, digits = 3) => Number.isFinite(value) ? value.toFixed(digits) : 'n/a'
@@ -330,7 +272,7 @@ function report() {
   }
   const passed = entries.filter(e => e.status === 'passed' && e.result)
   const loud = (list: Entry[]) => list.filter(e => !(e.host as { quietBefore: { quiet: boolean } }).quietBefore.quiet).length
-  lines.push(`Runs: ${entries.length} scored (${json.failedRuns} failed, all kept); runs that started on a host above the quiet threshold: ${loud(entries)}.`,
+  lines.push(`Runs: ${entries.length} recorded non-priming (${json.failedRuns} failed, all kept); runs that started on a host above the quiet threshold: ${loud(entries)}. Browser records below are not qualified for scoring.`,
     `Priming runs: ${priming.length} (${json.failedPrimedRuns} failed; ${loud(priming)} started on a host above the quiet threshold), recorded and never analysed: no table, test, interval or failed-run exclusion below uses them.`,
     ...ends.filter(end => end.stopped).map(end => `Session ${end.startedAt} stopped early: ${end.stopped}.`), '')
 
@@ -421,7 +363,7 @@ function report() {
       if (!rows.length) continue
       const show = (measure: string, scale = 1) => {
         const level = medianLevel(rows.map(e => measures[measure](e.result!) / scale), stats)
-        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (±${width(level, 2)})`
+        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (Â±${width(level, 2)})`
       }
       const sync = rows[0].result!.sync as { residency: number; firstDrop: { simSeconds: number; reason: string | null } | null } | null
       const drops = [...new Set(rows.map(e => JSON.stringify((e.result!.sync as typeof sync)?.firstDrop ?? null)))]
@@ -430,36 +372,12 @@ function report() {
     lines.push('')
   }
 
-  const web = passed.filter(e => e.kind === 'browser')
+  const web = recorded.filter(e => e.kind === 'browser')
   if (web.length) {
-    const cells = [...new Set(web.map(e => `${e.configuration}|${e.rate}`))]
-    lines.push('## Browser matrix (87n-offshore-sar; median over runs, 95% CI; half-width as % of median)', '',
-      `| Configuration | Rate | runs | ${Object.keys(browserMeasures).join(' | ')} |`, `|---|---|---|${Object.keys(browserMeasures).map(() => '---').join('|')}|`)
-    const browserJson: Record<string, unknown>[] = []
-    const plannedBrowser: Record<string, number> = {}
-    for (const cell of cells) {
-      const [configuration, rate] = cell.split('|')
-      const rows = web.filter(e => e.configuration === configuration && String(e.rate) === rate)
-      const levels = Object.fromEntries(Object.entries(browserMeasures).map(([name, take]) => {
-        const values = rows.map(e => take(e.result!)).filter(value => Number.isFinite(value))
-        return [name, values.length ? medianLevel(values, stats) : null]
-      }))
-      browserJson.push({ configuration, rate: Number(rate), runs: rows.length, levels })
-      plannedBrowser[cell] = Math.max(...['callback p95', 'throughput'].map(name => levels[name]
-        ? plannedRuns({ halfWidthPp: levels[name]!.halfWidthPct ?? 0, runsPerArm: rows.length }, targetHalfWidthPp, protocol.caps.browserRunsPerCell) : 0))
-      lines.push(`| ${configuration} | ${rate}x | ${rows.length} | ${Object.keys(browserMeasures).map(name => {
-        const level = levels[name]; const scale = name === 'heap' ? 2 ** 20 : 1
-        return level ? `${fixed(level.estimate / scale, 1)} [${fixed(level.low / scale, 1)}, ${fixed(level.high / scale, 1)}] (±${width(level, 1)})` : 'n/a'
-      }).join(' | ')} |`)
-    }
-    const sample = web[0].result as Record<string, any>
-    const steps = [...new Set(web.map(e => (e.result as Record<string, any>).interaction.resolutionStepMs))]
-    lines.push('', `Callback and interaction times in ms (interaction = Event Timing, key -> next paint, longest entry per interaction; observed duration step ${steps.join('/')} ms; exempt from the 1% target). Throughput in simulated s per wall s (paced: the bench has no unpaced mode). Heap in MiB after a forced GC. The callback figure ends in a microtask after the callback: React work on its default (Scheduler) lane is in long tasks and Long Animation Frames, not in it. Worker backlog: not applicable before I3. Chromium ${sample.browser.version}, ${sample.browser.headless ? 'headless' : 'headed'}, renderer: ${sample.browser.renderer}, viewport ${sample.browser.viewport.width}x${sample.browser.viewport.height} at DPR ${sample.browser.viewport.deviceScaleFactor}.`, '')
-    if (options.pilot) {
-      lines.push('### Pilot: runs per cell for a 1% half-width on callback p95 and throughput (capped)', '', '| Cell | planned N |', '|---|---|', ...Object.entries(plannedBrowser).map(([cell, n]) => `| ${cell.replace('|', ' ')}x | ${n} |`), '')
-      json.browserPilotPlanned = plannedBrowser
-    }
-    json.browser = browserJson
+    const qualification = browserQualification(protocol, web)
+    json.browserQualification = qualification
+    lines.push('## Browser accounting: NOT_QUALIFIED', '', qualification.reason,
+      `${web.length} browser records remain in their original input files and identities. Historical interval-inferred metrics are not rescored by this report. No browser levels, confidence intervals, planned sample count or budget verdict is emitted. Headless analysis is separate.`, '')
   }
   writeFileSync(join(dir, 'report.md'), `${lines.join('\n')}\n`)
   writeFileSync(join(dir, 'report.json'), JSON.stringify(json, null, 2))
