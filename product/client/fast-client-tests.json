@@ -109,6 +109,7 @@
     "artifact-thread-rendered.spec.ts",
     "recorded-code-reference-surfaces.spec.ts",
     "fms-cdu-rendered.spec.ts",
+    "fms-clock-setup-rendered.spec.ts",
     "fms-bench-held-key-recording-rendered.spec.ts",
     "fms-station-browser.spec.ts",
     "fms-bench-tick-cost-rendered.spec.ts",

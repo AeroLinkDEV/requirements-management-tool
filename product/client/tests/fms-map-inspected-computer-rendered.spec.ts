@@ -1,4 +1,5 @@
 import { expect, renderedTest as test, type Page } from './isolated-client-test'
+import { installPausedClock } from './paused-clock'
 
 // #1504 owner (#1502 §19 item 1, option a): the engineering map draws one computer, the inspected one: its route, its
 // own guidance mode and active leg, and it names that vantage. When the other computer is guiding the aircraft, the map
@@ -109,8 +110,12 @@ test('INDEPENDENT: inspecting FMS 1 while FMS 2 guides shows FMS 1 direct CYUL a
 
 // The issue's overlay case: a search pattern flown by FMS 2 must not be drawn over FMS 1's route, nor FMS 1 called SAR.
 test('INDEPENDENT: FMS 2 flying a sector search is not drawn as FMS 1 guidance; inspecting FMS 2 shows its pattern', async ({ page }) => {
+  await installPausedClock(page, new Date('2026-09-29T15:00:00Z'))
+  // Restore this main owner's original fixed Date with running timers after the shared paused setup.
   await page.clock.setFixedTime(new Date('2026-09-29T15:00:00Z'))
+  await page.clock.resume()
   await open(page)
+  expect(await page.evaluate(() => Date.now())).toBe(Date.parse('2026-09-29T15:00:00Z'))
   await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')
   const scenarios = page.getByRole('region', { name: 'Scenarios' })
   const start = { id: 'map-87n', title: '87N start', objective: 'Start the offshore helicopter mission', maxSeconds: 1, start: '87n-offshore-sar',
@@ -134,4 +139,5 @@ test('INDEPENDENT: FMS 2 flying a sector search is not drawn as FMS 1 guidance; 
   await expect(map(page)).toHaveAttribute('aria-label', /^Navigation map, FMS 1 inspected, \d+ NM range, LNAV mode, active waypoint \w+; FMS 2 guiding, SAR mode$/)
   await expect(page.locator('.fmsMap path.sar')).toHaveCount(0)
   await expect(guidingLeg(page)).toHaveCount(1)
+  expect(await page.evaluate(() => Date.now())).toBe(Date.parse('2026-09-29T15:00:00Z'))
 })

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { expect, renderedTest as test } from './isolated-client-test'
 import type { Page } from '@playwright/test'
+import { installPausedClock } from './paused-clock'
 
 // The FMS test bench is self-contained: the scripted CMA-9000 runs in the page, so this needs no backend.
 // Engine rules are proved in fms-cdu-engine.spec.ts; this proves the rendered panel wires them to real
@@ -1284,7 +1285,7 @@ test('B1.7: a paused run stops its clock: the predictions and the fuel on FUEL a
 // F9 rendered owner: real keys/status colours and the physical 24-column table. Solver/source rules stay in logic owners.
 test('F9 Conditions applies and records measured Doppler surface on FMS1 while CDU2 shows the shared word', async ({ page }) => {
   const start = new Date('2026-09-27T14:00:00Z')
-  await page.clock.install({ time: start }); await page.clock.pauseAt(start)
+  await installPausedClock(page, start)
   await open(page)
   await page.getByLabel('CDU inspected').selectOption('2')
   const scenarios = page.getByRole('region', { name: 'Scenarios' })
