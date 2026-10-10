@@ -21,6 +21,7 @@
  "fms-dead-reckoning.spec.ts": 0.4,
  "fms-demo-cycle.spec.ts": 0.2,
  "fms-dme-dme.spec.ts": 0.1,
+ "fms-dual-selected-integrity.spec.ts": 221.3,
  "fms-efis.spec.ts": 11.4,
  "fms-flight.spec.ts": 97.1,
  "fms-fuel-pages.spec.ts": 0.1,
