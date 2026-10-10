@@ -16,6 +16,8 @@ export type Phase = (typeof PHASES)[number];
 type ActionSource = Pick<ScenarioRunner, "poll" | "finished">;
 
 export type AdvanceOptions = {
+  /** A logical run may span browser tasks: refuse further integration after its terminal ACTION. */
+  readonly haltOnRunEnd?: boolean;
   /** Flight freeze (D1 3.8): INTEGRATE holds the aircraft while the clock and every other phase run on. */
   readonly flightFreeze?: boolean;
   /** Called as each instant F_j closes, immediately before its INTEGRATE: where the frame digest D_j is taken. */
@@ -63,6 +65,8 @@ export class FmsKernel {
    * (no extra poll, no repeated composite). Cleared when an INTEGRATE completes.
    */
   get faulted() { return this.failed; }
+  /** The runner's terminal ACTION is open; deliberate free flight may still use ordinary advance(). */
+  get runFinished() { return this.runner?.finished ?? false; }
 
   /**
    * Runs `frames` frames from the open ACTION at F_j: close F_j, INTEGRATE, then ACTION at F_{j+1}, and so on. A run that
@@ -70,6 +74,7 @@ export class FmsKernel {
    */
   advance(frames: number, options: AdvanceOptions = {}) {
     if (!Number.isSafeInteger(frames) || frames < 0) throw new RangeError(`advance needs a whole number of frames, not ${frames}`);
+    if (options.haltOnRunEnd && this.runFinished) return 0;
     const hold = this.plant.hold;
     if (options.flightFreeze && !hold) throw new Error("this composition has no flight freeze");
     const running = this.runner !== null && !this.runner.finished;

@@ -4,6 +4,7 @@ import { displayLuminance, screenBrightness, type Lighting } from "./lighting";
 import { COLUMNS, type CduBackend, type CduCell, type Lamp } from "./screen";
 import { COMPASS_LETTERS, functionFor, legendFor, type CduFunction, type CduVariant } from "./variants";
 import { useFmsStationDocument } from "./FmsStationSurface";
+import type { BenchPresentation } from "./benchPresentation";
 import "./FmsCduPanel.css";
 
 const HOLD_MS = 1000;
@@ -49,21 +50,23 @@ const CduLine = memo(function CduLine({ row }: { row: readonly CduCell[] }) {
 
 type Props = {
   backend: CduBackend;
+  presentation?: Pick<BenchPresentation, "subscribe" | "revision">;
   variant: CduVariant;
   layout: CduLayout;
   onKey?: (event: CduKeyEvent) => void;
   lighting?: Lighting;
 };
 
-export default function FmsCduPanel({ backend, variant, layout, onKey, lighting = DAYLIGHT }: Props) {
+export default function FmsCduPanel({ backend, presentation, variant, layout, onKey, lighting = DAYLIGHT }: Props) {
   // Resolve in the bench owner's JavaScript document before the same faceplate moves to an about:blank child.
   const assetBase = useMemo(() => new URL(ASSETS, document.baseURI).href, []);
   const destinationDocument = useFmsStationDocument();
   const destinationWindow = destinationDocument.defaultView ?? window;
-  const subscribe = useCallback((listener: () => void) => backend.subscribe(listener), [backend]);
-  const version = useSyncExternalStore(subscribe, () => backend.revision());
-  const screen = useMemo(() => backend.screen(), [backend, version]); // eslint-disable-line react-hooks/exhaustive-deps
-  const lamps = useMemo(() => backend.lamps(), [backend, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const subscribe = useCallback((listener: () => void) => presentation ? presentation.subscribe(listener) : backend.subscribe(listener), [backend, presentation]);
+  const version = useSyncExternalStore(subscribe, presentation?.revision ?? (() => backend.revision()));
+  // Different presentation stores can publish the same numeric version; their current model views still differ.
+  const screen = useMemo(() => backend.screen(), [backend, presentation, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lamps = useMemo(() => backend.lamps(), [backend, presentation, version]); // eslint-disable-line react-hooks/exhaustive-deps
   // The display follows the light sensor and BRT together; see lighting.ts.
   const luminance = displayLuminance(backend.brightness(), lighting);
   const [pressed, setPressed] = useState<ReadonlySet<string>>(new Set());

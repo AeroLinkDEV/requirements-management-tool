@@ -45,7 +45,9 @@ export function singleComposition(utc0Ms: number, options: FmsOptions = {}) {
   const fms = new ScriptedFms(clock.now, options);
   const sim = new FlightSimulator(fms);
   const plant: LegacyPlant = { clock, integrate: () => { clock.advanceFrame(); sim.step(FRAME_SECONDS); } };
-  return { clock, fms, sim, plant };
+  // Start-state placement is ACTION work: publish its observation before t0 checks without a plant/time step.
+  const settleStart = () => sim.observe(0);
+  return { clock, fms, sim, plant, settleStart };
 }
 
 /** The bench's composition: two computers, one aircraft (DualFmsSystem). */
@@ -57,5 +59,6 @@ export function dualComposition(utc0Ms: number, options: DualOptions = {}) {
     integrate: () => { clock.advanceFrame(); system.step(FRAME_SECONDS); },
     hold: () => { clock.advanceFrame(); system.tick(); },
   };
-  return { clock, system, plant };
+  const settleStart = () => system.tick();
+  return { clock, system, plant, settleStart };
 }

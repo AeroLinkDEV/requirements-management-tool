@@ -223,8 +223,8 @@ type Arm = {
 /** The I1a arm: the legacy plant adapter's compositions on the kernel. */
 const ARM: Arm = {
   single(start, scenario, onInstantClose) {
-    const { fms, sim, plant } = singleComposition(start, { profile: profileById(scenario.profile) })
-    const runner = new ScenarioRunner(scenario, fms, undefined, sim)
+    const { fms, sim, plant, settleStart } = singleComposition(start, { profile: profileById(scenario.profile) })
+    const runner = new ScenarioRunner(scenario, fms, undefined, sim, settleStart)
     const kernel = new FmsKernel(plant, runner)
     return {
       units: { computers: [fms], flights: [sim] }, runner, system: null, guidance: () => ({ fms, sim }),
@@ -234,9 +234,9 @@ const ARM: Arm = {
   },
   dual(start, scenario, onInstantClose) {
     const profile = profileById(scenario?.profile) ?? ACTIVE_PROFILE
-    const { system, plant } = dualComposition(start, { profile, secondaryProfile: profile })
+    const { system, plant, settleStart } = dualComposition(start, { profile, secondaryProfile: profile })
     const fms = system.computers[0]
-    const runner = scenario ? new ScenarioRunner(scenario, fms, { variant: 'census', cycle: fms.activeCycle.id }, system.flights[0]) : null
+    const runner = scenario ? new ScenarioRunner(scenario, fms, { variant: 'census', cycle: fms.activeCycle.id }, system.flights[0], settleStart) : null
     const kernel = new FmsKernel(plant, runner)
     return {
       units: { computers: system.computers, flights: system.flights }, runner, system,

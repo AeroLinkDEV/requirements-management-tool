@@ -28,6 +28,8 @@ import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./pro
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, scenarioStart, type Scenario } from "./scenario";
 import { FmsKernel } from "./kernel/kernel";
 import { dualComposition } from "./kernel/legacyPlantAdapter";
+import { startKernelPacing } from "./benchPacing";
+import { BenchPresentation } from "./benchPresentation";
 import type { ScriptedFms } from "./scriptedFms";
 import type { FmsSide } from "./crossTalk";
 import { WMM2025_DATABASE } from "./wmm2025";
@@ -75,7 +77,7 @@ const storedTab = (): TabId => {
 
 type KeptPanelProps = { shown: boolean; render: () => ReactNode } & Omit<HTMLAttributes<HTMLDivElement>, "hidden" | "children">;
 /**
- * A tool tab's panel. The simulation tick re-renders the bench four times a second; rebuilding every hidden panel
+ * A tool tab's panel. Simulation updates re-render the bench; rebuilding every hidden panel
  * each time (the key log alone grows to 200 entries) held the page's main thread long enough to stall pointer input
  * for seconds on a loaded host (#1349). A panel not shown is not rebuilt: it keeps what it last drew, and its
  * components their state, and is brought up to date when it is shown again.
@@ -83,6 +85,25 @@ type KeptPanelProps = { shown: boolean; render: () => ReactNode } & Omit<HTMLAtt
 const KeptPanel = memo(function KeptPanel({ shown, render, ...attributes }: KeptPanelProps) {
   return <div {...attributes} hidden={!shown}>{render()}</div>;
 }, (before, after) => !before.shown && !after.shown);
+
+const achievedRateStore = () => {
+  let value: number | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    snapshot: () => value,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    publish: (next: number | null) => {
+      if (Object.is(value, next)) return;
+      value = next; listeners.forEach(listener => listener());
+    },
+  };
+};
+
+// Rate expiry can publish without a model frame; it need only redraw this output, not the whole cockpit.
+const AchievedSpeed = memo(function AchievedSpeed({ playing, store }: { playing: boolean; store: ReturnType<typeof achievedRateStore> }) {
+  const value = useSyncExternalStore(store.subscribe, store.snapshot);
+  return <output aria-label="Achieved speed" aria-live="off">{playing ? value === null ? "Achieved — (measuring)" : `Achieved ×${value.toFixed(1)}` : "Achieved — (paused)"}</output>;
+});
 
 // The out-the-window view: whether it is shown, and how, is remembered. It starts hidden because showing it loads a
 // 3D engine and the terrain around the aircraft.
@@ -182,7 +203,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     // so its outcome does not depend on what a user has stored.
     const userDatabase = pendingScenario.current || !userName ? undefined
       : { store: browserUserDatabaseStore(window.localStorage), scope: { userId: userName, profileId: profile.id } };
-    const { system, plant } = dualComposition(utc0, { profile, secondaryProfile: profileById(secondaryProfileChoice.current) ?? profile, ...(userDatabase ? { userDatabase } : {}) });
+    const { system, plant, settleStart } = dualComposition(utc0, { profile, secondaryProfile: profileById(secondaryProfileChoice.current) ?? profile, ...(userDatabase ? { userDatabase } : {}) });
     const fms = system.computers[0], flight = system.flights[0];
     const start = pendingStart.current;
     // A start state and its copy to FMS 2 are one computation over both computers (#1518): both settle once, at the end.
@@ -191,10 +212,11 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
       fms.dualOperation?.settingsChanged(); fms.dualOperation?.finishEdit(true); system.computers[1].observeAircraft(fms);
       return outcome;
     }) : null;
+    if (started && "ready" in started) settleStart();
     // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards.
     const chosen = variantById(variantId);
     const runner = pendingScenario.current
-      ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id }, flight)
+      ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id }, flight, settleStart)
       : null;
     const recorder = pendingRecording.current ? new ScenarioRecorder(plant.clock.now) : null;
     // The surface, the start state and the runner's t = 0 poll above are the ACTION phase at F_0; the kernel rests there.
@@ -218,14 +240,18 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     return () => { stimulus.listener = null; };
   }, [system, recordTo]);
   const pausedFor = useRef<ScenarioRunner | null>(null);
-  const subscribe = useCallback((listener: () => void) => { const off = system.computers.map(unit => unit.subscribe(listener)); return () => off.forEach(remove => remove()); }, [system]);
-  useSyncExternalStore(subscribe, () => system.computers[0].revision() + system.computers[1].revision());
+  const stopPacing = useRef<(() => void) | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [rate, setRate] = useState(1);
+  // All selected rates retain the 4 Hz presentation target; model-notifying crew actions flush immediately.
+  const presentation = useMemo(() => new BenchPresentation(system.computers, window, 250), [system, playing, rate]);
+  useSyncExternalStore(presentation.subscribe, presentation.revision);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [alert, setAlert] = useState("");
   const [libraryAlert, setLibraryAlert] = useState(ALERTS[0].text);
   const [lighting, setLighting] = useState<Lighting>({ mode: "day", ambient: LIGHTING_MODES[0].ambient });
-  const [playing, setPlaying] = useState(false);
-  const [rate, setRate] = useState(1);
+  const achieved = useMemo(achievedRateStore, [kernel, runner, playing, rate]);
+  const [pacingFault, setPacingFault] = useState<string | null>(null);
   const [range, setRange] = useState(MAP_DEFAULT_RANGE_NM);
   // The lower display beside the CDU: the cockpit ND, or the engineering map with the true position.
   const [lowerDisplay, setLowerDisplay] = useState<"nd" | "map">("nd");
@@ -267,27 +293,57 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   }, [outside.shown]);
   const variant = variantById(variantId);
 
-  // Time moves in kernel frames (kernel/kernel.ts): while flying, each callback advances `rate` frames, each moving the
-  // clock and the flight and then running the scenario's steps, so a run sees the same timeline at any rate or callback
-  // pacing. Paused with no run is a flight freeze, one frame per callback: the aircraft stands still but the clock
-  // runs, so timers and a self test complete. Paused during a run halts the kernel: its clock stops, so no deadline or
-  // delayed step is consumed. Between callbacks the kernel rests in the frame's open ACTION, where the controls act.
-  useEffect(() => {
+  // Time moves in complete kernel frames, with ACTION/INTEGRATE/poll ordering unchanged. Between tasks the kernel
+  // rests in the frame's open ACTION. Playing uses bounded deadline pacing; paused with no active run freezes the
+  // aircraft while its clock/timers run. A paused active run or fault retains its instant without consuming work.
+  useLayoutEffect(() => {
     const interval = TICK_SECONDS * 1000;
-    const timer = window.setInterval(() => {
-      const running = runner !== null && !runner.finished;
-      if (playing) kernel.advance(rate);
-      else if (!running) kernel.advance(1, { flightFreeze: true });
-      // A finished scenario pauses the flight once; flying on afterwards is the engineer's choice.
-      if (runner?.finished && pausedFor.current !== runner) { pausedFor.current = runner; setPlaying(false); }
-    }, interval);
-    return () => window.clearInterval(timer);
-  }, [kernel, runner, playing, rate]);
+    achieved.publish(null);
+    if (!kernel.faulted) setPacingFault(null);
+    if (runner?.finished && pausedFor.current !== runner) {
+      pausedFor.current = runner;
+      setPlaying(false);
+      presentation.flush();
+      if (playing) return;
+    }
+    if (!playing) {
+      const timer = window.setInterval(() => {
+        if ((!runner || runner.finished) && !kernel.faulted) {
+          try { presentation.frame(() => kernel.advance(1, { flightFreeze: true })); }
+          catch (error) {
+            window.clearInterval(timer);
+            presentation.flush(); setPacingFault(error instanceof Error ? error.message : String(error)); setPlaying(false);
+          }
+        }
+      }, interval);
+      return () => window.clearInterval(timer);
+    }
+    setPacingFault(null);
+    const stop = startKernelPacing(rate, kernel, window, {
+      haltOnRunEnd: runner !== null && !runner.finished,
+      frame: presentation.frame,
+      onProgress: progress => { achieved.publish(progress.achievedRate); },
+      onStopped: () => { pausedFor.current = runner; presentation.flush(); setPlaying(false); },
+      onFault: error => {
+        presentation.flush(); setPacingFault(error instanceof Error ? error.message : String(error)); setPlaying(false);
+      },
+    });
+    stopPacing.current = stop;
+    return () => { stop(); if (stopPacing.current === stop) stopPacing.current = null; };
+  }, [kernel, runner, playing, rate, presentation, achieved]);
+  useEffect(() => {
+    const visible = () => { if (document.visibilityState === "visible") presentation.flush(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
+  }, [presentation]);
+
+  const replaceSession = () => { stopPacing.current?.(); achieved.publish(null); setSession(value => value + 1); };
+  const chooseRate = (next: number) => { if (next !== rate) { stopPacing.current?.(); achieved.publish(null); setRate(next); } };
 
   /** A different aircraft profile restarts the simulation in it. */
   const chooseProfile = (id: string) => {
     profileChoice.current = id;
-    setSession(s => s + 1);
+    replaceSession();
   };
 
   const chooseVariant = (id: string) => {
@@ -316,25 +372,32 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     recordTo?.key(event.fn, event.held);
   }, [backend, recordTo]);
 
-  // Stable physical-side callbacks let memoized faceplate keys skip the four-Hz bench ticks (#1349).
+  // Stable physical-side callbacks let memoized faceplate keys skip simulation updates (#1349).
   const onCockpitKeys = useMemo(() => ([1, 2] as const).map(side => (event: CduKeyEvent) => {
     const title = screenText(system.computers[side - 1].screen())[0].trim();
     setLog(entries => [{ ...event, title: `CDU ${side}: ${title}` }, ...entries].slice(0, 200));
     if (side === 1) recordTo?.key(event.fn, event.held);
   }), [system, recordTo]);
 
-  const reset = () => { setSession(value => value + 1); setLog([]); setPlaying(false); setRecording(false); };
+  const reset = () => { replaceSession(); setLog([]); setPlaying(false); setRecording(false); };
   const runScenario = (scenario: Scenario) => {
     pendingScenario.current = scenario;
     setCduSide(1);
-    setSession(value => value + 1);
+    replaceSession();
     setLog([]);
     setRecording(false);
     setPlaying(true);
   };
+  const stopScenario = () => {
+    if (!runner) return;
+    runner.abandon();
+    pausedFor.current = runner;
+    stopPacing.current?.();
+    setPlaying(false);
+  };
   const startDemonstration = (id: StartStateId) => {
     pendingStart.current = id;
-    setSession(value => value + 1);
+    replaceSession();
     setLog([]);
     setRecording(false);
     setPlaying(false);
@@ -343,7 +406,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const startRecording = () => {
     pendingRecording.current = true;
     setCduSide(1);
-    setSession(value => value + 1);
+    replaceSession();
     setLog([]);
     setPlaying(false);
     setRecording(true);
@@ -498,7 +561,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           {([1, 2] as const).map(side => <div key={side} className={`fmsBenchCduStation mode-${lighting.mode}`} data-side={side}
             data-active={cduSide === side} onFocusCapture={() => { if (!recording && (!runner || runner.finished)) setCduSide(side); }}>
             <div className="fmsBenchCduLabel"><strong>FMS {side} / CDU {side}</strong><span>{cduSide === side ? "Inspected" : ""}</span></div>
-            {layout ? <FmsCduPanel backend={system.computers[side - 1]} variant={variant} layout={layout} lighting={lighting}
+            {layout ? <FmsCduPanel presentation={presentation} backend={system.computers[side - 1]} variant={variant} layout={layout} lighting={lighting}
               onKey={onCockpitKeys[side - 1]} /> : <p role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
           </div>)}
         </>) : (
@@ -513,12 +576,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           <div data-testid="fms-cdu-inspected" aria-label={`CDU ${cduSide}`}>
 
           {layout
-            ? <FmsCduPanel backend={backend} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
+            ? <FmsCduPanel presentation={presentation} backend={backend} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
             : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
           </div>
           {showPeer && layout ? <div data-testid="fms-cdu-peer" aria-label={`CDU ${3 - cduSide}`}>
             <h2>FMS {3 - cduSide} / CDU {3 - cduSide}</h2>
-            <FmsCduPanel backend={peerBackend} variant={variant} layout={layout} lighting={lighting} />
+            <FmsCduPanel presentation={presentation} backend={peerBackend} variant={variant} layout={layout} lighting={lighting} />
           </div> : null}
         </div>
         )}
@@ -572,13 +635,15 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </p>
           <div className="fmsBenchActions">
             {/* Pause is a bench control: it stays usable whatever has failed in the simulated aircraft. */}
-            <button type="button" onClick={() => setPlaying(value => !value)} aria-pressed={playing}>
+            <button type="button" onClick={() => { if (playing) { stopPacing.current?.(); presentation.flush(); } setPlaying(value => !value); }} aria-pressed={playing}>
               {playing ? "Pause" : "Fly"}
             </button>
-            {!playing ? <span className="fmsBenchHint">{runner && !runner.finished ? "Run paused: its clock is stopped." : "Aircraft frozen: the clock runs."}</span> : null}
+            <AchievedSpeed playing={playing} store={achieved} />
+            {pacingFault ? <span role="alert">Simulation stopped: {pacingFault}. Press Fly to resume from the retained fault instant.</span> : null}
+            {!playing ? <span className="fmsBenchHint">{kernel.faulted ? "Faulted: the clock is stopped." : runner && !runner.finished ? "Run paused: its clock is stopped." : "Aircraft frozen: the clock runs."}</span> : null}
             <label className="fmsBenchRate">
               <span>Rate</span>
-              <select value={rate} onChange={event => setRate(Number(event.target.value))} aria-label="Simulation rate">
+              <select value={rate} onChange={event => chooseRate(Number(event.target.value))} aria-label="Simulation rate">
                 {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}×</option>)}
               </select>
             </label>
@@ -741,7 +806,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             recording={recording}
             screenLines={screenText(backend.screen())}
             onRun={runScenario}
-            onStop={() => runner?.abandon()}
+            onStop={stopScenario}
             onRecord={startRecording}
             onFinishRecording={finishRecording}
             onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
@@ -797,7 +862,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           <section className="fmsBenchCard" aria-label="Dual computers and radio devices">
             <h2>Dual FMS and civil RMS</h2>
             <label>FMS 2 software profile (restarts the bench) <select aria-label="FMS 2 software profile" value={secondaryProfileChoice.current}
-              onChange={event => { secondaryProfileChoice.current = event.target.value; setSession(value => value + 1); }}>
+              onChange={event => { secondaryProfileChoice.current = event.target.value; replaceSession(); }}>
               <option value="">Same as FMS 1</option>{PROFILES.map(profile => <option key={profile.id} value={profile.id}>{profile.title}</option>)}
             </select></label>
             <p className="fmsBenchReadout">{system.mode}, cross-talk {system.linked ? "available" : "lost"}; navigation source {system.navigationSide ? `FMS ${system.navigationSide}` : "each computer independently"}.</p>

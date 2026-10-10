@@ -427,6 +427,43 @@ The outside-view WebGL scene rebuilds when its destination document changes; loa
 renderer and available assets. Its render loop and resize follow the displayed window. CDU input/hold cleanup and
 synthetic-vision rendering likewise follow their destination document.
 
+The bench advances complete 0.25-second kernel frames, preserving the kernel's ACTION, INTEGRATE and scenario-poll
+order. Flying at 1/4/16/64× admits one finite rate-sized batch at monotonic deadlines, and yields zero-delay tasks
+between whole frames toward a 32 ms wall-time slice target. An indivisible slow frame or subsequent React rendering
+can exceed that target. Due work resumes without an extra interval or fixed idle delay; expired wall-time admissions
+do not accumulate catch-up batches or skip simulation frames. The achieved-rate indicator uses successfully completed
+flying frames in the most recent three seconds of monotonic wall time (or the elapsed Fly epoch when shorter),
+restarting at pause, rate/session replacement or fault boundaries. It initially says measuring. A separate 250 ms
+progress wake expires stale completed work without advancing the simulation; an expired window reports zero rather
+than retaining the old rate or returning to indefinite measuring.
+It excludes paused free-clock frames and an INTEGRATE fault's retained instant. It is a host observation, not a
+certified rate or a performance-protocol result.
+
+The bench and its CDU panels coalesce presentation notifications from completed paced frames to about four per
+second at every selected rate. At 64× this target nominally spans four simulated seconds; a blocked or
+hidden browser may publish later. Model computations and revisions still settle every frame. The current achieved-rate
+value also publishes at its progress wakes through its own display subscription, so expiry alone does not rebuild
+the cockpit. A new Fly/rate/session epoch replaces that subscription and begins in the measuring state.
+Model-notifying external inputs publish promptly;
+Pause, natural-terminal/fault stop and visibility recovery flush the current presentation. No computation scope spans browser tasks.
+Pause, rate/session replacement and leaving the bench cancel unexecuted scheduling debt. The kernel owns a running
+scenario's exact terminal boundary across yields; a deliberate Fly after it finishes is separate free flight.
+A successful named start settles its actual single/dual composition at unchanged t0 before the runner's first poll,
+with no flight or freeze frame. The bench's demonstration presets use that same composition operation once;
+refused starts do not invoke it. Bench scenarios, the census adapter and runHeadless supply their composition's
+settling operation. Paused free-flight freeze faults use the same visible stopped/fault recovery path as flying.
+Operator Stop records the pause synchronously, so the first deliberate Fly is permitted
+even before the next clock interval, including after stopping a paused run. Paused live runs freeze their clock;
+paused free flight advances the clock and timers while the aircraft stays frozen. An INTEGRATE fault cancels debt,
+shows a stopped error and retains its instant until deliberate Fly resumes without replay. These are browser and
+kernel lifecycle rules, not CMA operating logic.
+
+A hidden owner's throttled timer wake-up still executes a bounded slice, rather than a whole potentially blocking
+batch. That can reduce achieved rate for pop-out stations; child rendering never compensates by advancing the clock.
+The old interval-count performance instrument cannot infer work from these partial/expired admissions or include
+continuation costs. Its separately owned accounting revision must land before or with paced-source performance
+qualification; ordinary functional observations do not qualify that instrument.
+
 The original bench tab owns the only simulation and clock. Keep it open and visible for continuous updates:
 browsers can throttle a hidden or minimized owner. Child rendering does not advance or compensate the simulation
 clock. Closing the owner or leaving the bench closes its station windows. These arrangements use one browser

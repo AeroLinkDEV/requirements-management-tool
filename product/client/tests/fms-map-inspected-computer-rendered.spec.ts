@@ -110,12 +110,27 @@ test('INDEPENDENT: inspecting FMS 1 while FMS 2 guides shows FMS 1 direct CYUL a
 
 // The issue's overlay case: a search pattern flown by FMS 2 must not be drawn over FMS 1's route, nor FMS 1 called SAR.
 test('INDEPENDENT: FMS 2 flying a sector search is not drawn as FMS 1 guidance; inspecting FMS 2 shows its pattern', async ({ page }) => {
-  await installPausedClock(page, new Date('2026-09-29T15:00:00Z'))
-  // Restore this main owner's original fixed Date with running timers after the shared paused setup.
-  await page.clock.setFixedTime(new Date('2026-09-29T15:00:00Z'))
-  await page.clock.resume()
+  const initialUtc = new Date('2026-09-29T15:00:00Z')
+  const pause = page.clock.pauseAt.bind(page.clock)
+  page.clock.pauseAt = async instant => { await new Promise(resolve => setTimeout(resolve, 750)); await pause(instant) }
+  expect(page.url()).toBe('about:blank')
+  await installPausedClock(page, new Date(initialUtc.getTime() + 1000))
   await open(page)
-  expect(await page.evaluate(() => Date.now())).toBe(Date.parse('2026-09-29T15:00:00Z'))
+  // Capture the existing public IOS placement boundary without changing it. The completed start must be computed
+  // at t0 before PASS/map exposure; a later frozen-clock integration must not repair a stale initial position.
+  await page.evaluate(async () => {
+    const { ScriptedFms } = await import('/src/fmsCdu/scriptedFms.ts')
+    const original = ScriptedFms.prototype.placeAircraft
+    ScriptedFms.prototype.placeAircraft = function (...args) {
+      original.apply(this, args)
+      ;(window as unknown as { placedComputers: InstanceType<typeof ScriptedFms>[] }).placedComputers = [this]
+    }
+    const press = ScriptedFms.prototype.press
+    ScriptedFms.prototype.press = function (...args) {
+      press.apply(this, args)
+      ;(window as unknown as { lastPressed: InstanceType<typeof ScriptedFms> }).lastPressed = this
+    }
+  })
   await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')
   const scenarios = page.getByRole('region', { name: 'Scenarios' })
   const start = { id: 'map-87n', title: '87N start', objective: 'Start the offshore helicopter mission', maxSeconds: 1, start: '87n-offshore-sar',
@@ -123,6 +138,23 @@ test('INDEPENDENT: FMS 2 flying a sector search is not drawn as FMS 1 guidance; 
   await scenarios.getByLabel('Scenario file').setInputFiles({ name: 'map-87n.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(start)) })
   await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
   await expect(scenarios.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  await inspect(page, 2)
+  await key(page, 'LEGS')
+  const placed = await page.evaluate(() => (window as unknown as { placedComputers: {
+    position: { lat: number, lon: number }, now: Date
+  }[], lastPressed: { position: { lat: number, lon: number }, now: Date } }).placedComputers.concat((window as unknown as { lastPressed: { position: { lat: number, lon: number }, now: Date } }).lastPressed).map(f => ({ position: { ...f.position }, utc: f.now.toISOString() })))
+  // FAA 2609 87N is N40 50 46.52/W072 27 59.00; the declared start is 10 NM south. These bounds exclude the
+  // inherited Ontario seed by hundreds of miles while allowing the laboratory navigation estimate's small error.
+  expect(placed).toHaveLength(2)
+  for (const f of placed) {
+    expect(f.utc).toBe('2026-09-29T15:00:01.000Z')
+    expect(f.position.lat).toBeGreaterThan(40.67); expect(f.position.lat).toBeLessThan(40.69)
+    expect(f.position.lon).toBeGreaterThan(-72.48); expect(f.position.lon).toBeLessThan(-72.45)
+  }
+  // Preserve the current clock owner's fixed Date while later SAR/INDEPENDENT timers run at this same epoch.
+  await page.clock.setFixedTime(new Date(initialUtc.getTime() + 1000))
+  await page.clock.resume()
+  expect(await page.evaluate(() => Date.now())).toBe(Date.parse('2026-09-29T15:00:01Z'))
   await page.getByRole('tab', { name: 'Dual FMS and radios', exact: true }).click()
   await page.getByRole('region', { name: 'Dual computers and radio devices' }).getByRole('button', { name: 'Fail cross-talk link' }).click()
   await inspect(page, 2)
@@ -139,5 +171,5 @@ test('INDEPENDENT: FMS 2 flying a sector search is not drawn as FMS 1 guidance; 
   await expect(map(page)).toHaveAttribute('aria-label', /^Navigation map, FMS 1 inspected, \d+ NM range, LNAV mode, active waypoint \w+; FMS 2 guiding, SAR mode$/)
   await expect(page.locator('.fmsMap path.sar')).toHaveCount(0)
   await expect(guidingLeg(page)).toHaveCount(1)
-  expect(await page.evaluate(() => Date.now())).toBe(Date.parse('2026-09-29T15:00:00Z'))
+  expect(await page.evaluate(() => Date.now())).toBe(Date.parse('2026-09-29T15:00:01Z'))
 })
