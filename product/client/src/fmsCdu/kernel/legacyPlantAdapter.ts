@@ -59,6 +59,6 @@ export function dualComposition(utc0Ms: number, options: DualOptions = {}) {
     integrate: () => { clock.advanceFrame(); system.step(FRAME_SECONDS); },
     hold: () => { clock.advanceFrame(); system.tick(); },
   };
-  const settleStart = () => system.tick();
+  const settleStart = () => system.settleStart();
   return { clock, system, plant, settleStart };
 }
