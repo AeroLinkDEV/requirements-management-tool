@@ -458,6 +458,8 @@ export class ScriptedFms implements CduBackend {
   get groundSpeed() { return this.aircraft.groundSpeed; }
   /** Truth: the physical height above MSL (rev 3 B1.1). Only the flight simulation and engineering placement write it. */
   get physicalAltitude() { return this.aircraft.altitude; }
+  /** Modelled physical TAS, including zero: the legacy plant seed, separate from air-data indication validity. */
+  get physicalTrueAirspeed() { return this.aircraft.tas; }
   /**
    * The barometric altitude the FMS and the autopilot use (baro.ts): the physical height plus the injected baro error,
    * referenced to the declared QNH. The crew's setting does not change it; it changes what is indicated.
