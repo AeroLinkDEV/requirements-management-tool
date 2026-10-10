@@ -103,32 +103,69 @@ const finishScenario: Scenario = { id: 'pacing-finish', title: 'Pacing finish', 
   steps: [{ when: { kind: 'time', seconds: 0.75 }, action: { kind: 'alert', text: 'PACING END' } },
     { when: { kind: 'time', seconds: 0.75 }, action: { kind: 'expectLamp', lamp: 'MSG', lit: true } }] }
 
-test('the dual composition settles the placed aircraft on both units before the first scenario input at t0', () => {
-  const composed = dualComposition(epoch), [fms, peer] = composed.system.computers
-  const atInput: { lat: number, lon: number, utc: number }[] = []
-  const press = fms.press.bind(fms)
-  fms.press = key => { atInput.push({ ...peer.truePosition, utc: peer.now.getTime() }); press(key) }
-  const scenario: Scenario = { id: 'settled-t0', title: 'Settled t0', objective: 'Composition start ordering',
-    start: '87n-offshore-sar', maxSeconds: 1, steps: [
-      { when: { kind: 'start' }, action: { kind: 'keys', keys: ['INIT_REF'] } },
-      { when: { kind: 'start' }, action: { kind: 'expectAircraft', altitude: 500, heightTolerance: 1 } },
-    ] }
-  let settlements = 0
-  const runner = new ScenarioRunner(scenario, fms, undefined, composed.system.flights[0], () => {
-    settlements++; composed.settleStart()
+for (const placed of [
+  { start: '87n-offshore-sar' as const, altitude: 500, firstTas: 119.5 },
+  { start: 'kbtv-rnav15' as const, altitude: 3200, firstTas: 120.5 },
+]) for (const topology of ['single', 'dual FMS1', 'dual FMS2'] as const) {
+  const title = placed.start === '87n-offshore-sar' && topology === 'dual FMS1'
+    ? 'the dual composition settles the placed aircraft on both units before the first scenario input at t0'
+    : `the composition settles placed physical TAS before t0 and the first complete frame (${placed.start}, ${topology})`
+  test(title, () => {
+    const single = topology === 'single' ? singleComposition(epoch) : null
+    const dual = single ? null : dualComposition(epoch)
+    const side = topology === 'dual FMS2' ? 2 : 1
+    dual?.system.selectGuidance(side)
+    const fms = single?.fms ?? dual!.system.computers[side - 1]
+    const peer = single?.fms ?? dual!.system.computers[2 - side]
+    const units = single ? [single.fms] : dual!.system.computers
+    const flights = single ? [single.sim] : dual!.system.flights
+    const sim = single?.sim ?? dual!.system.simulator
+    const plant = single?.plant ?? dual!.plant
+    const settleStart = single?.settleStart ?? dual!.settleStart
+    const clock = single?.clock ?? dual!.clock
+    const atInput: { lat: number, lon: number, utc: number, physicalTas: number[], controllerTas: number[] }[] = []
+    const press = fms.press.bind(fms)
+    fms.press = key => {
+      atInput.push({ ...peer.truePosition, utc: peer.now.getTime(),
+        physicalTas: units.map(unit => unit.physicalTrueAirspeed),
+        controllerTas: flights.map(flight => flight.tas) })
+      press(key)
+    }
+    const scenario: Scenario = { id: 'settled-t0', title: 'Settled t0', objective: 'Composition start ordering',
+      start: placed.start, maxSeconds: 1, steps: [
+        { when: { kind: 'start' }, action: { kind: 'keys', keys: ['INIT_REF'] } },
+        { when: { kind: 'start' }, action: { kind: 'expectAircraft', altitude: placed.altitude, heightTolerance: 1 } },
+      ] }
+    let settlements = 0
+    const runner = new ScenarioRunner(scenario, fms, undefined, sim, () => {
+      settlements++; settleStart()
+    })
+    // Ignore setup EXEC inputs: this is the first t0 input, after placement and zero-time settlement.
+    const firstAction = atInput.at(-1)!
+    expect(firstAction.lat).toBeGreaterThan(placed.start === '87n-offshore-sar' ? 40 : 43)
+    expect(firstAction.lat).toBeLessThan(placed.start === '87n-offshore-sar' ? 41 : 46)
+    expect(firstAction.lon).toBeGreaterThan(placed.start === '87n-offshore-sar' ? -73 : -74)
+    expect(firstAction.lon).toBeLessThan(placed.start === '87n-offshore-sar' ? -72 : -71)
+    expect(settlements).toBe(1)
+    expect(runner.results.map(result => [result.status, result.at])).toEqual([['done', 0], ['pass', 0]])
+    expect(clock.ms).toBe(epoch); expect(firstAction.utc).toBe(epoch)
+    expect(peer.truePosition).toEqual(fms.truePosition)
+    // Both named placements retain the independent 120 kt physical TAS, distinct from the later IAS command.
+    expect(firstAction.physicalTas).toEqual(single ? [120] : [120, 120])
+    for (const tas of firstAction.controllerTas) expect(tas).toBeCloseTo(120, 8)
+    for (const unit of units) {
+      expect(unit.navigationInputs?.air).toMatchObject({ status: 'NORMAL', value: { tasValid: true } })
+      expect(unit.navigationInputs?.air.value?.tasKt).toBeCloseTo(120, 8)
+    }
+    // One complete 250 ms frame applies the existing 2 kt/s command law, not a constructor-seed discontinuity.
+    // SAR's 100 KIAS command decreases TAS by 0.5; KBTV's 120 KIAS at 3200 ft increases it by 0.5.
+    const kernel = new FmsKernel(plant, runner)
+    expect(kernel.advance(1)).toBe(1)
+    expect(kernel.unitClockMs).toBe(epoch + 250)
+    for (const flight of flights) expect(flight.tas).toBeCloseTo(placed.firstTas, 8)
+    for (const unit of units) expect(unit.physicalTrueAirspeed).toBeCloseTo(placed.firstTas, 8)
   })
-  // Ignore the setup's EXEC; the last input is the runner's first t0 action, after setup and settlement.
-  const firstAction = atInput.at(-1)!
-  expect(firstAction.lat).toBeGreaterThan(40)
-  expect(firstAction.lat).toBeLessThan(41)
-  expect(firstAction.lon).toBeGreaterThan(-73)
-  expect(firstAction.lon).toBeLessThan(-72)
-  expect(settlements).toBe(1)
-  expect(runner.results.map(result => [result.status, result.at])).toEqual([['done', 0], ['pass', 0]])
-  expect(composed.clock.ms).toBe(epoch); expect(firstAction.utc).toBe(epoch)
-  expect(peer.truePosition).toEqual(fms.truePosition)
-})
-
+}
 test('a refused start neither settles the composition nor executes its first input', () => {
   const composed = singleComposition(epoch)
   let settlements = 0
