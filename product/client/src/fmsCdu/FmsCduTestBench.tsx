@@ -6,6 +6,7 @@ import FmsCduPanel from "./FmsCduPanel";
 import { aircraftData, fmsOutputs } from "./efis";
 import { Nd, Pfd } from "./FmsEfis";
 import FmsMap from "./FmsMap";
+import { MAP_DEFAULT_RANGE_NM } from "./mapDrawing";
 import FmsGpsTab from "./FmsGpsTab";
 import FmsOutTheWindow, { FmsOutTheWindowHeader, groundImagery, type Ground, type HudModes } from "./FmsOutTheWindow";
 import type { ImagerySource } from "./groundImagery";
@@ -225,7 +226,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const [lighting, setLighting] = useState<Lighting>({ mode: "day", ambient: LIGHTING_MODES[0].ambient });
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
-  const [range, setRange] = useState(20);
+  const [range, setRange] = useState(MAP_DEFAULT_RANGE_NM);
   // The lower display beside the CDU: the cockpit ND, or the engineering map with the true position.
   const [lowerDisplay, setLowerDisplay] = useState<"nd" | "map">("nd");
   const [navLoad, setNavLoad] = useState<string | null>(null);

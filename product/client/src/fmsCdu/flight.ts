@@ -60,7 +60,7 @@ const ALT_HOLD_GAIN = 10;
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
 export type Guidance = {
   mode: GuidanceMode;
-  /** The leg being flown, for the map; null in heading mode. */
+  /** Active managed-path endpoints when available; the AFCS lateral mode separately states whether it is flown. */
   legFrom: LatLon | null;
   legTo: LatLon | null;
   desiredTrack: number | null;
