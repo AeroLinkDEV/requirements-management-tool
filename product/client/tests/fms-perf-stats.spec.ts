@@ -51,7 +51,7 @@ test('the report retains unsupported browser identities without scoring them and
   expect(prose).not.toContain('## Browser matrix')
   expect(prose).toContain('NOT_QUALIFIED')
   expect(prose).toContain('| W1 | single | 1 | 1.000')
-  expect(prose).toContain('250.000')
+  expect(prose).toContain('250.000 [250.000, 250.000] (\u00b10.00%)')
   expect(readFileSync(join(out, 'runs.jsonl'), 'utf8')).toBe(input)
 })
 

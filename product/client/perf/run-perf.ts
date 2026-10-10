@@ -363,7 +363,7 @@ function report() {
       if (!rows.length) continue
       const show = (measure: string, scale = 1) => {
         const level = medianLevel(rows.map(e => measures[measure](e.result!) / scale), stats)
-        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (Â±${width(level, 2)})`
+        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (±${width(level, 2)})`
       }
       const sync = rows[0].result!.sync as { residency: number; firstDrop: { simSeconds: number; reason: string | null } | null } | null
       const drops = [...new Set(rows.map(e => JSON.stringify((e.result!.sync as typeof sync)?.firstDrop ?? null)))]
