@@ -18,6 +18,104 @@ const screenLines = async (page: Page) => ((await page.locator('.fmsCduScreen').
 const expectLine = async (page: Page, line: number, pattern: RegExp) =>
   expect.poll(async () => (await screenLines(page))[line] ?? '').toMatch(pattern)
 
+// #1561: committed joining geometry belongs to ACT until a real EXEC removes JN.
+for (const [mode, side] of [['HDG', '1'], ['LNAV', '1'], ['HDG', '2']] as const) {
+  test(`hover join ACT membership: pending deletion and ERASE preserve it, EXEC removes it under ${mode}, FMS ${side}`, async ({ page }) => {
+    const epoch = new Date('2026-09-29T15:00:00Z')
+    await page.clock.setFixedTime(epoch)
+    await page.clock.pauseAt(epoch)
+    await page.clock.setSystemTime(epoch)
+    await open(page)
+    await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
+    await page.getByLabel('Map range').selectOption('5')
+    const card = page.getByRole('region', { name: 'Scenarios' })
+    const scenario = { id: 'hover-join-membership', title: 'Committed joining path', objective: 'Actual CDU activation and commitment before deletion',
+      maxSeconds: 2, start: '87n-offshore-sar', startTime: epoch.toISOString(), steps: [
+        { when: { kind: 'time', seconds: 1 }, action: { kind: 'keys', keys: ['TACT', 'LSK1R', 'LSK4L', 'LSK6R', 'EXEC'] } },
+        { when: { kind: 'time', seconds: 1.25 }, action: { kind: 'expectActive', waypoint: 'JN' } },
+      ] }
+    await card.getByLabel('Scenario file').setInputFiles({ name: 'join-membership.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+    await card.getByRole('button', { name: 'Run the scenario' }).click()
+    await page.clock.runFor(1500)
+    await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Fly', exact: true })).toBeVisible()
+    await page.getByLabel('CDU inspected', { exact: true }).selectOption(side)
+    await expect(page.locator('.fmsMap')).toHaveAttribute('aria-label', new RegExp(`FMS ${side} inspected`))
+    const join = page.getByTestId('hover-join')
+    await expect(join).toHaveClass('active')
+    const committed = await join.getAttribute('d')
+    expect(committed!.split(/[ML]/).filter(Boolean).length).toBeGreaterThan(8)
+    if (mode === 'HDG') {
+      await page.getByLabel('Selected heading').fill('090')
+      await page.getByRole('button', { name: 'HDG SEL' }).click()
+      await page.clock.runFor(250) // publish the completed heading selection on the existing paused timer
+      await page.getByRole('button', { name: 'LNAV', exact: true }).click()
+      await page.clock.runFor(250)
+      await expect(page.getByTestId('fma-roll')).toHaveText('HDG')
+      await expect(page.getByTestId('fma-roll-armed')).toHaveText('NAV')
+    } else await expect(page.getByTestId('fma-roll')).toHaveText('NAV')
+    await expect(join).toHaveAttribute('d', committed!)
+    await key(page, 'LEGS').click()
+    await expectLine(page, 0, /ACT/)
+    await expectLine(page, 2, /JN/)
+    const deleteJn = async () => {
+      await key(page, 'CLR').click()
+      if (!(await screenLines(page))[13].includes('DELETE')) await key(page, 'CLR').click()
+      await expectLine(page, 13, /DELETE/)
+      await key(page, 'LSK1L').click()
+      await expectLine(page, 0, /MOD/)
+      await expectLine(page, 2, /TDN/)
+    }
+    await deleteJn()
+    await expect(join).toHaveClass('active')
+    await expect(join).toHaveAttribute('d', committed!)
+    await key(page, 'LSK6L').click()
+    await expectLine(page, 0, /ACT/)
+    await expectLine(page, 2, /JN/)
+    await expect(join).toHaveAttribute('d', committed!)
+    await deleteJn()
+    await key(page, 'EXEC').click()
+    await expectLine(page, 0, /ACT/)
+    await expectLine(page, 2, /TDN/)
+    await expect(join).toHaveCount(0)
+    await page.locator('.fmsMap').screenshot({ path: test.info().outputPath(`committed-JN-deleted-${mode}.png`) })
+  })
+}
+
+test('hover join MOD membership: deleting unexecuted JN hides its preview and ERASE discards it', async ({ page }) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch)
+  await page.clock.pauseAt(epoch)
+  await page.clock.setSystemTime(epoch)
+  await open(page)
+  await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'hover-join-preview', title: 'Unexecuted joining preview', objective: 'Preview belongs to MOD JN',
+    maxSeconds: 2, start: '87n-offshore-sar', startTime: epoch.toISOString(), steps: [
+      { when: { kind: 'time', seconds: 1 }, action: { kind: 'keys', keys: ['TACT', 'LSK1R', 'LSK4L', 'LSK6R'] } },
+      { when: { kind: 'time', seconds: 1.25 }, action: { kind: 'expectLamp', lamp: 'EXEC', lit: true } },
+    ] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'join-preview.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await page.clock.runFor(1500)
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  const join = page.getByTestId('hover-join')
+  await expect(join).toHaveClass('modified')
+  await key(page, 'LEGS').click()
+  await expectLine(page, 0, /MOD/)
+  await expectLine(page, 2, /JN/)
+  await key(page, 'CLR').click()
+  if (!(await screenLines(page))[13].includes('DELETE')) await key(page, 'CLR').click()
+  await expectLine(page, 13, /DELETE/)
+  await key(page, 'LSK1L').click()
+  await expectLine(page, 2, /TDN/)
+  await expect(join).toHaveCount(0)
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /ACT/)
+  await expectLine(page, 2, /RDG/)
+  await expect(join).toHaveCount(0)
+})
+
 // F14 primary browser owner: actual forms dispatch admitted stimuli, show independent measured/physical effects,
 // record their payloads and timing, and replay those records through the runner. Engine-only tests cannot see this wiring.
 test('F14 real bench sensor controls drive the full fault matrix and recorded replay reports the applied values', async ({ page }) => {
@@ -1765,4 +1863,78 @@ test('cockpit PFD and ND name the guidance computer through FMS 1 to 2 to 1, ind
   await source.selectOption('1')
   await expectSource(1)
   await efis.screenshot({ path: testInfo.outputPath('guidance-return-fms1.png') })
+})
+
+test('hover join geometry replaces the straight chord to active JN while keeping the onward route', async ({ page }) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch)
+  await page.clock.pauseAt(epoch)
+  await page.clock.setSystemTime(epoch)
+  await open(page)
+  await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'join-chord', title: 'Join replaces chord', objective: 'No fictional straight joining shortcut',
+    maxSeconds: 2, start: '87n-offshore-sar', startTime: epoch.toISOString(), steps: [
+      { when: { kind: 'time', seconds: 1 }, action: { kind: 'keys', keys: ['TACT', 'LSK1R', 'LSK4L', 'LSK6R', 'EXEC'] } },
+      { when: { kind: 'time', seconds: 1.25 }, action: { kind: 'expectActive', waypoint: 'JN' } },
+    ] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'join-chord.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await page.clock.runFor(1500)
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  await expect(page.getByTestId('fma-roll')).toHaveText('NAV')
+  const join = page.getByTestId('hover-join')
+  await expect(join).toHaveClass('active')
+  const shape = (await join.getAttribute('d'))!
+  expect(shape.split(/[ML]/).filter(Boolean).length).toBeGreaterThan(8)
+  await expect(page.locator('.fmsMap path.active:not([data-testid="hover-join"])')).toHaveCount(0)
+  // The remaining route still connects the JN symbol to TDN and MRK, independently of the curved joining path.
+  const jn = page.locator('.fmsMap g.wpt').filter({ has: page.locator('text', { hasText: /^JN$/ }) })
+  const start = (await jn.getAttribute('transform'))!.match(/^translate\(([^)]+)\)$/)![1]
+  await expect(page.locator('.fmsMap path.later').first()).toHaveAttribute('d', new RegExp(`^M${start.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}L`))
+  await page.getByLabel('Selected heading').fill('090')
+  await page.getByRole('button', { name: 'HDG SEL' }).click()
+  await page.clock.runFor(250)
+  await expect(page.getByTestId('fma-roll')).toHaveText('HDG')
+  await expect(join).toHaveAttribute('d', shape)
+  await expect(page.locator('.fmsMap path.active:not([data-testid="hover-join"])')).toHaveCount(0)
+})
+
+test('hover join valid MOD preview preserves the existing ACT representation and ERASE restores its curve', async ({ page }) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch)
+  await page.clock.pauseAt(epoch)
+  await page.clock.setSystemTime(epoch)
+  await open(page)
+  await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'join-preview-priority', title: 'MOD over existing ACT', objective: 'Preserve both route representations under existing preview priority',
+    maxSeconds: 2, start: '87n-offshore-sar', startTime: epoch.toISOString(), steps: [
+      { when: { kind: 'time', seconds: 1 }, action: { kind: 'keys', keys: ['TACT', 'LSK1R', 'LSK4L', 'LSK6R', 'EXEC'] } },
+      { when: { kind: 'time', seconds: 1.25 }, action: { kind: 'expectActive', waypoint: 'JN' } },
+    ] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'join-preview-priority.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await page.clock.runFor(1500)
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  await expect(page.getByTestId('fma-roll')).toHaveText('NAV')
+  const join = page.getByTestId('hover-join')
+  await expect(join).toHaveClass('active')
+  const committed = (await join.getAttribute('d'))!
+  await expectLine(page, 0, /ACT HOVER/)
+  for (const id of ['LSK4L', 'LSK6R']) await key(page, id).click()
+  await expect(join).toHaveClass('modified')
+  const preview = (await join.getAttribute('d'))!
+  await expect(page.locator('.fmsMap path.active:not([data-testid="hover-join"])')).toHaveCount(1)
+  const end = preview.split(/[ML]/).filter(Boolean).at(-1)!
+  const modified = (await page.locator('.fmsMap path.modified:not([data-testid="hover-join"])').first().getAttribute('d'))!
+  expect(modified.startsWith(`M${end}L`)).toBe(true)
+  await key(page, 'LEGS').click()
+  await expectLine(page, 0, /MOD/)
+  await expectLine(page, 2, /JN/)
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /ACT/)
+  await expectLine(page, 2, /JN/)
+  await expect(join).toHaveClass('active')
+  await expect(join).toHaveAttribute('d', committed)
 })

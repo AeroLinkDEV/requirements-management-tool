@@ -129,10 +129,9 @@ for (const side of [1, 2]) test(`FMS${side} committed JN join has no unflown CF 
     return { d: node.getAttribute('d'), length: points.length === 2 ? Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]) : null }
   }))
   await info.attach('committed-join-geometry', { body: JSON.stringify({ side, paths, join: await page.getByTestId('hover-join').getAttribute('d'), map: await map(page).getAttribute('aria-label') }), contentType: 'application/json' })
-  // #1561 separately owns removing this short chord. This row rejects the unflown CF extent.
-  expect(paths).toHaveLength(1)
-  expect(paths[0].length).not.toBeNull()
-  expect(paths[0].length!).toBeLessThan(MAP_CF_EXTENT_NM * MAP_RADIUS_UNITS / MAP_DEFAULT_RANGE_NM / 2)
+  // A displayed committed joining curve replaces the straight chord, including any unflown CF extension.
+  await expect(page.getByTestId('hover-join')).toHaveAttribute('d', /^M[-\d.]+,[-\d.]+L[-\d.]+,[-\d.]+/)
+  expect(paths).toHaveLength(0)
   await page.locator('.fmsMap').screenshot({ path: info.outputPath(`fms${side}-committed-join.png`) })
 })
 
