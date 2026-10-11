@@ -213,6 +213,10 @@ export class DualFmsSystem {
       // Current/predicted RAIM still uses the best system navigation sensor (3-25); no usable adoption falls back
       // to each computer's local approach authority instead of retaining a stale shared qualification.
       const guiding = this.unit(this.driver);
+      // The shared physical approach switch reaches the peer before SYNC approach monitoring (#1567).
+      // Use the existing arm operation, including its procedure-speed refusal, rather than force its state.
+      const peer = this.peer(this.driver);
+      if (peer.approachArmed !== guiding.approachArmed) peer.armApproach(guiding.approachArmed);
       const approachSource = selected ? { chosen: guiding.gpsStatus.chosen, qualified: guiding.gpsApproachSource.qualified } : null;
       this.computers.forEach(unit => unit.refreshSystemNavigationMonitoring(approachSource));
       const different = one.localFlightPhase !== two.localFlightPhase;
