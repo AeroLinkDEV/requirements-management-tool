@@ -147,8 +147,36 @@ for (const side of [1, 2] as const) for (const independent of [false, true]) {
       expect(unit.rendezvousFor(unit.activeRoute, 0)).toMatchObject({ achievable: false, condition: 1 })
     }
     system.flights.forEach((flight, index) => expect(fmsOutputs(system.computers[index], flight).rollCommand.status).toBe('NCD'))
+    // R13: the visible same-text rendezvous advisory is white. CLR on it does not acknowledge the pending alert.
+    const beforeAcknowledgement = system.computers.map(unit => structuredClone(unit.recallList))
+    for (const unit of system.computers) {
+      expect(screenText(unit.screen())[SCRATCHPAD_LINE].trim()).toBe('RENDEZVOUS UNACHIEVABLE')
+      expect(unit.screen()[SCRATCHPAD_LINE].slice(0, 23).every(cell => cell.color === 'white')).toBe(true)
+    }
     selected.press('CLR')
     if (independent) own.press('CLR')
+    expect(screenText(selected.screen())[SCRATCHPAD_LINE].trim()).toBe('')
+    if (independent) expect(screenText(own.screen())[SCRATCHPAD_LINE].trim()).toBe('')
+    else expect(screenText(own.screen())[SCRATCHPAD_LINE].trim()).toBe('RENDEZVOUS UNACHIEVABLE')
+    for (let index = 0; index < 2; index++) {
+      expect(system.computers[index].lamps().has('MSG')).toBe(true)
+      expect(system.computers[index].recallList).toEqual(beforeAcknowledgement[index])
+    }
+    // Empty CLR exposes the latest pending amber alert; only CLR on that displayed alert acknowledges it.
+    for (const unit of independent ? [selected, own] : [selected]) {
+      unit.press('CLR')
+      expect(screenText(unit.screen())[SCRATCHPAD_LINE].trim()).toBe('RENDEZVOUS UNACHIEVABLE')
+      expect(unit.screen()[SCRATCHPAD_LINE].slice(0, 23).every(cell => cell.color === 'amber')).toBe(true)
+      expect(unit.lamps().has('MSG')).toBe(true)
+      unit.press('CLR')
+      expect(screenText(unit.screen())[SCRATCHPAD_LINE].trim()).toBe('')
+      expect(unit.lamps().has('MSG')).toBe(false)
+      if (independent && unit === selected) expect(own.lamps().has('MSG')).toBe(true)
+    }
+    for (let index = 0; index < 2; index++) {
+      expect(system.computers[index].lamps().has('MSG')).toBe(false)
+      expect(system.computers[index].recallList).toEqual(beforeAcknowledgement[index])
+    }
     fly(20)
     for (const unit of system.computers) {
       expect(recalled(unit)).toHaveLength(1)
