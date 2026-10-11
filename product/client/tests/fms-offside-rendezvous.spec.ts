@@ -1,3 +1,6 @@
+import { ScenarioRunner } from '../src/fmsCdu/scenario'
+import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
+import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import { expect, logicTest as test } from './isolated-client-test'
 import { dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
@@ -279,5 +282,91 @@ for (const side of [1, 2] as const) {
     fly(20)
     expect(own.rendezvousFor(own.activeRoute, 0)).toEqual(frozen)
     expect(selected.rendezvousFor(selected.activeRoute, 0)!.computedAt).toBe(selectedAt + 20_000)
+  })
+}
+
+// CONDITIONAL SOURCE PROPOSAL, not executed. R13/#1564: an advisory may be visible while an alert is pending;
+// there is no scratchpad-priority oracle here. CLR on that advisory must not acknowledge the latest alert.
+// The literal library trace supplies genuine shared GPS loss/DR antecedents, not a synthetic raised alert.
+for (const side of [1, 2] as const) {
+  test(`SYNC FMS${side} CLR preserves the latest GPS alert until CLR on that alert after library GPS loss into DR`, () => {
+    const scenario = SCENARIO_LIBRARY.find(row => row.id === 'dead-reckoning')!
+    const { system, plant, settleStart } = dualComposition(START)
+    const [one] = system.computers
+    // Same scenario, physical origin, default profile, UTC and runner APIs as the dual census; CLR side mirrors.
+    const runner = new ScenarioRunner(scenario, one, { variant: 'census', cycle: one.activeCycle.id }, system.flights[0], settleStart)
+    const kernel = new FmsKernel(plant, runner)
+    const selected = system.computers[side - 1]
+    const shown = (unit: ScriptedFms) => screenText(unit.screen())[SCRATCHPAD_LINE].trim()
+    const gpsRecall = (unit: ScriptedFms) => structuredClone(unit.recallList).filter(message => message.text === 'GPS NAV LOST')
+    const textColor = (unit: ScriptedFms) => unit.screen()[SCRATCHPAD_LINE].filter(cell => cell.ch !== ' ').map(cell => cell.color)
+    expect(runner.problems).toEqual([])
+    expect(system.mode).toBe('SYNC')
+    expect(kernel.advance(479)).toBe(479)
+    expect(kernel.unitClockMs).toBe(START + 119_750)
+    expect(one.hasCondition('apirsFail')).toBe(true)
+    expect(one.hasCondition('dvsFail')).toBe(true)
+    expect(one.hasCondition('dmeOutage')).toBe(true)
+    expect(one.hasCondition('gpsLost')).toBe(false)
+    for (const unit of system.computers) {
+      expect(unit.hasCondition('fmsFail')).toBe(false)
+      expect(unit.localNavigationSolution.mode).toBe('GPS')
+      expect(unit.lamps().has('POS')).toBe(false)
+      expect(gpsRecall(unit)).toHaveLength(0)
+    }
+    expect(kernel.advance(1)).toBe(1)
+    expect(kernel.unitClockMs).toBe(START + 120_000)
+    expect(one.hasCondition('gpsLost')).toBe(true)
+    for (const unit of system.computers) {
+      expect(unit.localNavigationSolution.mode).toBe('DR')
+      expect(unit.navState.mode).toBe('DR')
+      expect(unit.lamps().has('POS')).toBe(true)
+      expect(unit.lamps().has('MSG')).toBe(true)
+      expect(gpsRecall(unit)).toEqual([{ text: 'GPS NAV LOST', alert: true }])
+      expect(unit.recallList.some(message => message.text === 'FMS NAV IN DR')).toBe(false)
+      // Accept either presentation: current docs declare no priority beyond the latest alert.
+      expect(['GPS NAV LOST', 'FMS NAV IN DR']).toContain(shown(unit))
+      expect(textColor(unit)).toEqual(Array(10).fill(shown(unit) === 'GPS NAV LOST' ? 'amber' : 'white'))
+    }
+    const atLoss = system.computers.map(unit => structuredClone(unit.recallList))
+    expect(atLoss[0]).toEqual(atLoss[1])
+    const pendingGps = gpsRecall(selected)
+    if (shown(selected) === 'FMS NAV IN DR') {
+      expect(textColor(selected)).toEqual(Array(10).fill('white'))
+      selected.press('CLR')
+      // Primary intended fail-before boundary, if actual causal review confirms this public antecedent:
+      // clearing an advisory is not CLR on GPS NAV LOST and cannot acknowledge that pending alert.
+      expect(selected.lamps().has('MSG')).toBe(true)
+      for (const unit of system.computers) expect(unit.lamps().has('MSG')).toBe(true)
+      expect(shown(selected)).toBe('')
+      selected.press('CLR')
+      expect(shown(selected)).toBe('GPS NAV LOST')
+    }
+    expect(shown(selected)).toBe('GPS NAV LOST')
+    expect(textColor(selected)).toEqual(Array(10).fill('amber'))
+    selected.press('CLR')
+    expect(shown(selected)).toBe('')
+    for (let index = 0; index < 2; index++) {
+      expect(system.computers[index].lamps().has('MSG')).toBe(false)
+      expect(system.computers[index].recallList).toEqual(atLoss[index])
+    }
+    expect(kernel.advance(4)).toBe(4)
+    for (const unit of system.computers) {
+      expect(unit.lamps().has('MSG')).toBe(false)
+      expect(gpsRecall(unit)).toEqual(pendingGps)
+    }
+    // Keep every original scenario step, including physical GPS recovery at 720s. Other genuine alerts may occur.
+    kernel.advance(2_396)
+    expect(kernel.unitClockMs).toBe(START + 720_000)
+    expect(runner.outcome).toBe('passed')
+    expect(one.hasCondition('gpsLost')).toBe(false)
+    for (let index = 0; index < 2; index++) {
+      const unit = system.computers[index]
+      expect(unit.localNavigationSolution.mode).toBe('GPS')
+      expect(unit.lamps().has('POS')).toBe(false)
+      expect(gpsRecall(unit)).toEqual(pendingGps)
+      expect(unit.recallList.slice(-atLoss[index].length)).toEqual(atLoss[index])
+    }
+    expect(system.computers[0].recallList).toEqual(system.computers[1].recallList)
   })
 }
