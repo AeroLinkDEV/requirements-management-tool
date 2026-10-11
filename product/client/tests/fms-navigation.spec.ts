@@ -16,6 +16,9 @@ import { NOAA_WMM2025_REFERENCE } from './fixtures/fms-wmm2025-reference'
 import { MagvarModel } from '../src/fmsCdu/magvar'
 import { WMM2025_DATABASE } from '../src/fmsCdu/wmm2025'
 import { fmsOutputs } from '../src/fmsCdu/efis'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { ScenarioRunner, type Scenario } from '../src/fmsCdu/scenario'
 
 test('WMM2025 agrees with all independent NOAA field vectors at both epochs and ellipsoid heights', () => {
   const model = new MagvarModel()
@@ -642,6 +645,37 @@ test('RNP defaults by phase: a loaded approach does not grant approach phase', (
   expect(unit.activeRoute.legs[0]).toMatchObject({ ident: 'RW24R' })
   expect(unit.flightPhase).toBe('APPROACH')
   expect(unit.requiredRnp).toBe(0.3)
+  // #1581: the original GPS-loss scenario requests TOGA immediately and masks this non-final phase reset.
+  // Fly the normal public S300 KBTV startup to its FAF-distance trigger; no forced phase or private sensor state.
+  const { fms, sim, plant, settleStart } = singleComposition(Date.UTC(2026, 8, 29, 14), { profile: HELICOPTER_PROFILE })
+  const scenario: Scenario = {
+    id: '1581-s300-prefaf-phase-owner', title: 'S300 pre-FAF GPS loss', objective: 'Withdraw non-final approach phase on invalid GPS',
+    profile: HELICOPTER_PROFILE.id, start: 'kbtv-rnav15', startTime: '2026-09-29T14:00:00.000Z', maxSeconds: 1024,
+    steps: [{ when: { kind: 'fafDistance', nm: 2 }, action: { kind: 'expectLamp', lamp: 'NPA', lit: true } }],
+  }
+  const runner = new ScenarioRunner(scenario, fms, { variant: '1581 phase owner', cycle: fms.activeCycle.id }, sim, settleStart)
+  const kernel = new FmsKernel(plant, runner)
+  for (let frame = 0; frame < 4096 && !runner.finished; frame += 1) kernel.advance(1, { haltOnRunEnd: true })
+  expect(runner.outcome).toBe('passed')
+  expect(fms.approachArmed).toBe(true)
+  expect(fms.onFinalSegment).toBe(false)
+  expect(fms.distanceToFaf).toBeGreaterThan(0)
+  expect(fms.distanceToFaf).toBeLessThanOrEqual(2)
+  expect(fms.navState.gpsSource).not.toBeNull()
+  expect(fms.flightPhase).toBe('APPROACH')
+  expect(fms.requiredRnp).toBe(0.3)
+  expect(fms.nonPrecisionApproach).toBe(true)
+  fms.compute(() => fms.setCondition('gpsLost', true))
+  // One ordinary propagation frame before any TOGA: selection and receiver loss must be genuinely reached.
+  kernel.advance(1)
+  expect(fms.navState.gpsSource).toBeNull()
+  expect(fms.gpsStatus.assessed).toHaveLength(2)
+  expect(fms.gpsStatus.assessed.every(receiver => receiver.fix === null && receiver.reason === 'NO FIX')).toBe(true)
+  expect(fms.gpsApproachAuthority.annunciation).toBe('NO APPR')
+  // M300 7-10/7-11 (IFR-PHASE): current integrity is required before FAF, independently of approach capability.
+  expect(fms.flightPhase).toBe('TERMINAL')
+  expect(fms.requiredRnp).toBe(1)
+  expect(fms.nonPrecisionApproach).toBe(false)
 })
 
 test('ANP above RNP raises CHECK ANP only after the time to alert for the phase', () => {

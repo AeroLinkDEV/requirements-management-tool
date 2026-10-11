@@ -2039,6 +2039,8 @@ export class ScriptedFms implements CduBackend {
     const current = this.nav.mode === "GPS" && assessment.usable && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4;
     const holding = !leavingFafHold && this.holdingAtFaf;
     if (!approach || !this.flownOnFmsGuidance(approach) || !this.armedApproach || holding || distance === null || distance > 2) this.approachPhaseActive = false;
+    // Before FAF, loss of current integrity withdraws phase even when no GPS source remains to predict on (#1581).
+    if (!current && !this.onFinalSegment) this.approachPhaseActive = false;
     // Only an independent input adapter, with no receivers to predict on, cannot predict approach integrity. A computer
     // given the installation's receivers (FMS 2 in a dual installation) predicts and enters the approach phase (#1511).
     if (!approach || distance === null || distance > 6 || !source || !this.benchRaim) return;
