@@ -187,10 +187,50 @@ for (const pattern of ['HOLD', 'SAR'] as const) test(`${pattern} managed pattern
     await page.getByRole('button', { name: 'Jump to next waypoint', exact: true }).click()
     await expect(page.getByTestId('fms-cdu-inspected')).toContainText('IN PROGRESS')
   }
+  // Retain the actual system observed at an ordinary paused tick; the wrapper delegates it unchanged.
+  // Guidance can then be published at one navigation epoch without stepping the plant.
+  await page.evaluate(async () => {
+    const { DualFmsSystem } = await import('/src/fmsCdu/dualFms.ts')
+    const original = DualFmsSystem.prototype.tick
+    let system: InstanceType<typeof DualFmsSystem> | null = null
+    DualFmsSystem.prototype.tick = function () { system = this; return original.call(this) }
+    ;(window as unknown as { managedPatternObserved: () => boolean }).managedPatternObserved = () => system !== null
+    ;(window as unknown as { managedPatternMode: () => string }).managedPatternMode = () => {
+      if (!system) throw new Error('Actual paused system was not observed')
+      return system.simulator.lateralMode
+    }
+    ;(window as unknown as { managedPatternEpoch: (restore: boolean) => unknown }).managedPatternEpoch = restore => {
+      if (restore) DualFmsSystem.prototype.tick = original
+      if (!system) throw new Error('Actual paused system was not observed')
+      const current = system
+      current.computers[current.guidanceSide - 1].compute(() => {
+        current.simulator.refreshGuidance()
+        current.computers.forEach(fms => fms.notifyComputerState())
+      })
+      return structuredClone({
+        guidanceSide: current.guidanceSide,
+        utc: current.computers.map(fms => fms.now.getTime()),
+        centre: current.computers.map(fms => fms.position),
+        physical: current.computers.map(fms => fms.truePosition),
+        route: current.computers.map(fms => fms.activeRoute),
+        sarPath: current.simulator.sarPath,
+      })
+    }
+  })
+  await expect.poll(() => page.evaluate(() => (window as unknown as {
+    managedPatternObserved: () => boolean
+  }).managedPatternObserved())).toBe(true)
   await page.getByLabel('Simulation rate').selectOption('64')
   await page.getByRole('button', { name: 'Fly', exact: true }).click()
   await expect(map(page)).toHaveAttribute('aria-label', new RegExp(`${pattern} mode`), { timeout: 95_000 })
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  // Fixed wall time alone leaves paused navigation timers running. Freeze those timers here;
+  // pauseAt this same fixed time consumes no additional ticks, preserving the current epoch.
+  await page.clock.pauseAt(new Date('2026-09-29T15:00:00Z'))
+  const epochBefore = await page.evaluate(() => (window as unknown as {
+    managedPatternEpoch: (restore: boolean) => unknown
+  }).managedPatternEpoch(true))
+  await expect(map(page)).toHaveAttribute('aria-label', new RegExp(`${pattern} mode`))
   const snapshot = () => page.locator('.fmsMap').evaluate(svg => ({
     active: [...svg.querySelectorAll('path.active')].map(p => ({ path: p.getAttribute('d'), stroke: getComputedStyle(p).stroke, dash: getComputedStyle(p).strokeDasharray })),
     pattern: [...svg.querySelectorAll('path.hold,path.sar')].map(p => ({ kind: p.getAttribute('class'), path: p.getAttribute('d') })),
@@ -201,10 +241,17 @@ for (const pattern of ['HOLD', 'SAR'] as const) test(`${pattern} managed pattern
   // SAR has a straight current segment; hold turns legitimately have no straight active segment.
   if (pattern === 'SAR') expect(before.active).toHaveLength(1)
   await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
+  expect(await page.evaluate(() => (window as unknown as {
+    managedPatternMode: () => string
+  }).managedPatternMode())).toBe('HDG')
+  const epochAfter = await page.evaluate(() => (window as unknown as {
+    managedPatternEpoch: (restore: boolean) => unknown
+  }).managedPatternEpoch(false))
+  expect(epochAfter).toEqual(epochBefore)
   await expect(map(page)).toHaveAttribute('aria-label', /HDG mode/)
   await expect(page.getByTestId('fma-roll')).toHaveText('HDG')
   const after = await snapshot()
-  await info.attach('managed-pattern-transition', { body: JSON.stringify({ pattern, before, after }), contentType: 'application/json' })
+  await info.attach('managed-pattern-transition', { body: JSON.stringify({ pattern, epochBefore, epochAfter, before, after }), contentType: 'application/json' })
   expect(after).toEqual(before)
   await page.locator('.fmsMap').screenshot({ path: info.outputPath(`${pattern.toLowerCase()}-hdg-managed-pattern.png`) })
 })
