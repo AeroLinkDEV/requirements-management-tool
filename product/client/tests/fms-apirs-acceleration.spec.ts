@@ -21,8 +21,9 @@ const configure = (flight: FlightSimulator, heading: number) => {
   flight.selectSpeed(80)
 }
 const single = (heading = 0) => {
-  const { fms: unit, sim: flight, plant } = singleComposition(START)
+  const { fms: unit, sim: flight, plant, settleStart } = singleComposition(START)
   place(unit, heading)
+  settleStart()
   configure(flight, heading)
   const kernel = new FmsKernel(plant)
   return { unit, flight, advance: (frames: number) => kernel.advance(frames) }
