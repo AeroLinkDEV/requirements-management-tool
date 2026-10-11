@@ -4613,10 +4613,13 @@ export class ScriptedFms implements CduBackend {
 
   private clear(held: boolean) {
     if (this.message) {
-      // CLR clears alert and advisory messages from the scratchpad, which also acknowledges the alert.
-      this.crossTalk?.acknowledgeMessage(this.message.text);
+      const displayed = this.message;
       this.message = null;
-      this.pendingAlert = null;
+      // Only CLR on the displayed alert acknowledges it; an advisory leaves the latest alert pending (R13).
+      if (displayed.alert) {
+        if (this.pendingAlert?.text === displayed.text) this.pendingAlert = null;
+        this.crossTalk?.acknowledgeMessage(displayed.text);
+      }
       return;
     }
     if (this.scratch === "DELETE") { this.scratch = ""; return; }
