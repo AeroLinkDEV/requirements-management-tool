@@ -329,7 +329,7 @@ export class FlightSimulator {
     this.beforeGuidance = beforeGuidance ?? null;
     this.profile = fms.aircraftProfile.parameters;
     this.hoverHeightFt = this.profile.hoverHeightDefault.value;
-    this.airspeed = fms.targetSpeed;
+    this.airspeed = fms.physicalTrueAirspeed;
     this.selectedAlt = Math.round(fms.altitude);
     this.selectedTas = fms.vnav.cruiseSpeed;
     // Under the ADVISORY policy the aircraft starts level in altitude hold at its altitude.

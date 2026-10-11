@@ -127,10 +127,10 @@ for (const preset of [
   await expect(page.locator('.fmsCdu')).toBeVisible()
   await page.evaluate(async () => {
     const { DualFmsSystem } = await import('/src/fmsCdu/dualFms.ts')
-    const original = DualFmsSystem.prototype.tick
+    const original = DualFmsSystem.prototype.settleStart
     const values: { utc: number[], altitude: number[], position: { lat: number, lon: number }[] }[] = []
     ;(window as unknown as { presetTicks: typeof values }).presetTicks = values
-    DualFmsSystem.prototype.tick = function () {
+    DualFmsSystem.prototype.settleStart = function () {
       const result = original.call(this)
       values.push({ utc: this.computers.map(fms => fms.now.getTime()), altitude: this.computers.map(fms => fms.physicalAltitude),
         position: this.computers.map(fms => ({ ...fms.truePosition })) })

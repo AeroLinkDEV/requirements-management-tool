@@ -1,6 +1,8 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { aircraftData } from '../src/fmsCdu/efis'
 import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack, trimPitch } from '../src/fmsCdu/flight'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { dualComposition, singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import { cameraPose } from '../src/fmsCdu/outTheWindow'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
@@ -663,6 +665,67 @@ test('in a crosswind the aircraft crabs: its heading differs from its track by t
   expect(unit.heading).toBeCloseTo(expected.heading, 0)
   expect(unit.groundSpeed).toBeCloseTo(expected.groundSpeed, 0)
 })
+
+for (const topology of ['single', 'dual FMS1', 'dual FMS2'] as const) {
+  test(`warm physical TAS is the initial flight TAS before commanded acceleration: ${topology} (#1566)`, () => {
+    const epoch = Date.UTC(2026, 8, 27, 14, 0, 0)
+    const single = topology === 'single' ? singleComposition(epoch) : null
+    const dual = single ? null : dualComposition(epoch)
+    if (topology === 'dual FMS2') {
+      // Witness the native producer's coherent warm seed before the real guidance handover.
+      // changeGuidance copies aircraft motion and the previous simulator's TAS separately;
+      // this row must not infer that those pre-fix values already agree.
+      const native = dual!.system.computers[0]
+      expect(native.wind).toEqual({ direction: 270, speed: 12 })
+      expect(native.navigationInputs?.air).toMatchObject({ status: 'NORMAL', value: { tasValid: true } })
+      expect(native.navigationInputs?.air.value?.tasKt).toBeCloseTo(109.24208700557881, 8)
+      expect(native.utcTime.getTime()).toBe(epoch)
+      dual!.system.selectGuidance(2)
+    }
+    const unit = single?.fms ?? dual!.system.computers[dual!.system.guidanceSide - 1]
+    const sim = single?.sim ?? dual!.system.simulator
+    const plant = single?.plant ?? dual!.plant
+    const kernel = new FmsKernel(plant)
+    // Independent warm-seed vector: 120 kt on 115 degrees minus a 12 kt eastward wind.
+    // Its airspeed is 109.24208700557881, not the distinct 120 kt command.
+    expect(unit.wind).toEqual({ direction: 270, speed: 12 })
+    expect(unit.groundSpeed).toBe(120)
+    expect(unit.track).toBe(115)
+    expect(unit.physicalAltitude).toBe(3000)
+    expect(unit.targetSpeed).toBe(120)
+    expect(unit.heading).toBeCloseTo(117.66083698373166, 8)
+    expect(unit.navigationInputs?.air).toMatchObject({ status: 'NORMAL', value: { tasValid: true } })
+    expect(unit.navigationInputs?.air.value?.tasKt).toBeCloseTo(109.24208700557881, 8)
+    expect(kernel.unitClockMs).toBe(epoch)
+    expect(sim.tas).toBeCloseTo(109.24208700557881, 8)
+    expect(kernel.advance(1)).toBe(1)
+    expect(kernel.unitClockMs).toBe(epoch + 250)
+    // The existing 2 kt/s command law changes this physical baseline by 0.5 kt in one whole frame.
+    expect(sim.tas).toBeCloseTo(109.74208700557881, 8)
+  })
+}
+
+for (const seed of [
+  { name: 'tailwind', wind: { direction: 270, speed: 20 }, track: 90, groundSpeed: 100, tas: 80, heading: 90 },
+  { name: 'crosswind', wind: { direction: 90, speed: 30 }, track: 0, groundSpeed: 100, tas: 104.4030650891055, heading: 16.69924423399362 },
+  { name: 'zero physical TAS', wind: { direction: 0, speed: 0 }, track: 0, groundSpeed: 0, tas: 0, heading: 0 },
+  { name: 'still-air control', wind: { direction: 0, speed: 0 }, track: 90, groundSpeed: 120, tas: 120, heading: 90 },
+]) {
+  test(`a coherent engineering seed initializes physical TAS without a target fallback: ${seed.name} (#1566)`, () => {
+    const epoch = Date.UTC(2026, 8, 27, 14, 0, 0)
+    const unit = new ScriptedFms(() => new Date(epoch))
+    Object.assign(unit.wind, seed.wind)
+    unit.setAircraft({ track: seed.track, groundSpeed: seed.groundSpeed, tas: seed.tas, heading: seed.heading })
+    unit.refreshSensorInput()
+    expect(unit.navigationInputs?.air).toMatchObject({ status: 'NORMAL', value: { tasValid: true } })
+    expect(unit.navigationInputs?.air.value?.tasKt).toBeCloseTo(seed.tas, 8)
+    expect(unit.targetSpeed).toBe(120)
+    const before = { position: { ...unit.truePosition }, heading: unit.heading, track: unit.track, groundSpeed: unit.groundSpeed, utc: unit.utcTime.getTime() }
+    const sim = new FlightSimulator(unit)
+    expect(sim.tas).toBeCloseTo(seed.tas, 8)
+    expect({ position: unit.truePosition, heading: unit.heading, track: unit.track, groundSpeed: unit.groundSpeed, utc: unit.utcTime.getTime() }).toEqual(before)
+  })
+}
 
 test('the airspeed changes at the profile acceleration limit, not in one step', () => {
   const { unit, sim, fly } = setup()

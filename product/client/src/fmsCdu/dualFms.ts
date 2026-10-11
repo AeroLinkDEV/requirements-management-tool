@@ -255,13 +255,17 @@ export class DualFmsSystem {
       this.reconcile(); this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator)); remaining -= h;
     }
   }
+  /** Settle successful ACTION placement on the shared aircraft before the first scenario input, without integration. */
+  settleStart() { this.compute(() => { this.tickBoth(true); this.notify(); }); }
   tick() { this.compute(() => { this.tickBoth(); this.notify(); }); }
-  private tickBoth() {
+  private tickBoth(settleMotion = false) {
     const selected = this.unit(this.driver), other = this.peer(this.driver);
     if (this.driver === 2) this.unit(1).observeAircraft(selected);
     this.unit(1).refreshSensorInput(); this.unit(1).tick();
     this.unit(2).observeAircraft(selected); this.unit(2).refreshSensorInput(); this.unit(2).tick();
     other.observeAircraft(selected); this.settingsChanged(1); this.settingsChanged(2); this.reconcile();
+    // Placement has now reached both computers. Adopt their measured motion before publishing the first guidance.
+    if (settleMotion) this.flights.forEach(flight => flight.adoptAircraftMotion());
     this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator));
   }
 }
