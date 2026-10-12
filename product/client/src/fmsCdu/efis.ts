@@ -334,9 +334,11 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   // autopilot's (basic heading and altitude hold after the reversion).
   if (failed) return empty;
 
-  // This generic installation displays FMS NAV course data. It has no ILS/VOR course-selector model:
-  // coupling to NAV is separate from the validity of the path (S300 C-12, items 2, 5 and 6).
-  const managed = !fms.needsActiveLeg && g.desiredTrack !== null;
+  // This generic installation displays FMS NAV course data. It has no ILS/VOR course-selector model: desired course and
+  // deviation are valid with a valid path, coupled to NAV or not (S300 C-12, items 2, 5 and 6), except when the hold
+  // guidance is invalid (UNABLE HOLD, D-H). Label 121 likewise stays valid when uncoupled (7-16 item 3, 9-1), except
+  // when the FMS has withdrawn its roll steering (11-37 condition 1, E-17, UNABLE HOLD).
+  const managed = !fms.needsActiveLeg && g.desiredTrack !== null && !sim.holdGuidanceInvalid;
   const path = sim.verticalPath;
   const advisory = fms.advisoryVertical;
   const profile = fms.profile();
@@ -367,8 +369,9 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
       : sim.verticalFlag ? fail() : gpsVertical !== null ? normal(gpsVertical) : path ? normal(fms.altitude - path.altitude) : ncd(),
     verticalSource: advisory?.available ? "VNAV" : path?.source ?? null,
     verticalCoupled: advisory ? false : path?.coupled ?? false,
-    // Invalid with the active waypoint a moving one whose rendezvous is unachievable (M300 11-37, condition 1).
-    rollCommand: managed && !fms.rendezvousRollInvalid && sim.routeRollCommand !== null ? normal(sim.routeRollCommand) : ncd(),
+    // Invalid with the active waypoint a moving one whose rendezvous is unachievable (M300 11-37, condition 1), and after
+    // a transition refused at TDN until the hover is executed again (E-17). The managed steering, never the HDG bank.
+    rollCommand: managed && !fms.rendezvousRollInvalid && !fms.hoverRollSteeringWithdrawn && sim.managedRollCommand !== null ? normal(sim.managedRollCommand) : ncd(),
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
     // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood. In a manual hold,

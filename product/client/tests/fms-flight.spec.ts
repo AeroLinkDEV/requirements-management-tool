@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { aircraftData } from '../src/fmsCdu/efis'
+import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack, trimPitch } from '../src/fmsCdu/flight'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { dualComposition, singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
@@ -1460,7 +1460,7 @@ test('ACTIVATE needs a valid radio height; losing it between ACTIVATE and EXEC i
 })
 
 test('at TDN, 0.3 NM off the final track: TDN NOT POSSIBLE, roll steering withdrawn, NAV gives way to HDG (Stage D, E-17)', () => {
-  const { unit, sim, fly } = hoverProcedure()
+  const { unit, sim, fly, mark } = hoverProcedure()
   unit.press('LSK6R')
   unit.press('EXEC')
   // Just before TDN, displaced 0.3 NM across the final track.
@@ -1473,6 +1473,23 @@ test('at TDN, 0.3 NM off the final track: TDN NOT POSSIBLE, roll steering withdr
   expect(sim.modeEvents.some(e => e.event === 'NAV REMOVED')).toBe(true)
   // The FMA shows NAV lost in amber on the roll axis (B4.1).
   expect(sim.modeEvents.find(e => e.event === 'NAV REMOVED')?.lost).toEqual([{ axis: 'roll', mode: 'NAV' }])
+  // E-17: the roll steering command is disabled on the bus, not only uncoupled; the course and deviation stay valid (#1562).
+  expect(fmsOutputs(unit, sim)).toMatchObject({ rollCommand: { status: 'NCD' }, desiredTrack: { status: 'NORMAL' }, crossTrack: { status: 'NORMAL' } })
+  // NAV armed again does not capture the disabled steering.
+  sim.armLnav()
+  fly(20)
+  expect(sim.lateralMode).toBe('HDG')
+  expect(sim.lnavIsArmed).toBe(true)
+  expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NCD')
+  // Re-activated and re-executed, the hover steers again.
+  unit.open('HOVER')
+  expect(unit.designateHoverMark({ ident: 'WPT', position: mark, label: null })).toBe(true)
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  expect(unit.hover.status).toBe('ACT')
+  expect(unit.hover.refused).toBeNull()
+  sim.refreshGuidance()
+  expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NORMAL')
 })
 
 test('at TDN 400 ft higher than planned: the recomputed transition does not fit before MRK, TDN DIST SHORT (Stage D, T6)', () => {
@@ -1484,6 +1501,10 @@ test('at TDN 400 ft higher than planned: the recomputed transition does not fit 
   fly(600, () => unit.hover.refused !== null || unit.hover.request > 0)
   expect(unit.hover.refused).toBe('TDN DIST SHORT')
   expect(unit.hover.request).toBe(0)
+  // Either refusal disables roll steering (E-17, #1562): label 121 is invalid while the procedure stays active.
+  fly(2)
+  expect(sim.lateralMode).toBe('HDG')
+  expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NCD')
 })
 
 test('radio height lost during TD/H: ALT on the barometric altitude, the horizontal plan to MRK goes on; TDN FUNCTION LOST (Stage D, F2)', () => {

@@ -538,6 +538,26 @@ test('FMS NAV deviation stays visible in HDG without a coupled roll cue, then NA
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
 })
 
+// The airline-style FMA has no helicopter axes: the PFD gates its roll cue on the bus's engaged lateral mode instead.
+test('airline profile: FMS NAV deviation stays visible in HDG SEL without a roll cue, and LNAV capture draws the cue', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  await open(page)
+  await page.getByLabel('Aircraft profile').selectOption('lab-airline-vnav')
+  const pfd = page.locator('.efisPfd')
+  await expect(pfd.getByTestId('fma-lateral')).toHaveText('LNAV')
+  await expect(pfd.getByTestId('fd-roll')).toHaveCount(1)
+  await page.getByLabel('Selected heading').fill('110')
+  await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
+  await expect(pfd.getByTestId('fma-lateral')).toHaveText('HDG SEL')
+  await expect(pfd.getByTestId('ldev')).toBeVisible()
+  await expect(pfd.getByTestId('fd-roll')).toHaveCount(0)
+  await page.getByRole('button', { name: 'LNAV', exact: true }).click()
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await expect(pfd.getByTestId('fma-lateral')).toHaveText('LNAV')
+  await expect(pfd.getByTestId('fd-roll')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+})
+
 test('Fly moves the aircraft along the route on the map at the chosen rate, and Pause stops it', async ({ page }) => {
   await open(page)
   // The engineering map shares the lower display beside the CDU with the ND; the ND is shown first.

@@ -316,6 +316,8 @@ export class FlightSimulator {
   private last: Guidance;
   /** Managed steering retained at the computation boundary, before the AFCS's HDG override. */
   private managedRoll: number | null = null;
+  /** The hold, as it stood, whose pattern could not be flown (UNABLE HOLD); null when none. */
+  private unableHoldKey: string | null = null;
 
   private readonly beforeGuidance: (() => void) | null;
   constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>, beforeGuidance?: () => void) {
@@ -351,8 +353,25 @@ export class FlightSimulator {
 
   /** The guidance as last computed. Reading it changes nothing (#1518): the failure watch below keeps it current. */
   get guidance() { return this.last; }
-  /** FMS NAV steering remains advisory in HDG; reading it never computes or sequences a path. */
-  get routeRollCommand() { return this.managedRoll; }
+  /**
+   * The managed steering (route, hold, search or join) as last computed, before any HDG override: FMS NAV steering
+   * remains advisory data in HDG (M300 7-16 item 3, 9-1). Reading it never computes or sequences a path.
+   */
+  get managedRollCommand() { return this.managedRoll; }
+  /**
+   * UNABLE HOLD (F8, D-H): no holding pattern can be flown, so the hold guidance is invalid until the hold changes (it is
+   * modified, exited or deleted) or a pattern is built at a later passage.
+   */
+  get holdGuidanceInvalid() {
+    return this.unableHoldKey !== null && this.holdPlan === null && JSON.stringify(this.fms.activeRoute.hold ?? null) === this.unableHoldKey;
+  }
+  /**
+   * The FMS has withdrawn its roll steering: an unachievable rendezvous as the active waypoint (M300 11-37 condition 1),
+   * a transition refused at TDN (E-17), or UNABLE HOLD. Label 121 is then invalid, and NAV cannot capture on it.
+   */
+  get rollSteeringWithdrawn() {
+    return this.fms.rendezvousRollInvalid || this.fms.hoverRollSteeringWithdrawn || this.holdGuidanceInvalid;
+  }
 
   /**
    * A power or table failure (or the recovery) takes effect even while the plant is paused, so the outputs never
@@ -1693,8 +1712,9 @@ export class FlightSimulator {
         [{ axis: "roll", mode: "NAV" }]);
     }
     if (this.lateral === "LNAV") return managed;
-    // Capture during a flight step when the path is close; a paused guidance refresh leaves NAV armed.
-    if (dt > 0 && this.lnavArmed && !this.fms.rendezvousRollInvalid && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
+    // Capture during a flight step when the path is close; a paused guidance refresh leaves NAV armed. Withdrawn roll
+    // steering (rendezvous, TDN refusal, UNABLE HOLD) is never captured: NAV stays armed until it is valid again.
+    if (dt > 0 && this.lnavArmed && !this.rollSteeringWithdrawn && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
       this.lateral = "LNAV";
       this.lnavArmed = false;
       return managed;
@@ -1827,6 +1847,7 @@ export class FlightSimulator {
     const hold = this.fms.activeRoute.hold!;
     const geometry = this.holdGeometryNow(hold);
     if (!geometry) { this.unableHold(); return; }
+    this.unableHoldKey = null;
     const fix = this.fms.coordinates(hold.fix)!;
     const entry = entrySegments(this.fms.holdEntryFlown ?? "DIRECT", fix, hold.inbound, hold.turn, geometry);
     this.holdPlan = { segments: [...entry, ...geometry.racetrack], index: 0, legNm: geometry.legNm, entryEnd: entry.length - 1, designBank: geometry.designBank };
@@ -1834,6 +1855,7 @@ export class FlightSimulator {
 
   private unableHold() {
     this.holdPlan = null;
+    this.unableHoldKey = JSON.stringify(this.fms.activeRoute.hold ?? null);
     // Hold guidance is invalid: NAV gives way to a latched heading hold (F8), never shown captured on a path it cannot fly.
     const navLost: AxisMode[] = this.lateral === "LNAV" ? [{ axis: "roll", mode: "NAV" }] : [];
     if (this.lateral === "LNAV") {

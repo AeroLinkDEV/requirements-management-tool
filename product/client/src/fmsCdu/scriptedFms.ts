@@ -2795,6 +2795,15 @@ export class ScriptedFms implements CduBackend {
     return this.rendezvousFor(this.active, 0)?.achievable === false;
   }
 
+  /**
+   * A transition refused at TDN (TDN NOT POSSIBLE, TDN DIST SHORT, TDN FUNCTION LOST) while its procedure is still
+   * active: the roll steering command is automatically disabled until the hover is activated and executed again
+   * (M300 E-17). The refusal itself outlives the procedure, so it disables nothing once the procedure has ended.
+   */
+  get hoverRollSteeringWithdrawn(): boolean {
+    return this.hover.refused !== null && this.hover.active !== null;
+  }
+
   /** The TDN path angle from present altitude to the target altitude at the point before the reference. */
   tdnAngle(): number | null {
     const ref = this.tdn.refId ? this.coordinates(this.tdn.refId) : undefined;

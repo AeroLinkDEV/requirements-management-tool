@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
+import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import type { Airport, Fix } from '../src/fmsCdu/navData'
@@ -415,6 +416,18 @@ test('UNABLE HOLD at the first fix passage: no hold guidance, NAV gives way to a
   expect(sim.modeEvents.find(e => e.event === 'UNABLE HOLD')?.lost).toEqual([{ axis: 'roll', mode: 'NAV' }])
   const leg = unit.activeRoute.legs[0]
   expect(leg?.kind === 'wpt' && leg.ident).toBe('TIDUE')
+  // The guidance is invalid on the bus too, not only uncoupled (D-H, #1562), and NAV armed again does not capture it.
+  const invalid = { desiredTrack: { status: 'NCD' }, crossTrack: { status: 'NCD' }, rollCommand: { status: 'NCD' } }
+  expect(fmsOutputs(unit, sim)).toMatchObject(invalid)
+  sim.armLnav()
+  fly(20, () => false)
+  expect(sim.lateralMode).toBe('HDG')
+  expect(fmsOutputs(unit, sim)).toMatchObject(invalid)
+  // The hold deleted, the guidance to the fix is valid again.
+  unit.modify(route => { delete route.hold })
+  unit.press('EXEC')
+  sim.refreshGuidance()
+  expect(fmsOutputs(unit, sim)).toMatchObject({ desiredTrack: { status: 'NORMAL' }, rollCommand: { status: 'NORMAL' } })
 })
 
 // Q8 (Astra's answer 8): an airport-section procedure's course ident (R plus three digits) is how CIFP 2609 happens to
