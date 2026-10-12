@@ -417,15 +417,20 @@ timeline, never from interval count times the selected rate. Its recorder (`perf
 closes the measured window between tasks, conserves every entry of the measured epoch from its first admission, and
 counts frames admitted before the window and completed inside it. It reports the debt open at each boundary, the
 achieved rate beside the selected rate, simulation cost (slice durations), and continuation cost: the yield gap
-between a batch's slices, and the microtask tail of the slice's task. A run refuses, and is recorded as failed, when
-the timeline cannot be conserved, a slice straddles a boundary, the window holds a second epoch, a slice ran outside
-an observed timer task, or the arm publishes no timeline (an arm built before it). The session records the SHA-256
-of the served dist at its start and end.
+from one slice's end to the next slice of its batch, and the task tail after the slice. A yield gap contains the
+earlier task's tail, so the two are not added. The window loop ends as soon as an interaction step adds no completed
+frames, and the window is then accounted. A lost entry is visible only through a later entry of its epoch, so the
+window must be closed by one: the epoch continues past the window end, or ends inside it with its discard. A run
+refuses, and is recorded as failed with its numbers, when the timeline cannot be conserved, the window is not
+closed, a slice straddles a boundary, the window holds a second epoch, a slice ran outside an observed timer task,
+or the arm publishes no timeline (an arm built before it). The session records the SHA-256 of the served dist at
+its start and end, and of its seed; the report never pools two arm builds in one cell.
 
-Browser levels are descriptive. No browser budget verdict is made before a quiet-host browser A/A under this
-revision, which [#1542](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1542) still owns. Revision
-1 refusal records and v1 interval-inferred records keep their identities and are reported `NOT_QUALIFIED`.
-Headless statistics revision 3 is unchanged.
+Browser levels are descriptive only, and revision 2 admits no browser budget verdict.
+[#1542](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1542) first needs a counterbalanced
+browser protocol revision (the run order still starts every round with a 1x cell and ends it with a 64x cell), and
+then a quiet-host browser A/A under that revision. Revision 1 refusal records and v1 interval-inferred records keep
+their identities and are reported `NOT_QUALIFIED`. Headless statistics revision 3 is unchanged.
 
 ## Cockpit and station arrangements
 

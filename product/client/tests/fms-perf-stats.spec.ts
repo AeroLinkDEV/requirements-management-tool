@@ -5,9 +5,9 @@ import { join } from 'node:path'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
-import { browserWindowAccounting } from '../perf/browser-accounting'
+import { BROWSER_RUN_SCHEMA, browserWindowAccounting, measureWindow, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
-import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
+import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
@@ -18,8 +18,8 @@ import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, holm, judge
 // deterministic host (fixtures/fms-pacing-host.ts), not written by hand; the expected counts are derived by hand from
 // the frame costs. These are functional accounting proofs, not performance measurements.
 const pacingEpoch = Date.UTC(2026, 8, 27, 14)
-function paced(rate: number, frameMs: number, options: { tailMs?: number, otherMs?: number } = {}) {
-  const host = new TimelineHost(options.tailMs ?? 0), composed = singleComposition(pacingEpoch), kernel = new FmsKernel(composed.plant)
+function paced(rate: number, frameMs: number, options: { tailMs?: number, postMs?: number, otherMs?: number } = {}) {
+  const host = new TimelineHost(options.tailMs ?? 0, options.postMs ?? 0), composed = singleComposition(pacingEpoch), kernel = new FmsKernel(composed.plant)
   const stop = startKernelPacing(rate, kernel, host, { onFault: error => { throw error }, onInstantClose: () => { host.wall += frameMs } })
   // `otherMs` of other main-thread work (rendering, input) runs between every two timer tasks.
   const run = (tasks: number) => { for (let i = 0; i < tasks; i++) { host.runNext(); host.wall += options.otherMs ?? 0 } return host.wall }
@@ -28,25 +28,28 @@ function paced(rate: number, frameMs: number, options: { tailMs?: number, otherM
 }
 
 test('a window counts the completed frames of batches straddling both boundaries and separates continuation cost', () => {
-  // 64x, 8 ms frames: a slice is four frames (32 ms), a batch sixteen slices. Each task has a 2 ms microtask tail and
-  // 5 ms of other work follows it, so a task cycle is 39 ms and batches run back to back (each outlasts its deadline).
-  const { run, window } = paced(64, 8, { tailMs: 2, otherMs: 5 })
+  // 64x, 8 ms frames: a slice is four frames (32 ms), a batch sixteen slices. Each task does 1 ms of synchronous work
+  // after its slice and has a 2 ms microtask tail, and 5 ms of other work follows it: a task cycle is 40 ms, and
+  // batches run back to back (each outlasts its 250 ms deadline).
+  const { run, window } = paced(64, 8, { postMs: 1, tailMs: 2, otherMs: 5 })
   const begin = run(10) // after 10 slices of batch 1: 40 frames done, 24 outstanding
   const end = run(30)   // 6 more slices of batch 1, all 16 of batch 2, 8 of batch 3
-  expect([begin, end]).toEqual([250 + 10 * 39, 250 + 40 * 39])
+  run(1)                // the entry that closes the window
+  expect([begin, end]).toEqual([250 + 10 * 40, 250 + 40 * 40])
   const accounting = window(begin, end)
   expect(accounting.frames).toEqual({ admitted: 128, attempted: 120, completed: 120, discarded: 0, unfinishedAttempts: 0,
     carriedIn: { debt: 24, batch: 1, attemptedInWindow: 24, completedInWindow: 24 }, carriedOut: { debt: 32, batch: 3 } })
   expect(accounting.batchesAdmitted).toBe(2)
-  expect(accounting.simSeconds).toBe(30)
-  expect(accounting.wallSeconds).toBeCloseTo(1.17, 12)
-  expect(accounting.achievedRate).toBeCloseTo(30 / 1.17, 12)
-  expect(accounting.achievedFraction).toBeCloseTo(30 / 1.17 / 64, 12)
-  // Simulation: 30 slices of 32 ms. Continuation: 27 yield gaps of 7 ms (tail + other work) between slices of one
-  // batch inside the window (not across an admission, nor from a slice before the window); 30 tails of 2 ms.
+  expect([accounting.simSeconds, accounting.wallSeconds, accounting.achievedRate, accounting.achievedFraction]).toEqual([30, 1.2, 25, 25 / 64])
+  expect(accounting.window).toEqual({ begin: 650, end: 1850, epoch: accounting.window.epoch })
+  // The warm-up: the epoch's 10 slices before the window, 40 frames over the 0.4 s from its first admission.
+  expect(accounting.beforeWindow).toEqual({ completed: 40, simSeconds: 10, slices: 10, wallSeconds: 0.4 })
+  // Simulation: 30 slices of 32 ms. Continuation: 27 yield gaps of 8 ms (post + tail + other work) between slices of
+  // one batch inside the window (not across an admission, nor from a slice before the window); 30 task tails of
+  // 3 ms after the slice (post + microtask tail), of tasks lasting 35 ms.
   expect(accounting.simulation).toEqual({ slices: { frames: 30, p50: 32, p95: 32, p99: 32, max: 32, totalMs: 960 }, admissionMs: 64, continuationMs: 896 })
-  expect(accounting.continuation).toEqual({ slices: 28, yieldGaps: { frames: 27, p50: 7, p95: 7, p99: 7, max: 7, totalMs: 189 },
-    taskTails: { frames: 30, p50: 2, p95: 2, p99: 2, max: 2, totalMs: 60 }, pacingTasks: { frames: 30, p50: 34, p95: 34, p99: 34, max: 34, totalMs: 1020 } })
+  expect(accounting.continuation).toEqual({ slices: 28, yieldGaps: { frames: 27, p50: 8, p95: 8, p99: 8, max: 8, totalMs: 216 },
+    taskTails: { frames: 30, p50: 3, p95: 3, p99: 3, max: 3, totalMs: 90 }, pacingTasks: { frames: 30, p50: 35, p95: 35, p99: 35, max: 35, totalMs: 1050 } })
 })
 
 test('a busy window that admits nothing counts the continuation frames it executed, not intervals x rate', () => {
@@ -54,6 +57,7 @@ test('a busy window that admits nothing counts the continuation frames it execut
   // interval inference of revision 1 would have claimed four intervals x 64 / 4 = 64 s; ten frames, 2.5 s, ran.
   const { run, window } = paced(64, 100)
   const begin = run(3), end = run(10)
+  run(1)
   const accounting = window(begin, end)
   expect(accounting.frames).toEqual({ admitted: 0, attempted: 10, completed: 10, discarded: 0, unfinishedAttempts: 0,
     carriedIn: { debt: 61, batch: 1, attemptedInWindow: 10, completedInWindow: 10 }, carriedOut: { debt: 51, batch: 1 } })
@@ -65,14 +69,16 @@ test('a pause inside the window discards the batch remainder: 8 admitted, 5 comp
   const { run, window, stop, host } = paced(8, 40)
   const begin = host.wall
   run(5); stop()
+  // The discard ends the epoch, so it closes the window too.
   const accounting = window(begin, host.wall)
   expect(accounting.frames).toEqual({ admitted: 8, attempted: 5, completed: 5, discarded: 3, unfinishedAttempts: 0,
     carriedIn: { debt: 0, batch: null, attemptedInWindow: 0, completedInWindow: 0 }, carriedOut: { debt: 0, batch: null } })
 })
 
-test('accounting refuses a timeline it cannot conserve, a straddled boundary, a second epoch or unattributed slices', () => {
+test('accounting refuses a timeline it cannot conserve or close, a straddled boundary, a second epoch or unattributed slices', () => {
   const { host, run, kernel } = paced(64, 8)
   const begin = run(10), end = run(30)
+  run(1)
   const timeline = host.timeline(), tasks = host.timerTasks
   const refused = (input: Partial<Parameters<typeof browserWindowAccounting>[0]>) =>
     () => browserWindowAccounting({ rate: 64, begin, end, timeline, tasks, ...input })
@@ -80,6 +86,10 @@ test('accounting refuses a timeline it cannot conserve, a straddled boundary, a 
   expect(refused({ timeline: timeline.filter((_, i) => i !== 20) })).toThrow(/FMS_BROWSER_ACCOUNTING_REFUSED: batch 2 reports/)
   expect(refused({ timeline: [...timeline.slice(0, 21), timeline[20], ...timeline.slice(21)] })).toThrow(/FMS_BROWSER_ACCOUNTING_REFUSED/)
   expect(refused({ timeline: timeline.slice(1) })).toThrow(/does not start at the epoch's first admission|no outstanding admitted frames/)
+  // The last slice inside the window is lost: the entry after the window exposes it (120 would read as 116).
+  expect(refused({ timeline: timeline.filter((_, i) => i !== 39) })).toThrow(/batch 3 reports/)
+  // Nothing follows the window end, so a loss at its end would be invisible.
+  expect(refused({ timeline: timeline.slice(0, 40) })).toThrow(/no timeline entry of the epoch follows the window end/)
   expect(refused({ begin: timeline[10].start + 1 })).toThrow(/straddles a window boundary/)
   expect(refused({ timeline: [] })).toThrow(/no pacing slice was observed in the window/)
   expect(refused({ tasks: [] })).toThrow(/outside an observed timer task/)
@@ -93,9 +103,52 @@ test('accounting refuses a timeline it cannot conserve, a straddled boundary, a 
     .toThrow(/the window spans 2 pacing epochs/)
 })
 
+// The browser owner's run loop (perf/browser.perf.ts) over the recorder; here the recorder is the deterministic host.
+function probeOf(host: TimelineHost): WindowProbe {
+  let begin = 0, end = 0
+  const timeline = () => host.timeline()
+  return {
+    begin: async () => (begin = host.wall),
+    completed: async () => timeline().filter(entry => entry.kind === 'slice' && entry.start >= begin).reduce((total, entry) => total + Number(entry.detail.completed), 0),
+    finish: async () => { end = host.wall; return { begin, end, timeline: timeline(), tasks: host.timerTasks, rafIntervals: [], longTasks: [], loaf: [], events: [] } },
+    timeline: async () => timeline(),
+  }
+}
+
+test('the window loop ends at the target, waits for the entry that closes the window, and accounts it', async () => {
+  const { host, run } = paced(64, 8)
+  run(10)
+  let settles = 0
+  const { recorded, steps, stalled } = await measureWindow(probeOf(host), 100, async () => { run(10) }, async () => { settles++; run(1) })
+  // Ten slices (40 frames) per step: three steps reach 100; the window then ends between tasks and one task closes it.
+  expect([steps, stalled, settles]).toEqual([3, false, 1])
+  const accounting = browserWindowAccounting({ rate: 64, begin: recorded.begin, end: recorded.end, timeline: recorded.timeline, tasks: recorded.tasks })
+  expect(accounting.frames.completed).toBe(120)
+})
+
+test('a window that stops gaining frames ends at once and is accounted, so a missing timeline refuses instead of timing out', async () => {
+  // An arm without the timeline: nothing is ever recorded.
+  let steps = 0, settles = 0
+  const absent: WindowProbe = { begin: async () => 0, completed: async () => 0, timeline: async () => [],
+    finish: async () => ({ begin: 0, end: 6000, timeline: [], tasks: [], rafIntervals: [], longTasks: [], loaf: [], events: [] }) }
+  const empty = await measureWindow(absent, 9600, async () => { steps++ }, async () => { settles++ })
+  expect([empty.steps, empty.stalled, steps, settles]).toEqual([1, true, 1, 20])
+  expect(() => browserWindowAccounting({ rate: 64, begin: 0, end: 6000, timeline: empty.recorded.timeline, tasks: [] })).toThrow(/no pacing slice was observed/)
+
+  // A pause during the window: the step after it adds nothing; the discard closes the window and is reported.
+  const { host, run, stop } = paced(64, 8)
+  run(3)
+  let step = 0
+  const paused = await measureWindow(probeOf(host), 9600, async () => { if (step++ === 0) run(5); else stop() }, async () => { run(1) })
+  expect([paused.steps, paused.stalled]).toEqual([2, true])
+  const accounting = browserWindowAccounting({ rate: 64, begin: paused.recorded.begin, end: paused.recorded.end, timeline: paused.recorded.timeline, tasks: paused.recorded.tasks })
+  expect(accounting.frames).toMatchObject({ completed: 20, discarded: 32, carriedOut: { debt: 0 } })
+})
+
 const host = { quietBefore: { quiet: true } }
 const browserRecord = (index: number, rate: number, completed: number, wallSeconds: number, extra: Record<string, unknown> = {}) => ({
-  index, kind: 'browser', status: 'passed', block: index, arm: 'B', configuration: 'view-off-svs-off', rate, host, armIdentity: { commit: 'a'.repeat(40) },
+  index, kind: 'browser', status: 'passed', block: index, arm: 'B', configuration: 'view-off-svs-off', rate, host,
+  armIdentity: { commit: 'a'.repeat(40), srcTree: 's'.repeat(40), distSha256: 'd'.repeat(64) },
   result: { schema: 'aerolink.fms-perf-browser-run.v2', accountingRevision: 2, windowSimSeconds: completed / 4, wallSeconds, throughput: completed / 4 / wallSeconds,
     accounting: { achievedRate: completed / 4 / wallSeconds, achievedFraction: completed / 4 / wallSeconds / rate,
       simulation: { slices: { p50: 20, p95: 30, p99: 31 } }, continuation: { yieldGaps: { p95: 4 }, taskTails: { p95: 3 } } },
@@ -113,6 +166,8 @@ test('the report scores completed-frame browser records beside the selected rate
     browserRecord(0, 64, 8800, 40), browserRecord(1, 64, 9000, 40),
     { ...browserRecord(2, 64, 0, 1), result: historical },
     { ...browserRecord(3, 64, 0, 1), status: 'failed', result: null },
+    // Another build of arm B in the same --out (another served dist): its own cell, never pooled. 6,400 frames, 40x.
+    browserRecord(5, 64, 6400, 40, { armIdentity: { commit: 'a'.repeat(40), srcTree: 's'.repeat(40), distSha256: 'e'.repeat(64) } }),
     { index: 4, kind: 'headless', status: 'passed', block: 0, arm: 'B', workload: 'W1', topology: 'single', host,
       result: { p50: 1, p95: 2, p99: 3, throughput: 250, heapUsedBytesAfterGc: 1024, sync: null } },
   ]
@@ -121,17 +176,21 @@ test('the report scores completed-frame browser records beside the selected rate
   const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
   expect(child.status, child.stderr).toBe(0)
   const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
-  expect(report.browserQualification).toMatchObject({ accountingIssue: '#1557', policyRevision: 2, accepted: [0, 1],
+  expect(report.browserQualification).toMatchObject({ accountingIssue: '#1557', policyRevision: 2, accepted: [0, 1, 5],
     supportedAccountingSchemas: ['aerolink.fms-perf-browser-run.v2'], notQualified: [
       { index: 2, qualification: 'NOT_QUALIFIED', compatibility: 'historical-interval-inference' },
       { index: 3, qualification: 'NOT_QUALIFIED', compatibility: 'failed-run' }] })
-  expect(report.browser).toHaveLength(1)
+  expect(report.browser).toHaveLength(2)
   // Two runs: the median of 55 and 56.25 is 55.625; achieved / selected 55.625 / 64.
   expect(report.browser[0].levels.throughput.estimate).toBeCloseTo(55.625, 12)
   expect(report.browser[0].levels['achieved / selected'].estimate).toBeCloseTo(55.625 / 64, 12)
+  expect(report.browser[1]).toMatchObject({ arm: `B@${'a'.repeat(12)}/${'s'.repeat(12)}/${'e'.repeat(12)}`, runs: 1 })
+  expect(report.browser[1].levels.throughput.estimate).toBe(40)
   const prose = readFileSync(join(out, 'report.md'), 'utf8')
   expect(prose).toContain('## Browser matrix (accounting revision 2, completed frames')
-  expect(prose).toContain('| view-off-svs-off | 64x | 2 | 55.6 [55.0, 56.3]')
+  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'s'.repeat(12)}/${'d'.repeat(12)} | view-off-svs-off | 64x | 2 | 55.6 [55.0, 56.3]`)
+  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'s'.repeat(12)}/${'e'.repeat(12)} | view-off-svs-off | 64x | 1 | 40.0 [40.0, 40.0]`)
+  expect(prose).toContain('No browser budget verdict is made under this revision')
   expect(prose).toContain('- historical-interval-inference: 1 (runs 2)')
   expect(prose).toContain('- failed-run: 1 (runs 3)')
   expect(prose).toContain('| W1 | single | 1 | 1.000')
@@ -158,6 +217,19 @@ test('the headless report titles a set by its arms: A/A when both carry one clie
   expect(ab.prose).not.toContain('A/A result')
   expect(ab.prose).toContain('A/B result: **not judged')
   expect(ab.json.headless.comparison).toBe('A/B')
+})
+
+test('an A/B family reads as differences found or none significant; an A/A keeps its verdict', () => {
+  const judged = (verdict: 'failed' | 'passed' | 'refused', reason = '') => ({ verdict, reason, significant: verdict === 'failed' ? 3 : 0 })
+  expect(headlessVerdict('A/B', judged('failed'))).toEqual({ kind: 'A/B', title: 'A/B result', verdict: 'differences found' })
+  expect(headlessVerdict('A/B', judged('passed'))).toEqual({ kind: 'A/B', title: 'A/B result', verdict: 'no significant difference' })
+  expect(headlessVerdict('A/B', judged('refused', 'too few blocks'))).toMatchObject({ verdict: 'refused: too few blocks' })
+  expect(headlessVerdict('A/A', judged('failed'))).toEqual({ kind: 'A/A', title: 'A/A result', verdict: 'failed' })
+  expect(headlessVerdict('arms unidentified', judged('passed')).title).toBe('Arm comparison (arm identities not recorded, so neither A/A nor A/B)')
+})
+
+test('the protocol declares the browser run schema the owner writes', () => {
+  expect(JSON.parse(readFileSync('perf/protocol.json', 'utf8')).browser.accounting.schema).toBe(BROWSER_RUN_SCHEMA)
 })
 
 test('nearest-rank percentiles take the smallest value with at least p% at or below it', () => {

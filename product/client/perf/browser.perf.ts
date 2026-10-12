@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { apiLogin, login, selectProgram } from '../tests/auth'
-import { BROWSER_RUN_SCHEMA, browserWindowAccounting, installBrowserRecorder, type RecordedWindow } from './browser-accounting.ts'
+import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, installBrowserRecorder, measureWindow, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
 import { frameSummary } from './stats.ts'
 
 // One browser run (#1510 I0a; accounting revision 2, #1557): the 87N offshore SAR mission from its planned start, at
@@ -11,8 +11,10 @@ import { frameSummary } from './stats.ts'
 // Instrumentation is an init script (installBrowserRecorder). The simulated work is the frames the kernel completed,
 // read from the bench's own pacing timeline (User Timing measures, protocol.json browser.accounting.timeline), and
 // conserved by browserWindowAccounting; an arm without that timeline refuses. The window opens and closes in
-// page.evaluate tasks, so no pacing slice can straddle it. Simulation cost (slices) is separate from continuation cost
-// (yield gaps between a batch's slices; the timer task's microtask tail after its slice, where React renders a
+// page.evaluate tasks, so no pacing slice can straddle it; it ends early, and is accounted, when a step adds no
+// completed frames (measureWindow). Simulation cost (slices) is separate from continuation cost
+// (yield gaps between a batch's slices, which contain the earlier task's tail, so the two are not added; the timer
+// task's tail after its slice: sync work and the microtask render of a
 // published frame). Long tasks, Long Animation Frames, rAF and Event Timing (key -> next paint for a benign CDU key,
 // durations rounded to 8 ms by the browser) are attributed separately; JS heap from performance.memory
 // (--enable-precise-memory-info) after a forced collection. Worker backlog (D10 12.2) is not applicable before I3.
@@ -21,7 +23,9 @@ const protocol = JSON.parse(readFileSync(new URL('./protocol.json', import.meta.
 const rate = Number(process.env.AEROLINK_PERF_RATE)
 const configuration = protocol.browser.configurations.find((entry: { id: string }) => entry.id === process.env.AEROLINK_PERF_CONFIGURATION)
 const result = process.env.AEROLINK_PERF_RESULT
-type Recorder = { __fmsPerf: { begin(): number; completed: number; finish(): RecordedWindow } }
+type Recorder = { __fmsPerf: { begin(): number; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
+// The protocol declares the run schema this owner writes; a mismatch is a protocol edit without a harness edit.
+if (protocol.browser.accounting.schema !== BROWSER_RUN_SCHEMA) throw new Error(`protocol.json declares ${protocol.browser.accounting.schema}; this owner writes ${BROWSER_RUN_SCHEMA}`)
 
 test.use({
   viewport: { width: protocol.browser.viewport.width, height: protocol.browser.viewport.height },
@@ -67,21 +71,26 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     : null
   const atWarmup = await otw()
 
-  await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.begin())
-  const completed = () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.completed)
+  const probe: WindowProbe = {
+    begin: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.begin()),
+    completed: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.completed),
+    finish: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.finish()),
+    timeline: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.timeline),
+  }
   let presses = 0
-  while (await completed() < targetFrames) {
+  const { recorded: measured, steps, stalled } = await measureWindow(probe, targetFrames, async () => {
     // A BRT pair brightens and dims back within the 5 s alternation window: no effect on the simulation.
     await brt.click(); presses += 1
     await page.waitForTimeout(1000)
     await brt.click(); presses += 1
     await page.waitForTimeout(5000)
-  }
-  const measured = await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.finish())
+  }, () => page.waitForTimeout(250))
   const atEnd = await otw()
   const finished = await scenarios.locator('.fmsScenarioResult').count()
   // Refuses (fails the run) unless the timeline conserves every admitted frame of one epoch across the window.
-  const accounting = browserWindowAccounting({ rate, begin: measured.begin, end: measured.end, timeline: measured.timeline, tasks: measured.tasks })
+  let accounting: WindowAccounting | null = null, refusal: string | null = null
+  try { accounting = browserWindowAccounting({ rate, begin: measured.begin, end: measured.end, timeline: measured.timeline, tasks: measured.tasks }) }
+  catch (error) { if (!(error instanceof AccountingRefusal)) throw error; refusal = error.message }
 
   const cdp = await context.newCDPSession(page)
   await cdp.send('HeapProfiler.collectGarbage')
@@ -96,7 +105,8 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
   const step = durations.length ? durations.reduce((g, d) => { let [a, b] = [g, d]; while (b) [a, b] = [b, a % b]; return a }) : null
   const summary = {
     schema: BROWSER_RUN_SCHEMA, accountingRevision: protocol.browser.accounting.revision, scenario: protocol.browser.scenario, rate, configuration: configuration.id,
-    windowSimSeconds: accounting.simSeconds, wallSeconds: accounting.wallSeconds, throughput: accounting.achievedRate, accounting,
+    windowSimSeconds: accounting?.simSeconds ?? null, wallSeconds: accounting?.wallSeconds ?? null, throughput: accounting?.achievedRate ?? null,
+    accounting, refusal, window: { begin: measured.begin, end: measured.end, steps, stalled, targetFrames },
     longTasks: { count: measured.longTasks.length, totalMs: measured.longTasks.reduce((a, b) => a + b, 0) },
     raf: measured.rafIntervals.length ? frameSummary(measured.rafIntervals) : null,
     longAnimationFrames: { count: measured.loaf.length, p95Ms: measured.loaf.length ? frameSummary(measured.loaf.map(entry => entry.duration)).p95 : null },
@@ -104,7 +114,10 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     heapUsedBytesAfterGc: heap, outsideView: { atWarmup, atEnd }, scenarioFinishedInWindow: finished > 0,
     browser: { version: context.browser()?.version() ?? null, headless, renderer, viewport: protocol.browser.viewport },
   }
-  expect(finished, 'the mission is still running at the end of the window').toBe(0)
-  expect(accounting.frames.discarded, 'nothing stopped the pacing epoch inside the window').toBe(0)
+  // Written before the end checks: a failed run keeps its numbers (the report scores passed runs only).
   writeFileSync(result, JSON.stringify(summary, null, 2))
+  if (refusal) throw new Error(refusal)
+  expect(stalled, 'every step of the window added completed frames').toBe(false)
+  expect(finished, 'the mission is still running at the end of the window').toBe(0)
+  expect(accounting!.frames.discarded, 'nothing stopped the pacing epoch inside the window').toBe(0)
 })

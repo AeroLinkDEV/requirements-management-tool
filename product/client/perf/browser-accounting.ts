@@ -95,9 +95,14 @@ export function browserWindowAccounting({ rate, begin, end, timeline, tasks }: W
   const sum = (list: readonly Slice[], key: 'admitted' | 'attempted' | 'completed') => list.reduce((total, slice) => total + slice[key], 0)
   const admitted = sum(slices, 'admitted'), attempted = sum(slices, 'attempted'), completed = sum(slices, 'completed')
   const discarded = measured.reduce((total, event) => total + (event.kind === 'discard' ? event.discarded : 0), 0)
-  if (open.begin.debt + admitted - attempted - discarded !== open.end.debt) throw new AccountingRefusal('the window does not conserve its admitted frames')
+  // Conservation sees a lost entry only through a later entry of the epoch. The window is closed when the epoch's
+  // timeline continues past its end, or ends inside it with a discard (a stopped epoch emits nothing more).
+  const later = after.filter(row => !before.includes(row) && !inside(row.event))
+  if (!later.length && after.at(-1)?.event.kind !== 'discard')
+    throw new AccountingRefusal('no timeline entry of the epoch follows the window end, so entries lost before it cannot be detected')
 
-  // Continuation cost. A yield gap is measured only between two slices of one batch, both inside the window.
+  // Continuation cost. A yield gap is measured only between two slices of one batch, both inside the window; it is
+  // the wall time from one slice's end to the next slice's start, so it contains the earlier task's tail.
   const gaps: number[] = []
   slices.forEach((slice, i) => { if (i > 0 && !slice.admitted && slices[i - 1].batch === slice.batch) gaps.push(slice.start - slices[i - 1].end) })
   const tails: number[] = [], taskDurations: number[] = []
@@ -112,8 +117,13 @@ export function browserWindowAccounting({ rate, begin, end, timeline, tasks }: W
   const wallSeconds = (end - begin) / 1000, simSeconds = completed * FRAME_SECONDS
   const achievedRate = simSeconds / wallSeconds
   const carried = open.begin.debt ? slices.filter(slice => slice.batch === open.begin.batch) : []
+  const warm = before.map(row => row.event).filter((event): event is Slice => event.kind === 'slice')
   return {
     selectedRate: rate, achievedRate, achievedFraction: achievedRate / rate, wallSeconds, simSeconds,
+    window: { begin, end, epoch: epochs[0] },
+    // The epoch's executed work before the window (the warm-up), from its first admission.
+    beforeWindow: { completed: sum(warm, 'completed'), simSeconds: sum(warm, 'completed') * FRAME_SECONDS, slices: warm.length,
+      wallSeconds: warm.length ? (begin - warm[0].start) / 1000 : 0 },
     frames: {
       admitted, attempted, completed, discarded, unfinishedAttempts: attempted - completed,
       carriedIn: { debt: open.begin.debt, batch: open.begin.debt ? open.begin.batch : null, attemptedInWindow: sum(carried, 'attempted'), completedInWindow: sum(carried, 'completed') },
@@ -126,7 +136,34 @@ export function browserWindowAccounting({ rate, begin, end, timeline, tasks }: W
 }
 export type WindowAccounting = ReturnType<typeof browserWindowAccounting>
 
-type BrowserRecord = { index: number; status: string; arm: string; configuration?: string; rate?: number; armIdentity?: { commit?: string }; result?: Record<string, unknown> | null }
+/** The recorder as the run sees it (page.evaluate calls in the browser owner). */
+export type WindowProbe = { begin(): Promise<number>; completed(): Promise<number>; finish(): Promise<RecordedWindow>; timeline(): Promise<TimelineEntry[]> }
+
+/**
+ * The measured window's run loop. `step` is one interaction pair (it lets wall time pass). The window ends when it
+ * holds `targetFrames` completed frames, or as soon as a step adds none (an arm without a timeline, a mission end,
+ * a fault or a pause): the caller then accounts what was recorded, so the declared refusal fires instead of a
+ * timeout. After the window ends, `settle` lets time pass, at most `settles` times, until a timeline entry follows the
+ * end: the accounting needs one to detect entries lost before it.
+ */
+export async function measureWindow(probe: WindowProbe, targetFrames: number, step: () => Promise<void>, settle: () => Promise<void>, settles = 20) {
+  await probe.begin()
+  let completed = 0, steps = 0, stalled = false
+  while (completed < targetFrames) {
+    await step(); steps += 1
+    const now = await probe.completed()
+    if (now <= completed) { stalled = true; break }
+    completed = now
+  }
+  const recorded = await probe.finish()
+  for (let i = 0; i < settles && !recorded.timeline.some(entry => entry.start >= recorded.end); i++) {
+    await settle()
+    recorded.timeline = await probe.timeline()
+  }
+  return { recorded, steps, stalled }
+}
+
+type BrowserRecord ={ index: number; status: string; arm: string; configuration?: string; rate?: number; armIdentity?: { commit?: string }; result?: Record<string, unknown> | null }
 
 /** Passed records under accounting revision 2 are reported; every other browser record is retained as NOT_QUALIFIED. */
 export function browserQualification(protocol: { browser?: { accounting?: { revision?: number } } }, records: readonly BrowserRecord[]) {
@@ -200,6 +237,8 @@ export function installBrowserRecorder(names: { slice: string; discard: string }
     begin() { flush(); state.measuring = true; state.begin = performance.now(); state.tasks = []; state.rafIntervals = []; state.lastFrame = -1; return state.begin },
     /** Completed frames of slices observed since begin: the run loop's progress, not the accounting. */
     get completed() { flush(); return state.timeline.filter(entry => entry.kind === 'slice' && entry.start >= state.begin).reduce((total, entry) => total + Number(entry.detail.completed), 0) },
+    /** The whole timeline so far; it keeps recording after finish(), so the entry that closes the window arrives. */
+    get timeline() { flush(); return state.timeline },
     finish() {
       // The window ends here, between tasks; every measure queued before it is taken now.
       state.end = performance.now(); state.measuring = false; flush()

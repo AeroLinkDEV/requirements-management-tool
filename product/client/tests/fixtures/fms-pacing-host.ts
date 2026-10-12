@@ -24,13 +24,14 @@ export class SchedulingHost implements TickSchedulingHost {
 
 /**
  * A host with User Timing: it keeps the measures the pacing timeline (#1557) makes, in the shape the browser recorder
- * keeps them, and every timer task with its microtask tail (`tailMs` of work after the callback, in the same task).
+ * keeps them, and every timer task: `postMs` of synchronous work after the callback's slice, then `tailMs` of microtask work
+ * after the callback, both in the same task.
  */
 export class TimelineHost extends SchedulingHost {
   measures: { name: string, start: number, end: number, detail: Record<string, unknown> }[] = []
   cleared: string[] = []
   timerTasks: { start: number, end: number, tail: number }[] = []
-  constructor(readonly tailMs = 0) {
+  constructor(readonly tailMs = 0, readonly postMs = 0) {
     super()
     this.performance = {
       now: () => this.wall,
@@ -47,6 +48,7 @@ export class TimelineHost extends SchedulingHost {
     if (!first) return false
     const start = Math.max(this.wall, first.due)
     super.runNext()
+    this.wall += this.postMs
     const end = this.wall
     this.wall += this.tailMs
     this.timerTasks.push({ start, end, tail: this.wall })
