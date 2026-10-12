@@ -76,7 +76,13 @@ test('imported PI is the S300 two-outbound construction followed by the coded in
   expect(unit.resolveWaypoint('PTRPTR')).toBe('invalid')
   unit.press('CLR'); unit.press('LEGS')
   // Reference plus the two private outbound fixes are one procedure-turn deletion; its inbound CF stays.
-  for (let i = 0; i < 8 && !screenText(unit.screen())[SCRATCHPAD_LINE].includes('DELETE'); i += 1) unit.press('CLR')
+  // Discard the rejected FIX entry, then acknowledge any pending alert before selecting DELETE.
+  unit.press('CLR', { held: true })
+  if (unit.lamps().has('MSG')) {
+    unit.press('CLR') // Redisplay the pending alert on the empty scratchpad (R13).
+    unit.press('CLR') // Acknowledge the displayed alert.
+  }
+  unit.press('CLR')
   expect(screenText(unit.screen())[SCRATCHPAD_LINE]).toContain('DELETE')
   unit.press('LSK1L')
   expect(unit.route.legs.filter(l => l.kind === 'wpt' && l.procedureTurn?.role === 'OUTBOUND')).toEqual([])
