@@ -12,16 +12,25 @@ import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 // here. The rows' trigger, clear and inhibit behaviour is tested with the code that raises them (F2, F8, F12).
 const SOURCE = 'src/fmsCdu'
 const files = readdirSync(SOURCE).filter(name => /\.tsx?$/.test(name)).map(name => ({ name, text: readFileSync(`${SOURCE}/${name}`, 'utf8') }))
-/** Literal messages raised through the library (alert("…")) or straight to the FMS's own alert method (this.alert("…")). */
+/** Literal messages raised through the library (alert("…")) or straight to the FMS's own alert method, with optional cause metadata. */
 const raised = (pattern: RegExp) => files.flatMap(({ name, text }) => [...text.matchAll(pattern)].map(m => ({ name, text: m[1] })))
 const viaLibrary = raised(/(?<![.\w])alert\("([^"]+)"\)/g)
-const direct = raised(/this\.alert\("([^"]+)"\)/g)
+const directLiterals = (source: string) => [...source.matchAll(/this\.alert\("([^"]+)"\s*(?=[,)])/g)].map(m => m[1])
+const direct = files.flatMap(({ name, text }) => directLiterals(text).map(text => ({ name, text })))
 /** Literal status advisories (this.advisory("…")) whose Appendix E row is mapped: white, not alerts (F10's FMS NAV IN DR). */
 const advisories = raised(/this\.advisory\("([^"]+)"\)/g).filter(r => r.text in APPENDIX_E)
 // Templated raises: GPS${n} NOT USABLE and APPR ON GPS${n}, for receivers 1 and 2.
 const templated = files.flatMap(({ text }) => [...text.matchAll(/alert\(`([^`]+)`\)/g)].map(m => m[1]))
 
 test('F12: every navigation alert has an Appendix E source', () => {
+  // Cause metadata must not hide a literal raise from the provenance audit. Dynamic/concatenated text is not a
+  // literal message, and an unknown literal still reaches the missing-source check rather than disappearing.
+  expect(directLiterals('this.alert("SYSTEM FAILED"); this.alert("MAG VAR CRC FAILED", "MAGVAR:CRC_FAILED");'))
+    .toEqual(['SYSTEM FAILED', 'MAG VAR CRC FAILED'])
+  expect(directLiterals('other.alert("OTHER"); this.alert(alert("NESTED")); this.alert("PREFIX" + suffix);'))
+    .toEqual([])
+  const unmapped = directLiterals('this.alert("UNMAPPED PROVENANCE CONTROL", "CONTROL");')
+  expect(unmapped.filter(text => !(text in APPENDIX_E))).toEqual(['UNMAPPED PROVENANCE CONTROL'])
   // Every message in the library has a row or a laboratory reason, and the map holds nothing that is never raised.
   for (const { text } of ALERTS) expect(APPENDIX_E[text], text).toBeDefined()
   const raisedTexts = new Set([...ALERTS.map(a => a.text), ...viaLibrary.map(r => r.text), ...direct.map(r => r.text), ...advisories.map(r => r.text)])
