@@ -1,5 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { startTickPacing, startKernelPacing, type TickSchedulingHost, type PacingProgress } from '../src/fmsCdu/benchPacing'
+import { readFileSync } from 'node:fs'
+import { startTickPacing, startKernelPacing, PACING_TIMELINE, type PacingProgress } from '../src/fmsCdu/benchPacing'
 import { BenchPresentation } from '../src/fmsCdu/benchPresentation'
 import { ScenarioRunner, runHeadless, type Scenario } from '../src/fmsCdu/scenario'
 import { FlightSimulator } from '../src/fmsCdu/flight'
@@ -7,28 +8,8 @@ import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { singleComposition, dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
 import { FRAME_UNITS } from '../src/fmsCdu/kernel/time'
+import { SchedulingHost, TimelineHost } from './fixtures/fms-pacing-host'
 
-// Monotonic platform ports; production alone admits work, owns debt/termination and chooses task deadlines.
-class SchedulingHost implements TickSchedulingHost {
-  wall = 0
-  next = 1
-  tasks = new Map<number, { due: number, callback: () => void }>()
-  delays: number[] = []
-  performance = { now: () => this.wall }
-  setTimeout(callback: () => void, milliseconds: number) {
-    const id = this.next++
-    this.delays.push(milliseconds)
-    this.tasks.set(id, { due: this.wall + milliseconds, callback })
-    return id
-  }
-  clearTimeout(id: number) { this.tasks.delete(id) }
-  runNext() {
-    const first = [...this.tasks.entries()].sort((a, b) => a[1].due - b[1].due || a[0] - b[0])[0]
-    if (!first) return false
-    this.tasks.delete(first[0]); this.wall = Math.max(this.wall, first[1].due); first[1].callback()
-    return true
-  }
-}
 const epoch = Date.UTC(2026, 8, 27, 14)
 const noFault = (error: unknown) => { throw error }
 
@@ -333,4 +314,56 @@ for (const interval of [250, 1000]) test(`both presentation subscriptions coales
   expect(presentation.revision()).toBeGreaterThan(beforeDue)
   expect(panel).toBe(bench); expect(host.tasks.size).toBe(0)
   offBench(); offPanel(); expect(host.tasks.size).toBe(0)
+})
+
+// The pacing timeline (#1557) is how the browser performance harness counts executed simulation; interval count x
+// selected rate overstated it. A host with User Timing receives one measure per slice and per discarded remainder.
+// The harness reads the measures by the names its protocol declares; a rename on either side fails here.
+test('the bench publishes its pacing timeline under the names the performance protocol declares', () => {
+  const protocol = JSON.parse(readFileSync('perf/protocol.json', 'utf8'))
+  expect(protocol.browser.accounting.timeline).toEqual(PACING_TIMELINE)
+})
+const slice = (epoch: number, rate: number, batch: number, admitted: number, attempted: number, completed: number, remaining: number) =>
+  JSON.stringify({ schema: 1, epoch, rate, batch, admitted, attempted, completed, remaining })
+const discard = (epoch: number, rate: number, batch: number, discarded: number) => JSON.stringify({ schema: 1, epoch, rate, batch, discarded })
+
+test('the pacing timeline reports admitted, completed and discarded frames of a paused batch: 8 admitted, 5 completed, 3 discarded', () => {
+  const host = new TimelineHost(), composed = singleComposition(epoch), kernel = new FmsKernel(composed.plant)
+  // An indivisible 40 ms frame exceeds the 32 ms slice target, so each task completes one frame and yields.
+  const stop = startKernelPacing(8, kernel, host, { onFault: noFault, onInstantClose: () => { host.wall += 40 } })
+  for (let i = 0; i < 5; i++) host.runNext()
+  stop()
+  const [first] = host.measures, e = Number(first.detail.epoch)
+  expect(host.entries()).toEqual([
+    `slice@250-290 ${slice(e, 8, 1, 8, 1, 1, 7)}`, `slice@290-330 ${slice(e, 8, 1, 0, 1, 1, 6)}`, `slice@330-370 ${slice(e, 8, 1, 0, 1, 1, 5)}`,
+    `slice@370-410 ${slice(e, 8, 1, 0, 1, 1, 4)}`, `slice@410-450 ${slice(e, 8, 1, 0, 1, 1, 3)}`, `discard@450-450 ${discard(e, 8, 1, 3)}`])
+  expect(kernel.now).toBe(5 * FRAME_UNITS)
+  // Every measure is cleared from the performance entry buffer as it is made; observers still receive it.
+  expect(host.cleared).toEqual(host.measures.map(measure => measure.name))
+  // A later Fly is a new epoch whose batches number from 1 again.
+  const resumed = startKernelPacing(8, kernel, host, { onFault: noFault, onInstantClose: () => { host.wall += 40 } })
+  host.runNext(); resumed()
+  expect(host.entries().slice(6)).toEqual([`slice@700-740 ${slice(e + 1, 8, 1, 8, 1, 1, 7)}`, `discard@740-740 ${discard(e + 1, 8, 1, 7)}`])
+})
+
+test('the pacing timeline counts the terminal frame as completed and a faulted attempt as attempted only', () => {
+  const ended = new TimelineHost(), composed = singleComposition(epoch)
+  const runner = new ScenarioRunner(finishScenario, composed.fms, undefined, composed.sim), kernel = new FmsKernel(composed.plant, runner)
+  startKernelPacing(64, kernel, ended, { onFault: noFault, onInstantClose: () => { ended.wall += 20 } })
+  for (let i = 0; ended.tasks.size && i < 10; i++) ended.runNext()
+  const e = Number(ended.measures[0].detail.epoch)
+  // The run ends at 0.75 s: three completed frames; the batch's other 61 frames are discarded, never attempted.
+  expect(ended.entries()).toEqual([`slice@250-290 ${slice(e, 64, 1, 64, 2, 2, 62)}`, `slice@290-310 ${slice(e, 64, 1, 0, 1, 1, 61)}`, `discard@310-310 ${discard(e, 64, 1, 61)}`])
+
+  const faulted = new TimelineHost(), plantComposition = singleComposition(epoch)
+  let attempts = 0
+  const plant = { ...plantComposition.plant, integrate: () => {
+    attempts++; faulted.wall += 10
+    if (attempts === 2) { plantComposition.clock.advanceFrame(); throw new Error('retained fault') }
+    plantComposition.plant.integrate()
+  } }
+  startKernelPacing(64, new FmsKernel(plant), faulted, { onFault: () => {} })
+  faulted.runNext()
+  const f = Number(faulted.measures[0].detail.epoch)
+  expect(faulted.entries()).toEqual([`slice@250-270 ${slice(f, 64, 1, 64, 2, 1, 62)}`, `discard@270-270 ${discard(f, 64, 1, 62)}`])
 })

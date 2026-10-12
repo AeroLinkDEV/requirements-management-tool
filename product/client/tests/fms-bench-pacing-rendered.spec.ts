@@ -1,6 +1,8 @@
 import { expect, renderedTest as test } from './isolated-client-test'
 import type { Page } from '@playwright/test'
 import { installPausedClock } from './paused-clock'
+import { PACING_TIMELINE } from '../src/fmsCdu/benchPacing'
+import { browserWindowAccounting, installBrowserRecorder, type RecordedWindow } from '../perf/browser-accounting'
 
 // CPU8 failed on both main and head and measures loaded React work. Retained diagnostics are not this ordinary-host gate.
 // Logic cannot observe the browser's actual timer tasks, pointer dispatch and completed production frames.
@@ -332,4 +334,48 @@ for (const action of ['Pause', 'rate replacement'] as const) test(`the CDU publi
   else await page.getByLabel('Simulation rate').selectOption('4')
   expect(await clock(), 'the control publishes without an additional simulation frame').toBe(initial.getTime() + 48000)
   await expect(screen).toHaveAttribute('aria-label', /1400:48Z/)
+})
+
+// #1557: the performance harness's own recorder in an actual browser. Logic tests drive the pacing timeline on a
+// deterministic host; only a browser shows that User Timing delivers the cleared measures and their details to an
+// observer, that the recorder attributes every slice to a real timer task, and that page.evaluate boundaries fall
+// between tasks. Functional accounting with imposed 8 ms frames, not a performance measurement.
+test('the performance recorder conserves a real browser window of paced frames through a Pause', async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear())
+  await page.addInitScript(installBrowserRecorder, { slice: PACING_TIMELINE.slice, discard: PACING_TIMELINE.discard })
+  await page.goto('/tests/fixtures/fms-cdu.html')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await page.evaluate(async () => {
+    const { DualFmsSystem } = await import('/src/fmsCdu/dualFms.ts')
+    const original = DualFmsSystem.prototype.step
+    DualFmsSystem.prototype.step = function (...args) {
+      const began = performance.now()
+      const result = original.apply(this, args)
+      while (performance.now() - began < 8) { /* imposed whole-frame work: several frames per slice, then a yield */ }
+      return result
+    }
+  })
+  type Recorder = { __fmsPerf: { begin(): number, completed: number, finish(): RecordedWindow } }
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await page.waitForTimeout(1500)
+  await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.begin())
+  await page.waitForTimeout(2500)
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Fly', exact: true })).toBeVisible()
+  const recorded = await page.evaluate(() => ({ window: (window as unknown as Recorder).__fmsPerf.finish(),
+    buffered: performance.getEntriesByType('measure').filter(entry => entry.name.startsWith('aerolink.fms-bench.')).length }))
+  await test.info().attach('recorded-window.json', { body: JSON.stringify(recorded), contentType: 'application/json' })
+  const accounting = browserWindowAccounting({ rate: 64, begin: recorded.window.begin, end: recorded.window.end, timeline: recorded.window.timeline, tasks: recorded.window.tasks })
+  await test.info().attach('accounting.json', { body: JSON.stringify(accounting), contentType: 'application/json' })
+  expect(recorded.buffered, 'every timeline measure is cleared from the entry buffer').toBe(0)
+  expect(accounting.frames.completed).toBeGreaterThan(0)
+  expect(accounting.frames.unfinishedAttempts).toBe(0)
+  // Pause leaves no outstanding debt: every admitted frame was completed in or before the window, or discarded.
+  expect(accounting.frames.carriedOut.debt).toBe(0)
+  expect(accounting.continuation.slices, 'an 8 ms frame batch yields between slices').toBeGreaterThan(0)
+  expect(accounting.continuation.yieldGaps.frames).toBeGreaterThan(0)
+  expect(accounting.continuation.taskTails.frames).toBe(accounting.simulation.slices.frames)
+  expect(accounting.achievedRate).toBeGreaterThan(0)
+  expect(accounting.achievedRate).toBeLessThanOrEqual(64 * 1.05)
 })

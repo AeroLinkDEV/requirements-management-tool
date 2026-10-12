@@ -405,20 +405,27 @@ Sources: CMC Electronics CMA-5024 datasheets ([current](https://cmcelectronics.c
 
 ## Browser performance accounting
 
-The performance harness's browser accounting compatibility revision 1 fails closed while no completed-frame and
-continuation-cost schema is qualified. `perf/run-perf.ts browser` writes an attributable refusal before seeding or
-starting an API. Refusal records are created exclusively: reusing `--out` refuses before replacing an existing
-arm/harness record and requires a fresh output directory. The direct performance configuration and browser owner also refuse. Report output retains browser
-record identities and marks them `NOT_QUALIFIED`, without computing browser metric levels, confidence intervals,
-sample counts or budget verdicts. Historical raw records and their original reports retain their actual source and
-protocol identities; this revision does not requalify them. Headless statistics revision 3 is unchanged.
+The bench publishes a pacing timeline on the browser's performance timeline (`PACING_TIMELINE` in
+`benchPacing.ts`): one User Timing measure per task slice, carrying the frames that task admitted, attempted and
+completed and the debt it left, and one per batch remainder that a Pause, rate change, run end or fault discarded.
+Each measure is cleared from the entry buffer as it is made, so long sessions do not grow it; observers and a
+profiler's Timings track still see it.
 
-[Issue #1557](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1557) still owns actual completed
-frames, outstanding work across warmup/scored boundaries and continuation/React attribution. The separate
-[#1542](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1542) browser warm-up/host-drift mechanism
-and quiet-host protocol qualification also remain open. This compatibility protection permits pacing integration
-under the reviewed refusal alternative; it is neither browser budget qualification nor completion of the I0/D10
-performance obligations. Direct completed-frame functional pacing observations remain separate evidence.
+The performance harness's browser accounting revision 2
+([#1557](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1557)) counts simulated work from that
+timeline, never from interval count times the selected rate. Its recorder (`perf/browser-accounting.ts`) opens and
+closes the measured window between tasks, conserves every entry of the measured epoch from its first admission, and
+counts frames admitted before the window and completed inside it. It reports the debt open at each boundary, the
+achieved rate beside the selected rate, simulation cost (slice durations), and continuation cost: the yield gap
+between a batch's slices, and the microtask tail of the slice's task. A run refuses, and is recorded as failed, when
+the timeline cannot be conserved, a slice straddles a boundary, the window holds a second epoch, a slice ran outside
+an observed timer task, or the arm publishes no timeline (an arm built before it). The session records the SHA-256
+of the served dist at its start and end.
+
+Browser levels are descriptive. No browser budget verdict is made before a quiet-host browser A/A under this
+revision, which [#1542](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1542) still owns. Revision
+1 refusal records and v1 interval-inferred records keep their identities and are reported `NOT_QUALIFIED`.
+Headless statistics revision 3 is unchanged.
 
 ## Cockpit and station arrangements
 

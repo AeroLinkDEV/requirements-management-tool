@@ -33,10 +33,12 @@
   },
   "browser": {
     "accounting": {
-      "revision": 1,
-      "mode": "fail-closed-unavailable",
+      "revision": 2,
+      "mode": "completed-frames",
       "issue": "#1557",
-      "declared": "Browser accounting compatibility revision 1, declared before new runs: scored browser sessions refuse before seed/API startup; direct configuration/owner invocation also refuses. No completed-frame/continuation accounting schema is qualified. Report output retains historical/unknown browser identities with NOT_QUALIFIED and emits no browser metric levels, intervals, planned sample counts or budget verdicts. Historical raw records and their original verdicts remain under their original revisions; this revision does not requalify them. Headless statistics revision 3 and its priming and failed-run rules are unchanged. Actual completed frames, outstanding work at warmup/scored boundaries and continuation/React attribution remain open in #1557; #1542 warm-up/host drift and quiet-host A/A are separate qualifications."
+      "schema": "aerolink.fms-perf-browser-run.v2",
+      "timeline": { "schema": 1, "slice": "aerolink.fms-bench.pacing-slice", "discard": "aerolink.fms-bench.pacing-discard" },
+      "declared": "Browser accounting revision 2 (#1557), declared before any run under it; it replaces revision 1's fail-closed refusal. Simulated work is the frames the kernel actually completed, read from the bench's pacing timeline (User Timing measures: one per task slice with the frames admitted, attempted and completed and the debt left; one per discarded remainder), never interval count x selected rate. The window opens and closes between tasks, so every slice lies wholly inside or outside it (a straddling slice refuses the run); frames admitted before the window and completed inside it count, and the debt open at each boundary is recorded. Every entry of the measured pacing epoch is conserved from its first admission (admitted = attempted + discarded + outstanding); a missing, extra or reordered entry, a second epoch in the window, a slice outside an observed timer task, or no timeline at all (an arm built before the timeline existed) refuses the run, which is recorded as failed. Throughput is completed simulated seconds per wall second, reported beside the selected rate (achieved / selected). Simulation cost (slice durations) is reported separately from continuation cost (the yield gap between a batch's slices, and the timer task's microtask tail after its slice); long tasks, Long Animation Frames, rAF and Event Timing stay separately attributed. The window runs until it holds windowSimSeconds of completed simulation. Browser levels are descriptive: no browser budget verdict is made before a quiet-host browser A/A under this revision (#1542). Revision 1 refusal records and v1 interval-inferred records keep their original identities and are reported NOT_QUALIFIED. Headless statistics revision 3 is unchanged."
     },
     "scenario": "87n-offshore-sar",
     "rates": [1, 64],
