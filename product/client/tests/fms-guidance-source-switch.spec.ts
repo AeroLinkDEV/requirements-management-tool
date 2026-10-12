@@ -1,7 +1,10 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import type { FmsSide } from '../src/fmsCdu/crossTalk'
-import { distanceNm, type LatLon } from '../src/fmsCdu/fmsModel'
+import { distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
+import { dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { fmsOutputs } from '../src/fmsCdu/efis'
 import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { setUp87nOffshoreSar } from '../src/fmsCdu/heliDemo'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
@@ -16,6 +19,107 @@ const START = Date.UTC(2026, 8, 29, 15, 0, 0)
 const metres = (a: LatLon, b: LatLon) => distanceNm(a, b) * 1852
 /** The most the one aircraft's air velocity can change in a 0.25 s step, at the profile's acceleration limits (kt). */
 const STEP_KT = Math.hypot(HELICOPTER_PROFILE.parameters.longitudinalAccel.value, HELICOPTER_PROFILE.parameters.lateralAccel.value) * 0.25 + 1e-9
+
+// #1560 primary owner: actual active-moving roll authority across a guidance takeover and subsequent capture.
+// The existing low-speed transfer rows never return to a computer with a previously invalid rendezvous;
+// offside cadence owns its cache, not the shared AFCS's NAV selection. No private latch or synthetic invalid flag.
+for (const side of [1, 2] as const) {
+  test(`FMS${side} invalid rendezvous removes NAV again at takeover and cannot recapture before recovery`, () => {
+    const { system, plant } = dualComposition(START)
+    const kernel = new FmsKernel(plant)
+    system.computers[0].dualOperation!.requestMode('INDEPENDENT')
+    system.computers[0].dualOperation!.confirmMode(true)
+    expect(system.mode).toBe('INDEPENDENT')
+    expect(system.linked).toBe(true)
+    const invalid = system.computers[side - 1], healthy = system.computers[2 - side]
+    invalid.defineMoving('FAR1', offset(invalid.position, invalid.track, 600), 0, 0)
+    invalid.directTo('FAR1'); invalid.press('EXEC')
+    healthy.defineMoving('NEAR1', offset(healthy.position, healthy.track, 12), 0, 0)
+    healthy.directTo('NEAR1'); healthy.press('EXEC')
+    expect(invalid.rendezvousFor(invalid.activeRoute, 0)).toMatchObject({ condition: 1, achievable: false })
+    expect(healthy.rendezvousFor(healthy.activeRoute, 0)).toMatchObject({ condition: 1, achievable: true })
+    system.selectGuidance(side)
+    kernel.advance(1)
+    expect(system.simulator.axisModes.roll).toBe('HDG')
+    expect(fmsOutputs(invalid, system.simulator).rollCommand.status).toBe('NCD')
+    system.selectGuidance(side === 1 ? 2 : 1)
+    system.simulator.armLnav(); kernel.advance(1)
+    expect(system.simulator.axisModes.roll).toBe('NAV')
+    expect(fmsOutputs(healthy, system.simulator).rollCommand.status).toBe('NORMAL')
+    // The invalid offside must not remove the healthy selected computer's physical NAV.
+    kernel.advance(4)
+    expect(system.simulator.axisModes.roll).toBe('NAV')
+    const before = { position: { ...healthy.truePosition }, heading: healthy.heading, bank: system.simulator.bankAngle, now: kernel.unitClockMs }
+    const removalCount = system.flights[side - 1].modeEvents.filter(event => event.event === 'NAV REMOVED').length
+    system.selectGuidance(side)
+    expect(system.simulator.axisModes.roll, 'selected invalid roll withdraws NAV at the public switch boundary').toBe('HDG')
+    expect(fmsOutputs(invalid, system.simulator).rollCommand.status).toBe('NCD')
+    expect({ position: { ...invalid.truePosition }, heading: invalid.heading, bank: system.simulator.bankAngle, now: kernel.unitClockMs }).toEqual(before)
+    expect(system.simulator.modeEvents.filter(event => event.event === 'NAV REMOVED')).toHaveLength(removalCount + 1)
+    kernel.advance(1)
+    expect(system.simulator.axisModes.roll).toBe('HDG')
+    expect(system.simulator.modeEvents.filter(event => event.event === 'NAV REMOVED')).toHaveLength(removalCount + 1)
+    for (let repeat = 0; repeat < 2; repeat++) {
+      system.simulator.armLnav(); kernel.advance(1)
+      expect(system.simulator.axisModes.roll, 'an invalid active roll cannot capture in the same whole frame').toBe('HDG')
+      expect(fmsOutputs(invalid, system.simulator).rollCommand.status).toBe('NCD')
+    }
+    invalid.defineMoving('FAR1', offset(invalid.position, invalid.track, 12), 0, 0)
+    kernel.advance(40)
+    expect(invalid.rendezvousFor(invalid.activeRoute, 0)).toMatchObject({ achievable: true, condition: 1 })
+    system.simulator.armLnav(); kernel.advance(1)
+    expect(system.simulator.axisModes.roll).toBe('NAV')
+    expect(fmsOutputs(invalid, system.simulator).rollCommand.status).toBe('NORMAL')
+  })
+
+  test(`FMS${side} cannot recapture NAV on an invalid active roll in the same frame`, () => {
+    const { system, plant } = dualComposition(START)
+    const kernel = new FmsKernel(plant)
+    system.selectGuidance(side)
+    const unit = system.computers[side - 1]
+    unit.defineMoving('FAR1', offset(unit.position, unit.track, 600), 0, 0)
+    unit.directTo('FAR1'); unit.press('EXEC')
+    expect(unit.rendezvousFor(unit.activeRoute, 0)).toMatchObject({ condition: 1, achievable: false })
+    kernel.advance(1)
+    expect(system.simulator.axisModes.roll).toBe('HDG')
+    const removals = system.simulator.modeEvents.filter(event => event.event === 'NAV REMOVED').length
+    for (let repeat = 0; repeat < 2; repeat++) {
+      system.simulator.armLnav(); kernel.advance(1)
+      expect(system.simulator.axisModes.roll, 'capture must not bypass the invalid roll guard').toBe('HDG')
+      expect(fmsOutputs(unit, system.simulator).rollCommand.status).toBe('NCD')
+    }
+    expect(system.simulator.modeEvents.filter(event => event.event === 'NAV REMOVED')).toHaveLength(removals)
+  })
+
+  for (const condition of [2, 3, 4] as const) {
+    test(`FMS${side} condition ${condition} rendezvous advisory preserves NAV across takeover`, () => {
+      const { system, plant } = dualComposition(START)
+      const kernel = new FmsKernel(plant)
+      const [one, two] = system.computers
+      one.dualOperation!.requestMode('INDEPENDENT'); one.dualOperation!.confirmMode(true)
+      for (const unit of [one, two]) {
+        unit.defineMoving('NEAR1', offset(unit.position, unit.track, 12), 0, 0)
+        unit.directTo('NEAR1'); unit.press('EXEC')
+      }
+      const unit = system.computers[side - 1]
+      unit.defineMoving('FAR1', offset(unit.position, unit.track, 600), 0, 0)
+      unit.replaceLegs(condition === 4 ? [{ kind: 'wpt', ident: 'FAR1' }] : [{ kind: 'wpt', ident: 'NEAR1' }, { kind: 'wpt', ident: 'FAR1' }])
+      if (condition === 2) unit.press('EXEC')
+      expect(unit.routeStatus).toBe(condition === 2 ? 'ACT' : 'MOD')
+      expect(unit.rendezvousFor(unit.route, condition === 4 ? 0 : 1)).toMatchObject({ condition, achievable: false })
+      expect(unit.rendezvousRollInvalid).toBe(false)
+      system.selectGuidance(side === 1 ? 2 : 1)
+      system.simulator.armLnav(); kernel.advance(1)
+      expect(system.simulator.axisModes.roll).toBe('NAV')
+      system.selectGuidance(side)
+      expect(system.simulator.axisModes.roll).toBe('NAV')
+      expect(fmsOutputs(unit, system.simulator).rollCommand.status).toBe('NORMAL')
+      kernel.advance(1)
+      expect(system.simulator.axisModes.roll).toBe('NAV')
+      expect(system.simulator.modeEvents.filter(event => event.event === 'NAV REMOVED')).toHaveLength(0)
+    })
+  }
+}
 
 /** The 87N offshore SAR start on a dual system, set up and copied to FMS 2 as the bench does it. */
 function mission() {
