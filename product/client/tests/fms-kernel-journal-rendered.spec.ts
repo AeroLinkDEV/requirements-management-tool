@@ -284,8 +284,11 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
   await tab('Scenarios')
   expect((await exportFrom(page, ios)).journal.at(-1)).toMatchObject({ kind: 'ios.unitPower', target: 'fms2', source: { kind: 'ios', id: 'navdata.coldStart', surface: popped ? 'popout' : 'main' }, payload: { kind: 'ios.unitPower', unit: 2, mode: 'COLD', onGround: true }, outcome: { status: 'accepted' } })
   await page.locator('.fmsStationDock > summary').click()
-  await controls.getByRole('button', { name: 'Return all panels', exact: true }).click()
-  if (popped) await expect.poll(() => instructor.isClosed()).toBe(true)
+  const returnAll = controls.getByRole('button', { name: 'Return all panels', exact: true })
+  if (popped) {
+    await returnAll.click()
+    await expect.poll(() => instructor.isClosed()).toBe(true)
+  } else await expect(returnAll).toBeDisabled()
 })
 
 for (const popped of [false, true]) for (const paused of [false, true]) test(`real Stop ${paused ? 'paused' : 'running'} on instructor ${popped ? 'popout' : 'main'} executes at its retained instant and freezes without an extra frame`, async ({ page }) => {
