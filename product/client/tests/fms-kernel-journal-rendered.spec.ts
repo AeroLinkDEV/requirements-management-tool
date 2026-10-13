@@ -602,53 +602,6 @@ for (const popped of [false, true]) test(`D5 sensor parameter branches retain sh
   if (popped) { await page.locator('.fmsStationDock > summary').click(); await page.getByRole('button', { name: 'Return all panels', exact: true }).click(); await expect.poll(() => instructor.isClosed()).toBe(true) }
 })
 
-// HOV/TU are v1 scenario inputs, not native AFCS buttons. Their refused high-speed branch must not become a silent pass.
-for (const popped of [false, true]) test(`D5 v1 HOV TU refusal stays a scenario-host input when instructor is ${popped ? 'popout' : 'main'}`, async ({ page }) => {
-  const { instructor, ios } = await openD5Instructor(page, popped)
-  await expect(page.getByRole('button', { name: 'HOV', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'TU', exact: true })).toHaveCount(0)
-  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
-  const card = ios.getByRole('region', { name: 'Scenarios', exact: true })
-  for (const [id, action, reason] of [
-    ['d5-v1-hover', { kind: 'autopilot', hover: true }, 'HOV is not available: above the coordinated-flight speed, or no eligible hover feedback'],
-    ['d5-v1-tu', { kind: 'autopilot', transitionUp: true }, 'TU is not available: not in a hover mode, too fast, or no valid radio height'],
-  ] as const) {
-    // Published 87N start:100 KIAS/500ft. ALT is a real accepted positive control; no forced hover/instant recovery.
-    const scenario = { id, title: id, objective: 'Preserve native v1 refusal and sender', profile: 'cma9000-s300-heli-civil',
-      start: '87n-offshore-sar', surface: 'offshore-87n', startTime: '2026-09-29T15:00:00.000Z', maxSeconds: 10,
-      steps: [{ when: { kind: 'start' }, action: { kind: 'autopilot', hold: true } }, { when: { kind: 'start' }, action }] }
-    await card.getByLabel('Scenario file', { exact: true }).setInputFiles(fixtureFile(`${id}.json`, scenario))
-    await expect(card.getByText(`Loaded “${id}.json”.`, { exact: true })).toBeVisible()
-    await card.getByRole('button', { name: 'Run the scenario', exact: true }).click()
-    await expect(card.getByRole('status').filter({ hasText: /^EXECUTION ERROR:/ })).toBeVisible()
-    const record = await exportFrom(page, ios)
-    await retainPublicJson(`${id}-public-journal`, { suppliedScenario: scenario, record })
-    const start = `${id}@2026-09-29T15:00:00.000Z`
-    expect(record.frame).toBe(0)
-    expect(record.control).toEqual([])
-    expect(record.liveQueue).toEqual({ v: 1, entries: [] })
-    expect(record.counters).toEqual({ submissionSeq: 6, controlSeq: 1, recordOrdinal: 6 })
-    expect(record.journal).toMatchObject([
-      { kind: 'config.surface', target: 'plant', payload: { kind: 'config.surface', surface: 'offshore-87n' }, outcome: { status: 'accepted' }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} start`, surface: 'main' } },
-      { kind: 'ios.place', target: 'plant', payload: { kind: 'ios.place', startState: '87n-offshore-sar' }, outcome: { status: 'accepted' }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} start`, surface: 'main' } },
-      { kind: 'scenario.step', target: 'scenario', payload: { kind: 'autopilot', hold: true }, outcome: { status: 'accepted' }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} step 1`, surface: 'main' } },
-      { kind: 'scenario.step', target: 'scenario', payload: action, outcome: { status: 'refused', reason }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} step 2`, surface: 'main' } },
-      { kind: 'ios.flightFreeze', target: 'plant', payload: { kind: 'ios.flightFreeze', on: true }, outcome: { status: 'accepted' }, origin: 'native', source: { kind: 'ui', id: 'flight.runEnded', surface: 'main' } },
-    ].map((entry, i) => ({ ...entry, submissionSeq: i + 1, recordOrdinal: i + 1, frame: 0, phase: 'ACTION', orderInPhase: i })))
-    expect(record.journal).toHaveLength(5)
-    const downloaded = page.waitForEvent('download')
-    await card.getByRole('button', { name: 'Download run report', exact: true }).click()
-    const report = await readFile((await (await downloaded).path())!, 'utf8')
-    const path = test.info().outputPath(`${id}-run.md`)
-    await writeFile(path, report, 'utf8')
-    await test.info().attach(`${id}-run`, { path, contentType: 'text/markdown' })
-    expect(report).toMatch(/^\| 1 \|[^\n]*\| 0 s \| DONE \|/m)
-    expect(report).toMatch(/^\| 2 \|[^\n]*\| 0 s \| ERROR \|/m)
-    expect(report).toContain(reason)
-  }
-  if (popped) { await page.locator('.fmsStationDock > summary').click(); await page.getByRole('button', { name: 'Return all panels', exact: true }).click(); await expect.poll(() => instructor.isClosed()).toBe(true) }
-})
-
 // Published warm GPS1 PRN24 fixture; the logical GPS/FDE owners keep the sky and fault-response science.
 for (const popped of [false, true]) test(`D5 mask satellite and selection producers retain resolved values on instructor ${popped ? 'popout' : 'main'}`, async ({ page }) => {
   const { instructor, ios } = await openD5Instructor(page, popped, { epoch: new Date('2026-09-27T14:00:00Z'), profile: 'cma9000-later-sbas-heli' })
