@@ -1,6 +1,6 @@
 import type { KernelRecord } from '../src/fmsCdu/kernel/kernel'
 import type { Page, Locator } from '@playwright/test'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { expect, renderedTest as test } from './isolated-client-test'
 
 // Only the real component can detect a first-render TDZ or a CDU/peer key bypassing the submission boundary.
@@ -124,6 +124,12 @@ const exportFrom = async (root: Page, surface: Page | Locator): Promise<KernelRe
   return JSON.parse(await readFile((await (await downloaded).path())!, 'utf8'))
 }
 const fixtureFile = (name: string, value: unknown) => ({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(value)) })
+// A file-backed attachment survives successful runs with the line reporter; body-only attachments need a retained trace.
+const retainPublicJson = async (name: string, value: unknown) => {
+  const path = test.info().outputPath(`${name}.json`)
+  await writeFile(path, JSON.stringify(value, null, 2), 'utf8')
+  await test.info().attach(name, { path, contentType: 'application/json' })
+}
 
 // These rows own D5 bridge metadata, not the GPS/radio model's numerical effects (their existing owners remain).
 // A new operation can bypass or misaddress the shared adapter even when another operation on it is correct.
@@ -236,7 +242,7 @@ for (const popped of [false, true]) test(`D5 eligible VNAV on cockpit ${popped ?
   await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
   await expect(ios.getByTestId('fms-input-outcome')).toHaveText('Last executed input: accepted.')
   const after = await exportFrom(page, ios)
-  await test.info().attach('vnav-public-journals', { body: JSON.stringify({ before, after }, null, 2), contentType: 'application/json' })
+  await retainPublicJson('vnav-public-journals', { before, after })
   expect(after.frame).toBe(0)
   expect(after.control).toEqual(before.control)
   expect(after.journal.map(entry => [entry.submissionSeq, entry.recordOrdinal, entry.frame, entry.phase, entry.orderInPhase, entry.origin, entry.kind, entry.target, entry.source, entry.payload, entry.outcome])).toEqual([
@@ -290,7 +296,7 @@ for (const popped of [false, true]) test(`D5 shipped PinS on cockpit ${popped ? 
   await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
   await expect(ios.getByTestId('fms-input-outcome')).toHaveText('Last executed input: accepted.')
   const after = await exportFrom(page, ios)
-  await test.info().attach('pins-public-input-and-journals', { body: JSON.stringify({ input, before, after }, null, 2), contentType: 'application/json' })
+  await retainPublicJson('pins-public-input-and-journals', { input, before, after })
   expect(after.frame).toBe(0)
   expect(after.control).toEqual(before.control)
   // Includes the dynamic declaration context: expected preservation is bound before submit, independently of encoding.
@@ -302,6 +308,128 @@ for (const popped of [false, true]) test(`D5 shipped PinS on cockpit ${popped ? 
     { submissionSeq: 5, recordOrdinal: 5, frame: 0, phase: 'ACTION', orderInPhase: 4, origin: 'native', kind: 'ios.jump', target: 'fms1', source: { kind: 'ios', id: 'flight.jump', surface: 'main' }, payload: { kind: 'ios.jump', unit: 1, op: 'sequence' }, outcome: { status: 'accepted' } },
     { submissionSeq: 6, recordOrdinal: 6, frame: 0, phase: 'ACTION', orderInPhase: 5, origin: 'native', kind: 'afcs.select', target: 'afcs', source: { kind: 'ui', id: 'afcs.pinsContinue', surface: popped ? 'popout' : 'main' }, payload: { kind: 'afcs.select', selection: { select: 'pinsContinue', declaration: { basicVfr: true, landingAreaVisible: false, publishedVisibility: false } } }, outcome: { status: 'accepted' } },
   ])
+  await cockpit.close()
+})
+
+// POS INIT/SETUP laws remain owned by fms-navigation; this owner binds the actual entries to the native D5 stream.
+for (const popped of [false, true]) test(`D5 RTC UTC date and SETUP local offset retain CDU1 cockpit ${popped ? 'popout' : 'main'} inputs`, async ({ page }) => {
+  const { ios } = await openD5Instructor(page, false)
+  await ios.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  const cockpit = await openD5Cockpit(page, popped)
+  const cdu = cockpit.surface.locator('.fmsBenchCduStation[data-side="1"]')
+  const screen = cdu.locator('.fmsCduScreen')
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const before = await exportFrom(page, ios)
+  expect(before).toMatchObject({ frame: 0, journal: [], control: [] })
+  const source = { kind: 'cdu', id: 'CDU 1', surface: popped ? 'popout' : 'main', side: 1 }
+  const expected: Record<string, unknown>[] = []
+  const press = async (physical: string, fn: string) => {
+    await cdu.locator(`[data-key="${physical}"]`).click()
+    expected.push({ kind: 'cdu.key', payload: { kind: 'cdu.key', side: 1, fn, held: false }, source, target: 'fms1', outcome: { status: 'accepted' } })
+  }
+  // Physical ids and expected functions are separately literal; no functionFor/encoder supplies this oracle.
+  const utc = async () => {
+    for (const [physical, fn] of [['1', 'CHAR_1'], ['2', 'CHAR_2'], ['1', 'CHAR_1'], ['5', 'CHAR_5'], ['3', 'CHAR_3'], ['0', 'CHAR_0']]) await press(physical, fn)
+    await press('LSK5L', 'LSK5L')
+  }
+  await press('INIT_REF', 'INIT_REF'); await press('LSK2L', 'LSK2L')
+  await expect(screen).toContainText('GPS UTC')
+  await expect(screen).toContainText('15:00:00')
+  await utc()
+  await expect(screen).toContainText('NOT ALLOWED')
+  await expect(screen).toContainText('15:00:00')
+  const gpsRefusal = await exportFrom(page, ios)
+  // Native press returns void: acceptance of LSK5L is not a claim that the GPS-protected RTC entry succeeded.
+  expect(gpsRefusal.journal.at(-1)).toMatchObject({ payload: { fn: 'LSK5L' }, outcome: { status: 'accepted' } })
+  for (let i = 0; i < 7; i++) await press('CLR', 'CLR') // dismiss the advisory, then remove the retained six digits
+  await ios.getByRole('tab', { name: 'Conditions', exact: true }).click()
+  await ios.getByRole('checkbox', { name: /^GPS lost sensor/ }).check()
+  expected.push({ kind: 'ios.condition', payload: { kind: 'ios.condition', unit: 1, condition: 'gpsLost', on: true },
+    source: { kind: 'ios', id: 'conditions.gpsLost', surface: 'main' }, target: 'fms1', outcome: { status: 'accepted' } })
+  await expect(screen).toContainText('RTC UTC') // actual positive eligibility, not a forced private RTC offset
+  await utc()
+  await expect(screen).toContainText('12:15:30')
+  for (const [physical, fn] of [['O', 'CHAR_O'], ['C', 'CHAR_C'], ['T', 'CHAR_T'], ['0', 'CHAR_0'], ['1', 'CHAR_1'], ['SLASH', 'SLASH'], ['2', 'CHAR_2'], ['6', 'CHAR_6']]) await press(physical, fn)
+  await press('LSK5R', 'LSK5R')
+  await expect(screen).toContainText('2026-10-01')
+  await expect(screen).toContainText('12:15:30')
+  await press('LSK6L', 'LSK6L')
+  await expect(screen).toContainText('SETUP')
+  await press('LSK2L', 'LSK2L')
+  await expect(screen).toContainText('LOCAL')
+  for (const [physical, fn] of [['5', 'CHAR_5'], ['DOT', 'DOT'], ['5', 'CHAR_5']]) await press(physical, fn)
+  await press('LSK2R', 'LSK2R')
+  await expect(screen).toContainText('+5.5HRS')
+  await press('LSK6L', 'LSK6L')
+  await expect(screen).toContainText('LOCAL')
+  await expect(screen).toContainText('17:45:30')
+  await ios.getByRole('checkbox', { name: /^GPS lost sensor/ }).uncheck()
+  expected.push({ kind: 'ios.condition', payload: { kind: 'ios.condition', unit: 1, condition: 'gpsLost', on: false },
+    source: { kind: 'ios', id: 'conditions.gpsLost', surface: 'main' }, target: 'fms1', outcome: { status: 'accepted' } })
+  await expect(screen).toContainText('GPS UTC')
+  await expect(screen).toContainText('2026-09-29')
+  await expect(screen).toContainText('20:30:00') // restored world15:00 UTC plus the unchanged +5.5 local display offset
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const after = await exportFrom(page, ios)
+  await retainPublicJson('rtc-setup-public-journals', { before, gpsRefusal, after })
+  expect(after.frame).toBe(0)
+  expect(after.control).toEqual([])
+  expect(after.liveQueue).toEqual({ v: 1, entries: [] })
+  expect(after.counters).toEqual({ submissionSeq: 42, controlSeq: 1, recordOrdinal: 42 })
+  expect(after.journal).toMatchObject(expected.map((entry, i) => ({ ...entry, submissionSeq: i + 1,
+    recordOrdinal: i + 1, origin: 'native', frame: 0, phase: 'ACTION', orderInPhase: i })))
+  expect(after.journal).toHaveLength(expected.length)
+  await cockpit.close()
+})
+
+// Brightness and variation laws stay in fms-cdu-engine; this owner detects the non-CLR hold branch and resolved native keys.
+for (const popped of [false, true]) test(`D5 BRT hold and hardware variation keys retain CDU2 cockpit ${popped ? 'popout' : 'main'} identity`, async ({ page }) => {
+  const { ios } = await openD5Instructor(page, false)
+  const cockpit = await openD5Cockpit(page, popped)
+  const cdu = cockpit.surface.locator('.fmsBenchCduStation[data-side="2"]')
+  const screen = cdu.locator('.fmsCduScreen')
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const before = await exportFrom(page, ios)
+  expect(before).toMatchObject({ frame: 0, journal: [], control: [] })
+  const brt = cdu.locator('[data-key="F2_6"]')
+  await expect(brt).toHaveAttribute('aria-label', 'BRT')
+  const box = (await brt.boundingBox())!
+  await cockpit.surface.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await cockpit.surface.mouse.down()
+  await page.clock.runFor(1000)
+  await cockpit.surface.mouse.up() // BRT fires on down only; holding it does not produce a second/held:true key
+  const afterHold = await exportFrom(page, ios)
+  expect(afterHold.frame).toBe(4)
+  expect(afterHold.journal).toHaveLength(1)
+  await brt.click()
+  await page.clock.runFor(6000) // existing idle-clock path; never alter the five-second BRT law/pacing to admit a fixture
+  await brt.click()
+  await ios.getByRole('tab', { name: 'Flight and setup', exact: true }).click()
+  await ios.getByRole('combobox', { name: 'Hardware variation', exact: true }).selectOption('030/430')
+  await expect(cdu.locator('[data-key="F2_2"]')).toHaveAttribute('aria-label', 'TPDR')
+  await cdu.locator('[data-key="F2_2"]').click()
+  await expect(screen).toContainText('RADIO')
+  await expect(screen).toContainText('2/2')
+  await ios.getByRole('combobox', { name: 'Hardware variation', exact: true }).selectOption('001/101/301/501')
+  await expect(cdu.locator('[data-key="F2_2"]')).toHaveAttribute('aria-label', 'ANS')
+  await expect(cdu.locator('[data-key="F2_3"]')).toHaveAttribute('aria-label', 'SQK IDT')
+  await cdu.locator('[data-key="F2_2"]').click()
+  await expect(screen).toContainText('GSM/SMS')
+  await cdu.locator('[data-key="F2_3"]').click()
+  await expect(screen).toContainText('TPDR IDENT')
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const after = await exportFrom(page, ios)
+  await retainPublicJson('brt-variation-public-journals', { before, afterHold, after })
+  expect(after.frame).toBe(28)
+  expect(after.control).toEqual([])
+  expect(after.liveQueue).toEqual({ v: 1, entries: [] })
+  expect(after.counters).toEqual({ submissionSeq: 7, controlSeq: 1, recordOrdinal: 7 })
+  expect(after.journal).toMatchObject([
+    ['BRT', 0, 0], ['BRT', 4, 0], ['BRT', 28, 0], ['TPDR', 28, 1], ['ANS', 28, 2], ['SQK_IDT', 28, 3],
+  ].map(([fn, frame, orderInPhase], i) => ({ kind: 'cdu.key', payload: { kind: 'cdu.key', side: 2, fn, held: false },
+    source: { kind: 'cdu', id: 'CDU 2', surface: popped ? 'popout' : 'main', side: 2 }, target: 'fms2', outcome: { status: 'accepted' },
+    submissionSeq: i + 1, recordOrdinal: i + 1, origin: 'native', frame, phase: 'ACTION', orderInPhase })))
+  expect(after.journal).toHaveLength(6)
   await cockpit.close()
 })
 
