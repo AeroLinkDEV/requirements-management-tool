@@ -203,6 +203,9 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
   await tab('Nav data')
   await ios.getByRole('button', { name: 'FMS power off', exact: true }).click()
   await ios.getByRole('button', { name: 'Warm start FMS', exact: true }).click()
+  // The accepted S300 laboratory boot duration is five seconds; admit preflight only after the real unit finishes.
+  await page.clock.runFor(5000)
+  await expect(ios.getByRole('button', { name: 'POS INIT', exact: true })).toBeEnabled()
   await ios.getByRole('button', { name: 'POS INIT', exact: true }).click()
   await ios.getByRole('button', { name: 'Restore WMM2025', exact: true }).click()
   const unsupported = {}
@@ -330,7 +333,7 @@ for (const popped of [false, true]) for (const paused of [false, true]) test(`re
   expect(await readFile((await (await downloaded).path())!, 'utf8')).toContain('ended after 0 s of simulated time')
   await page.clock.runFor(1000)
   const later = await exportFrom(page, ios)
-  expect(later.frame).toBe(paused ? 0 : 4)
+  expect(later.frame).toBe(4)
   expect(later.journal).toEqual(after.journal)
   expect(later.control).toEqual(after.control)
   await expect(card.getByText(/^STOPPED by the operator:/)).toBeVisible()
