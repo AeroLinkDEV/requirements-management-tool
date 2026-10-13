@@ -1,6 +1,8 @@
 import { expect, renderedTest as test } from './isolated-client-test'
 import type { Page } from '@playwright/test'
 import { installPausedClock } from './paused-clock'
+import { PACING_TIMELINE } from '../src/fmsCdu/benchPacing'
+import { browserWindowAccounting, installBrowserRecorder, measureWindow, type RecordedWindow, type TimelineEntry, type WindowProbe } from '../perf/browser-accounting'
 
 // CPU8 failed on both main and head and measures loaded React work. Retained diagnostics are not this ordinary-host gate.
 // Logic cannot observe the browser's actual timer tasks, pointer dispatch and completed production frames.
@@ -332,4 +334,55 @@ for (const action of ['Pause', 'rate replacement'] as const) test(`the CDU publi
   else await page.getByLabel('Simulation rate').selectOption('4')
   expect(await clock(), 'the control publishes without an additional simulation frame').toBe(initial.getTime() + 48000)
   await expect(screen).toHaveAttribute('aria-label', /1400:48Z/)
+})
+
+// #1557: the performance harness's own recorder in an actual browser. Logic tests drive the pacing timeline on a
+// deterministic host; only a browser shows that User Timing delivers the cleared measures and their details to an
+// observer, that the recorder attributes every slice to a real timer task, and that page.evaluate boundaries fall
+// between tasks. Functional accounting with imposed 8 ms frames, not a performance measurement.
+test('the performance recorder conserves a real browser window of paced frames, closed by a later entry, through a Pause', async ({ page }) => {
+  await page.addInitScript(() => localStorage.clear())
+  await page.addInitScript(installBrowserRecorder, { slice: PACING_TIMELINE.slice, discard: PACING_TIMELINE.discard })
+  await page.goto('/tests/fixtures/fms-cdu.html')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await page.evaluate(async () => {
+    const { DualFmsSystem } = await import('/src/fmsCdu/dualFms.ts')
+    const original = DualFmsSystem.prototype.step
+    DualFmsSystem.prototype.step = function (...args) {
+      const began = performance.now()
+      const result = original.apply(this, args)
+      while (performance.now() - began < 8) { /* imposed whole-frame work: several frames per slice, then a yield */ }
+      return result
+    }
+  })
+  type Recorder = { __fmsPerf: { begin(): number, completed: number, finish(): RecordedWindow, timeline: TimelineEntry[] } }
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await page.waitForTimeout(1500)
+  const probe: WindowProbe = {
+    begin: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.begin()),
+    completed: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.completed),
+    finish: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.finish()),
+    timeline: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.timeline),
+  }
+  // The harness's own loop: 1 s steps until 160 completed frames (40 s simulated), then wait for the closing entry.
+  const { recorded, stalled } = await measureWindow(probe, 160, () => page.waitForTimeout(1000), () => page.waitForTimeout(250))
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Fly', exact: true })).toBeVisible()
+  // The Pause's discard (if a batch was open) joins the timeline; the epoch still conserves with it.
+  const after = await page.evaluate(() => ({ timeline: (window as unknown as Recorder).__fmsPerf.timeline,
+    buffered: performance.getEntriesByType('measure').filter(entry => entry.name.startsWith('aerolink.fms-bench.')).length }))
+  await test.info().attach('recorded-window.json', { body: JSON.stringify({ recorded, after }), contentType: 'application/json' })
+  const accounting = browserWindowAccounting({ rate: 64, begin: recorded.begin, end: recorded.end, timeline: after.timeline, tasks: recorded.tasks })
+  await test.info().attach('accounting.json', { body: JSON.stringify(accounting), contentType: 'application/json' })
+  expect(stalled).toBe(false)
+  expect(after.buffered, 'every timeline measure is cleared from the entry buffer').toBe(0)
+  expect(accounting.frames.completed).toBeGreaterThanOrEqual(160)
+  expect(accounting.frames).toMatchObject({ unfinishedAttempts: 0, discarded: 0 })
+  expect(accounting.beforeWindow.completed).toBeGreaterThan(0)
+  expect(accounting.continuation.slices, 'an 8 ms frame batch yields between slices').toBeGreaterThan(0)
+  expect(accounting.continuation.yieldGaps.frames).toBeGreaterThan(0)
+  expect(accounting.continuation.taskTails.frames).toBe(accounting.simulation.slices.frames)
+  expect(accounting.achievedRate).toBeGreaterThan(0)
+  expect(accounting.achievedRate).toBeLessThanOrEqual(64 * 1.05)
 })

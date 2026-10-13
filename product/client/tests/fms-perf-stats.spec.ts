@@ -1,103 +1,340 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { startKernelPacing } from '../src/fmsCdu/benchPacing'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { BROWSER_RUN_SCHEMA, browserWindowAccounting, measureWindow, type WindowProbe } from '../perf/browser-accounting'
+import { TimelineHost } from './fixtures/fms-pacing-host'
+import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
 // order, the exact bootstrap of a three-run sample, blocking, the within-block permutation test (protocol revision 2)
 // and its calibration under a null with block effects, and Holm's step-down adjustment.
 
-// #1557 compatibility protection, not completed-frame accounting or a performance experiment. Exercise the real
-// commands: interval-derived records must remain historical inputs, never current browser budget evidence.
-test('the report retains unsupported browser identities without scoring them and keeps headless output', ({ browserName: _browserName }, testInfo) => {
+// Browser accounting revision 2 (#1557). The timelines below are produced by the real bench pacing driver on a
+// deterministic host (fixtures/fms-pacing-host.ts), not written by hand; the expected counts are derived by hand from
+// the frame costs. These are functional accounting proofs, not performance measurements.
+const pacingEpoch = Date.UTC(2026, 8, 27, 14)
+function paced(rate: number, frameMs: number, options: { tailMs?: number, postMs?: number, otherMs?: number } = {}) {
+  const host = new TimelineHost(options.tailMs ?? 0, options.postMs ?? 0), composed = singleComposition(pacingEpoch), kernel = new FmsKernel(composed.plant)
+  const stop = startKernelPacing(rate, kernel, host, { onFault: error => { throw error }, onInstantClose: () => { host.wall += frameMs } })
+  // `otherMs` of other main-thread work (rendering, input) runs between every two timer tasks.
+  const run = (tasks: number) => { for (let i = 0; i < tasks; i++) { host.runNext(); host.wall += options.otherMs ?? 0 } return host.wall }
+  const window = (begin: number, end: number) => browserWindowAccounting({ rate, begin, end, timeline: host.timeline(), tasks: host.timerTasks })
+  return { host, kernel, stop, run, window }
+}
+
+test('a window counts the completed frames of batches straddling both boundaries and separates continuation cost', () => {
+  // 64x, 8 ms frames: a slice is four frames (32 ms), a batch sixteen slices. Each task does 1 ms of synchronous work
+  // after its slice and has a 2 ms microtask tail, and 5 ms of other work follows it: a task cycle is 40 ms, and
+  // batches run back to back (each outlasts its 250 ms deadline).
+  const { run, window } = paced(64, 8, { postMs: 1, tailMs: 2, otherMs: 5 })
+  const begin = run(10) // after 10 slices of batch 1: 40 frames done, 24 outstanding
+  const end = run(30)   // 6 more slices of batch 1, all 16 of batch 2, 8 of batch 3
+  run(1)                // the entry that closes the window
+  expect([begin, end]).toEqual([250 + 10 * 40, 250 + 40 * 40])
+  const accounting = window(begin, end)
+  expect(accounting.frames).toEqual({ admitted: 128, attempted: 120, completed: 120, discarded: 0, unfinishedAttempts: 0,
+    carriedIn: { debt: 24, batch: 1, attemptedInWindow: 24, completedInWindow: 24 }, carriedOut: { debt: 32, batch: 3 } })
+  expect(accounting.batchesAdmitted).toBe(2)
+  expect([accounting.simSeconds, accounting.wallSeconds, accounting.achievedRate, accounting.achievedFraction]).toEqual([30, 1.2, 25, 25 / 64])
+  expect(accounting.window).toEqual({ begin: 650, end: 1850, epoch: accounting.window.epoch })
+  // The warm-up: the epoch's 10 slices before the window, 40 frames over the 0.4 s from its first admission.
+  expect(accounting.beforeWindow).toEqual({ completed: 40, simSeconds: 10, slices: 10, wallSeconds: 0.4 })
+  // Simulation: 30 slices of 32 ms. Continuation: 27 yield gaps of 8 ms (post + tail + other work) between slices of
+  // one batch inside the window (not across an admission, nor from a slice before the window); 30 task tails of
+  // 3 ms after the slice (post + microtask tail), of tasks lasting 35 ms.
+  expect(accounting.simulation).toEqual({ slices: { frames: 30, p50: 32, p95: 32, p99: 32, max: 32, totalMs: 960 }, admissionMs: 64, continuationMs: 896 })
+  expect(accounting.continuation).toEqual({ slices: 28, yieldGaps: { frames: 27, p50: 8, p95: 8, p99: 8, max: 8, totalMs: 216 },
+    taskTails: { frames: 30, p50: 3, p95: 3, p99: 3, max: 3, totalMs: 90 }, pacingTasks: { frames: 30, p50: 35, p95: 35, p99: 35, max: 35, totalMs: 1050 } })
+})
+
+test('a busy window that admits nothing counts the continuation frames it executed, not intervals x rate', () => {
+  // 64x, 100 ms frames: each task completes one indivisible frame, so a batch takes 6.4 s. Over the 1 s window the
+  // interval inference of revision 1 would have claimed four intervals x 64 / 4 = 64 s; ten frames, 2.5 s, ran.
+  const { run, window } = paced(64, 100)
+  const begin = run(3), end = run(10)
+  run(1)
+  const accounting = window(begin, end)
+  expect(accounting.frames).toEqual({ admitted: 0, attempted: 10, completed: 10, discarded: 0, unfinishedAttempts: 0,
+    carriedIn: { debt: 61, batch: 1, attemptedInWindow: 10, completedInWindow: 10 }, carriedOut: { debt: 51, batch: 1 } })
+  expect(accounting.batchesAdmitted).toBe(0)
+  expect([accounting.simSeconds, accounting.wallSeconds, accounting.achievedRate]).toEqual([2.5, 1, 2.5])
+})
+
+test('a pause inside the window discards the batch remainder: 8 admitted, 5 completed, 3 discarded', () => {
+  const { run, window, stop, host } = paced(8, 40)
+  const begin = host.wall
+  run(5); stop()
+  // The discard ends the epoch, so it closes the window too.
+  const accounting = window(begin, host.wall)
+  expect(accounting.frames).toEqual({ admitted: 8, attempted: 5, completed: 5, discarded: 3, unfinishedAttempts: 0,
+    carriedIn: { debt: 0, batch: null, attemptedInWindow: 0, completedInWindow: 0 }, carriedOut: { debt: 0, batch: null } })
+})
+
+test('accounting refuses a timeline it cannot conserve or close, a straddled boundary, a second epoch or unattributed slices', () => {
+  const { host, run, kernel } = paced(64, 8)
+  const begin = run(10), end = run(30)
+  run(1)
+  const timeline = host.timeline(), tasks = host.timerTasks
+  const refused = (input: Partial<Parameters<typeof browserWindowAccounting>[0]>) =>
+    () => browserWindowAccounting({ rate: 64, begin, end, timeline, tasks, ...input })
+  expect(refused({})).not.toThrow()
+  expect(refused({ timeline: timeline.filter((_, i) => i !== 20) })).toThrow(/FMS_BROWSER_ACCOUNTING_REFUSED: batch 2 reports/)
+  expect(refused({ timeline: [...timeline.slice(0, 21), timeline[20], ...timeline.slice(21)] })).toThrow(/FMS_BROWSER_ACCOUNTING_REFUSED/)
+  expect(refused({ timeline: timeline.slice(1) })).toThrow(/does not start at the epoch's first admission|no outstanding admitted frames/)
+  // The last slice inside the window is lost: the entry after the window exposes it (120 would read as 116).
+  expect(refused({ timeline: timeline.filter((_, i) => i !== 39) })).toThrow(/batch 3 reports/)
+  // Nothing follows the window end, so a loss at its end would be invisible.
+  expect(refused({ timeline: timeline.slice(0, 40) })).toThrow(/no timeline entry of the epoch follows the window end/)
+  expect(refused({ begin: timeline[10].start + 1 })).toThrow(/straddles a window boundary/)
+  expect(refused({ timeline: [] })).toThrow(/no pacing slice was observed in the window/)
+  expect(refused({ tasks: [] })).toThrow(/outside an observed timer task/)
+  expect(refused({ rate: 16 })).toThrow(/paced at 64x, not the selected 16x/)
+  // A pause and a new Fly (a second pacing epoch) inside the window.
+  const second = new TimelineHost()
+  second.wall = end
+  const stop = startKernelPacing(64, kernel, second, { onFault: error => { throw error } })
+  second.runNext(); stop()
+  expect(() => browserWindowAccounting({ rate: 64, begin, end: second.wall, timeline: [...timeline, ...second.timeline()], tasks: [...tasks, ...second.timerTasks] }))
+    .toThrow(/the window spans 2 pacing epochs/)
+})
+
+// The browser owner's run loop (perf/browser.perf.ts) over the recorder; here the recorder is the deterministic host.
+function probeOf(host: TimelineHost): WindowProbe {
+  let begin = 0, end = 0
+  const timeline = () => host.timeline()
+  return {
+    begin: async () => (begin = host.wall),
+    completed: async () => timeline().filter(entry => entry.kind === 'slice' && entry.start >= begin).reduce((total, entry) => total + Number(entry.detail.completed), 0),
+    finish: async () => { end = host.wall; return { begin, end, timeline: timeline(), tasks: host.timerTasks, rafIntervals: [], longTasks: [], loaf: [], events: [] } },
+    timeline: async () => timeline(),
+  }
+}
+
+test('the window loop ends at the target, waits for the entry that closes the window, and accounts it', async () => {
+  const { host, run } = paced(64, 8)
+  run(10)
+  let settles = 0
+  const { recorded, steps, stalled } = await measureWindow(probeOf(host), 100, async () => { run(10) }, async () => { settles++; run(1) })
+  // Ten slices (40 frames) per step: three steps reach 100; the window then ends between tasks and one task closes it.
+  expect([steps, stalled, settles]).toEqual([3, false, 1])
+  const accounting = browserWindowAccounting({ rate: 64, begin: recorded.begin, end: recorded.end, timeline: recorded.timeline, tasks: recorded.tasks })
+  expect(accounting.frames.completed).toBe(120)
+})
+
+test('a window that stops gaining frames ends at once and is accounted, so a missing timeline refuses instead of timing out', async () => {
+  // An arm without the timeline: nothing is ever recorded.
+  let steps = 0, settles = 0
+  const absent: WindowProbe = { begin: async () => 0, completed: async () => 0, timeline: async () => [],
+    finish: async () => ({ begin: 0, end: 6000, timeline: [], tasks: [], rafIntervals: [], longTasks: [], loaf: [], events: [] }) }
+  const empty = await measureWindow(absent, 9600, async () => { steps++ }, async () => { settles++ })
+  expect([empty.steps, empty.stalled, steps, settles]).toEqual([1, true, 1, 20])
+  expect(() => browserWindowAccounting({ rate: 64, begin: 0, end: 6000, timeline: empty.recorded.timeline, tasks: [] })).toThrow(/no pacing slice was observed/)
+
+  // A pause during the window: the step after it adds nothing; the discard closes the window and is reported.
+  const { host, run, stop } = paced(64, 8)
+  run(3)
+  let step = 0
+  const paused = await measureWindow(probeOf(host), 9600, async () => { if (step++ === 0) run(5); else stop() }, async () => { run(1) })
+  expect([paused.steps, paused.stalled]).toEqual([2, true])
+  const accounting = browserWindowAccounting({ rate: 64, begin: paused.recorded.begin, end: paused.recorded.end, timeline: paused.recorded.timeline, tasks: paused.recorded.tasks })
+  expect(accounting.frames).toMatchObject({ completed: 20, discarded: 32, carriedOut: { debt: 0 } })
+})
+
+const host = { quietBefore: { quiet: true } }
+const reportProtocol = JSON.parse(readFileSync('perf/protocol.json', 'utf8'))
+const reportHarness = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), apiTree: 'b'.repeat(40), apiAssemblySha256: 'f'.repeat(64), dirtyEntries: 0 }
+const browserRecord = (index: number, rate: number, completed: number, wallSeconds: number, extra: Record<string, unknown> = {}) => ({
+  index, kind: 'browser', status: 'passed', block: index, arm: 'B', configuration: 'view-off-svs-off', rate, host,
+  armIdentity: { commit: 'a'.repeat(40), srcTree: 'b'.repeat(40), lockBlob: 'b'.repeat(40), viteBlob: 'c'.repeat(40), distSha256: 'd'.repeat(64), distFiles: 2 },
+  result: { schema: 'aerolink.fms-perf-browser-run.v2', accountingRevision: 2, scenario: reportProtocol.browser.scenario, rate, configuration: 'view-off-svs-off', windowSimSeconds: completed / 4, wallSeconds, throughput: completed / 4 / wallSeconds,
+    accounting: { achievedRate: completed / 4 / wallSeconds, achievedFraction: completed / 4 / wallSeconds / rate,
+      simulation: { slices: { p50: 20, p95: 30, p99: 31 } }, continuation: { yieldGaps: { p95: 4 }, taskTails: { p95: 3 } } },
+    longTasks: { count: 0 }, raf: null, interaction: { entries: [], resolutionStepMs: null }, heapUsedBytesAfterGc: 2 ** 20,
+    browser: { version: 'fixture', headless: true, renderer: 'fixture', viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } } },
+  ...extra,
+})
+
+// Independent synthetic receipts at the real CLI boundary. Values and expected levels are hand-defined, not
+// produced by qualification. Session start precedes seeding; the end and each run carry its retained seed receipt.
+function browserSession(out: string, id: number, rows: ReturnType<typeof browserRecord>[], protocol = reportProtocol, harness = reportHarness) {
+  const startedAt = `2026-10-13T12:${String(id).padStart(2, '0')}:00.000Z`
+  const seedFile = `seed-${id}.json`, seedBytes = '{"fixture":"independent seed"}'
+  const seed = { file: seedFile, sha256: createHash('sha256').update(seedBytes).digest('hex') }
+  writeFileSync(join(out, seedFile), seedBytes)
+  const start = { kind: 'browser', startedAt, harness, dirtyOverride: false, protocol,
+    environment: { node: '24-fixture', v8: 'fixture', playwright: '1-fixture', os: { platform: 'fixture', release: 'fixture', arch: 'x64' }, cpu: { model: 'fixture', logicalCores: 4 }, memoryGiB: 8, powerPlan: null, environmentVariableNames: [] },
+    arms: [{ arm: 'B', ...rows[0].armIdentity }], rounds: 2, cells: [{ configuration: rows[0].configuration, rate: rows[0].rate }] }
+  const end = { ...start, endedAt: `2026-10-13T12:${String(id).padStart(2, '0')}:59.000Z`, harnessAtEnd: harness,
+    servedAtEnd: { distSha256: rows[0].armIdentity.distSha256, distFiles: rows[0].armIdentity.distFiles }, seed }
+  const linked = rows.map(row => ({ ...row, sessionStartedAt: startedAt, startedAt: `2026-10-13T12:${String(id).padStart(2, '0')}:30.000Z`, seed }))
+  return { start, end, rows: linked }
+}
+
+function writeBrowserSession(out: string, id: number, receipt: { start: object; end: object }) {
+  writeFileSync(join(out, `session-${id}.json`), JSON.stringify(receipt.start))
+  writeFileSync(join(out, `session-end-${id}.json`), JSON.stringify(receipt.end))
+}
+
+test('the report scores completed-frame browser records beside the selected rate and keeps older records NOT_QUALIFIED', ({ browserName: _browserName }, testInfo) => {
   const out = testInfo.outputPath('mixed-records')
   mkdirSync(out, { recursive: true })
-  const host = { quietBefore: { quiet: true } }
-  const browserResult = {
-    schema: 'aerolink.fms-perf-browser-run.v1', windowSimSeconds: 336, throughput: 42,
-    callbacks: { p50: 1, p95: 2, p99: 3 }, longTasks: { count: 0 }, raf: null,
-    interaction: { entries: [], resolutionStepMs: null }, heapUsedBytesAfterGc: 1024,
-    browser: { version: 'historical fixture', headless: true, renderer: 'fixture', viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } },
-  }
-  // Literal #1557 busy/partial observations: 1,067 completed frames meant 266.75 s, whereas 21 callbacks at64x
-  // inferred336 s. In the second window no interval-admitted frame completed: 26 continuation frames meant6.5 s,
-  // whereas13 callbacks inferred208 s. These are recorded functional examples, not budget measurements.
+  const historical = { schema: 'aerolink.fms-perf-browser-run.v1', windowSimSeconds: 336, throughput: 42, callbacks: { p50: 1, p95: 2, p99: 3 } }
   const rows = [
-    { index: 0, kind: 'browser', status: 'passed', block: 0, arm: 'B', configuration: 'view-off-svs-off', rate: 64, host,
-      armIdentity: { commit: 'a'.repeat(40) }, completedFrameWitness: 1067, result: browserResult },
-    { index: 1, kind: 'browser', status: 'passed', block: 1, arm: 'B', configuration: 'view-off-svs-off', rate: 64, host,
-      armIdentity: { commit: 'b'.repeat(40) }, completedFrameWitness: 26, result: { ...browserResult, windowSimSeconds: 208 } },
-    { index: 2, kind: 'browser', status: 'failed', block: 2, arm: 'B', configuration: 'view-off-svs-off', rate: 64, host,
-      armIdentity: { commit: 'c'.repeat(40) }, result: { schema: 'unreviewed-completed-frames-v99', throughput: 999 } },
-    { index: 3, kind: 'headless', status: 'passed', block: 0, arm: 'B', workload: 'W1', topology: 'single', host,
+    // 64x selected: 8,800 and 9,000 completed frames over 40 s achieve 55x and 56.25x.
+    browserRecord(0, 64, 8800, 40), browserRecord(1, 64, 9000, 40),
+    { ...browserRecord(2, 64, 0, 1), result: historical },
+    { ...browserRecord(3, 64, 0, 1), status: 'failed', result: null },
+    // Another build of arm B in the same --out (another served dist): its own cell, never pooled. 6,400 frames, 40x.
+    browserRecord(5, 64, 6400, 40, { armIdentity: { commit: 'a'.repeat(40), srcTree: 'b'.repeat(40), lockBlob: 'b'.repeat(40), viteBlob: 'c'.repeat(40), distSha256: 'e'.repeat(64), distFiles: 2 } }),
+    { index: 4, kind: 'headless', status: 'passed', block: 0, arm: 'B', workload: 'W1', topology: 'single', host,
       result: { p50: 1, p95: 2, p99: 3, throughput: 250, heapUsedBytesAfterGc: 1024, sync: null } },
   ]
+  const first = browserSession(out, 0, rows.slice(0, 4) as ReturnType<typeof browserRecord>[])
+  const second = browserSession(out, 1, [rows[4]] as ReturnType<typeof browserRecord>[])
+  writeBrowserSession(out, 0, first); writeBrowserSession(out, 1, second)
+  const input = [...first.rows, ...second.rows, rows[5]].map(row => JSON.stringify(row)).join('\n') + '\n'
+  writeFileSync(join(out, 'runs.jsonl'), input)
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
+  expect(report.browserQualification).toMatchObject({ accountingIssue: '#1557', policyRevision: 2, accepted: [0, 1, 5],
+    supportedAccountingSchemas: ['aerolink.fms-perf-browser-run.v2'], notQualified: [
+      { index: 2, qualification: 'NOT_QUALIFIED', compatibility: 'historical-interval-inference' },
+      { index: 3, qualification: 'NOT_QUALIFIED', compatibility: 'failed-run' }] })
+  expect(report.browser).toHaveLength(2)
+  // Two runs: the median of 55 and 56.25 is 55.625; achieved / selected 55.625 / 64.
+  expect(report.browser[0].levels.throughput.estimate).toBeCloseTo(55.625, 12)
+  expect(report.browser[0].levels['achieved / selected'].estimate).toBeCloseTo(55.625 / 64, 12)
+  expect(report.browser[1]).toMatchObject({ arm: `B@${'a'.repeat(12)}/${'b'.repeat(12)}/${'e'.repeat(12)}`, runs: 1 })
+  expect(report.browser[1].levels.throughput.estimate).toBe(40)
+  const prose = readFileSync(join(out, 'report.md'), 'utf8')
+  expect(prose).toContain('## Browser matrix (accounting revision 2, completed frames')
+  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'b'.repeat(12)}/${'d'.repeat(12)} | view-off-svs-off | 64x | 2 | 55.6 [55.0, 56.3]`)
+  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'b'.repeat(12)}/${'e'.repeat(12)} | view-off-svs-off | 64x | 1 | 40.0 [40.0, 40.0]`)
+  expect(prose).toContain('No browser budget verdict is made under this revision')
+  expect(prose).toContain('- historical-interval-inference: 1 (runs 2)')
+  expect(prose).toContain('- failed-run: 1 (runs 3)')
+  expect(prose).toContain('| W1 | single | 1 | 1.000')
+  expect(readFileSync(join(out, 'runs.jsonl'), 'utf8')).toBe(input)
+})
+
+test('browser report cells retain actual scenario, protocol, runtime, harness and full build identities', ({ browserName: _browserName }, testInfo) => {
+  const out = testInfo.outputPath('browser-cohorts')
+  mkdirSync(out, { recursive: true })
+  const normal = browserRecord(0, 64, 1600, 40) // 10x; its identical repeat combines, each other cohort stays 50x.
+  const otherScenario = 'kbtv-rnav15-advisory'
+  const scenario = browserRecord(2, 64, 8000, 40)
+  scenario.result.scenario = otherScenario
+  const runtime = browserRecord(3, 64, 8000, 40)
+  runtime.result.browser = { version: 'other-chromium', headless: false, renderer: 'other-renderer', viewport: { width: 1280, height: 720, deviceScaleFactor: 2 } }
+  const lock = browserRecord(6, 64, 8000, 40)
+  lock.armIdentity.lockBlob = 'e'.repeat(40)
+  // Equal display prefixes do not establish equal immutable hashes.
+  const prefix = browserRecord(7, 64, 8000, 40)
+  prefix.armIdentity.distSha256 = 'd'.repeat(12) + 'e'.repeat(52)
+  const receipts = [
+    browserSession(out, 0, [normal, browserRecord(1, 64, 1600, 40)]),
+    browserSession(out, 1, [scenario], { ...reportProtocol, browser: { ...reportProtocol.browser, scenario: otherScenario } }),
+    browserSession(out, 2, [runtime], { ...reportProtocol, browser: { ...reportProtocol.browser, viewport: runtime.result.browser.viewport } }),
+    browserSession(out, 3, [browserRecord(4, 64, 8000, 40)], { ...reportProtocol, statistics: { ...reportProtocol.statistics, seed: 99 } }),
+    browserSession(out, 4, [browserRecord(5, 64, 8000, 40)], reportProtocol, { ...reportHarness, apiAssemblySha256: 'e'.repeat(64) }),
+    browserSession(out, 5, [lock]), browserSession(out, 6, [prefix]),
+  ]
+  receipts.forEach((receipt, id) => writeBrowserSession(out, id, receipt))
+  writeFileSync(join(out, 'runs.jsonl'), receipts.flatMap(receipt => receipt.rows).map(row => JSON.stringify(row)).join('\n') + '\n')
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
+  expect(report.browserQualification.accepted).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+  expect(report.browser.map((cell: any) => [cell.runs, cell.levels.throughput.estimate])).toEqual([[2, 10], [1, 50], [1, 50], [1, 50], [1, 50], [1, 50], [1, 50]])
+  expect(report.browser[1].identity.scenario).toBe(otherScenario)
+  expect(report.browser[2].identity.runtime).toMatchObject({ version: 'other-chromium', headless: false })
+  expect(report.browser[3].identity.protocol.statistics.seed).toBe(99)
+  expect(report.browser[4].identity.harness.apiAssemblySha256).toBe('e'.repeat(64))
+  const prose = readFileSync(join(out, 'report.md'), 'utf8')
+  expect(prose).toContain(otherScenario)
+  expect(prose).toContain('other-chromium, headed, renderer: other-renderer, viewport 1280x720 at DPR 2')
+})
+
+test('browser report requires an unambiguous complete clean session with matching source and retained seed', ({ browserName: _browserName }, testInfo) => {
+  const out = testInfo.outputPath('browser-session-evidence')
+  mkdirSync(out, { recursive: true })
+  const variants = ['valid', 'missing-session', 'missing-end', 'changed-dist', 'changed-harness', 'dirty-smoke', 'changed-seed', 'missing-seed-file', 'incomplete-identity', 'duplicate-end', 'wrong-run-arm', 'changed-protocol', 'wrong-session', 'duplicate-session', 'wrong-run-seed', 'incomplete-runtime', 'incomplete-protocol']
+  const rows = variants.map((variant, id) => {
+    const receipt = browserSession(out, id, [browserRecord(id, 64, 1600, 40)])
+    const row = receipt.rows[0]
+    if (variant === 'changed-dist') receipt.end.servedAtEnd.distSha256 = 'e'.repeat(64)
+    if (variant === 'changed-harness') receipt.end.harnessAtEnd = { ...reportHarness, commit: 'e'.repeat(40) }
+    if (variant === 'dirty-smoke') receipt.start.dirtyOverride = true
+    if (variant === 'changed-seed') receipt.end.seed = { ...receipt.end.seed, sha256: 'e'.repeat(64) }
+    if (variant === 'missing-seed-file') { receipt.end.seed = { ...receipt.end.seed, file: 'absent-seed.json' }; row.seed = receipt.end.seed }
+    if (variant === 'incomplete-identity') receipt.start.harness = { ...reportHarness, apiAssemblySha256: '' }
+    if (variant === 'wrong-run-arm') row.armIdentity = { ...row.armIdentity, lockBlob: 'e'.repeat(40) }
+    if (variant === 'changed-protocol') receipt.end.protocol = { ...reportProtocol, browser: { ...reportProtocol.browser, scenario: 'other-scenario' } }
+    if (variant === 'wrong-session') row.sessionStartedAt = 'unknown-session'
+    if (variant === 'wrong-run-seed') row.seed = { ...row.seed, sha256: 'e'.repeat(64) }
+    if (variant === 'incomplete-runtime') row.result.browser.version = ''
+    if (variant === 'incomplete-protocol') {
+      receipt.start.protocol = { ...reportProtocol, statistics: { ...reportProtocol.statistics, iterations: undefined } }
+      receipt.end.protocol = receipt.start.protocol
+    }
+    if (variant !== 'missing-session') writeFileSync(join(out, `session-${id}.json`), JSON.stringify(receipt.start))
+    if (variant !== 'missing-end') writeFileSync(join(out, `session-end-${id}.json`), JSON.stringify(receipt.end))
+    if (variant === 'duplicate-end') writeFileSync(join(out, 'session-end-100.json'), JSON.stringify(receipt.end))
+    if (variant === 'duplicate-session') writeFileSync(join(out, 'session-100.json'), JSON.stringify(receipt.start))
+    return row
+  })
   const input = rows.map(row => JSON.stringify(row)).join('\n') + '\n'
   writeFileSync(join(out, 'runs.jsonl'), input)
   const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
   expect(child.status, child.stderr).toBe(0)
   const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
-  expect(report.browserQualification).toMatchObject({ status: 'NOT_QUALIFIED', accountingIssue: '#1557',
-    policyRevision: 1, declaredMode: 'fail-closed-unavailable', metrics: null, supportedAccountingSchemas: [], records: [
-    { index: 0, status: 'passed', arm: 'B', commit: 'a'.repeat(40) },
-    { index: 1, status: 'passed', arm: 'B', commit: 'b'.repeat(40) },
-    { index: 2, status: 'failed', arm: 'B', commit: 'c'.repeat(40), compatibility: 'unsupported-or-missing' },
-  ] })
-  expect(report).not.toHaveProperty('browser')
-  expect(report).not.toHaveProperty('browserPilotPlanned')
-  const prose = readFileSync(join(out, 'report.md'), 'utf8')
-  expect(prose).not.toContain('## Browser matrix')
-  expect(prose).toContain('NOT_QUALIFIED')
-  expect(prose).toContain('| W1 | single | 1 | 1.000')
-  expect(prose).toContain('250.000 [250.000, 250.000] (\u00b10.00%)')
+  expect(report.browserQualification.accepted).toEqual([0])
+  expect(report.browserQualification.notQualified.map((row: any) => row.index)).toEqual(variants.slice(1).map((_, i) => i + 1))
+  expect(report.browserQualification.notQualified.every((row: any) => row.compatibility === 'session-evidence' && row.reason)).toBe(true)
+  expect(report.browser[0]).toMatchObject({ runs: 1, levels: { throughput: { estimate: 10 } } })
   expect(readFileSync(join(out, 'runs.jsonl'), 'utf8')).toBe(input)
 })
 
-test('the browser command refuses explicitly before seeding or starting an API', ({ browserName: _browserName }, testInfo) => {
-  const out = testInfo.outputPath('refused-browser')
-  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser', '--out', out,
-    '--arm', `B=${resolve('../..')}`, '--rounds', '1', '--dirty-smoke'], { cwd: process.cwd(), encoding: 'utf8', timeout: 30_000 })
-  writeFileSync(testInfo.outputPath('browser-command.log'), `${child.stdout ?? ''}\n${child.stderr ?? ''}`)
-  expect(child.status).not.toBe(0)
-  expect(child.stderr).toContain('FMS_BROWSER_ACCOUNTING_UNAVAILABLE')
-  const refusal = JSON.parse(readFileSync(join(out, 'browser-accounting-refusal.json'), 'utf8'))
-  expect(refusal).toMatchObject({ status: 'REFUSED', accountingIssue: '#1557', metrics: null })
-  expect(refusal.arm.name).toBe('B')
-  const firstBytes = readFileSync(join(out, 'browser-accounting-refusal.json'))
-  const firstSHA = createHash('sha256').update(firstBytes).digest('hex')
-  writeFileSync(testInfo.outputPath('first-refusal.json'), firstBytes)
-  // Reusing --out with another arm must not rewrite the previous committed-harness refusal evidence.
-  const repeated = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser', '--out', out,
-    '--arm', `A=${resolve('../..')}`, '--rounds', '1', '--dirty-smoke'], { cwd: process.cwd(), encoding: 'utf8', timeout: 30_000 })
-  writeFileSync(testInfo.outputPath('repeated-browser-command.log'), `${repeated.stdout ?? ''}\n${repeated.stderr ?? ''}`)
-  const afterBytes = readFileSync(join(out, 'browser-accounting-refusal.json'))
-  writeFileSync(testInfo.outputPath('after-repeated-refusal.json'), afterBytes)
-  expect(afterBytes, 'the first refusal evidence must survive another arm using the same output directory').toEqual(firstBytes)
-  expect(createHash('sha256').update(afterBytes).digest('hex')).toBe(firstSHA)
-  expect(JSON.parse(afterBytes.toString('utf8')).arm.name).toBe('B')
-  expect(repeated.status).not.toBe(0)
-  expect(repeated.stderr).toContain('FMS_BROWSER_REFUSAL_EVIDENCE_EXISTS')
-  expect(readdirSync(out)).toEqual(['browser-accounting-refusal.json', 'logs', 'runs'])
-  expect(readdirSync(join(out, 'logs'))).toEqual([])
-  expect(readdirSync(join(out, 'runs'))).toEqual([])
-  expect(existsSync(join(out, 'seed.json'))).toBe(false)
-  expect(existsSync(join(out, 'logs', 'seed.log'))).toBe(false)
-  expect(existsSync(join(out, 'runs.jsonl'))).toBe(false)
+test('the headless report titles a set by its arms: A/A when both carry one client identity, otherwise A/B', ({ browserName: _browserName }, testInfo) => {
+  const same = { srcTree: 'b'.repeat(40), lockBlob: 'l'.repeat(40), viteBlob: 'v'.repeat(40) }
+  const titled = (name: string, b: Record<string, string>) => {
+    const out = testInfo.outputPath(name)
+    mkdirSync(out, { recursive: true })
+    const runs = [0, 1].flatMap(block => ['A', 'B', 'B', 'A'].map((arm, slot) => ({ index: block * 4 + slot, kind: 'headless', status: 'passed', block, slot, arm,
+      armIdentity: arm === 'A' ? same : b, workload: 'W1', topology: 'single', host,
+      result: { p50: 1 + slot, p95: 2, p99: 3, throughput: 250, heapUsedBytesAfterGc: 1024, sync: null } })))
+    writeFileSync(join(out, 'runs.jsonl'), runs.map(row => JSON.stringify(row)).join('\n') + '\n')
+    const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
+    expect(child.status, child.stderr).toBe(0)
+    return { prose: readFileSync(join(out, 'report.md'), 'utf8'), json: JSON.parse(readFileSync(join(out, 'report.json'), 'utf8')) }
+  }
+  const aa = titled('aa', same)
+  expect(aa.prose).toContain('A/A result: **not judged')
+  expect(aa.json.headless.comparison).toBe('A/A')
+  const ab = titled('ab', { ...same, srcTree: 't'.repeat(40) })
+  expect(ab.prose).not.toContain('A/A result')
+  expect(ab.prose).toContain('A/B result: **not judged')
+  expect(ab.json.headless.comparison).toBe('A/B')
 })
 
-test('direct browser harness configuration refuses before fixture or server creation', ({ browserName: _browserName }, testInfo) => {
-  const out = testInfo.outputPath('direct-browser')
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./perf/playwright.perf.config.ts')"], {
-    cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, AEROLINK_PERF_MODE: 'browser',
-      AEROLINK_PERF_OUTPUT_DIR: out, AEROLINK_PERF_DIST: join(out, 'deliberately-absent-dist') },
-  })
-  writeFileSync(testInfo.outputPath('direct-command.log'), `${child.stdout ?? ''}\n${child.stderr ?? ''}`)
-  expect(child.status).not.toBe(0)
-  expect(child.stderr).toContain('FMS_BROWSER_ACCOUNTING_UNAVAILABLE')
-  expect(existsSync(out)).toBe(false)
+test('an A/B family reads as differences found or none significant; an A/A keeps its verdict', () => {
+  const judged = (verdict: 'failed' | 'passed' | 'refused', reason = '') => ({ verdict, reason, significant: verdict === 'failed' ? 3 : 0 })
+  expect(headlessVerdict('A/B', judged('failed'))).toEqual({ kind: 'A/B', title: 'A/B result', verdict: 'differences found' })
+  expect(headlessVerdict('A/B', judged('passed'))).toEqual({ kind: 'A/B', title: 'A/B result', verdict: 'no significant difference' })
+  expect(headlessVerdict('A/B', judged('refused', 'too few blocks'))).toMatchObject({ verdict: 'refused: too few blocks' })
+  expect(headlessVerdict('A/A', judged('failed'))).toEqual({ kind: 'A/A', title: 'A/A result', verdict: 'failed' })
+  expect(headlessVerdict('arms unidentified', judged('passed')).title).toBe('Arm comparison (arm identities not recorded, so neither A/A nor A/B)')
+})
+
+test('the protocol declares the browser run schema the owner writes', () => {
+  expect(JSON.parse(readFileSync('perf/protocol.json', 'utf8')).browser.accounting.schema).toBe(BROWSER_RUN_SCHEMA)
 })
 
 test('nearest-rank percentiles take the smallest value with at least p% at or below it', () => {

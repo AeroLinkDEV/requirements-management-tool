@@ -363,6 +363,30 @@ export function judgeFamily(input: {
   return { verdict: significant ? 'failed' : 'passed', reason: '', significant }
 }
 
+export type ComparisonKind = 'A/A' | 'A/B' | 'arms unidentified'
+
+/** A/A when both arms carry one client identity (source tree, lock file, Vite config); otherwise A/B. */
+export function comparisonKind(runs: readonly { arm: string; armIdentity?: unknown }[]): ComparisonKind {
+  const identity = (arm: string) => new Set(runs.filter(e => e.arm === arm).map(e => {
+    const id = e.armIdentity as { srcTree?: string; lockBlob?: string; viteBlob?: string } | undefined
+    return id?.srcTree && id.lockBlob && id.viteBlob ? `${id.srcTree}|${id.lockBlob}|${id.viteBlob}` : null
+  }))
+  const a = identity('A'), b = identity('B')
+  if (a.has(null) || b.has(null) || a.size !== 1 || b.size !== 1) return 'arms unidentified'
+  return [...a][0] === [...b][0] ? 'A/A' : 'A/B'
+}
+
+/**
+ * The headless verdict line's title and wording. An A/B set is not an A/A result: there the family test's `failed`
+ * means the arms differ, which is what an A/B is run to find, and `passed` that no difference was significant.
+ */
+export function headlessVerdict(kind: ComparisonKind, judged: Judgement) {
+  const outcome = kind === 'A/B' && (judged.verdict === 'failed' || judged.verdict === 'passed')
+    ? (judged.verdict === 'failed' ? 'differences found' : 'no significant difference') : judged.verdict
+  return { kind, title: kind === 'arms unidentified' ? 'Arm comparison (arm identities not recorded, so neither A/A nor A/B)' : `${kind} result`,
+    verdict: `${outcome}${judged.reason ? `: ${judged.reason}` : ''}` }
+}
+
 /** Holm's step-down adjustment of a family of p-values, returned in the input order. */
 export function holm(pValues: readonly number[]): number[] {
   const m = pValues.length
