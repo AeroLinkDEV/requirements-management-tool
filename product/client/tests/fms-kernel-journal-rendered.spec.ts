@@ -279,18 +279,31 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
   if (popped) await expect.poll(() => instructor.isClosed()).toBe(true)
 })
 
-for (const paused of [false, true]) test(`real Stop ${paused ? 'paused' : 'running'} executes at its retained instant and freezes without an extra frame`, async ({ page }) => {
+for (const popped of [false, true]) for (const paused of [false, true]) test(`real Stop ${paused ? 'paused' : 'running'} on instructor ${popped ? 'popout' : 'main'} executes at its retained instant and freezes without an extra frame`, async ({ page }) => {
   const epoch = new Date('2026-09-29T15:00:00Z')
   await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
   await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
+  await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
+  await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
+  let instructor = page
+  if (popped) {
+    await page.locator('.fmsStationDock > summary').click()
+    const controls = page.getByRole('region', { name: 'Station arrangement', exact: true })
+    await controls.getByLabel('Instructor apart').check()
+    const opened = page.waitForEvent('popup')
+    await controls.getByRole('button', { name: 'Open instructor station in a window', exact: true }).click()
+    instructor = await opened
+  }
+  const ios = instructor.getByRole('region', { name: 'Instructor station', exact: true })
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
   const scenario = { id: 'd5-stop', title: 'D5 stop owner', objective: '', maxSeconds: 20, startTime: epoch.toISOString(), surface: 'offshore-87n', steps: [{ when: { kind: 'time', seconds: 0 }, action: { kind: 'wind', direction: 200, speed: 35 } }, { when: { kind: 'time', seconds: 0 }, action: { kind: 'alert', text: 'BEFORE STOP' } }, { when: { kind: 'time', seconds: 10 }, action: { kind: 'alert', text: 'MUST NOT EXECUTE' } }] }
-  const card = page.getByRole('region', { name: 'Scenarios', exact: true })
+  const card = ios.getByRole('region', { name: 'Scenarios', exact: true })
   await card.getByLabel('Scenario file', { exact: true }).setInputFiles(fixtureFile('stop.json', scenario))
   await expect(card.getByText('Loaded “stop.json”.', { exact: true })).toBeVisible()
   await card.getByRole('button', { name: 'Run the scenario', exact: true }).click()
   await expect(card.getByRole('button', { name: 'Stop the run', exact: true })).toBeVisible()
   if (paused) await page.getByRole('button', { name: 'Pause', exact: true }).click()
-  const before = await exportFrom(page, page)
+  const before = await exportFrom(page, ios)
   expect(before.frame).toBe(0)
   expect(before.journal.slice(0, 2)).toMatchObject([
     { frame: 0, origin: 'v1-translated', kind: 'config.surface', target: 'plant', source: { kind: 'scenario', id: 'd5-stop@2026-09-29T15:00:00.000Z start', surface: 'main' }, payload: { kind: 'config.surface', surface: 'offshore-87n' }, outcome: { status: 'accepted' } },
@@ -298,15 +311,19 @@ for (const paused of [false, true]) test(`real Stop ${paused ? 'paused' : 'runni
   ])
   await card.getByRole('button', { name: 'Stop the run', exact: true }).click()
   await expect(card.getByText(/^STOPPED by the operator:/)).toBeVisible()
-  const after = await exportFrom(page, page)
+  const after = await exportFrom(page, ios)
   expect(after.frame).toBe(0)
   expect(after.journal.slice(before.journal.length)).toMatchObject([
-    { frame: 0, kind: 'scenario.stop', target: 'scenario', source: { kind: 'ui', id: 'scenarios.stop', surface: 'main' }, payload: { kind: 'scenario.stop', runId: 'd5-stop@2026-09-29T15:00:00.000Z' }, outcome: { status: 'accepted' } },
-    { frame: 0, kind: 'ios.flightFreeze', target: 'plant', source: { kind: 'ui', id: 'flight.runEnded', surface: 'main' }, payload: { kind: 'ios.flightFreeze', on: true }, outcome: { status: 'accepted' } },
+    { frame: 0, kind: 'scenario.stop', target: 'scenario', source: { kind: 'ui', id: 'scenarios.stop', surface: popped ? 'popout' : 'main' }, payload: { kind: 'scenario.stop', runId: 'd5-stop@2026-09-29T15:00:00.000Z' }, outcome: { status: 'accepted' } },
+    { frame: 0, kind: 'ios.flightFreeze', target: 'plant', source: { kind: 'ui', id: 'flight.runEnded', surface: popped ? 'popout' : 'main' }, payload: { kind: 'ios.flightFreeze', on: true }, outcome: { status: 'accepted' } },
   ])
   await expect(card.getByRole('button', { name: 'Stop the run', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Fly', exact: true })).toBeVisible()
   const downloaded = page.waitForEvent('download')
   await card.getByRole('button', { name: 'Download run report', exact: true }).click()
   expect(await readFile((await (await downloaded).path())!, 'utf8')).toContain('ended after 0 s of simulated time')
+  if (popped) {
+    await page.getByRole('region', { name: 'Station arrangement', exact: true }).getByRole('button', { name: 'Return Instructor station', exact: true }).click()
+    await expect.poll(() => instructor.isClosed()).toBe(true)
+  }
 })
