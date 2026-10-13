@@ -133,13 +133,18 @@ const retainPublicJson = async (name: string, value: unknown) => {
 
 // These rows own D5 bridge metadata, not the GPS/radio model's numerical effects (their existing owners remain).
 // A new operation can bypass or misaddress the shared adapter even when another operation on it is correct.
-const openD5Instructor = async (page: Page, popped: boolean) => {
-  const epoch = new Date('2026-09-29T15:00:00Z')
+const openD5Instructor = async (page: Page, popped: boolean, options: { epoch?: Date; profile?: string } = {}) => {
+  const epoch = options.epoch ?? new Date('2026-09-29T15:00:00Z')
   await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
   await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
   await expect(page.locator('.fmsCdu')).toBeVisible()
   await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
+  if (options.profile) {
+    const setup = page.getByRole('region', { name: 'Instructor station', exact: true })
+    await setup.getByRole('tab', { name: 'Flight and setup', exact: true }).click()
+    await setup.getByRole('combobox', { name: 'Aircraft profile', exact: true }).selectOption(options.profile)
+  }
   let instructor = page
   if (popped) {
     await page.locator('.fmsStationDock > summary').click()
@@ -594,6 +599,122 @@ for (const popped of [false, true]) test(`D5 sensor parameter branches retain sh
   expect(record.journal.map(entry => [entry.kind, entry.target, entry.source, entry.payload, entry.outcome])).toEqual(vectors.map(({ unit, stimulus, outcome }) => [
     'f14.sensor', unit === 1 ? 'fms1' : 'fms2', { kind: 'f14', id: `sensor.${stimulus.kind}`, surface: popped ? 'popout' : 'main' }, { kind: 'f14.sensor', unit, stimulus }, outcome,
   ]))
+  if (popped) { await page.locator('.fmsStationDock > summary').click(); await page.getByRole('button', { name: 'Return all panels', exact: true }).click(); await expect.poll(() => instructor.isClosed()).toBe(true) }
+})
+
+// HOV/TU are v1 scenario inputs, not native AFCS buttons. Their refused high-speed branch must not become a silent pass.
+for (const popped of [false, true]) test(`D5 v1 HOV TU refusal stays a scenario-host input when instructor is ${popped ? 'popout' : 'main'}`, async ({ page }) => {
+  const { instructor, ios } = await openD5Instructor(page, popped)
+  await expect(page.getByRole('button', { name: 'HOV', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'TU', exact: true })).toHaveCount(0)
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const card = ios.getByRole('region', { name: 'Scenarios', exact: true })
+  for (const [id, action, reason] of [
+    ['d5-v1-hover', { kind: 'autopilot', hover: true }, 'HOV is not available: above the coordinated-flight speed, or no eligible hover feedback'],
+    ['d5-v1-tu', { kind: 'autopilot', transitionUp: true }, 'TU is not available: not in a hover mode, too fast, or no valid radio height'],
+  ] as const) {
+    // Published 87N start:100 KIAS/500ft. ALT is a real accepted positive control; no forced hover/instant recovery.
+    const scenario = { id, title: id, objective: 'Preserve native v1 refusal and sender', profile: 'cma9000-s300-heli-civil',
+      start: '87n-offshore-sar', surface: 'offshore-87n', startTime: '2026-09-29T15:00:00.000Z', maxSeconds: 10,
+      steps: [{ when: { kind: 'start' }, action: { kind: 'autopilot', hold: true } }, { when: { kind: 'start' }, action }] }
+    await card.getByLabel('Scenario file', { exact: true }).setInputFiles(fixtureFile(`${id}.json`, scenario))
+    await expect(card.getByText(`Loaded “${id}.json”.`, { exact: true })).toBeVisible()
+    await card.getByRole('button', { name: 'Run the scenario', exact: true }).click()
+    await expect(card.getByRole('status').filter({ hasText: /^EXECUTION ERROR:/ })).toBeVisible()
+    const record = await exportFrom(page, ios)
+    await retainPublicJson(`${id}-public-journal`, { suppliedScenario: scenario, record })
+    const start = `${id}@2026-09-29T15:00:00.000Z`
+    expect(record.frame).toBe(0)
+    expect(record.control).toEqual([])
+    expect(record.liveQueue).toEqual({ v: 1, entries: [] })
+    expect(record.counters).toEqual({ submissionSeq: 6, controlSeq: 1, recordOrdinal: 6 })
+    expect(record.journal).toMatchObject([
+      { kind: 'config.surface', target: 'plant', payload: { kind: 'config.surface', surface: 'offshore-87n' }, outcome: { status: 'accepted' }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} start`, surface: 'main' } },
+      { kind: 'ios.place', target: 'plant', payload: { kind: 'ios.place', startState: '87n-offshore-sar' }, outcome: { status: 'accepted' }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} start`, surface: 'main' } },
+      { kind: 'scenario.step', target: 'scenario', payload: { kind: 'autopilot', hold: true }, outcome: { status: 'accepted' }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} step 1`, surface: 'main' } },
+      { kind: 'scenario.step', target: 'scenario', payload: action, outcome: { status: 'refused', reason }, origin: 'v1-translated', source: { kind: 'scenario', id: `${start} step 2`, surface: 'main' } },
+      { kind: 'ios.flightFreeze', target: 'plant', payload: { kind: 'ios.flightFreeze', on: true }, outcome: { status: 'accepted' }, origin: 'native', source: { kind: 'ui', id: 'flight.runEnded', surface: 'main' } },
+    ].map((entry, i) => ({ ...entry, submissionSeq: i + 1, recordOrdinal: i + 1, frame: 0, phase: 'ACTION', orderInPhase: i })))
+    expect(record.journal).toHaveLength(5)
+    const downloaded = page.waitForEvent('download')
+    await card.getByRole('button', { name: 'Download run report', exact: true }).click()
+    const report = await readFile((await (await downloaded).path())!, 'utf8')
+    const path = test.info().outputPath(`${id}-run.md`)
+    await writeFile(path, report, 'utf8')
+    await test.info().attach(`${id}-run`, { path, contentType: 'text/markdown' })
+    expect(report).toMatch(/^\| 1 \|[^\n]*\| 0 s \| DONE \|/m)
+    expect(report).toMatch(/^\| 2 \|[^\n]*\| 0 s \| ERROR \|/m)
+    expect(report).toContain(reason)
+  }
+  if (popped) { await page.locator('.fmsStationDock > summary').click(); await page.getByRole('button', { name: 'Return all panels', exact: true }).click(); await expect.poll(() => instructor.isClosed()).toBe(true) }
+})
+
+// Published warm GPS1 PRN24 fixture; the logical GPS/FDE owners keep the sky and fault-response science.
+for (const popped of [false, true]) test(`D5 mask satellite and selection producers retain resolved values on instructor ${popped ? 'popout' : 'main'}`, async ({ page }) => {
+  const { instructor, ios } = await openD5Instructor(page, popped, { epoch: new Date('2026-09-27T14:00:00Z'), profile: 'cma9000-later-sbas-heli' })
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const before = await exportFrom(page, ios)
+  expect(before).toMatchObject({ frame: 0, journal: [], control: [] })
+  await ios.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
+  const expected: Record<string, unknown>[] = []
+  const surface = popped ? 'popout' : 'main'
+  for (const choice of ['GPS1', 'OFF', 'AUTO']) {
+    await ios.getByLabel('FMS GPS selection', { exact: true }).selectOption(choice)
+    expected.push({ kind: 'fms.gpsSelect', target: 'fms2', payload: { kind: 'fms.gpsSelect', unit: 2, choice },
+      source: { kind: 'ios', id: 'gps.selection', surface }, outcome: { status: 'accepted' } })
+  }
+  const faults = ios.getByRole('region', { name: 'GPS 1 faults', exact: true })
+  const gps = (id: string, op: unknown) => expected.push({ kind: 'f14.gps', target: 'gps1', payload: { kind: 'f14.gps', receiver: 1, op },
+    source: { kind: 'f14', id: `gps1.${id}`, surface }, outcome: { status: 'accepted' } })
+  const low = faults.getByRole('button', { name: 'Mask low satellites (below 15°)', exact: true })
+  await expect(low).toBeEnabled(); await expect(low).toHaveAttribute('aria-pressed', 'false')
+  await low.click(); gps('maskLow', { op: 'maskLow', on: true })
+  await expect(low).toHaveAttribute('aria-pressed', 'true') // positive low-satellite eligibility, not an assumed empty toggle
+  await low.click(); gps('maskLow', { op: 'maskLow', on: false })
+  await expect(low).toHaveAttribute('aria-pressed', 'false')
+  const prn = faults.getByRole('group', { name: 'GPS 1 mask satellites', exact: true }).getByRole('button', { name: '24', exact: true })
+  await expect(prn).toBeEnabled(); await expect(prn).toHaveAttribute('aria-pressed', 'false')
+  await prn.click(); gps('mask', { op: 'mask', prns: [24] })
+  await expect(prn).toHaveAttribute('aria-pressed', 'true')
+  await prn.click(); gps('mask', { op: 'mask', prns: [] })
+  await expect(prn).toHaveAttribute('aria-pressed', 'false')
+  const satellite = faults.getByLabel('GPS 1 faulty satellite', { exact: true })
+  const inject = faults.getByRole('button', { name: 'Inject', exact: true })
+  const clear = faults.getByRole('button', { name: 'Clear', exact: true })
+  await expect(inject).toBeDisabled(); await expect(clear).toBeDisabled()
+  await expect(satellite.getByRole('option', { name: 'PRN 24', exact: true })).toHaveCount(1)
+  await satellite.selectOption('24') // independently published tracked PRN; never select an observed/model-derived expected id
+  for (const [fault, value] of [['RAMP', 5], ['STEP', 200]] as const) {
+    await faults.getByLabel('GPS 1 range error kind', { exact: true }).selectOption(fault)
+    await faults.getByLabel('GPS 1 range error amount', { exact: true }).fill(String(value))
+    await expect(inject).toBeEnabled(); await inject.click()
+    gps('satelliteFault', { op: 'satelliteFault', prn: 24, fault, value })
+    await expect(clear).toBeEnabled(); await clear.click()
+    gps('satelliteFault', { op: 'clearSatelliteFault' })
+    await expect(clear).toBeDisabled()
+  }
+  await ios.getByRole('tab', { name: 'Conditions', exact: true }).click()
+  await ios.getByRole('checkbox', { name: /^GPS integrity lost \(RAIM\) sensor/ }).check()
+  expected.push({ kind: 'ios.condition', target: 'fms1', payload: { kind: 'ios.condition', unit: 1, condition: 'gpsIntegrity', on: true },
+    source: { kind: 'ios', id: 'conditions.gpsIntegrity', surface }, outcome: { status: 'accepted' } })
+  await ios.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
+  await expect(low).toBeDisabled()
+  await ios.getByRole('tab', { name: 'Conditions', exact: true }).click()
+  await ios.getByRole('checkbox', { name: /^GPS integrity lost \(RAIM\) sensor/ }).uncheck()
+  expected.push({ kind: 'ios.condition', target: 'fms1', payload: { kind: 'ios.condition', unit: 1, condition: 'gpsIntegrity', on: false },
+    source: { kind: 'ios', id: 'conditions.gpsIntegrity', surface }, outcome: { status: 'accepted' } })
+  await ios.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
+  await expect(low).toBeEnabled()
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const after = await exportFrom(page, ios)
+  await retainPublicJson('mask-satellite-public-journals', { before, after })
+  expect(after.frame).toBe(0)
+  expect(after.control).toEqual([])
+  expect(after.liveQueue).toEqual({ v: 1, entries: [] })
+  expect(after.counters).toEqual({ submissionSeq: 14, controlSeq: 1, recordOrdinal: 14 })
+  expect(after.journal).toMatchObject(expected.map((entry, i) => ({ ...entry, submissionSeq: i + 1,
+    recordOrdinal: i + 1, origin: 'native', frame: 0, phase: 'ACTION', orderInPhase: i })))
+  expect(after.journal).toHaveLength(13)
   if (popped) { await page.locator('.fmsStationDock > summary').click(); await page.getByRole('button', { name: 'Return all panels', exact: true }).click(); await expect.poll(() => instructor.isClosed()).toBe(true) }
 })
 
