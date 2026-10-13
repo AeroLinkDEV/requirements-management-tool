@@ -231,9 +231,10 @@ for (const popped of [false, true]) test(`D5 GPS parameter branches retain liter
   await numeric.getByLabel('Override 130', { exact: true }).selectOption('BIAS')
   await numeric.getByLabel('Override 130 amount', { exact: true }).fill('1000000001')
   await numeric.getByRole('button', { name: 'Set', exact: true }).click()
-  await expect(page.getByTestId('fms-input-outcome')).toHaveText('Last executed input: refused: the receiver refused the operation.')
   ops.push({ id: 'override 130', op: { op: 'override', label: '130', kind: 'BIAS', amount: 1000000001 }, outcome: { status: 'refused', reason: 'the receiver refused the operation' } })
   await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  // The execution-outcome display belongs to the actual instructor's Scenarios panel (main or popout).
+  await expect(ios.getByTestId('fms-input-outcome')).toHaveText('Last executed input: refused: the receiver refused the operation.')
   const record = await exportFrom(page, ios)
   expect(record.journal.map(entry => [entry.kind, entry.target, entry.source, entry.payload, entry.outcome])).toEqual(ops.map(({ id, op, outcome }) => [
     'f14.gps', 'gps2', { kind: 'f14', id: `gps2.${id}`, surface: popped ? 'popout' : 'main' }, { kind: 'f14.gps', receiver: 2, op }, outcome ?? { status: 'accepted' },
