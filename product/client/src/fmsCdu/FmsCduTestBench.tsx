@@ -105,7 +105,7 @@ const achievedRateStore = () => {
 // Rate expiry can publish without a model frame; it need only redraw this output, not the whole cockpit.
 const AchievedSpeed = memo(function AchievedSpeed({ playing, store }: { playing: boolean; store: ReturnType<typeof achievedRateStore> }) {
   const value = useSyncExternalStore(store.subscribe, store.snapshot);
-  return <output aria-label="Achieved speed" aria-live="off">{playing ? value === null ? "Achieved â€” (measuring)" : `Achieved Ã—${value.toFixed(1)}` : "Achieved â€” (paused)"}</output>;
+  return <output aria-label="Achieved speed" aria-live="off">{playing ? value === null ? "Achieved — (measuring)" : `Achieved ×${value.toFixed(1)}` : "Achieved — (paused)"}</output>;
 });
 
 // The out-the-window view: whether it is shown, and how, is remembered. It starts hidden because showing it loads a
@@ -200,10 +200,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const pendingRecording = useRef(false);
   // A demonstration start state (kbtvDemo.ts) also starts on the next session: a restarted simulation, then set up.
   const pendingStart = useRef<StartStateId | null>(null);
+  // Session construction reads the current play state; play/pause never reconstructs the composition.
+  const [playing, setPlaying] = useState(false);
   // Which window each surface is in, for the source of what it submits (D5 7.1: main or a pop-out).
   const surfaces = useRef({ cockpit: false, instructor: false });
   surfaces.current = { cockpit: cockpitAway, instructor: instructorAway };
-  const { system, kernel, port, runner, recorder, started, listenGps } = useMemo(() => {
+  const { system, kernel, port, runner, recorder, started, listenGps, gpsView } = useMemo(() => {
     // Simulated time is the kernel's (kernel/time.ts): it starts at the wall clock, or at a scenario's planned start
     // (which fixes the GPS sky), and moves only as the kernel advances.
     const utc0 = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
@@ -240,7 +242,11 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     pendingStart.current = null;
     // From here the bench holds only read-only views of the units: it changes them by submitting to the kernel.
     const view: DualFmsView = system;
-    return { system: view, kernel, port, runner: runner as RunView | null, recorder, started, listenGps: (listener: typeof gps.listener) => { gps.listener = listener; } };
+    const runView: RunView | null = runner;
+    return { system: view, kernel, port, runner: runView, recorder, started,
+      listenGps: (listener: typeof gps.listener) => { gps.listener = listener; },
+      gpsView: (side: FmsSide) => fmsGpsView(system.computers[side - 1], fms),
+    };
   }, [session, userName]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Submits from a surface: the source is completed with the window the control is in. */
   const submitFrom = (surface: "cockpit" | "instructor"): Submit => (action, source, then) =>
@@ -263,7 +269,6 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   }, [listenGps, recordTo]);
   const pausedFor = useRef<RunView | null>(null);
   const stopPacing = useRef<(() => void) | null>(null);
-  const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   // All selected rates retain the 4 Hz presentation target; model-notifying crew actions flush immediately.
   const presentation = useMemo(() => new BenchPresentation(system.computers, window, 250), [system, playing, rate]);
@@ -324,6 +329,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     if (!kernel.faulted) setPacingFault(null);
     if (runner?.finished && pausedFor.current !== runner) {
       pausedFor.current = runner;
+      if (!kernel.flightFreeze) port.submit({ kind: "ios.flightFreeze", on: true }, { kind: "ui", id: "flight.runEnded", surface: "main" });
       setPlaying(false);
       presentation.flush();
       if (playing) return;
@@ -331,7 +337,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     if (!playing) {
       const timer = window.setInterval(() => {
         if ((!runner || runner.finished) && !kernel.faulted) {
-          try { presentation.frame(() => kernel.advance(1, { flightFreeze: true })); }
+          try { presentation.frame(() => kernel.advance(1)); }
           catch (error) {
             window.clearInterval(timer);
             presentation.flush(); setPacingFault(error instanceof Error ? error.message : String(error)); setPlaying(false);
@@ -345,14 +351,18 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
       haltOnRunEnd: runner !== null && !runner.finished,
       frame: presentation.frame,
       onProgress: progress => { achieved.publish(progress.achievedRate); },
-      onStopped: () => { pausedFor.current = runner; presentation.flush(); setPlaying(false); },
+      onStopped: () => {
+        pausedFor.current = runner;
+        port.submit({ kind: "ios.flightFreeze", on: true }, { kind: "ui", id: "flight.runEnded", surface: "main" });
+        presentation.flush(); setPlaying(false);
+      },
       onFault: error => {
         presentation.flush(); setPacingFault(error instanceof Error ? error.message : String(error)); setPlaying(false);
       },
     });
     stopPacing.current = stop;
     return () => { stop(); if (stopPacing.current === stop) stopPacing.current = null; };
-  }, [kernel, runner, playing, rate, presentation, achieved]);
+  }, [kernel, port, runner, playing, rate, presentation, achieved]);
   useEffect(() => {
     const visible = () => { if (document.visibilityState === "visible") presentation.flush(); };
     document.addEventListener("visibilitychange", visible);
@@ -439,6 +449,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const stopScenario = () => {
     if (!runner) return;
     submitIos({ kind: "scenario.stop", runId: runner.runId }, { kind: "ui", id: "scenarios.stop" });
+    if (!kernel.flightFreeze) submitIos({ kind: "ios.flightFreeze", on: true }, { kind: "ui", id: "flight.runEnded" });
     pausedFor.current = runner;
     stopPacing.current?.();
     setPlaying(false);
@@ -466,7 +477,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const guidance = sim.guidance;
   const bus = fmsOutputs(guidanceBackend, sim);
   const air = aircraftData(guidanceBackend, sim);
-  const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "âˆ’"}${Math.abs(value).toFixed(digits)}`;
+  const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
   const next = guidanceBackend.activeRoute.legs[0];
   // The executed approach's chart notes (C.10): restrictions, speed notes and minima the coded data does not carry,
@@ -500,7 +511,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         <label className="fmsBenchVariant">
           <span>Hardware variation</span>
           <select value={variant.id} onChange={event => chooseVariant(event.target.value)}>
-            {CDU_VARIANTS.map(option => <option key={option.id} value={option.id}>{option.id} â€” {option.label}</option>)}
+            {CDU_VARIANTS.map(option => <option key={option.id} value={option.id}>{option.id} — {option.label}</option>)}
           </select>
         </label>
   </>);
@@ -570,7 +581,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           <button type="button" onClick={() => setFocused(value => !value)}>{focused ? "Show navigation" : "Focus bench"}</button>
           <FmsStationDock arrangement={arrangement} onArrangement={chooseArrangement} windows={station.windows} opening={station.opening}
             errors={station.errors} onOpen={openStationSurface} onReturn={station.returnSurface} onReturnAll={station.returnAll} />
-          <span className="fmsBenchHint">Scripted simulation Â· EFIS / AFCS: FMS {system.guidanceSide} Â· Inspected: CDU {cduSide}</span>
+          <span className="fmsBenchHint">Scripted simulation · EFIS / AFCS: FMS {system.guidanceSide} · Inspected: CDU {cduSide}</span>
           {recording ? <strong className="fmsBenchHint" role="status">Recording CDU 1 only; CDU 2 input is not recorded.</strong> : null}
         </> : null}
       </div>
@@ -610,7 +621,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             data-active={cduSide === side} onFocusCapture={() => { if (!recording && (!runner || runner.finished)) setCduSide(side); }}>
             <div className="fmsBenchCduLabel"><strong>FMS {side} / CDU {side}</strong><span>{cduSide === side ? "Inspected" : ""}</span></div>
             {layout ? <FmsCduPanel presentation={presentation} backend={cdus[side - 1]} variant={variant} layout={layout} lighting={lighting}
-              onKey={onCockpitKeys[side - 1]} /> : <p role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU modelâ€¦"}</p>}
+              onKey={onCockpitKeys[side - 1]} /> : <p role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
           </div>)}
         </>) : (
         <div className={`fmsBenchPanel mode-${lighting.mode}`}>
@@ -625,7 +636,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
 
           {layout
             ? <FmsCduPanel presentation={presentation} backend={cdus[cduSide - 1]} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
-            : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU modelâ€¦"}</p>}
+            : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
           </div>
           {showPeer && layout ? <div data-testid="fms-cdu-peer" aria-label={`CDU ${3 - cduSide}`}>
             <h2>FMS {3 - cduSide} / CDU {3 - cduSide}</h2>
@@ -692,7 +703,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <label className="fmsBenchRate">
               <span>Rate</span>
               <select value={rate} onChange={event => chooseRate(Number(event.target.value))} aria-label="Simulation rate">
-                {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}Ã—</option>)}
+                {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}×</option>)}
               </select>
             </label>
             {!cockpitView ? (<>
@@ -773,15 +784,15 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           <dl className="fmsBenchGuidance" aria-label="Guidance">
             {guidanceBackend.pinsContinuation ? <><dt>PinS continuation</dt><dd>
               {guidanceBackend.pinsContinuation.available ? guidanceBackend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? "Proceed VFR" : "Proceed visually" : "Chart continuation not verified"}
-              {guidanceBackend.pinsContinuation.active ? " â€” crew flying the visual segment" : ""}
+              {guidanceBackend.pinsContinuation.active ? " — crew flying the visual segment" : ""}
             </dd></> : null}
             <dt>Mode</dt><dd>{guidance.mode}</dd>
             <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : guidanceBackend.angleText(guidance.desiredTrack)}</dd>
             <dt>TRK</dt><dd>{guidanceBackend.angleText(guidanceBackend.track)}</dd>
             <dt>XTK</dt><dd>{guidance.crossTrack >= 0 ? "R" : "L"}{Math.abs(guidance.crossTrack).toFixed(2)} NM</dd>
-            <dt>Bank</dt><dd>{guidance.mode === "HDG" ? "â€”" : `${sim.bankAngle >= 0 ? "R" : "L"}${Math.abs(sim.bankAngle).toFixed(0)}Â°`}</dd>
+            <dt>Bank</dt><dd>{guidance.mode === "HDG" ? "—" : `${sim.bankAngle >= 0 ? "R" : "L"}${Math.abs(sim.bankAngle).toFixed(0)}°`}</dd>
             <dt>GS</dt><dd>{Math.round(guidanceBackend.groundSpeed)} kt</dd>
-            <dt>ALT</dt><dd>{Math.round(guidanceBackend.altitude)} ft â†’ {Math.round(guidance.targetAltitude)}</dd>
+            <dt>ALT</dt><dd>{Math.round(guidanceBackend.altitude)} ft → {Math.round(guidance.targetAltitude)}</dd>
             <dt>VS</dt><dd>{signed(Math.round(guidanceBackend.verticalSpeed / 10) * 10)} fpm</dd>
           </dl>
           {guidanceBackend.pinsContinuation?.available && !guidanceBackend.pinsContinuation.active ? <fieldset>
@@ -806,7 +817,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         hidden={cockpitView && !iosVisible} onKeyDown={event => {
           if (cockpitView && (!cockpitAway || instructorAway) && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeIos(); }
         }}>
-        {cockpitView ? <div className="fmsBenchIosHead"><strong>Instructor station Â· CDU {cduSide}</strong>
+        {cockpitView ? <div className="fmsBenchIosHead"><strong>Instructor station · CDU {cduSide}</strong>
           {!cockpitAway && !instructorAway ? <button type="button" aria-pressed={iosExpanded} onClick={() => setIosExpanded(value => !value)}>{iosExpanded ? "Compact instructor" : "More instructor room"}</button> : null}
           {!cockpitAway || instructorAway ? <button type="button" onClick={closeIos}>Close instructor station</button> : null}
           {iosReservesOutside && outside.shown ? <span className="fmsBenchHint fmsBenchOtwCoveredHint">At this width the instructor drawer covers part or all of the outside view. Close the drawer to see the whole view.</span> : null}
@@ -913,7 +924,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           </section>
         </>)} />
         <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps"
-          shown={tab === "gps" && iosVisible} render={() => tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} side={cduSide} submit={submitIos} /> : null} />
+          shown={tab === "gps" && iosVisible} render={() => tab === "gps" ? <FmsGpsTab view={gpsView(cduSide)} fms={backend} side={cduSide} submit={submitIos} /> : null} />
         <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" shown={tab === "dual" && iosVisible} render={() => (
           <section className="fmsBenchCard" aria-label="Dual computers and radio devices">
             <h2>Dual FMS and civil RMS</h2>
@@ -931,7 +942,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               <option value="normal">Normal</option><option value="failed">No feedback</option>
             </select></label>
             <RejectNextTune submit={submitIos} />
-            <ul aria-label="RMS tuning feedback">{system.rms.requests.slice(0, 6).map(request => <li key={request.id}>FMS {request.side}: {request.device.toUpperCase()} {request.value} â€” {request.status}</li>)}</ul>
+            <ul aria-label="RMS tuning feedback">{system.rms.requests.slice(0, 6).map(request => <li key={request.id}>FMS {request.side}: {request.device.toUpperCase()} {request.value} — {request.status}</li>)}</ul>
           </section>
         )} />
         <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" shown={tab === "navdata" && iosVisible} render={() => (<>
@@ -1132,14 +1143,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </label>
             <p className="fmsBenchReadout">
               Display <strong data-testid="fms-luminance">{formatLuminance(displayLuminance(backend.brightness(), lighting))} fL</strong>
-              {lighting.mode === "nvg" ? " (NVG range 0.1â€“3 fL)" : ""}. BRT on the panel adjusts it within the range.
+              {lighting.mode === "nvg" ? " (NVG range 0.1–3 fL)" : ""}. BRT on the panel adjusts it within the range.
             </p>
           </section>
           <section className="fmsBenchCard">
             <h2>Keyboard</h2>
             <dl className="fmsBenchKeys">
-              <dt>Aâ€“Z, 0â€“9</dt><dd>Type into the scratchpad</dd>
-              <dt>F1â€“F6</dt><dd>Left line select keys (Shift for right)</dd>
+              <dt>A–Z, 0–9</dt><dd>Type into the scratchpad</dd>
+              <dt>F1–F6</dt><dd>Left line select keys (Shift for right)</dd>
               <dt>Backspace</dt><dd>CLR (hold for one second to clear all)</dd>
               <dt>Enter</dt><dd>EXEC</dd>
               <dt>PgUp / PgDn</dt><dd>PREV / NEXT</dd>

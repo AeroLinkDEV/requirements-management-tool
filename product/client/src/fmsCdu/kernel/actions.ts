@@ -89,6 +89,7 @@ export type KernelAction =
   | { kind: "config.userdb"; unit: FmsSide; text: string }
   | { kind: "config.magvar"; unit: FmsSide; op: "load"; package: unknown }
   | { kind: "config.magvar"; unit: FmsSide; op: "restoreWmm2025" }
+  | { kind: "config.surface"; surface: string }
   | { kind: "scenario.stop"; runId: string };
 
 export type ActionKind = KernelAction["kind"];
@@ -101,6 +102,8 @@ export type KernelUnits = {
   readonly computers: readonly ScriptedFms[];
   readonly flights: readonly FlightSimulator[];
   readonly system: DualFmsSystem | null;
+  /** Existing start-state observation, without advancing the plant or clock. */
+  readonly settleStart: () => void;
 };
 
 /** What executing an action did: its outcome, the payload as resolved, and the unit it acted on. */
@@ -254,6 +257,8 @@ export function executeAction(context: ActionContext, action: KernelAction): Exe
       const loaded = fms.loadMagvar(action.op === "restoreWmm2025" ? WMM2025_DATABASE : action.package);
       return { outcome: loaded ? accepted({ valid: fms.magvar.valid, name: fms.magvar.database.name }) : refused("unsupported model package"), payload: action, target: fmsTarget(action.unit) };
     }
+    case "config.surface":
+      return { outcome: units.computers[0].declareSurface(action.surface) ? accepted() : refused("unknown surface"), payload: action, target: "plant" };
     case "scenario.stop": {
       const runner = context.runner;
       if (!runner || runner.runId !== action.runId) return { outcome: refused("no such run"), payload: action, target: "scenario" };
@@ -313,5 +318,6 @@ function place(units: KernelUnits, action: Extract<KernelAction, { kind: "ios.pl
     if (system) { fms.dualOperation?.settingsChanged(); fms.dualOperation?.finishEdit(true); system.computers[1].observeAircraft(fms); }
     return outcome;
   });
+  if ("ready" in result) units.settleStart();
   return { outcome: "refused" in result ? refused(result.refused) : accepted(), payload: action, target: "plant" };
 }

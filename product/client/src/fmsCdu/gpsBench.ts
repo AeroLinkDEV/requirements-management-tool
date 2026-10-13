@@ -4,7 +4,7 @@ import { busFix, type GpsChoice } from "./gpsSensors";
 import { stimulusFor, type GpsStimulusView } from "./gpsStimulus";
 export { lowSatellites } from "./gpsStimulus";
 import type { FlightPhase } from "./navigation";
-import type { FmsView, ScriptedFms } from "./scriptedFms";
+import type { ScriptedFms } from "./scriptedFms";
 
 /**
  * The bench side of the CMA-5024 simulation. The FMS owns GPS1 and GPS2 and feeds them from the aircraft's true state
@@ -24,10 +24,10 @@ export type GpsView = {
   stimulus: GpsStimulusView;
 };
 
-export function fmsGpsView(fms: FmsView, sensorOwner: FmsView = fms): GpsView {
+export function fmsGpsView(fms: ScriptedFms, sensorOwner: ScriptedFms = fms): GpsView {
   // The condition replaces the bench's masking and clears it (ScriptedFms.setCondition, GpsStimulus.apply): drawing
   // this view never changes the record (#1518). The record is the sensor owner's, created with its first use.
-  const stimulus: GpsStimulusView = stimulusFor(sensorOwner as ScriptedFms), integrityHeld = sensorOwner.hasCondition("gpsIntegrity");
+  const stimulus: GpsStimulusView = stimulusFor(sensorOwner), integrityHeld = sensorOwner.hasCondition("gpsIntegrity");
   return {
     receivers: fms.gps,
     difference: () => {

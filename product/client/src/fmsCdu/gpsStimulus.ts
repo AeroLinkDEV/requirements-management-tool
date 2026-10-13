@@ -1,6 +1,6 @@
 import { NUMBER_LABELS, STATUS_FIELDS, validPatch, type GpsBus, type GpsLabel, type GpsReceiver, type NumberLabel, type Override, type Ssm, type StatusLabel, type StatusPatch } from "./gps";
 import type { ScriptedFms } from "./scriptedFms";
-import type { MethodRoles, ViewOf } from "./computation";
+import type { MethodRoles, ReadView, ViewOf } from "./computation";
 
 /**
  * What the bench has injected into each of the FMS's receivers (faults, word overrides, status patches), held for the
@@ -93,7 +93,7 @@ export function gpsOpProblem(value: unknown): string | null {
 }
 
 /** The operation in words, with its fields and values, for step lists, the run report and the test procedure. */
-export function describeGpsOp(o: GpsOp): string {
+export function describeGpsOp(o: ReadView<GpsOp>): string {
   switch (o.op) {
     case "maskLow": return o.on ? "mask the satellites below 15°" : "remove the low-satellite mask";
     case "mask": return o.prns.length ? `mask PRN ${o.prns.join(", ")}` : "unmask the PRNs masked by hand";
@@ -135,7 +135,7 @@ const initial = (): ReceiverStimulus => ({
  * Every public method of GpsStimulus and what it is (computation.ts MethodRole; #1517 I1b's structural guard). The GPS
  * sensors tab reads the record through GpsStimulusView and changes it only by submitting `f14.gps` to the kernel.
  */
-const GPS_STIMULUS_ROLES = { apply: "self-computing", clearMasking: "kernel-internal", state: "query" } as const satisfies MethodRoles<GpsStimulus>;
+const GPS_STIMULUS_ROLES = { apply: "self-computing", clearMasking: "kernel-internal", state: "query", listener: "kernel-internal" } as const satisfies MethodRoles<GpsStimulus>;
 export type GpsStimulusView = ViewOf<GpsStimulus, typeof GPS_STIMULUS_ROLES>;
 
 export class GpsStimulus {

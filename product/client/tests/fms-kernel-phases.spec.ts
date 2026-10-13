@@ -118,6 +118,11 @@ test('a run that ends in an ACTION halts the call there, with no INTEGRATE after
   expect(integrations).toHaveLength(4)
   expect(kernel.now).toBe(F(4))
   expect(kernel.unitClockMs).toBe(START + 1000)
+  kernel.submit({ kind: 'ios.alert', unit: 1, text: 'AFTER END' }, { kind: 'ios', id: 'terminal-input', surface: 'main' })
+  expect(kernel.journal.at(-1)).toMatchObject({ frame: 4, kind: 'ios.alert', outcome: { status: 'accepted' } })
+  expect(runner.endedAfter).toBe(1)
+  expect(integrations).toHaveLength(4)
+  expect(kernel.unitClockMs).toBe(START + 1000)
   expect(kernel.advance(2)).toBe(2)
   expect(integrations).toHaveLength(6)
 })
@@ -149,8 +154,10 @@ test('an INTEGRATE that throws leaves the kernel faulted at the next instant, it
     const atFault = flown(composition)
     if (input) {
       // An input executes in F_3's open ACTION: it causes no poll and moves nothing by itself.
-      fms.raiseAlert('INPUT')
-      sim.selectHeading((fms.track + 90) % 360)
+      kernel.submit({ kind: 'ios.alert', unit: 1, text: 'INPUT' }, { kind: 'ios', id: 'fault-input', surface: 'main' })
+      kernel.submit({ kind: 'afcs.select', selection: { select: 'heading', heading: (fms.track + 90) % 360 } }, { kind: 'ui', id: 'fault-heading', surface: 'main' })
+      expect(kernel.journal.filter(record => record.origin === 'native').map(record => [record.frame, record.kind]))
+        .toEqual([[3, 'ios.alert'], [3, 'afcs.select']])
       expect(runner.results[0]).toEqual({ status: 'pending' })
       expect(flown(composition)).toEqual(atFault)
     }

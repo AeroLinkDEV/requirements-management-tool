@@ -16,12 +16,19 @@ test('bench initializes and both real CDU panels submit held keys to the exporte
   await page.getByRole('button', { name: 'Show peer CDU', exact: true }).click()
   const one = page.getByTestId('fms-cdu-inspected')
   const two = page.getByTestId('fms-cdu-peer')
-  await one.locator('[data-key="FPLN"]').click()
-  await two.locator('[data-key="FPLN"]').click()
+  await one.locator('[data-key="RTE"]').click()
+  await two.locator('[data-key="RTE"]').click()
   const clr = two.locator('[data-key="CLR"]')
-  await clr.dispatchEvent('pointerdown', { pointerId: 1, button: 0, pointerType: 'mouse' })
+  const box = (await clr.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
   await page.clock.runFor(1000)
-  await clr.dispatchEvent('pointerup', { pointerId: 1, button: 0, pointerType: 'mouse' })
+  await page.mouse.up()
+  // Play/pause must preserve the same composition and journal; an initializer dependency on playing loses these keys.
+  await page.getByRole('button', { name: 'Fly', exact: true }).click()
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  // A refused FMS go-around remains a real AFCS selection and its outcome is read from the exported event journal.
+  await page.getByRole('button', { name: 'TOGA', exact: true }).click()
   const downloaded = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Export journal', exact: true }).click()
   const download = await downloaded
@@ -29,9 +36,16 @@ test('bench initializes and both real CDU panels submit held keys to the exporte
   const keys = record.journal.filter((entry: { kind: string }) => entry.kind === 'cdu.key')
   expect(keys.map((entry: { submissionSeq: number; payload: unknown; target: string; source: unknown; outcome: unknown }) =>
     [entry.submissionSeq, entry.payload, entry.target, entry.source, entry.outcome])).toEqual([
-    [1, { kind: 'cdu.key', side: 1, fn: 'FPLN', held: false }, 'fms1', { kind: 'cdu', id: 'CDU 1', surface: 'main', side: 1 }, { status: 'accepted' }],
-    [2, { kind: 'cdu.key', side: 2, fn: 'FPLN', held: false }, 'fms2', { kind: 'cdu', id: 'CDU 2', surface: 'main', side: 2 }, { status: 'accepted' }],
+    [1, { kind: 'cdu.key', side: 1, fn: 'RTE', held: false }, 'fms1', { kind: 'cdu', id: 'CDU 1', surface: 'main', side: 1 }, { status: 'accepted' }],
+    [2, { kind: 'cdu.key', side: 2, fn: 'RTE', held: false }, 'fms2', { kind: 'cdu', id: 'CDU 2', surface: 'main', side: 2 }, { status: 'accepted' }],
     [3, { kind: 'cdu.key', side: 2, fn: 'CLR', held: true }, 'fms2', { kind: 'cdu', id: 'CDU 2', surface: 'main', side: 2 }, { status: 'accepted' }],
   ])
+  expect(record.journal.filter((entry: { kind: string }) => entry.kind === 'ios.flightFreeze').map((entry: { payload: unknown }) => entry.payload)).toEqual([
+    { kind: 'ios.flightFreeze', on: false }, { kind: 'ios.flightFreeze', on: true },
+  ])
+  expect(record.journal.at(-1)).toMatchObject({ submissionSeq: 6, kind: 'afcs.select', target: 'afcs',
+    payload: { kind: 'afcs.select', selection: { select: 'toga' } },
+    outcome: { status: 'refused', reason: 'the FMS refused the missed approach: none ahead, or it has failed' },
+  })
   expect(errors).toEqual([])
 })

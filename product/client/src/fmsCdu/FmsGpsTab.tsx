@@ -1,3 +1,4 @@
+import type { ReadView } from "./computation";
 import { useState } from "react";
 import { STATUS_FIELDS, type FieldType, type GpsBus, type GpsLabel, type GpsReceiverView, type NumberLabel, type Override, type SatelliteStatus, type Ssm, type StatusLabel, type Word } from "./gps";
 import { MONITOR_LABELS, alertLimits, modeLabel, type GpsView } from "./gpsBench";
@@ -96,7 +97,7 @@ function RoutingStrip({ view, fms, side, submit }: { view: GpsView; fms: FmsView
   );
 }
 
-type BenchFaults = ReceiverStimulus;
+type BenchFaults = ReadView<ReceiverStimulus>;
 
 function ReceiverColumn({ name, rx, view, index, fms, submit }: { name: string; rx: GpsReceiverView; view: GpsView; index: 0 | 1; fms: FmsView; submit: Submit }) {
   // Each change is one operation on this receiver, as the sensor owner's stimulus record applies it.
@@ -120,7 +121,7 @@ const MODE_TONE: Record<string, string> = {
   SBAS_PA: "ok", SBAS_NAV: "ok", NAV: "ok", ALT_AIDING: "warn", ACQUISITION: "warn", INITIALIZATION: "idle", SELF_TEST: "idle", FAULT: "fail",
 };
 
-function ReceiverCard({ name, raw, transmitting, faults, phase, inUse }: { name: string; raw: GpsBus; transmitting: boolean; faults: BenchFaults; phase: FmsView["flightPhase"]; inUse: boolean }) {
+function ReceiverCard({ name, raw, transmitting, faults, phase, inUse }: { name: string; raw: ReadView<GpsBus>; transmitting: boolean; faults: BenchFaults; phase: FmsView["flightPhase"]; inUse: boolean }) {
   const status = raw["273"].value!;
   const sats = raw["060"].map(word => word.value!);
   const sbas = raw["305"].value!;
@@ -183,7 +184,7 @@ function faultChips(faults: BenchFaults) {
 }
 
 /** A polar sky plot: north up, the horizon outside, rings at 30° and 60°, the zenith at the centre. */
-function SkyPlot({ name, sats }: { name: string; sats: SatelliteStatus[] }) {
+function SkyPlot({ name, sats }: { name: string; sats: readonly SatelliteStatus[] }) {
   const c = 100, r = 88;
   const at = (s: SatelliteStatus) => {
     const radius = r * (1 - Math.max(0, s.elevation) / 90), az = (s.azimuth * Math.PI) / 180;
@@ -209,7 +210,7 @@ function SkyPlot({ name, sats }: { name: string; sats: SatelliteStatus[] }) {
   );
 }
 
-function Cn0Bars({ sats }: { sats: SatelliteStatus[] }) {
+function Cn0Bars({ sats }: { sats: readonly SatelliteStatus[] }) {
   return (
     <ul className="fmsGpsCn0" aria-label="Signal strength, dB-Hz">
       {sats.length === 0 ? <li className="fmsBenchHint">No satellites tracked.</li> : sats.map(s => (
@@ -247,7 +248,7 @@ type Apply = (op: GpsOp | GpsToggle, control: string, then?: (applied: boolean) 
 
 /** The fault controls of one receiver: each changes only its own stimulus, in the bench session's record. */
 function FaultControls({ name, raw, faults, apply, held }: {
-  name: string; raw: GpsBus; faults: BenchFaults; apply: Apply; held: boolean;
+  name: string; raw: ReadView<GpsBus>; faults: BenchFaults; apply: Apply; held: boolean;
 }) {
   const gps = raw["060"].map(word => word.value!).filter(s => !s.sbas);
   const [prn, setPrn] = useState<number | "">("");

@@ -107,8 +107,8 @@ export class MagvarModel {
   }
   get database(): Readonly<MagvarDatabase> { return { ...this.table }; }
   get valid() { return this.checked; }
-  outOfDate(date: Date) { return date.getTime() > Date.UTC(this.table.epoch + 5, 0, 1); }
-  withinEpoch(date: Date) { return date.getTime() >= Date.UTC(this.table.epoch, 0, 1) && !this.outOfDate(date); }
+  outOfDate(date: Pick<Date, "getTime">) { return date.getTime() > Date.UTC(this.table.epoch + 5, 0, 1); }
+  withinEpoch(date: Pick<Date, "getTime">) { return date.getTime() >= Date.UTC(this.table.epoch, 0, 1) && !this.outOfDate(date); }
   field(position: LatLon, heightAboveEllipsoidKm: number, date: Date) {
     if (!this.checked) return null;
     const key = `${position.lat}/${position.lon}/${heightAboveEllipsoidKm}/${date.getTime()}`;

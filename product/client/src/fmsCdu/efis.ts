@@ -1,3 +1,4 @@
+import type { ReadView } from "./computation";
 import type { AxisModeLists, FlightView, VerticalMode } from "./flight";
 import { formatSetting } from "./baro";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
@@ -194,8 +195,8 @@ export type AircraftData = {
   helicopter: {
     axes: { collective: string; pitch: string; roll: string };
     /** Per axis, the modes armed (white beside the engaged mode) and those a failure just took away (amber) (B3.4, B4.1). */
-    armed: AxisModeLists;
-    degraded: AxisModeLists;
+    armed: ReadView<AxisModeLists>;
+    degraded: ReadView<AxisModeLists>;
     /** In the low-speed regime (below the coordinated-flight speed, with its hysteresis): the ND shows the ground velocity. */
     lowSpeed: boolean;
     radioHeight: { value: number | null; status: "NORMAL" | "NCD" | "FAIL" };
@@ -229,7 +230,7 @@ export function cdiFullScaleNm(phase: keyof typeof LATERAL_FULL_SCALE, performan
  * line never bridges geometry the plan does not have. The active marker is on the active leg's fix only (the first leg
  * of the route), so an unresolved active fix leaves nothing marked active.
  */
-function routePoints(fms: FmsView, route: Route): RoutePoint[] {
+function routePoints(fms: FmsView, route: ReadView<Route>): RoutePoint[] {
   const points: RoutePoint[] = [];
   for (const [index, leg] of route.legs.entries()) {
     if (leg.kind === "disco") break;

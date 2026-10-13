@@ -47,9 +47,9 @@ export function singleComposition(utc0Ms: number, options: FmsOptions = {}) {
   const clock = new LegacyUnitClock(utc0Ms);
   const fms = new ScriptedFms(clock.now, options);
   const sim = new FlightSimulator(fms);
-  const plant: LegacyPlant = { clock, units: { computers: [fms], flights: [sim], system: null }, integrate: () => { clock.advanceFrame(); sim.step(FRAME_SECONDS); } };
   // Start-state placement is ACTION work: publish its observation before t0 checks without a plant/time step.
   const settleStart = () => sim.observe(0);
+  const plant: LegacyPlant = { clock, units: { computers: [fms], flights: [sim], system: null, settleStart }, integrate: () => { clock.advanceFrame(); sim.step(FRAME_SECONDS); } };
   return { clock, fms, sim, plant, settleStart };
 }
 
@@ -57,12 +57,12 @@ export function singleComposition(utc0Ms: number, options: FmsOptions = {}) {
 export function dualComposition(utc0Ms: number, options: DualOptions = {}) {
   const clock = new LegacyUnitClock(utc0Ms);
   const system = new DualFmsSystem(clock.now, options);
+  const settleStart = () => system.settleStart();
   const plant: LegacyPlant = {
     clock,
-    units: { computers: system.computers, flights: system.flights, system },
+    units: { computers: system.computers, flights: system.flights, system, settleStart },
     integrate: () => { clock.advanceFrame(); system.step(FRAME_SECONDS); },
     hold: () => { clock.advanceFrame(); system.tick(); },
   };
-  const settleStart = () => system.settleStart();
   return { clock, system, plant, settleStart };
 }

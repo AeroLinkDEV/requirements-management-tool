@@ -1,3 +1,4 @@
+import type { ReadView } from "./computation";
 import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, errorProblem, settingProblem } from "./baro";
 import { FlightSimulator } from "./flight";
@@ -164,7 +165,7 @@ export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed 
  */
 export type RunContext = { variant: string; cycle: string; data?: string; profile?: string; surface?: string };
 
-const isExpectation = (action: Action) => action.kind.startsWith("expect");
+const isExpectation = (action: ReadView<Action>) => action.kind.startsWith("expect");
 
 /**
  * A v1 step or check as the runner executed it in the ACTION phase (#1502 D5 7.5), for the kernel to journal with
@@ -172,7 +173,7 @@ const isExpectation = (action: Action) => action.kind.startsWith("expect");
  * takes them after each poll, in the order they ran, and allocates their submissionSeq then.
  */
 export type Translation = {
-  readonly kind: "ios.place" | "scenario.step" | "scenario.check";
+  readonly kind: "config.surface" | "ios.place" | "scenario.step" | "scenario.check";
   /** The step (1-based) for a step or check; absent for the start state. */
   readonly step?: number;
   readonly payload: unknown;
@@ -190,7 +191,7 @@ export const linePattern = (text: string) =>
   `^\\s*${text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ +/g, "\\s+")}\\s*$`;
 
 /** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
-export function describeStep(step: ScenarioStep, index = 0): string {
+export function describeStep(step: ReadView<ScenarioStep>, index = 0): string {
   const w = step.when;
   const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "below" ? `At or below ${w.feet} ft` : w.kind === "above" ? `When the altimeter reads ${w.feet} ft or more` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : w.kind === "fafDistance" ? `Within ${w.nm} NM along the predicted path to the FAF` : `When ${w.waypoint} is the active waypoint`;
   const a = step.action;
@@ -472,7 +473,10 @@ export class ScenarioRunner {
     const problems = scenarioProblems(scenario);
     // The surface is declared first; the start state sets up the fresh simulation before the first step; the context
     // is read after both.
-    if (!problems.length && this.scenario.surface) fms.declareSurface(this.scenario.surface);
+    if (!problems.length && this.scenario.surface) {
+      fms.declareSurface(this.scenario.surface);
+      this.translations.push({ kind: "config.surface", payload: { kind: "config.surface", surface: this.scenario.surface }, outcome: { status: "accepted" }, target: "plant" });
+    }
     if (!problems.length && this.scenario.start) {
       const start = this.scenario.start;
       const set = fms.compute(() => START_STATES[start].setUp(fms, sim ?? undefined));
@@ -772,7 +776,7 @@ export function runHeadless(scenario: Scenario, start = scenarioStart(scenario) 
 // ------------------------------------------------------------------ outputs
 
 /** The scenario as test procedure text, in the fields of an AeroLink test procedure proposal. */
-export function procedureText(scenario: Scenario) {
+export function procedureText(scenario: ReadView<Scenario>) {
   const checks = scenario.steps.filter(step => isExpectation(step.action));
   return {
     title: scenario.title,
@@ -793,7 +797,7 @@ export function procedureText(scenario: Scenario) {
   };
 }
 
-const usesGps = (scenario: Scenario) => scenario.steps.some(step => step.action.kind === "gps");
+const usesGps = (scenario: ReadView<Scenario>) => scenario.steps.some(step => step.action.kind === "gps");
 
 const OUTCOME_TEXT: Record<RunOutcome, string> = {
   running: "RUNNING",
@@ -807,7 +811,7 @@ const OUTCOME_TEXT: Record<RunOutcome, string> = {
 };
 
 /** A short, stable fingerprint of the scenario as run (FNV-1a over its JSON), so a report names what it ran. */
-export function scenarioDigest(scenario: Scenario) {
+export function scenarioDigest(scenario: ReadView<Scenario>) {
   let hash = 0x811c9dc5;
   for (const ch of JSON.stringify(scenario)) {
     hash ^= ch.codePointAt(0)!;

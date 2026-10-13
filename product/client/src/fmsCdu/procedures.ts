@@ -1,3 +1,4 @@
+import type { ReadView } from "./computation";
 import type { Leg, LegSource, Route } from "./fmsModel";
 import type { NavDatabase, Procedure, ProcedureLeg } from "./navData";
 
@@ -61,7 +62,9 @@ export function enrouteLegs(route: Route): Leg[] {
   return enroute;
 }
 
-export function findProcedure(db: NavDatabase, route: Route, kind: Procedure["kind"]) {
+export function findProcedure(db: NavDatabase, route: ReadView<Route>, kind: Procedure["kind"]): Procedure | undefined;
+export function findProcedure(db: Pick<ReadView<NavDatabase>, "proceduresFor">, route: ReadView<Route>, kind: Procedure["kind"]): ReadView<Procedure> | undefined;
+export function findProcedure(db: Pick<ReadView<NavDatabase>, "proceduresFor">, route: ReadView<Route>, kind: Procedure["kind"]) {
   const choice = kind === "SID" ? route.sid : kind === "STAR" ? route.star : route.approach;
   const airport = kind === "SID" ? route.origin : route.dest;
   return choice ? db.proceduresFor(airport, kind).find(p => p.ident === choice.ident) : undefined;

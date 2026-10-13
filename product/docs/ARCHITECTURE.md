@@ -221,6 +221,19 @@ Identity now comes from a revocable authenticated server session. Passwords use 
 
 The current identity boundary uses local accounts. External-directory federation and provisioning remain deferred under [DEC-051](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-051---identity-federation-is-deferred-until-an-organization-commits-to-deploying-it), including its 2026-08-01 disposition. Their implementation resumes only after a real organization/provider deployment commitment; local provider administration is not evidence of working federation. An organization requiring corporate-directory authentication therefore needs that separate deployment contract and qualification before AeroLink can support it.
 
+## FMS simulation submission boundary
+
+The FMS Test Bench is a client-side simulation. Its kernel owns frame time and the ordering of journaled actions
+and control records. Crew, CDU, instructor and scenario inputs reach units through the submission boundary;
+components receive structural read-only unit views. Submission returns an ordering receipt, while execution publishes
+an accepted or refused outcome with resolved values. Both CDU sides and pop-out surfaces retain their attribution.
+
+The I1 legacy plant adapter still runs each composite flight step once. Inputs at its open ACTION rest point do not
+poll a scenario or advance time. Operator halt, rate and reset records use a separate control sequence and a shared
+record ordinal; scenario Stop is an action. The exported ordering journal is not yet a content-addressed reproduction
+record or snapshot/replay facility. Those later analyzer stages, transport ownership and performance qualification
+remain separate. The simulation does not execute AeroLink verification procedures or provide OEM qualification.
+
 ## Enterprise hardening boundary
 
 The enterprise-hardening release adds versioned controlled files, structured and attachment-aware redlines, saved structured queries with stable links, durable background processing, multi-session edit detection, three-way merge records, integrity checkpoints, and an operator-facing control dashboard. These are separate attributable records around the authoritative requirement/SRCR/baseline aggregates; they do not create an alternate approval path or mutate approved history.

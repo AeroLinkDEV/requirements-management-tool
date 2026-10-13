@@ -261,8 +261,7 @@ export class FmsKernel {
     if (this.executing) throw new Error("advance() called by an executing action");
     const running = this.runner !== null && !this.runner.finished;
     if (this.stopped && running) return 0;
-    const holding = this.frozen || this.stopped;
-    if (holding && !this.plant.hold) throw new Error("this composition has no flight freeze");
+    if ((this.frozen || this.stopped || options.flightFreeze) && !this.plant.hold) throw new Error("this composition has no flight freeze");
     // Input left pending at an open ACTION (one made while the last INTEGRATE ran, before it threw) goes first.
     if (this.open) this.executePending();
     for (let done = 0; done < frames; done += 1) {
@@ -276,7 +275,8 @@ export class FmsKernel {
             break;
           case "INTEGRATE":
             try {
-              if (holding) this.plant.hold!(); else this.plant.integrate();
+              // A pending action may have changed freeze at this instant within the same advance call.
+              if (this.frozen || this.stopped || options.flightFreeze) this.plant.hold!(); else this.plant.integrate();
             } catch (error) {
               // The composite moved the units' clock before it threw: kernel time follows it, and F_{j+1}'s ACTION is
               // open without its poll, exactly where today's state rests after the throw.

@@ -18,7 +18,7 @@ import {
 import { Constellation, seededRandom } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus, type GpsReceiverView } from "./gps";
 import { stimulusFor } from "./gpsStimulus";
-import { actionsOf, asComputations, type MethodRoles, type ViewOf } from "./computation";
+import { actionsOf, asComputations, type MethodRoles, type ReadView, type ViewOf } from "./computation";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
@@ -247,10 +247,28 @@ const SCRIPTED_FMS_ROLES = {
   updateNavigation: "kernel-internal", updatePerformance: "kernel-internal", updateRendezvous: "kernel-internal",
 } as const satisfies MethodRoles<ScriptedFms>;
 
+// Ports are exposed only for display reads; their command and draining methods remain unit machinery.
+const CROSS_TALK_VIEW_ROLES = {
+  requestMode: "kernel-internal", confirmMode: "kernel-internal", beginEdit: "kernel-internal", finishEdit: "kernel-internal",
+  crossfill: "kernel-internal", settingsChanged: "kernel-internal", healthChanged: "kernel-internal", navigationChanged: "kernel-internal",
+  publishAlert: "kernel-internal", reportAlertCause: "kernel-internal", retainAlertCauses: "kernel-internal",
+  acknowledgeMessage: "kernel-internal", missedApproachRequested: "kernel-internal", setIndependent: "kernel-internal",
+} as const satisfies MethodRoles<CrossTalkPort>;
+const RADIO_PORT_VIEW_ROLES = {
+  tune: "kernel-internal", swap: "kernel-internal", receiving: "query", ndbTransmitting: "query",
+  setNdbOffAir: "kernel-internal", stationFaults: "query", setStationFaults: "kernel-internal", dmeReceiving: "query",
+  dmeTuning: "query", navMode: "query", setNavMode: "kernel-internal", autoTune: "kernel-internal", drainEvents: "kernel-internal",
+  faults: "query", setFaults: "kernel-internal", dmeHold: "query", setDmeHold: "kernel-internal", adf: "query",
+  setAdf: "kernel-internal", testState: "query", pressTest: "kernel-internal", setScanRoster: "kernel-internal",
+  scanRoster: "query", scanning: "query",
+} as const satisfies MethodRoles<RadioManagementPort>;
+
 /** What the bench's components get of a computer: its queries and properties, never a way to change it (submit()). */
-export type FmsView = Omit<ViewOf<ScriptedFms, typeof SCRIPTED_FMS_ROLES>, "gps" | "magvar"> & {
+export type FmsView = Omit<ViewOf<ScriptedFms, typeof SCRIPTED_FMS_ROLES>, "gps" | "magvar" | "radioPort" | "dualOperation"> & {
   readonly gps: readonly GpsReceiverView[];
   readonly magvar: MagvarView;
+  readonly radioPort: ViewOf<RadioManagementPort, typeof RADIO_PORT_VIEW_ROLES> | null;
+  readonly dualOperation: ViewOf<CrossTalkPort, typeof CROSS_TALK_VIEW_ROLES> | null;
 };
 
 export class ScriptedFms implements CduBackend {
@@ -300,7 +318,7 @@ export class ScriptedFms implements CduBackend {
   private crossfillPending: Pick<ScriptedFms["computerPlan"], "points" | "moving" | "pilot" | "sar" | "hover"> | null = null;
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
   /**
-   * The FUEL pages (S300 manual 14-1â€¦14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
+   * The FUEL pages (S300 manual 14-1…14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
    * which the fuel computer's values replace on each new access of the page; the FIX; the unit shown. KG throughout inside.
    */
   readonly fuelPage = { whatIfUsable: null as number | null, whatIfFlow: null as number | null, fix: null as string | null, unit: "KG" as "KG" | "LB" };
@@ -332,7 +350,7 @@ export class ScriptedFms implements CduBackend {
    * DVS (M300 12-23). The APIRS and DVS fail through the apirsFail and dvsFail conditions. */
   private poweredAt = 0;
   private poweredOffAt: number | null = null;
-  /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/sÂ². */
+  /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/s². */
   private apirsBias = nominalApirsBias(1);
   private apirsFaultBias = { north: 0, east: 0 };
   private airInputFaults = { tasValid: true, headingValid: true, headingBiasDeg: 0 };
@@ -563,7 +581,7 @@ export class ScriptedFms implements CduBackend {
    */
   get heading() { return this.aircraft.heading ?? this.aircraft.track; }
   /**
-   * The true airspeed flown now, from the ground velocity and the wind (air = ground âˆ’ wind), as air data would give it;
+   * The true airspeed flown now, from the ground velocity and the wind (air = ground − wind), as air data would give it;
    * null when the aircraft is not moving through the air measurably (below 1 kt).
    */
   get trueAirspeed(): number | null {
@@ -586,7 +604,7 @@ export class ScriptedFms implements CduBackend {
   afcs: { hoverHeight: number; vx: number | null; vy: number | null; ias: number } | null = null;
 
   /**
-   * The CMA transition down to hover (M300 11-18â€¦11-22, A-74â€¦A-76; plan D-T): the mark (MRK), the procedure's state
+   * The CMA transition down to hover (M300 11-18…11-22, A-74…A-76; plan D-T): the mark (MRK), the procedure's state
    * (MOD after ACTIVATE, ACT after EXEC), the final track into the wind (the wind direction frozen at ACTIVATE; below
    * 5 kt, the bearing to MRK), the planned distance from TDN to MRK, and at TDN the transition request the autopilot
    * takes (a counter it watches) or the reason it was refused (TDN NOT POSSIBLE, TDN DIST SHORT). `active` is the
@@ -610,7 +628,7 @@ export class ScriptedFms implements CduBackend {
      */
     requestData: null as { id: number; mrk: LatLon; finalTrack: number; remainingNm: number; gateNm: number; plan: TransitionPlan } | null,
     refused: null as string | null,
-    /** Why the transition was refused at TDN, as the planner put it (below gate speed, no closure, â€¦). */
+    /** Why the transition was refused at TDN, as the planner put it (below gate speed, no closure, …). */
     refusedReason: null as string | null,
     functionLost: false,
     /** At TDN: the position against the final track, the remaining distance, the state and the recomputed decision. */
@@ -783,7 +801,7 @@ export class ScriptedFms implements CduBackend {
   }
   angleText(trueAngle: number | undefined, at = this.position) {
     const angle = trueAngle === undefined ? null : this.displayAngle(trueAngle, at);
-    return `${angle === null ? "---" : String(Math.round(angle) || 360).padStart(3, "0")}${this.angleReference === "TRUE" ? "T" : "Â°"}`;
+    return `${angle === null ? "---" : String(Math.round(angle) || 360).padStart(3, "0")}${this.angleReference === "TRUE" ? "T" : "°"}`;
   }
   toggleAngleReference() {
     if (polarRegion(this.position)) return false;
@@ -1087,7 +1105,7 @@ export class ScriptedFms implements CduBackend {
     this.previousTruthVelocity = null;
     this.engineering = [...this.engineering, {
       at: this.now, action: "PLACE AIRCRAFT",
-      detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}Â°, ${Math.round(state.altitude)} FT`,
+      detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
     }];
     this.updateNavigation(0);
     this.emit();
@@ -1602,7 +1620,7 @@ export class ScriptedFms implements CduBackend {
     this.navigation.resetKalman();
     this.apirsBias = nominalApirsBias(++this.powerCycles);
   }
-  /** Bench fault stimulus (plan C2, F14): a deliberate APIRS accelerometer bias outside the nominal model, m/sÂ². */
+  /** Bench fault stimulus (plan C2, F14): a deliberate APIRS accelerometer bias outside the nominal model, m/s². */
   setApirsFaultBias(northMs2: number, eastMs2: number) { this.apirsFaultBias = { north: northMs2, east: eastMs2 }; }
   /** DVS STATUS 2/2 WATER CURRENT (M300 12-23): the surface's drift the crew enters, direction toward and speed. */
   private dvsMagnetic = false;
@@ -1935,7 +1953,7 @@ export class ScriptedFms implements CduBackend {
     });
     const chosen = selection.chosen;
     this.gpsSelection = { qualified: selection.qualified, refused: selection.refused };
-    // A qualified approach transfer is annunciated (AC 20-138D Change 2 Â§21-2.2(g)); the nav source log records it too.
+    // A qualified approach transfer is annunciated (AC 20-138D Change 2 §21-2.2(g)); the nav source log records it too.
     if (selection.transferred && chosen !== null) this.alert(alert(`APPR ON GPS${chosen + 1}`));
     // A receiver lost is annunciated whether or not the other takes over: a transfer never hides the failure or the lost
     // redundancy. Its recovery is logged, and by itself changes nothing.
@@ -2519,7 +2537,7 @@ export class ScriptedFms implements CduBackend {
 
   /**
    * Burns fuel for dt seconds and checks the plan: FUEL RESERVE when fuel on board reaches the reserve, NOT ENOUGH
-   * FUEL when the prediction at the destination is below it, UNABLE NEXT ALTITUDE (the manualâ€™s wording is not in
+   * FUEL when the prediction at the destination is below it, UNABLE NEXT ALTITUDE (the manual’s wording is not in
    * the alert list, so the advisory is used) when a climb constraint cannot be made.
    */
   updatePerformance(dt: number) {
@@ -2678,10 +2696,10 @@ export class ScriptedFms implements CduBackend {
     return true;
   }
 
-  private rendezvousKey(route: Route, ident: string) { return (route === this.active ? "ACT:" : "MOD:") + ident; }
+  private rendezvousKey(route: ReadView<Route>, ident: string) { return (route === this.active ? "ACT:" : "MOD:") + ident; }
 
   /** The M300 11-37 condition a moving waypoint at `index` of `route` falls under. */
-  private rendezvousCondition(route: Route, index: number): 1 | 2 | 3 | 4 {
+  private rendezvousCondition(route: ReadView<Route>, index: number): 1 | 2 | 3 | 4 {
     const first = route.legs.findIndex(leg => leg.kind === "wpt") === index;
     return route === this.active ? (index === 0 ? 1 : 2) : first ? 4 : 3;
   }
@@ -2692,7 +2710,7 @@ export class ScriptedFms implements CduBackend {
    * reading between computations gets the same answer without keeping it. Every computation ends by determining the
    * rest (settleRendezvous), so a read between computations finds them determined.
    */
-  rendezvousFor(route: Route, index: number): MovingRendezvous | null {
+  rendezvousFor(route: ReadView<Route>, index: number): MovingRendezvous | null {
     const leg = route.legs[index];
     if (leg?.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return null;
     const key = this.rendezvousKey(route, leg.ident);
@@ -2724,7 +2742,7 @@ export class ScriptedFms implements CduBackend {
    * previous waypoint, reached along the route, otherwise (2 and 3). Unachievable when no such point lies within a
    * travelling distance of 500 NM from there.
    */
-  private solveRendezvous(route: Route, index: number, ident: string): MovingRendezvous {
+  private solveRendezvous(route: ReadView<Route>, index: number, ident: string): MovingRendezvous {
     const now = this.now.getTime();
     const condition = this.rendezvousCondition(route, index);
     const tas = this.trueAirspeed ?? this.plannedSpeed;
@@ -3534,7 +3552,7 @@ export class ScriptedFms implements CduBackend {
    * A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. A runway belongs to
    * an airport, so it resolves in the context of a route: the active route unless a page asks about the modification.
    */
-  coordinates(ident: string, route: Route = this.active): LatLon | undefined {
+  coordinates(ident: string, route: ReadView<Route> = this.active): LatLon | undefined {
     const snapshot = route.legs.find(leg => leg.kind === "wpt" && leg.ident === ident && leg.position);
     if (snapshot?.kind === "wpt" && snapshot.position) return { ...snapshot.position };
     if (route === this.modified && this.crossfillPending) {
@@ -3569,7 +3587,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** A database position in the active cycle, looked up now: a runway in the context of the route's airports. */
-  private lookup(ident: string, route: Route): LatLon | undefined {
+  private lookup(ident: string, route: ReadView<Route>): LatLon | undefined {
     const generated = route.legs.find(leg => leg.kind === "wpt" && leg.ident === ident && leg.position);
     if (generated?.kind === "wpt") return generated.position;
     if (/^RW\d{2}[LRC]?$/.test(ident)) {
@@ -3789,7 +3807,7 @@ export class ScriptedFms implements CduBackend {
   routeLoadReport: string[] = [];
 
   /**
-   * Loads a stored route (CO ROUTE). INVERSE (E6; M300 3-10â€¦3-11 define the INV prefix and the toggle, not the leg
+   * Loads a stored route (CO ROUTE). INVERSE (E6; M300 3-10…3-11 define the INV prefix and the toggle, not the leg
    * semantics) follows the nearest S300 rule, BACKTRACK [M300 11-35], and is inferred and labelled: the origin and
    * destination swap, the waypoints are flown in reverse order, every leg as TF with the first as DF (the route
    * before it is not kept), and airways and altitude constraints, which belong to the direction flown, are not
@@ -3799,7 +3817,7 @@ export class ScriptedFms implements CduBackend {
    * load refused, never substituted; a fix a user route recorded at another position is reported as moved (it is
    * flown where the database has it now).
    *
-   * Airborne, a load into the active route appends rather than replaces (#1369; M300 3-10â€¦3-13). The destination
+   * Airborne, a load into the active route appends rather than replaces (#1369; M300 3-10…3-13). The destination
    * becomes the stored route's (its origin, inversed), the active waypoint is kept and followed by a discontinuity and
    * the stored route's waypoints, and a procedure in the plan (SID, STAR, approach) is replaced as a whole. The origin
    * stays: the manual names only the destination. The RTE page marks the name with "+". An inversed append drops the
@@ -4174,7 +4192,7 @@ export class ScriptedFms implements CduBackend {
     return ident;
   }
 
-  // ------------------------------------------------------------------ transition down to hover (M300 11-18â€¦11-22)
+  // ------------------------------------------------------------------ transition down to hover (M300 11-18…11-22)
 
   /**
    * Designates the hover mark (HOVER page 1L/1R, M300 A-75): MARK ON TOP (present position), a waypoint by ident, or

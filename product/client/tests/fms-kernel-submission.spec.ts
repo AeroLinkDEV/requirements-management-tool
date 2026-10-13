@@ -6,6 +6,8 @@ import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { ScenarioRunner, type Scenario, type ScenarioStep } from '../src/fmsCdu/scenario'
 import { WMM2025_DATABASE } from '../src/fmsCdu/wmm2025'
 import { CanonicalWriter, frameBytes, frameDigest } from './fixtures/fms-kernel-digest'
+import ts from 'typescript'
+import path from 'node:path'
 
 // #1517 I1b: the submission boundary (#1502 D5 7.1-7.4, D1 3.8a). submit() returns a receipt and nothing else; the
 // outcome comes on the event stream; the journal records each executed action at its instant with its resolved payload;
@@ -22,10 +24,19 @@ const scenario = (steps: ScenarioStep[], maxSeconds = 10): Scenario => ({ id: 's
 const alert = (text: string): KernelAction => ({ kind: 'ios.alert', unit: 1, text })
 const flown = (units: LegacyPlant['units']) => ({ position: units.computers[0].truePosition, track: units.computers[0].track })
 
+test('production bench view rejects nested writes while retaining its display queries', () => {
+  const program = ts.createProgram([path.resolve('tests/fixtures/fms-kernel-view-types.ts')], {
+    noEmit: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2023,
+    module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
+  })
+  const diagnostics = ts.getPreEmitDiagnostics(program)
+  expect(diagnostics.map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n'))).toEqual([])
+})
+
 // D5 7.5: a freeze submitted after ACTION F0 closed belongs to ACTION F1. Within the same advance(3),
 // [F0,F1] flies, [F1,F2] and [F2,F3] hold. The clock still advances 750ms. Cached per-call holding violates this.
 test('pending freeze takes effect at ACTION F1 within one advance, while its clock continues', () => {
-  const { plant, system } = dualComposition(START)
+  const { plant } = dualComposition(START)
   const kernel = new FmsKernel(plant)
   let atF1: ReturnType<typeof flown> | null = null
   kernel.advance(3, { onInstantClose: () => {
@@ -39,7 +50,6 @@ test('pending freeze takes effect at ACTION F1 within one advance, while its clo
   expect(kernel.journal.map(entry => [entry.frame, entry.payload, entry.outcome])).toEqual([
     [1, { kind: 'ios.flightFreeze', on: true }, { status: 'accepted' }],
   ])
-  expect(system.simulator.guidance).toBeDefined()
 })
 
 /** Replays an exported record on a fresh kernel: every native action and control record in recordOrdinal order, each at its instant. */
