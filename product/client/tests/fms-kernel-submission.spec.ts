@@ -1,11 +1,11 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import type { ActionSource, KernelAction } from '../src/fmsCdu/kernel/actions'
-import { FmsKernel, type KernelEvent, type KernelRecord } from '../src/fmsCdu/kernel/kernel'
+import { FmsKernel, type KernelEvent } from '../src/fmsCdu/kernel/kernel'
 import { dualComposition, singleComposition, type LegacyPlant } from '../src/fmsCdu/kernel/legacyPlantAdapter'
-import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { ScenarioRunner, type Scenario, type ScenarioStep } from '../src/fmsCdu/scenario'
-import { WMM2025_DATABASE } from '../src/fmsCdu/wmm2025'
-import { CanonicalWriter, frameBytes, frameDigest } from './fixtures/fms-kernel-digest'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
+import { CanonicalWriter, frameBytes } from './fixtures/fms-kernel-digest'
+import { replay, session } from './fixtures/fms-kernel-session'
 import ts from 'typescript'
 import path from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -91,19 +91,6 @@ test('pending freeze takes effect at ACTION F1 within one advance, while its clo
     [1, { kind: 'ios.flightFreeze', on: true }, { status: 'accepted' }],
   ])
 })
-
-/** Replays an exported record on a fresh kernel: every native action and control record in recordOrdinal order, each at its instant. */
-function replay(record: KernelRecord, kernel: FmsKernel, options: { onInstantClose?: () => void } = {}) {
-  const entries = [...record.journal.filter(entry => entry.origin === 'native'), ...record.control].sort((a, b) => a.recordOrdinal - b.recordOrdinal)
-  for (const entry of entries) {
-    const at = 'frame' in entry ? entry.frame : entry.instant / F(1)
-    while (kernel.frame < at) kernel.advance(1, options)
-    if ('submissionSeq' in entry && 'origin' in entry) kernel.submit(entry.payload as KernelAction, entry.source)
-    else if (entry.kind === 'halt' || entry.kind === 'resume' || entry.kind === 'reset') kernel.control({ kind: entry.kind })
-    else if (entry.kind === 'rate') kernel.control({ kind: 'rate', rate: entry.rate })
-  }
-  while (kernel.frame < record.frame) kernel.advance(1, options)
-}
 
 // Owner: submit() is synchronous and returns only a receipt; the outcome is published on the kernel's event stream as
 // {submissionSeq, frame, outcome}, and the journal records the action with its outcome (a refusal is journaled too).
@@ -325,76 +312,64 @@ test('scenario.stop is journaled and its replay reproduces the stopped run', () 
   replay(live.kernel.record(), replayed.kernel)
   expect({ outcome: replayed.runner.outcome, endedAfter: replayed.runner.endedAfter, results: replayed.runner.results })
     .toEqual({ outcome: live.runner.outcome, endedAfter: live.runner.endedAfter, results: live.runner.results })
-  expect(replayed.kernel.journal).toEqual(live.kernel.journal)
+  expect(replayed.kernel!.journal).toEqual(live.kernel.journal)
+  // Both actual operator states keep the same open ACTION. Wrong/ended runs are meaningful native negatives.
+  for (const paused of [false, true]) {
+    const composition = dualComposition(START)
+    const runner = new ScenarioRunner(scenario(steps), composition.system.computers[0], undefined, composition.system.flights[0])
+    const active = { composition, runner, kernel: new FmsKernel(composition.plant, runner) }
+    active.kernel.advance(6)
+    if (paused) active.kernel.control({ kind: 'halt' })
+    const instant = active.kernel.now, clock = active.composition.clock.ms
+    const state = () => Array.from(frameBytes({ computers: composition.system.computers, flights: composition.system.flights }, new CanonicalWriter()))
+    const beforeBytes = state()
+    active.kernel.submit({ kind: 'scenario.stop', runId: 'wrong-run' }, ui('scenarios.stop'))
+    expect(active.kernel.journal.at(-1)!.outcome).toEqual({ status: 'refused', reason: 'no such run' })
+    expect(active.runner.outcome).toBe('running')
+    expect(active.runner.endedAfter).toBeNull()
+    active.kernel.submit({ kind: 'scenario.stop', runId: active.runner.runId }, ui('scenarios.stop'))
+    active.kernel.submit({ kind: 'ios.flightFreeze', on: true }, ui('flight.runEnded'))
+    expect(active.runner.outcome).toBe('stopped')
+    expect(active.runner.endedAfter).toBe(1.5)
+    expect(active.kernel.now).toBe(instant)
+    expect(active.kernel.frame).toBe(6)
+    expect(active.composition.clock.ms).toBe(clock)
+    expect(active.kernel.flightFreeze).toBe(true)
+    expect(state()).toEqual(beforeBytes)
+    expect(active.kernel.journal.slice(-2)).toMatchObject([
+      { frame: 6, kind: 'scenario.stop', target: 'scenario', payload: { kind: 'scenario.stop', runId: active.runner.runId }, outcome: { status: 'accepted' } },
+      { frame: 6, kind: 'ios.flightFreeze', target: 'plant', payload: { kind: 'ios.flightFreeze', on: true }, outcome: { status: 'accepted' } },
+    ])
+    active.kernel.submit({ kind: 'scenario.stop', runId: active.runner.runId }, ui('scenarios.stop'))
+    expect(active.kernel.journal.at(-1)!.outcome).toEqual({ status: 'refused', reason: 'the run has already ended' })
+    expect(active.kernel.now).toBe(instant)
+    expect(active.composition.clock.ms).toBe(clock)
+  }
 })
 
 /**
  * A scripted bench session on the dual composition: the bench's controls at the resting points, as direct unit calls
  * (what the bench did before I1b) or as the actions it now submits. Both use the kernel's journaled flight freeze.
  */
-function session(mode: 'direct' | 'submit', record?: KernelRecord) {
-  const { system, plant } = dualComposition(START)
-  const kernel = new FmsKernel(plant)
-  const frames: string[] = []
-  const writer = new CanonicalWriter()
-  const onInstantClose = () => { writer.length = 0; frames.push(frameDigest(frameBytes({ computers: system.computers, flights: system.flights }, writer))) }
-  if (record) { replay(record, kernel, { onInstantClose }); return { frames, kernel } }
-  const [one, two] = system.computers
-  const act = (direct: () => void, action: KernelAction, source: ActionSource) => { if (mode === 'direct') direct(); else kernel.submit(action, source) }
-  const freeze = (on: boolean) => { if (kernel.flightFreeze !== on) kernel.submit({ kind: 'ios.flightFreeze', on }, ui('flight.flyPause')) }
-  const fly = (frames: number) => { freeze(false); for (let i = 0; i < frames / 4; i += 1) kernel.advance(4, { onInstantClose }) }
-  const hold = (frames: number) => { freeze(true); for (let i = 0; i < frames; i += 1) kernel.advance(1, { onInstantClose }) }
-  const cdu = (side: 1 | 2): ActionSource => ({ kind: 'cdu', id: `CDU ${side}`, surface: 'main', side })
-  const f14 = (id: string): ActionSource => ({ kind: 'f14', id, surface: 'main' })
-  fly(40)
-  act(() => one.press('LEGS', { held: false }), { kind: 'cdu.key', side: 1, fn: 'LEGS', held: false }, cdu(1))
-  act(() => two.press('PROG', { held: false }), { kind: 'cdu.key', side: 2, fn: 'PROG', held: false }, cdu(2))
-  act(() => one.press('CLR', { held: true }), { kind: 'cdu.key', side: 1, fn: 'CLR', held: true }, cdu(1))
-  fly(8)
-  act(() => system.simulator.selectHeading(120), { kind: 'afcs.select', selection: { select: 'heading', heading: 120 } }, ui('afcs.heading')); fly(20)
-  act(() => system.simulator.armLnav(), { kind: 'afcs.select', selection: { select: 'lnav' } }, ui('afcs.lnav')); fly(20)
-  act(() => system.simulator.engageVerticalSpeed(-500), { kind: 'afcs.select', selection: { select: 'verticalSpeed', fpm: -500 } }, ui('afcs.vs')); fly(20)
-  act(() => system.simulator.engageAltitudeHold(), { kind: 'afcs.select', selection: { select: 'altitudeHold' } }, ui('afcs.alt'))
-  act(() => system.simulator.selectSpeed(100), { kind: 'afcs.select', selection: { select: 'speed', knots: 100 } }, ui('afcs.spd')); fly(20)
-  act(() => system.selectGuidance(2), { kind: 'afcs.sourceSelect', side: 2 }, ui('flight.guidanceSource')); fly(20)
-  act(() => system.selectGuidance(1), { kind: 'afcs.sourceSelect', side: 1 }, ui('flight.guidanceSource')); fly(8)
-  act(() => system.setLinkAvailable(!system.linked), { kind: 'ios.link', available: 'toggle' }, ios('dual.link')); fly(8)
-  act(() => system.setLinkAvailable(!system.linked), { kind: 'ios.link', available: 'toggle' }, ios('dual.link')); fly(8)
-  act(() => one.setCondition('gpsLost', true), { kind: 'ios.condition', unit: 1, condition: 'gpsLost', on: true }, ios('conditions.gpsLost')); fly(20)
-  act(() => one.setCondition('gpsLost', false), { kind: 'ios.condition', unit: 1, condition: 'gpsLost', on: false }, ios('conditions.gpsLost')); fly(8)
-  act(() => stimulusFor(one).apply(0, { op: 'jam', db: 30 }), { kind: 'f14.gps', receiver: 1, op: { op: 'jam', db: 30 } }, f14('gps1.jamming')); fly(20)
-  act(() => stimulusFor(one).apply(0, { op: 'fault', fault: 'RECEIVER', on: !stimulusFor(one).state(0).receiver }), { kind: 'f14.gps', receiver: 1, op: { op: 'toggle', field: 'receiver' } }, f14('gps1.receiver')); fly(8)
-  act(() => stimulusFor(one).apply(0, { op: 'jam', db: 0 }), { kind: 'f14.gps', receiver: 1, op: { op: 'jam', db: 0 } }, f14('gps1.jamming')); fly(8)
-  act(() => one.setBaroError(80, 'bench'), { kind: 'ios.atmosphere', baroErrorFt: 80, reason: 'bench' }, ios('baro.error'))
-  act(() => one.setBaroSetting({ kind: 'QNH', hPa: 1002 }), { kind: 'fms.baroSetting', unit: 1, setting: { kind: 'QNH', hPa: 1002 } }, ui('baro.setting')); fly(8)
-  act(() => Object.assign(one.wind, { direction: 200, speed: 35 }), { kind: 'ios.wind', direction: 200, speed: 35 }, ios('wind')); fly(20)
-  hold(12)
-  act(() => one.setCondition('fmsFail', true), { kind: 'ios.condition', unit: 1, condition: 'fmsFail', on: true }, ios('conditions.fmsFail')); hold(8); fly(8)
-  act(() => one.setCondition('fmsFail', false), { kind: 'ios.condition', unit: 1, condition: 'fmsFail', on: false }, ios('conditions.fmsFail')); fly(8)
-  act(() => one.sequence(), { kind: 'ios.jump', unit: 'guidance', op: 'sequence' }, ios('flight.jump')); fly(20)
-  act(() => { one.goAround(); system.simulator.engageGoAround() }, { kind: 'afcs.select', selection: { select: 'toga' } }, ui('afcs.toga')); fly(8)
-  act(() => one.raiseAlert('UNABLE RNP'), { kind: 'ios.alert', unit: 1, text: 'UNABLE RNP' }, ios('alerts.other'))
-  act(() => one.loadMagvar(WMM2025_DATABASE), { kind: 'config.magvar', unit: 1, op: 'restoreWmm2025' }, ios('navdata.restoreWmm2025')); fly(8)
-  act(() => system.rms.injectFailure('com1', true), { kind: 'f14.radio', device: 'com1', feedback: 'FAILED' }, f14('dual.com1Feedback'))
-  act(() => system.rms.rejectNext('nav2'), { kind: 'f14.radio', device: 'nav2', rejectNext: true }, f14('dual.rejectNext'))
-  act(() => one.open('POS'), { kind: 'cdu.open', side: 1, page: 'POS' }, ios('navdata.preflight.POS')); fly(8)
-  act(() => two.powerOff(), { kind: 'ios.unitPower', unit: 2, mode: 'OFF', onGround: false }, ios('navdata.powerOff')); fly(8)
-  act(() => two.powerOn('WARM', false), { kind: 'ios.unitPower', unit: 2, mode: 'WARM', onGround: false }, ios('navdata.warmStart')); fly(40)
-  return { frames, kernel }
-}
 
 // Owner: routing the bench's controls through submit() changes no state (#1517: "I1b changes routing, not behaviour").
 // The same session made with the direct calls the bench made before, made through submit(), and replayed from the
-// exported journal on a fresh kernel gives the same frame digest at every instant, by the frozen encoder.
-test('a session made with direct calls, through submit(), and replayed from its journal is identical at every frame', () => {
+// exported journal on a fresh kernel gives the same bytes/digest at every instant, by the frozen encoder.
+// This fast head-only self-check catches dispatcher/re-driver drift; actual-base and qualified-Chromium identity requires
+// a separately retained actual-base Chromium stage gate, not inferred from this Node run.
+test('the head session retains identical state for direct calls, submissions and journal-driven calls at every frame', () => {
   test.setTimeout(3 * 60_000)
   const direct = session('direct'), submitted = session('submit')
-  const record = submitted.kernel.record()
+  const record = submitted.kernel!.record()
   const replayed = session('submit', record)
-  expect(direct.frames.length).toBe(submitted.kernel.frame)
+  expect(direct.frames.length).toBe(submitted.kernel!.frame)
   expect(submitted.frames).toEqual(direct.frames)
+  expect(submitted.bytes).toEqual(direct.bytes)
   expect(replayed.frames).toEqual(direct.frames)
+  expect(replayed.bytes).toEqual(direct.bytes)
+  expect(submitted.end).toBe(direct.end)
+  expect(replayed.end).toBe(direct.end)
   // Every row reached the journal, resolved, and the replay journaled the same records again.
   expect(record.journal.filter(entry => entry.kind !== 'ios.flightFreeze')).toHaveLength(31)
-  expect(replayed.kernel.journal).toEqual(submitted.kernel.journal)
+  expect(replayed.kernel!.journal).toEqual(submitted.kernel!.journal)
 })
