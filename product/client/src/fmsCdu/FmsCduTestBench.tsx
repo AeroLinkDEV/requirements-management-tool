@@ -389,10 +389,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   /** Every new session ends this one's kernel with a reset record (control plane). */
   const newSession = () => { stopPacing.current?.(); achieved.publish(null); kernel.control({ kind: "reset" }); setSession(value => value + 1); };
   /** Jump (Fly-to-next-waypoint) on the guidance computer: an engineering action, journaled as ios.jump. */
-  const jump = () => submit({ kind: "ios.jump", unit: "guidance", op: "sequence" }, { kind: "ios", id: "flight.jump" },
+  const jump = (from: Submit) => from({ kind: "ios.jump", unit: "guidance", op: "sequence" }, { kind: "ios", id: "flight.jump" },
     event => setJumpNote(event.outcome.status === "refused" && event.outcome.reason === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null));
-  const overrideDiscontinuity = () => {
-    submit({ kind: "ios.jump", unit: "guidance", op: "overrideDiscontinuity" }, { kind: "ios", id: "flight.overrideDiscontinuity" });
+  const overrideDiscontinuity = (from: Submit) => {
+    from({ kind: "ios.jump", unit: "guidance", op: "overrideDiscontinuity" }, { kind: "ios", id: "flight.overrideDiscontinuity" });
     setJumpNote("Discontinuity overridden (engineering action, logged).");
   };
   const afcs = (selection: Extract<KernelAction, { kind: "afcs.select" }>["selection"], then?: (event: OutcomeEvent) => void) =>
@@ -712,11 +712,11 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </label>
             {!cockpitView ? (<>
             <button type="button" disabled={guidanceBackend.hasCondition("fmsFail")}
-              onClick={jump}>
+              onClick={() => jump(submit)}>
               Jump to next waypoint
             </button>
             {next?.kind === "disco" && !guidanceBackend.hasCondition("fmsFail")
-              ? <button type="button" onClick={overrideDiscontinuity}>Override discontinuity</button>
+              ? <button type="button" onClick={() => overrideDiscontinuity(submit)}>Override discontinuity</button>
               : null}
             <button type="button" onClick={reset}>Restart the simulation</button>
             </>) : null}
@@ -846,11 +846,11 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <p className="fmsBenchProfile">Aircraft profile: <strong>{backend.aircraftProfile.title}</strong> ({backend.aircraftProfile.id} v{backend.aircraftProfile.version}, {profileFingerprint(backend.aircraftProfile)}).</p>
             {cockpitView ? <div className="fmsBenchActions">
             <button type="button" disabled={guidanceBackend.hasCondition("fmsFail")}
-              onClick={jump}>
+              onClick={() => jump(submitIos)}>
               Jump to next waypoint
             </button>
             {next?.kind === "disco" && !guidanceBackend.hasCondition("fmsFail")
-              ? <button type="button" onClick={overrideDiscontinuity}>Override discontinuity</button>
+              ? <button type="button" onClick={() => overrideDiscontinuity(submitIos)}>Override discontinuity</button>
               : null}
             <button type="button" onClick={reset}>Restart the simulation</button>
             </div> : <p className="fmsBenchHint">The flight controls are beside the displays.</p>}

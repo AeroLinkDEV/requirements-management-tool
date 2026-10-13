@@ -546,8 +546,8 @@ export class ScenarioRunner {
           // A fresh alert check counts what the last action itself raised, so the baseline is taken just before it.
           this.previousAlerts = this.fms.recallList.length;
           // Each action is one kernel computation (#1518), settled when it ends as the bench settles a control.
-          this.fms.compute(() => this.act(step.action));
-          this.finish({ status: "done", at: now, ...(isSensorStimulus(step.action) ? { actual: describeSensorStimulus(step.action) } : {}) });
+          const execution = this.fms.compute(() => this.act(step.action));
+          this.finish({ status: "done", at: now, ...(isSensorStimulus(step.action) ? { actual: describeSensorStimulus(step.action) } : {}) }, execution);
         }
       } catch (error) {
         this.results[this.next] = { status: "error", at: now, actual: error instanceof Error ? error.message : String(error) };
@@ -575,16 +575,16 @@ export class ScenarioRunner {
   }
 
   /** The step at `next` as the kernel journals it: its action and outcome, or its check and result. */
-  private translate(result: StepResult) {
+  private translate(result: StepResult, execution?: KernelOutcome) {
     const action = this.scenario.steps[this.next].action, check = isExpectation(action);
     this.translations.push({
       kind: check ? "scenario.check" : "scenario.step", step: this.next + 1, payload: structuredClone(action), target: "scenario",
-      outcome: result.status === "error" ? { status: "refused", reason: result.actual ?? "error" } : check ? { status: "accepted", detail: { status: result.status, actual: result.actual } } : { status: "accepted" },
+      outcome: result.status === "error" ? { status: "refused", reason: result.actual ?? "error" } : check ? { status: "accepted", detail: { status: result.status, actual: result.actual } } : execution ?? { status: "accepted" },
     });
   }
 
-  private finish(result: StepResult) {
-    this.translate(result);
+  private finish(result: StepResult, execution?: KernelOutcome) {
+    this.translate(result, execution);
     this.results[this.next] = result;
     this.previousAt = result.at ?? this.elapsed;
     this.next += 1;
@@ -613,7 +613,7 @@ export class ScenarioRunner {
     return leg?.kind === "wpt" ? leg.ident : null;
   }
 
-  private act(action: Action) {
+  private act(action: Action): KernelOutcome | undefined {
     const fms = this.fms;
     if (isSensorStimulus(action)) { applySensorStimulus(fms, action); return; }
     switch (action.kind) {
@@ -622,31 +622,40 @@ export class ScenarioRunner {
       case "condition": fms.setCondition(action.condition, action.on); return;
       case "alert": fms.raiseAlert(action.text); return;
       case "procedure": fms.selectProcedure(action.procedure, action.ident, action.transition); return;
-      case "armApproach": fms.armApproach(action.on !== false); return;
+      case "armApproach": {
+        const on = action.on !== false;
+        const armed = fms.armApproach(on);
+        // False on a disarm is the resolved off state, not a refusal. Preserve the legacy done/timing separately.
+        return !on || armed ? { status: "accepted" } : { status: "refused", reason: fms.approachRefusal ?? "the approach cannot be armed" };
+      }
       // TOGA: the FMS missed-approach request and, under the helicopter profile, the autopilot's GA.
       // A refused TOGA (no missed approach to go around onto, or the FMS failed) is an error in the run, never a silent pass.
       case "goAround": if (!fms.goAround()) throw new Error("TOGA refused by the FMS: no missed approach ahead, or the FMS has failed"); this.sim?.engageGoAround(); return;
       case "proceedPins": if (!(this.sim ? this.sim.proceedFromPins(action) : fms.proceedFromPins(action))) throw new Error("PinS continuation refused: MAP, chart or crew conditions unavailable"); return;
       case "wind": Object.assign(fms.wind, { direction: action.direction, speed: action.speed }); return;
-      case "baro":
-        if (action.declaredQnh !== undefined) fms.declareQnh(action.declaredQnh, "scenario");
-        if (action.errorFt !== undefined) fms.setBaroError(action.errorFt, "scenario");
-        if (action.setting !== undefined) fms.setBaroSetting(action.setting === "STD" ? { kind: "STD" } : { kind: "QNH", hPa: action.setting });
-        return;
+      case "baro": {
+        let applied = true;
+        // Do not short-circuit: retain every existing native call, its order and any partial effects.
+        if (action.declaredQnh !== undefined) applied = fms.declareQnh(action.declaredQnh, "scenario") && applied;
+        if (action.errorFt !== undefined) applied = fms.setBaroError(action.errorFt, "scenario") && applied;
+        if (action.setting !== undefined) applied = fms.setBaroSetting(action.setting === "STD" ? { kind: "STD" } : { kind: "QNH", hPa: action.setting }) && applied;
+        return applied ? { status: "accepted" } : { status: "refused", reason: "out of the bench's range" };
+      }
       case "autopilot": {
         const sim = this.sim;
         if (!sim) throw new Error("autopilot selections need the flight simulation");
-        if (action.altitude !== undefined) sim.selectAltitude(action.altitude);
+        let selected = true;
+        if (action.altitude !== undefined) selected = sim.selectAltitude(action.altitude) && selected;
         if (action.verticalSpeed !== undefined && !sim.engageVerticalSpeed(action.verticalSpeed)) throw new Error(`VS is not available in the ${fms.aircraftProfile.id} profile`);
         if (action.hold && !sim.engageAltitudeHold()) throw new Error(`ALT is not available in the ${fms.aircraftProfile.id} profile`);
-        if (action.speed !== undefined) sim.selectSpeed(action.speed);
+        if (action.speed !== undefined) selected = sim.selectSpeed(action.speed) && selected;
         if (action.heading !== undefined) sim.selectHeading(action.heading);
         if (action.lnav) sim.armLnav();
         if (action.hover && !sim.engageHover()) throw new Error("HOV is not available: above the coordinated-flight speed, or no eligible hover feedback");
         if (action.groundSpeed !== undefined && !sim.engageGroundSpeed(action.groundSpeed)) throw new Error("GSPD is not available: out of range, above the low-speed regime, or no eligible hover feedback");
         if (action.transitionUp && !sim.engageTransitionUp()) throw new Error("TU is not available: not in a hover mode, too fast, or no valid radio height");
         if (action.forceTrimRelease && !sim.releaseForceTrim()) throw new Error("the force trim release is the helicopter profile's");
-        return;
+        return selected ? { status: "accepted" } : { status: "refused", reason: "the autopilot refused a selection" };
       }
       case "gps": {
         // Through the same stimulus record as the GPS sensors tab, so the tab shows what the scenario applied.

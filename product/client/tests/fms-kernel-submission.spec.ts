@@ -8,6 +8,46 @@ import { WMM2025_DATABASE } from '../src/fmsCdu/wmm2025'
 import { CanonicalWriter, frameBytes, frameDigest } from './fixtures/fms-kernel-digest'
 import ts from 'typescript'
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
+
+// Independent literal Q7 controls: the published 70 KIAS restriction permits arming; 40 KIAS is below VMINI 50.
+// The scenario's legacy result stays done at t0 even when the separate executed command was refused.
+test('translated APPR journals its actual refusal independently of legacy done, including successful disarm', () => {
+  const published = readFileSync('tests/fixtures/cifp/copter-pins-2609.pc', 'latin1')
+  const atSpeed = (speed: '040' | '070') => published.split('\n').map(line =>
+    /^SUSAH 87N K6FR190  R      010TIDUE/.test(line) ? `${line.slice(0, 99)}${speed}${line.slice(102)}` : line).join('\n')
+  const start = (speed: '040' | '070') => {
+    const composition = singleComposition(START)
+    const fms = composition.fms
+    fms.loadArinc424(atSpeed(speed), 'Q7.pc'); fms.swapCycles(); fms.press('RTE')
+    for (const key of ['CHAR_8', 'CHAR_7', 'CHAR_N', 'LSK1R', 'EXEC'] as const) fms.press(key)
+    fms.selectProcedure('APPROACH', 'R190', 'HTO'); fms.press('EXEC')
+    expect(fms.aircraftProfile.parameters.vmini.value).toBe(50)
+    return composition
+  }
+  for (const row of [
+    { speed: '070', on: true, armed: true, result: 'accepted' },
+    { speed: '040', on: true, armed: false, result: 'refused' },
+    { speed: '040', on: false, armed: false, result: 'accepted' },
+  ] as const) {
+    const direct = start(row.speed)
+    expect(direct.fms.armApproach(row.on)).toBe(row.armed)
+    const native = start(row.speed), nativeKernel = new FmsKernel(native.plant)
+    nativeKernel.submit({ kind: 'afcs.select', selection: { select: 'approach', on: row.on } }, ui('afcs.approach'))
+    expect(nativeKernel.journal[0].outcome.status).toBe(row.result)
+    const translated = start(row.speed)
+    const runner = new ScenarioRunner(scenario([{ when: { kind: 'start' }, action: { kind: 'armApproach', on: row.on } }]), translated.fms, undefined, translated.sim)
+    const kernel = new FmsKernel(translated.plant, runner)
+    expect(translated.fms.approachArmed).toBe(row.armed)
+    expect(runner.results).toEqual([{ status: 'done', at: 0 }])
+    expect(runner.outcome).toBe('no checks')
+    expect(kernel.journal[0]).toMatchObject({ frame: 0, kind: 'scenario.step', origin: 'v1-translated',
+      payload: { kind: 'armApproach', on: row.on }, outcome: { status: row.result } })
+    if (row.result === 'refused') expect(kernel.journal[0].outcome).toEqual({ status: 'refused', reason: 'procedure speed limit below profile VMINI (40 < 50 KIAS)' })
+    expect(kernel.now).toBe(0)
+    expect(kernel.unitClockMs).toBe(START)
+  }
+})
 
 // #1517 I1b: the submission boundary (#1502 D5 7.1-7.4, D1 3.8a). submit() returns a receipt and nothing else; the
 // outcome comes on the event stream; the journal records each executed action at its instant with its resolved payload;
