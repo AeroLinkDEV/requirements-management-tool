@@ -1481,7 +1481,28 @@ test('at TDN, 0.3 NM off the final track: TDN NOT POSSIBLE, roll steering withdr
   expect(sim.lateralMode).toBe('HDG')
   expect(sim.lnavIsArmed).toBe(true)
   expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NCD')
-  // Re-activated and re-executed, the hover steers again.
+  // ACTIVATE only previews a replacement: the rejected active procedure stays disabled through CANCEL or ERASE.
+  const refusedProcedure = unit.hover.active!.id
+  for (const discard of [() => unit.press('LSK6L'), () => unit.eraseModification()]) {
+    unit.open('HOVER')
+    expect(unit.designateHoverMark({ ident: 'WPT', position: mark, label: null })).toBe(true)
+    unit.press('LSK6R')
+    expect(unit.hover.status).toBe('MOD')
+    expect(unit.hover.active!.id).toBe(refusedProcedure)
+    sim.refreshGuidance()
+    expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NCD')
+    discard()
+    expect(unit.hover.status).toBe('ACT')
+    expect(unit.hover.active!.id).toBe(refusedProcedure)
+    sim.refreshGuidance()
+    expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NCD')
+    sim.armLnav()
+    fly(2)
+    expect(sim.lateralMode).toBe('HDG')
+    expect(sim.lnavIsArmed).toBe(true)
+    expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NCD')
+  }
+  // Only a replacement accepted on EXEC restores steering (E-17).
   unit.open('HOVER')
   expect(unit.designateHoverMark({ ident: 'WPT', position: mark, label: null })).toBe(true)
   unit.press('LSK6R')

@@ -4205,7 +4205,11 @@ export class ScriptedFms implements CduBackend {
         ...(rest[0]?.kind === "disco" ? rest.slice(1) : rest),
       ];
     });
-    Object.assign(this.hover, { status: "MOD", finalTrack, windDirection: this.systemWind.direction, dtra: plan.dtraNm, plan, windSpeed: null, refused: null, refusedReason: null, functionLost: false, requestData: null, atTdn: null });
+    // ACTIVATE previews a replacement, while the executed procedure still owns steering. Preserve its refusal through
+    // MOD, CANCEL and ERASE: only an accepted replacement on EXEC restores the disabled roll command (M300 E-17).
+    Object.assign(this.hover, { status: "MOD", finalTrack, windDirection: this.systemWind.direction, dtra: plan.dtraNm, plan, windSpeed: null,
+      refused: this.hover.active ? this.hover.refused : null, refusedReason: this.hover.active ? this.hover.refusedReason : null,
+      functionLost: false, requestData: null, atTdn: null });
     return null;
   }
 
