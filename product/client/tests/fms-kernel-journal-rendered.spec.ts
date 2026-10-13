@@ -125,6 +125,194 @@ const exportFrom = async (root: Page, surface: Page | Locator): Promise<KernelRe
 }
 const fixtureFile = (name: string, value: unknown) => ({ name, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(value)) })
 
+// These rows own D5 bridge metadata, not the GPS/radio model's numerical effects (their existing owners remain).
+// A new operation can bypass or misaddress the shared adapter even when another operation on it is correct.
+const openD5Instructor = async (page: Page, popped: boolean) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
+  await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
+  await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
+  let instructor = page
+  if (popped) {
+    await page.locator('.fmsStationDock > summary').click()
+    const controls = page.getByRole('region', { name: 'Station arrangement', exact: true })
+    await controls.getByLabel('Instructor apart').check()
+    const opened = page.waitForEvent('popup')
+    await controls.getByRole('button', { name: 'Open instructor station in a window', exact: true }).click()
+    instructor = await opened
+    await page.locator('.fmsStationDock > summary').click()
+  }
+  const ios = instructor.getByRole('region', { name: 'Instructor station', exact: true })
+  await ios.getByRole('tab', { name: 'Flight and setup', exact: true }).click()
+  await ios.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  return { instructor, ios }
+}
+
+for (const popped of [false, true]) test(`D5 GPS parameter branches retain literal receiver, values and instructor ${popped ? 'popout' : 'main'} source`, async ({ page }) => {
+  const { instructor, ios } = await openD5Instructor(page, popped)
+  await ios.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
+  const faults = ios.getByRole('region', { name: 'GPS 2 faults', exact: true })
+  const ops: { id: string; op: unknown; outcome?: unknown }[] = []
+  // Literal on/off vectors distinguish receiver2 from the inspected FMS2 and shared sensor owner FMS1.
+  for (const [label, id, onOp, offOp] of [
+    ['SBAS do not use', 'doNotUse', { op: 'sbas', doNotUse: true }, { op: 'sbas', doNotUse: false }],
+    ['RF input fault', 'rfInput', { op: 'fault', fault: 'RF_INPUT', on: true }, { op: 'fault', fault: 'RF_INPUT', on: false }],
+    ['Baro lost', 'baroLost', { op: 'baroLost', on: true }, { op: 'baroLost', on: false }],
+    ['Stop transmitting', 'stopped', { op: 'fault', fault: 'STOP_TRANSMITTING', on: true }, { op: 'fault', fault: 'STOP_TRANSMITTING', on: false }],
+  ] as const) {
+    await faults.getByLabel(`GPS 2 ${label}`, { exact: true }).check()
+    await faults.getByLabel(`GPS 2 ${label}`, { exact: true }).uncheck()
+    ops.push({ id, op: onOp }, { id, op: offOp })
+  }
+  for (const geo of [131, 133]) {
+    await faults.getByLabel(`GPS 2 GEO ${geo} outage`, { exact: true }).check()
+    await faults.getByLabel(`GPS 2 GEO ${geo} outage`, { exact: true }).uncheck()
+    ops.push({ id: 'outage', op: { op: 'sbas', outage: [geo] } }, { id: 'outage', op: { op: 'sbas', outage: [] } })
+  }
+  await faults.getByLabel('GPS 2 jamming', { exact: true }).focus()
+  await faults.getByLabel('GPS 2 jamming', { exact: true }).press('End')
+  await faults.getByLabel('GPS 2 jamming', { exact: true }).press('Home')
+  ops.push({ id: 'jamming', op: { op: 'jam', db: 25 } }, { id: 'jamming', op: { op: 'jam', db: 0 } })
+  await faults.getByLabel('GPS 2 ionospheric storm', { exact: true }).focus()
+  await faults.getByLabel('GPS 2 ionospheric storm', { exact: true }).press('End')
+  await faults.getByLabel('GPS 2 ionospheric storm', { exact: true }).press('Home')
+  ops.push({ id: 'ionoStorm', op: { op: 'sbas', ionoStorm: 30 } }, { id: 'ionoStorm', op: { op: 'sbas', ionoStorm: 1 } })
+  await faults.getByLabel('GPS 2 spoof north offset', { exact: true }).fill('-300')
+  await faults.getByLabel('GPS 2 spoof east drift', { exact: true }).fill('2')
+  await faults.getByRole('button', { name: 'Spoof', exact: true }).click()
+  await faults.getByRole('button', { name: 'End', exact: true }).click()
+  ops.push({ id: 'spoof', op: { op: 'spoof', northM: -300, driftEastMps: 2 } }, { id: 'spoof', op: { op: 'clearSpoof' } })
+  await ios.getByText('GPS 2 bus monitor', { exact: true }).click()
+  const monitor = ios.getByRole('table', { name: 'GPS 2 bus monitor', exact: true })
+  // Independent declared numeric-label vector. No encoder/receiver output supplies expected label/value/SSM.
+  for (const label of ['110', '120', '111', '121', '076', '370', '103', '112', '165', '166', '174', '101', '102', '130', '133', '247', '136', '116', '117', '201']) {
+    const row = monitor.locator(`[data-label="${label}"]`)
+    await row.getByLabel(`Override ${label}`, { exact: true }).selectOption('FORCE')
+    await row.getByLabel(`Override ${label} amount`, { exact: true }).fill('1')
+    await row.getByLabel(`Override ${label} status`, { exact: true }).selectOption('FW')
+    await row.getByRole('button', { name: 'Set', exact: true }).click()
+    await row.getByRole('button', { name: 'Clear', exact: true }).click()
+    ops.push({ id: `override ${label}`, op: { op: 'override', label, kind: 'FORCE', amount: 1, ssm: 'FW' } }, { id: `override ${label}`, op: { op: 'clearOverride', label } })
+  }
+  const numeric = monitor.locator('[data-label="130"]')
+  for (const kind of ['FREEZE', 'BIAS', 'RAMP']) {
+    await numeric.getByLabel('Override 130', { exact: true }).selectOption(kind)
+    if (kind !== 'FREEZE') await numeric.getByLabel('Override 130 amount', { exact: true }).fill('-2')
+    await numeric.getByRole('button', { name: 'Set', exact: true }).click()
+    await numeric.getByRole('button', { name: 'Clear', exact: true }).click()
+    ops.push({ id: 'override 130', op: kind === 'FREEZE' ? { op: 'override', label: '130', kind: 'FREEZE' } : { op: 'override', label: '130', kind, amount: -2 } }, { id: 'override 130', op: { op: 'clearOverride', label: '130' } })
+  }
+  for (const ssm of ['NORMAL', 'NCD', 'FT', 'FW']) {
+    await numeric.getByLabel('Override 130', { exact: true }).selectOption('FORCE')
+    await numeric.getByLabel('Override 130 amount', { exact: true }).fill('1')
+    await numeric.getByLabel('Override 130 status', { exact: true }).selectOption(ssm)
+    await numeric.getByRole('button', { name: 'Set', exact: true }).click()
+    await numeric.getByRole('button', { name: 'Clear', exact: true }).click()
+    ops.push({ id: 'override 130', op: { op: 'override', label: '130', kind: 'FORCE', amount: 1, ssm } }, { id: 'override 130', op: { op: 'clearOverride', label: '130' } })
+  }
+  // All typed form branches, including a nested boolean and blank nullable string; validation science stays below UI.
+  for (const [label, field, value, control, patch] of [
+    ['273', 'used', '5', 'input', { used: 5 }], ['355', 'buses.dme', 'true', 'select', { buses: { dme: true } }],
+    ['156', 'armed', 'true', 'select', { armed: true }], ['305', 'provider', 'D5-LITERAL', 'input', { provider: 'D5-LITERAL' }],
+    ['305', 'provider', '', 'input', { provider: null }], ['305', 'level', 'LNAV', 'select', { level: 'LNAV' }],
+  ] as const) {
+    const row = monitor.locator(`[data-label="${label}"]`)
+    await row.getByLabel(`Status field ${label}`, { exact: true }).selectOption(field)
+    const input = row.getByLabel(`Status value ${label}`, { exact: true })
+    if (control === 'select') await input.selectOption(value); else await input.fill(value)
+    await row.getByRole('button', { name: 'Set', exact: true }).click()
+    await row.getByRole('button', { name: 'Clear', exact: true }).click()
+    ops.push({ id: `status ${label}`, op: { op: 'status', label, patch } }, { id: `status ${label}`, op: { op: 'clearStatus', label } })
+  }
+  // The native amount form has no max attribute: this admitted input reaches the receiver's actual refusal boundary.
+  // The preceding BIAS -2 is its positive control; do not substitute disabled/missing-control failures for this refusal.
+  await numeric.getByLabel('Override 130', { exact: true }).selectOption('BIAS')
+  await numeric.getByLabel('Override 130 amount', { exact: true }).fill('1000000001')
+  await numeric.getByRole('button', { name: 'Set', exact: true }).click()
+  await expect(page.getByTestId('fms-input-outcome')).toHaveText('Last executed input: refused: the receiver refused the operation.')
+  ops.push({ id: 'override 130', op: { op: 'override', label: '130', kind: 'BIAS', amount: 1000000001 }, outcome: { status: 'refused', reason: 'the receiver refused the operation' } })
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const record = await exportFrom(page, ios)
+  expect(record.journal.map(entry => [entry.kind, entry.target, entry.source, entry.payload, entry.outcome])).toEqual(ops.map(({ id, op, outcome }) => [
+    'f14.gps', 'gps2', { kind: 'f14', id: `gps2.${id}`, surface: popped ? 'popout' : 'main' }, { kind: 'f14.gps', receiver: 2, op }, outcome ?? { status: 'accepted' },
+  ]))
+  if (popped) { await page.locator('.fmsStationDock > summary').click(); await page.getByRole('button', { name: 'Return all panels', exact: true }).click(); await expect.poll(() => instructor.isClosed()).toBe(true) }
+})
+
+for (const popped of [false, true]) test(`D5 sensor parameter branches retain shared versus inspected targets and instructor ${popped ? 'popout' : 'main'} source`, async ({ page }) => {
+  const { instructor, ios } = await openD5Instructor(page, popped)
+  await ios.getByRole('tab', { name: 'Conditions', exact: true }).click()
+  const card = ios.getByRole('region', { name: 'Sensor fault laboratory', exact: true })
+  const vectors: { unit: number; stimulus: Record<string, unknown> & { kind: string }; outcome: unknown }[] = []
+  const accepted = (unit: number, stimulus: Record<string, unknown> & { kind: string }) => vectors.push({ unit, stimulus, outcome: { status: 'accepted' } })
+  await card.getByLabel('Fault radio', { exact: true }).selectOption('nav2')
+  await card.getByLabel('Radio receiver state', { exact: true }).selectOption('SILENT')
+  await card.getByRole('button', { name: 'Apply receiver state', exact: true }).click()
+  accepted(2, { kind: 'radioFault', device: 'nav2', receiver: 'SILENT' })
+  await card.getByRole('button', { name: 'Apply control path', exact: true }).click()
+  accepted(2, { kind: 'radioFault', device: 'nav2', controlPath: 'LOST' })
+  await card.getByRole('button', { name: 'Apply measurement bus', exact: true }).click()
+  accepted(2, { kind: 'radioFault', device: 'nav2', measurementBus: 'LOST' })
+  await card.getByLabel('Fault radio', { exact: true }).selectOption('dme1')
+  await expect(card.getByRole('button', { name: 'Apply control path', exact: true })).toBeDisabled()
+  await card.getByLabel('Fault station ident', { exact: true }).fill('ZZZZ')
+  await card.getByRole('button', { name: 'Apply ground stimulus', exact: true }).click()
+  vectors.push({ unit: 2, stimulus: { kind: 'stationFault', ident: 'ZZZZ', component: 'DME', reply: false }, outcome: { status: 'refused', reason: 'DME ZZZZ requires one unambiguous compatible facility in the active database' } })
+  // Published native F14 fixture has YOW VOR/DME and the five-character BOBTU NDB; no fabricated facilities.
+  await card.getByLabel('Fault station ident', { exact: true }).fill('YOW')
+  for (const [choice, stimulus] of [
+    ['DME_NO_REPLY', { kind: 'stationFault', ident: 'YOW', component: 'DME', reply: false }],
+    ['DME_REPLY', { kind: 'stationFault', ident: 'YOW', component: 'DME', reply: true }],
+    ['OFF_AIR', { kind: 'stationOffAir', ident: 'YOW', off: true }], ['ON_AIR', { kind: 'stationOffAir', ident: 'YOW', off: false }],
+  ] as const) {
+    await card.getByLabel('Ground station stimulus', { exact: true }).selectOption(choice)
+    await card.getByRole('button', { name: 'Apply ground stimulus', exact: true }).click(); accepted(2, stimulus)
+  }
+  await card.getByLabel('Ground station stimulus', { exact: true }).selectOption('DME_IDENT')
+  for (const ident of ['BAD', '']) {
+    await card.getByLabel('DME reported ident', { exact: true }).fill(ident)
+    await card.getByRole('button', { name: 'Apply ground stimulus', exact: true }).click()
+    accepted(2, { kind: 'stationFault', ident: 'YOW', component: 'DME', reportedIdent: ident === '' ? null : 'BAD' })
+  }
+  await card.getByLabel('Ground station stimulus', { exact: true }).selectOption('VOR_BIAS')
+  await card.getByLabel('VOR radial bias degrees', { exact: true }).fill('10')
+  await card.getByRole('button', { name: 'Apply ground stimulus', exact: true }).click()
+  accepted(2, { kind: 'stationFault', ident: 'YOW', component: 'VOR', biasDeg: 10 })
+  for (const [choice, offAir] of [['NDB_OFF', true], ['NDB_ON', false]] as const) {
+    await card.getByLabel('Ground station stimulus', { exact: true }).selectOption(choice)
+    await card.getByLabel('Fault station ident', { exact: true }).fill('BOBTU')
+    await card.getByRole('button', { name: 'Apply ground stimulus', exact: true }).click()
+    accepted(2, { kind: 'ndb', ident: 'BOBTU', offAir })
+  }
+  await card.getByLabel('Navigation heading valid', { exact: true }).uncheck()
+  accepted(1, { kind: 'airInput', headingValid: false })
+  await card.getByLabel('Navigation heading bias degrees', { exact: true }).fill('30')
+  await card.getByRole('button', { name: 'Apply heading bias', exact: true }).click()
+  accepted(1, { kind: 'airInput', headingBiasDeg: 30 })
+  await card.getByLabel('Measured Doppler surface', { exact: true }).selectOption('SEA')
+  await card.getByRole('button', { name: 'Apply Doppler surface', exact: true }).click()
+  accepted(1, { kind: 'dvsInput', surface: 'SEA' })
+  await card.getByLabel('Power interruption duration ms', { exact: true }).fill('51')
+  await card.getByRole('button', { name: 'Interrupt KALMAN power', exact: true }).click()
+  accepted(1, { kind: 'powerInterrupt', durationMs: 51 })
+  await card.getByLabel('APIRS accelerometer bias north m/s²', { exact: true }).fill('0.3')
+  await card.getByLabel('APIRS accelerometer bias east m/s²', { exact: true }).fill('-0.2')
+  await card.getByRole('button', { name: 'Apply APIRS bias', exact: true }).click()
+  accepted(1, { kind: 'apirsBias', northMs2: 0.3, eastMs2: -0.2 })
+  for (const [button, mode] of [['GPS pair integrity only', 'INTEGRITY_ONLY'], ['GPS pair position gone', 'POSITION_GONE'], ['Restore GPS pair words', 'NORMAL']] as const) {
+    await card.getByRole('button', { name: button, exact: true }).click()
+    accepted(1, { kind: 'gpsPair', mode })
+  }
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const record = await exportFrom(page, ios)
+  expect(record.journal.map(entry => [entry.kind, entry.target, entry.source, entry.payload, entry.outcome])).toEqual(vectors.map(({ unit, stimulus, outcome }) => [
+    'f14.sensor', unit === 1 ? 'fms1' : 'fms2', { kind: 'f14', id: `sensor.${stimulus.kind}`, surface: popped ? 'popout' : 'main' }, { kind: 'f14.sensor', unit, stimulus }, outcome,
+  ]))
+  if (popped) { await page.locator('.fmsStationDock > summary').click(); await page.getByRole('button', { name: 'Return all panels', exact: true }).click(); await expect.poll(() => instructor.isClosed()).toBe(true) }
+})
+
 for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popout' : 'main'} producers export literal resolved actions including a valid discontinuity override`, async ({ page }) => {
   test.setTimeout(90_000)
   const epoch = new Date('2026-09-29T15:00:00Z')
