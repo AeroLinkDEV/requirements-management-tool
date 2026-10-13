@@ -17,6 +17,7 @@ test('bench initializes and both real CDU panels submit held keys to the exporte
   const one = page.getByTestId('fms-cdu-inspected')
   const two = page.getByTestId('fms-cdu-peer')
   await one.locator('[data-key="RTE"]').click()
+  await expect(page.getByTestId('fms-input-outcome')).toHaveText('Last executed input: accepted.')
   await two.locator('[data-key="RTE"]').click()
   const clr = two.locator('[data-key="CLR"]')
   const box = (await clr.boundingBox())!
@@ -29,6 +30,7 @@ test('bench initializes and both real CDU panels submit held keys to the exporte
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
   // A refused FMS go-around remains a real AFCS selection and its outcome is read from the exported event journal.
   await page.getByRole('button', { name: 'TOGA', exact: true }).click()
+  await expect(page.getByTestId('fms-input-outcome')).toHaveText('Last executed input: refused: the FMS refused the missed approach: none ahead, or it has failed.')
   const downloaded = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Export journal', exact: true }).click()
   const download = await downloaded

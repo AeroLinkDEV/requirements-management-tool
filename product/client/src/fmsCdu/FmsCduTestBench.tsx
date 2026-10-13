@@ -256,6 +256,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const cdus = useMemo(() => ([1, 2] as const).map(side => kernelCdu(system.computers[side - 1], side,
     (action: KernelAction, source: ActionSource) => port.submit(action, source), () => (surfaces.current.cockpit ? "popout" : "main"))), [system, port]);
   const backend = system.computers[cduSide - 1];
+  const subscribeOutcomes = useCallback((listener: () => void) => kernel.subscribe(event => {
+    if (event.kind === "outcome") listener();
+  }), [kernel]);
+  const latestOutcome = useSyncExternalStore(subscribeOutcomes, () => kernel.latestOutcome);
   const sharedSensorCondition = (id: ConditionId) => ["gpsLost", "gpsIntegrity", "dmeOutage", "apirsFail", "dvsFail", "raFail"].includes(id);
   const conditionSide = (id: ConditionId): FmsSide => (sharedSensorCondition(id) ? 1 : cduSide);
   const conditionBackend = (id: ConditionId) => system.computers[conditionSide(id) - 1];
@@ -877,6 +881,9 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </p>
             <p className="fmsBenchHint">Every control, key and scenario step that changes the simulation, in the order the kernel executed it, with its outcome (#1502 D5).</p>
             <button type="button" onClick={exportJournal}>Export journal</button>
+            {latestOutcome ? <p aria-live="polite" data-testid="fms-input-outcome">
+              Last executed input: {latestOutcome.outcome.status === "accepted" ? "accepted" : `refused: ${latestOutcome.outcome.reason}`}.
+            </p> : null}
           </section>
         </>)} />
         <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" shown={tab === "conditions" && iosVisible} render={() => (<>

@@ -143,6 +143,7 @@ export class FmsKernel {
   private orderFrame = -1;
   private order = 0;
   private readonly listeners = new Set<(event: KernelEvent) => void>();
+  private lastOutcome: OutcomeEvent | null = null;
   private readonly context: ActionContext;
 
   /**
@@ -188,6 +189,8 @@ export class FmsKernel {
   get liveQueue(): LiveQueueState { return EMPTY_LIVE_QUEUE; }
   get journal(): readonly JournalRecord[] { return this.records; }
   get controlRecords(): readonly ControlRecord[] { return this.controls; }
+  /** The most recent published outcome, for the bench's event-stream subscription. */
+  get latestOutcome(): OutcomeEvent | null { return this.lastOutcome; }
 
   /** The ordering record as plain data: journal, control records, live queue and counters (the bench exports it). */
   record(): KernelRecord {
@@ -332,7 +335,9 @@ export class FmsKernel {
     if (frame !== this.orderFrame) { this.orderFrame = frame; this.order = 0; }
     const record: JournalRecord = { recordOrdinal: this.nextOrdinal++, frame, phase: "ACTION", orderInPhase: this.order++, ...entry, effectsDigest: null };
     this.records.push(record);
-    this.emit({ kind: "outcome", submissionSeq: record.submissionSeq, frame, outcome: record.outcome, payload: record.payload });
+    const event: OutcomeEvent = { kind: "outcome", submissionSeq: record.submissionSeq, frame, outcome: record.outcome, payload: record.payload };
+    this.lastOutcome = event;
+    this.emit(event);
   }
 
   private writeControl(entry: { kind: "halt" | "resume" | "reset" } | { kind: "rate"; rate: number } | { kind: "execution-error"; message: string }, cursor: ControlCursor) {
