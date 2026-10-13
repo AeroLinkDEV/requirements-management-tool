@@ -1,45 +1,39 @@
 import { distanceNm } from "./fmsModel";
-import type { ApproachLevel, GpsLabel, GpsMode, GpsReceiver, Override, Ssm } from "./gps";
+import type { ApproachLevel, GpsLabel, GpsMode, GpsReceiverView, Override, Ssm } from "./gps";
 import { busFix, type GpsChoice } from "./gpsSensors";
-import { stimulusFor, type GpsStimulus } from "./gpsStimulus";
+import { stimulusFor, type GpsStimulusView } from "./gpsStimulus";
 export { lowSatellites } from "./gpsStimulus";
 import type { FlightPhase } from "./navigation";
-import type { ScriptedFms } from "./scriptedFms";
+import type { FmsView, ScriptedFms } from "./scriptedFms";
 
 /**
  * The bench side of the CMA-5024 simulation. The FMS owns GPS1 and GPS2 and feeds them from the aircraft's true state
- * (scriptedFms.ts); the GPS sensors tab reads them through this view, and every change the bench makes (a fault, an
- * override, a deselection) is followed by the FMS re-reading them, so it reaches the FMS's choice at once.
+ * (scriptedFms.ts); the GPS sensors tab reads them through this view. Every change the bench makes (a fault, an
+ * override, a deselection, the receiver selection) is an action submitted to the kernel (`f14.gps`, `fms.gpsSelect`),
+ * followed by the FMS re-reading them, so it reaches the FMS's choice at once. The view itself changes nothing.
  */
 export type GpsView = {
-  receivers: readonly GpsReceiver[];
+  receivers: readonly GpsReceiverView[];
   /** The distance between the two receivers' reported positions, m; null unless both report a valid one. */
   difference(): number | null;
-  setBaroLost(index: number, lost: boolean): void;
-  /** Tell the FMS a receiver was changed from the bench. */
-  updated(): void;
-  select(choice: GpsChoice | "OFF"): void;
   /** The FMS's GPS selection (NAV OPTIONS): AUTO, one receiver, or OFF (GPS deselected). */
   choice: GpsChoice | "OFF";
   /** The GPS integrity condition holds the receivers' satellite selection: bench masking is replaced while it is on. */
   integrityHeld: boolean;
   /** What the bench has injected into each receiver, kept with the bench session (gpsStimulus.ts). */
-  stimulus: GpsStimulus;
+  stimulus: GpsStimulusView;
 };
 
-export function fmsGpsView(fms: ScriptedFms, sensorOwner: ScriptedFms = fms): GpsView {
+export function fmsGpsView(fms: FmsView, sensorOwner: FmsView = fms): GpsView {
   // The condition replaces the bench's masking and clears it (ScriptedFms.setCondition, GpsStimulus.apply): drawing
-  // this view never changes the record (#1518).
-  const stimulus = stimulusFor(sensorOwner), integrityHeld = sensorOwner.hasCondition("gpsIntegrity");
+  // this view never changes the record (#1518). The record is the sensor owner's, created with its first use.
+  const stimulus: GpsStimulusView = stimulusFor(sensorOwner as ScriptedFms), integrityHeld = sensorOwner.hasCondition("gpsIntegrity");
   return {
     receivers: fms.gps,
     difference: () => {
       const [a, b] = fms.gps.map(rx => { const bus = rx.bus(); return bus ? busFix(bus) : null; });
       return a && b ? distanceNm(a, b) * 1852 : null;
     },
-    setBaroLost: (index, lost) => stimulus.setBaroLost(index, lost),
-    updated: () => { sensorOwner.gpsUpdated(); if (sensorOwner !== fms) fms.gpsUpdated(); },
-    select: choice => fms.selectGpsReceiver(choice),
     choice: fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF",
     integrityHeld,
     stimulus,

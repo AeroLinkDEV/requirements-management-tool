@@ -1,5 +1,6 @@
 import { NUMBER_LABELS, STATUS_FIELDS, validPatch, type GpsBus, type GpsLabel, type GpsReceiver, type NumberLabel, type Override, type Ssm, type StatusLabel, type StatusPatch } from "./gps";
 import type { ScriptedFms } from "./scriptedFms";
+import type { MethodRoles, ViewOf } from "./computation";
 
 /**
  * What the bench has injected into each of the FMS's receivers (faults, word overrides, status patches), held for the
@@ -130,6 +131,13 @@ const initial = (): ReceiverStimulus => ({
   receiver: false, rfInput: false, baroLost: false, stopped: false, spoof: null, overrides: {}, statusPatches: {},
 });
 
+/**
+ * Every public method of GpsStimulus and what it is (computation.ts MethodRole; #1517 I1b's structural guard). The GPS
+ * sensors tab reads the record through GpsStimulusView and changes it only by submitting `f14.gps` to the kernel.
+ */
+const GPS_STIMULUS_ROLES = { apply: "self-computing", clearMasking: "kernel-internal", state: "query" } as const satisfies MethodRoles<GpsStimulus>;
+export type GpsStimulusView = ViewOf<GpsStimulus, typeof GPS_STIMULUS_ROLES>;
+
 export class GpsStimulus {
   private readonly states: [ReceiverStimulus, ReceiverStimulus] = [initial(), initial()];
   private readonly fms: ScriptedFms;
@@ -222,33 +230,9 @@ export class GpsStimulus {
     return true;
   }
 
-  // The tab's controls, as operations.
-  setMaskLow(index: number, on: boolean) { this.apply(index, { op: "maskLow", on }); }
-  toggleMasked(index: number, value: number) {
-    const current = this.states[index].masked;
-    this.apply(index, { op: "mask", prns: current.includes(value) ? current.filter(p => p !== value) : [...current, value] });
-  }
   /** The integrity condition has taken the satellite selection: the bench's masking no longer applies. */
   clearMasking() {
     this.states.forEach((state, index) => { if (state.lowPrns.length || state.masked.length) this.states[index] = { ...state, lowPrns: [], masked: [] }; });
-  }
-  setJamming(index: number, db: number) { this.apply(index, { op: "jam", db }); }
-  setSatFault(index: number, fault: SatFault | null) {
-    this.apply(index, fault ? { op: "satelliteFault", prn: fault.prn, fault: fault.kind, value: fault.amount } : { op: "clearSatelliteFault" });
-  }
-  setSbas(index: number, sbas: Partial<Pick<ReceiverStimulus, "doNotUse" | "outage" | "ionoStorm">>) { this.apply(index, { op: "sbas", ...sbas }); }
-  setFault(index: number, fault: "receiver" | "rfInput" | "stopped", on: boolean) {
-    this.apply(index, { op: "fault", fault: fault === "receiver" ? "RECEIVER" : fault === "rfInput" ? "RF_INPUT" : "STOP_TRANSMITTING", on });
-  }
-  setBaroLost(index: number, lost: boolean) { this.apply(index, { op: "baroLost", on: lost }); }
-  setSpoof(index: number, spoof: Spoof | null) { this.apply(index, spoof ? { op: "spoof", ...spoof } : { op: "clearSpoof" }); }
-  /** A numeric word override from the bus monitor's form (FORCE with an optional status, FREEZE, BIAS, RAMP), or null to clear. */
-  setOverride(index: number, label: NumberLabel, override: { kind: Override["kind"]; amount?: number; ssm?: Ssm } | null) {
-    this.apply(index, override ? { op: "override", label, ...override } : { op: "clearOverride", label });
-  }
-  /** A typed status patch; false, and nothing recorded, when the receiver refuses it. null clears the label's patch. */
-  setStatusPatch<L extends StatusLabel>(index: number, label: L, patch: StatusPatch[L] | null): boolean {
-    return this.apply(index, patch ? { op: "status", label, patch: patch as Record<string, unknown> } : { op: "clearStatus", label });
   }
 }
 

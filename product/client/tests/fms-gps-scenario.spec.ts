@@ -133,15 +133,15 @@ test('while recording, what the GPS tab applies is recorded with its time, and r
   const recorder = new ScenarioRecorder(() => new Date(now))
   const stimulus = stimulusFor(fms)
   stimulus.listener = (index, op) => recorder.gps((index + 1) as 1 | 2, op)
-  stimulus.setJamming(1, 30)
+  stimulus.apply(1, { op: 'jam', db: 30 })
   now += 2_100
-  stimulus.setSatFault(0, { prn: 24, kind: 'RAMP', amount: 5 })
-  stimulus.setOverride(0, '130', { kind: 'FORCE', amount: 0.9, ssm: 'FW' })
+  stimulus.apply(0, { op: 'satelliteFault', prn: 24, fault: 'RAMP', value: 5 })
+  stimulus.apply(0, { op: 'override', label: '130', kind: 'FORCE', amount: 0.9, ssm: 'FW' })
   now += 3_000
-  expect(stimulus.setStatusPatch(1, '273', { integrity: 'DETECTED' })).toBe(true)
-  stimulus.setSatFault(0, null)
-  stimulus.setOverride(0, '130', null)
-  stimulus.setStatusPatch(1, '273', null)
+  expect(stimulus.apply(1, { op: 'status', label: '273', patch: { integrity: 'DETECTED' } })).toBe(true)
+  stimulus.apply(0, { op: 'clearSatelliteFault' })
+  stimulus.apply(0, { op: 'clearOverride', label: '130' })
+  stimulus.apply(1, { op: 'clearStatus', label: '273' })
   const recorded = recorder.toScenario('recorded GPS')
   expect(recorded.startTime).toBe(START)
   expect(recorded.steps).toEqual([
@@ -154,7 +154,7 @@ test('while recording, what the GPS tab applies is recorded with its time, and r
     { when: { kind: 'time', seconds: 5.25 }, action: { kind: 'gps', receiver: 2, stimulus: { op: 'clearStatus', label: '273' } } },
   ])
   // A refused change is not recorded.
-  expect(stimulus.setStatusPatch(1, '273', { mode: 'WARP' } as never)).toBe(false)
+  expect(stimulus.apply(1, { op: 'status', label: '273', patch: { mode: 'WARP' } })).toBe(false)
   expect(recorder.toScenario('again').steps).toHaveLength(7)
   // Played back, it leaves the receivers as the tab left them, and it is valid JSON the bench can import.
   const replay = runHeadless({ ...parseScenario(JSON.stringify(recorded)), steps: [...recorded.steps, { when: { kind: 'start' }, action: { kind: 'expectGpsSource', source: 'GPS1' } }] })

@@ -101,7 +101,8 @@
     "fms-kernel-phases.spec.ts",
     "fms-kernel-legacy-equivalence.spec.ts",
     "fms-dual-selected-integrity.spec.ts",
-    "fms-bench-pacing.spec.ts"
+    "fms-bench-pacing.spec.ts",
+    "fms-kernel-submission.spec.ts"
   ],
   "rendered": [
     "client-truth-rendered.spec.ts",
@@ -113,6 +114,7 @@
     "artifact-thread-rendered.spec.ts",
     "recorded-code-reference-surfaces.spec.ts",
     "fms-cdu-rendered.spec.ts",
+    "fms-kernel-journal-rendered.spec.ts",
     "fms-clock-setup-rendered.spec.ts",
     "fms-bench-held-key-recording-rendered.spec.ts",
     "fms-station-browser.spec.ts",

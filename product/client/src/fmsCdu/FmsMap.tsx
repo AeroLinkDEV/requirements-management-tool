@@ -1,7 +1,7 @@
 import type { FmsSide } from "./crossTalk";
-import { racetrackOutline, sarTrack, segmentsOutline, type FlightSimulator, type Guidance } from "./flight";
+import { racetrackOutline, sarTrack, segmentsOutline, type FlightView, type Guidance } from "./flight";
 import { arcSweep, bearingDeg, distanceNm, longitudeDelta, offset, type LatLon, type Route } from "./fmsModel";
-import type { ScriptedFms } from "./scriptedFms";
+import type { FmsView } from "./scriptedFms";
 import { MAP_CF_EXTENT_NM, MAP_RADIUS_UNITS } from "./mapDrawing";
 import "./FmsMap.css";
 
@@ -15,8 +15,8 @@ import "./FmsMap.css";
  * for the leg it is flying, labelled with its side ("FMS 2 guiding → TOLGU"), so the two are never mixed.
  */
 
-type Computer = { side: FmsSide; fms: ScriptedFms; sim: FlightSimulator };
-type Props = { fms: ScriptedFms; sim: FlightSimulator; side: FmsSide; guiding: Computer | null; range: number };
+type Computer = { side: FmsSide; fms: FmsView; sim: FlightView };
+type Props = { fms: FmsView; sim: FlightView; side: FmsSide; guiding: Computer | null; range: number };
 
 const R = MAP_RADIUS_UNITS; // the map is drawn in a -R..R box; the range ring at R is the selected range
 

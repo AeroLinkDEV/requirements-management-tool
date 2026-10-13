@@ -2,7 +2,7 @@ import { alert } from "./alerts";
 import type { AlertCauseOwner, CrossTalkPort, RadioManagementPort } from "./crossTalk";
 import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey, type StandbyKey, adfFrequency } from "./radioManagement";
 import type { CivilSolution } from "./civilNavigation";
-import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
+import { MagvarModel, normalizeAngle, polarRegion, type AngleReference, type MagvarView } from "./magvar";
 import { WMM2025_DATABASE } from "./wmm2025";
 import { STANDARD_HPA, errorProblem, formatSetting, indicatedAltitudeFt, settingProblem, type BaroSetting } from "./baro";
 import { parseArinc424, type Arinc424Result } from "./arinc424";
@@ -16,9 +16,9 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { Constellation, seededRandom } from "./gnss";
-import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
+import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus, type GpsReceiverView } from "./gps";
 import { stimulusFor } from "./gpsStimulus";
-import { asComputations } from "./computation";
+import { actionsOf, asComputations, type MethodRoles, type ViewOf } from "./computation";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
@@ -199,6 +199,60 @@ export type DeselectableInput = "TAS" | "HDG" | "DME" | "VOR/DME/TCN" | "DVS" | 
 type Computation = { depth: number; observing: number; settling: boolean; dirty: boolean; members: ScriptedFms[] };
 const SETTLE_ROUNDS = 4;
 
+/**
+ * Every public method of ScriptedFms and what it is (computation.ts MethodRole; #1517 I1b's structural guard). The
+ * actions are the ones asComputations wraps; only the queries are in FmsView, the read-only view the bench's
+ * components get. A public method missing here fails the typecheck.
+ */
+const SCRIPTED_FMS_ROLES = {
+  // Crew, bench and scenario actions: each one kernel computation.
+  abeamPoints: "action", acknowledgeComputerMessage: "action", activateHover: "action", activateSar: "action", activateSecondary: "action",
+  addMark: "action", answerCall: "action", armApproach: "action", cancelHover: "action", cancelTdn: "action", changeHold: "action",
+  chooseEntry: "action", completeSar: "action", copyActiveToSecondary: "action", createPilot: "action", createUserWaypoint: "action",
+  declareQnh: "action", declareSurface: "action", defineHold: "action", defineMoving: "action", definePoint: "action",
+  defineTemporary: "action", deselectRaimSatellite: "action", designateHoverMark: "action", designateHoverMarkIdent: "action",
+  designateHoverMarkOnTop: "action", directTo: "action", endCall: "action", enterManualWind: "action", enterQnh: "action",
+  enterWaypoint: "action", eraseHold: "action", eraseModification: "action", executeTdn: "action", forgetPilot: "action",
+  goAround: "action", importUserDatabase: "action", initializePosition: "action", interceptCourse: "action", interruptSar: "action",
+  loadArinc424: "action", loadBacktrack: "action", loadCompanyRoute: "action", loadMagvar: "action", loadNavData: "action",
+  modify: "action", open: "action", overrideDiscontinuity: "action", placeAircraft: "action", powerOff: "action", powerOn: "action",
+  predictRaimAt: "action", predictRaimEta: "action", proceedFromPins: "action", raiseAlert: "action", readMessages: "action",
+  receiveComputerAlert: "action", receiveComputerPlan: "action", receiveComputerSettings: "action", refreshSystemNavigationMonitoring: "action", replaceLegs: "action",
+  requestMissedApproach: "action", saveCompanyRoute: "action", selectGpsReceiver: "action", selectProcedure: "action",
+  selectRunway: "action", sequence: "action", setAirInputFaults: "action", setApirsFaultBias: "action", setApproachTemperature: "action",
+  setBaroError: "action", setBaroSetting: "action", setDeselected: "action", setDmeDeselected: "action", setDvsInputSurface: "action",
+  setDvsWindMagnetic: "action", setFafAltitude: "action", setFuel: "action", setGpsBaro: "action", setInhibited: "action",
+  setNavRadioMode: "action", setNdbOffAir: "action", setOffset: "action", setRadio: "action", setRadioFaults: "action", setRnp: "action",
+  setScratch: "action", setStationFault: "action", setStationOffAir: "action", setUtcTime: "action", setWaterCurrent: "action",
+  squawk: "action", startSelfTest: "action", swapCycles: "action", swapRadio: "action", toggleAngleReference: "action",
+  // State changes that run their own computation.
+  press: "self-computing", setCondition: "self-computing",
+  // Reads: they change nothing (#1518), so they make up the read-only view.
+  adfBearing: "query", adfRelativeBearing: "query", angleFromEntry: "query", angleText: "query", brightness: "query",
+  compensatedAltitude: "query", compensatedConstraint: "query", coordinates: "query", displayAngle: "query", dmeDistance: "query",
+  dmeReportedIdent: "query", dmeSlantRangeNm: "query", dmeStation: "query", enrouteEnd: "query", entryFor: "query",
+  etaAlongPath: "query", exportUserDatabase: "query", fuelPerformance: "query", groundSpeedOn: "query", hasCondition: "query",
+  holdEntryFor: "query", holdExceedsProtection: "query", inputState: "query", isMoving: "query", lamps: "query", legGeometry: "query",
+  movingAge: "query", movingPositionNow: "query", navRadial: "query", navRadioMode: "query", navStation: "query",
+  nearestVorDme: "query", profile: "query", radioObservations: "query", radioReceiving: "query", rendezvous: "query",
+  rendezvousFor: "query", revision: "query", screen: "query", shownEta: "query", splitsHover: "query", subscribe: "query",
+  tacanBearingAndRange: "query", tacanStation: "query", tacanStations: "query", tdnAngle: "query", vorDmeStations: "query",
+  // The step's, the computation's and the dual system's own machinery.
+  advisory: "kernel-internal", alert: "kernel-internal", arrive: "kernel-internal", attachComputerPorts: "kernel-internal",
+  attachHoldPath: "kernel-internal", attachSettle: "kernel-internal", compute: "kernel-internal", gpsUpdated: "kernel-internal",
+  notifyComputerState: "kernel-internal", observe: "kernel-internal", observeAircraft: "kernel-internal",
+  powerInterrupt: "kernel-internal", receiveSystemNavigation: "kernel-internal", recordFault: "kernel-internal",
+  refreshSensorInput: "kernel-internal", resolveWaypoint: "kernel-internal", setAircraft: "kernel-internal",
+  setReceiverCommandAuthority: "kernel-internal", shareComputation: "kernel-internal", tick: "kernel-internal",
+  updateNavigation: "kernel-internal", updatePerformance: "kernel-internal", updateRendezvous: "kernel-internal",
+} as const satisfies MethodRoles<ScriptedFms>;
+
+/** What the bench's components get of a computer: its queries and properties, never a way to change it (submit()). */
+export type FmsView = Omit<ViewOf<ScriptedFms, typeof SCRIPTED_FMS_ROLES>, "gps" | "magvar"> & {
+  readonly gps: readonly GpsReceiverView[];
+  readonly magvar: MagvarView;
+};
+
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
   private changes = 0;
@@ -213,25 +267,7 @@ export class ScriptedFms implements CduBackend {
   private settler: (() => void) | null = null;
   // The actions the crew, the bench and the scenarios take, each one computation (press and setCondition compute
   // themselves). The steps' own internals (tick, arrive, updateNavigation, setAircraft...) run inside a step already.
-  static {
-    asComputations(ScriptedFms, [
-      "abeamPoints", "acknowledgeComputerMessage", "activateHover", "activateSar", "activateSecondary", "addMark", "answerCall",
-      "armApproach", "cancelHover", "cancelTdn", "changeHold", "chooseEntry", "completeSar", "copyActiveToSecondary",
-      "createPilot", "createUserWaypoint", "declareQnh", "declareSurface", "defineHold", "defineMoving", "definePoint",
-      "defineTemporary", "deselectRaimSatellite", "designateHoverMark", "designateHoverMarkIdent", "designateHoverMarkOnTop",
-      "directTo", "endCall", "enterManualWind", "enterQnh", "enterWaypoint", "eraseHold", "eraseModification", "executeTdn",
-      "forgetPilot", "goAround", "importUserDatabase", "initializePosition", "interceptCourse", "interruptSar", "loadArinc424",
-      "loadBacktrack", "loadCompanyRoute", "loadMagvar", "loadNavData", "modify", "open", "overrideDiscontinuity",
-      "placeAircraft", "powerOff", "powerOn", "predictRaimAt", "predictRaimEta", "proceedFromPins", "raiseAlert",
-      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "refreshSystemNavigationMonitoring", "replaceLegs",
-      "requestMissedApproach", "saveCompanyRoute", "selectGpsReceiver", "selectProcedure", "selectRunway", "sequence",
-      "setAirInputFaults", "setApirsFaultBias", "setApproachTemperature", "setBaroError", "setBaroSetting", "setDeselected",
-      "setDmeDeselected", "setDvsInputSurface", "setDvsWindMagnetic", "setFafAltitude", "setFuel", "setGpsBaro",
-      "setInhibited", "setNavRadioMode", "setNdbOffAir", "setOffset", "setRadio", "setRadioFaults", "setRnp", "setScratch",
-      "setSensorHealth", "setStationFault", "setStationOffAir", "setSurfaceDrift", "setUtcTime", "setWaterCurrent", "squawk",
-      "startSelfTest", "swapCycles", "swapRadio", "toggleAngleReference",
-    ], self => self);
-  }
+  static { asComputations(ScriptedFms, actionsOf<ScriptedFms>(SCRIPTED_FMS_ROLES), self => self); }
   private page: PageId = "IDENT";
   private index = 0;
   private scratch = "";
@@ -264,7 +300,7 @@ export class ScriptedFms implements CduBackend {
   private crossfillPending: Pick<ScriptedFms["computerPlan"], "points" | "moving" | "pilot" | "sar" | "hover"> | null = null;
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
   /**
-   * The FUEL pages (S300 manual 14-1…14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
+   * The FUEL pages (S300 manual 14-1â€¦14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
    * which the fuel computer's values replace on each new access of the page; the FIX; the unit shown. KG throughout inside.
    */
   readonly fuelPage = { whatIfUsable: null as number | null, whatIfFlow: null as number | null, fix: null as string | null, unit: "KG" as "KG" | "LB" };
@@ -292,18 +328,16 @@ export class ScriptedFms implements CduBackend {
   private readonly sensorPort: SensorInputPort | null;
   private sensorSequence = 0;
   private sensorFrame: SensorFrame | null = null;
-  /** Plan F11: when the FMS was last powered (KALMAN is available a minute later), the APIRS and DVS health (bench
-   * stimuli), the crew's water current for the DVS (M300 12-23), and the simulated surface drift the DVS sees. */
+  /** Plan F11: when the FMS was last powered (KALMAN is available a minute later), and the crew's water current for the
+   * DVS (M300 12-23). The APIRS and DVS fail through the apirsFail and dvsFail conditions. */
   private poweredAt = 0;
   private poweredOffAt: number | null = null;
-  private sensorHealth: Record<"APIRS" | "DVS", "NORMAL" | "FAIL"> = { APIRS: "NORMAL", DVS: "NORMAL" };
-  /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/s². */
+  /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/sÂ². */
   private apirsBias = nominalApirsBias(1);
   private apirsFaultBias = { north: 0, east: 0 };
   private airInputFaults = { tasValid: true, headingValid: true, headingBiasDeg: 0 };
   private powerCycles = 1;
   private waterCurrent: { northKt: number; eastKt: number } | null = null;
-  private surfaceDrift = { northKt: 0, eastKt: 0 };
   private truthVelocity: { north: number; east: number; at: number } | null = null;
   private previousTruthVelocity: { north: number; east: number; at: number } | null = null;
   readonly predictiveRaim = { ident: null as string | null, eta: null as number | null, requestedAt: null as number | null };
@@ -529,7 +563,7 @@ export class ScriptedFms implements CduBackend {
    */
   get heading() { return this.aircraft.heading ?? this.aircraft.track; }
   /**
-   * The true airspeed flown now, from the ground velocity and the wind (air = ground − wind), as air data would give it;
+   * The true airspeed flown now, from the ground velocity and the wind (air = ground âˆ’ wind), as air data would give it;
    * null when the aircraft is not moving through the air measurably (below 1 kt).
    */
   get trueAirspeed(): number | null {
@@ -552,7 +586,7 @@ export class ScriptedFms implements CduBackend {
   afcs: { hoverHeight: number; vx: number | null; vy: number | null; ias: number } | null = null;
 
   /**
-   * The CMA transition down to hover (M300 11-18…11-22, A-74…A-76; plan D-T): the mark (MRK), the procedure's state
+   * The CMA transition down to hover (M300 11-18â€¦11-22, A-74â€¦A-76; plan D-T): the mark (MRK), the procedure's state
    * (MOD after ACTIVATE, ACT after EXEC), the final track into the wind (the wind direction frozen at ACTIVATE; below
    * 5 kt, the bearing to MRK), the planned distance from TDN to MRK, and at TDN the transition request the autopilot
    * takes (a counter it watches) or the reason it was refused (TDN NOT POSSIBLE, TDN DIST SHORT). `active` is the
@@ -576,7 +610,7 @@ export class ScriptedFms implements CduBackend {
      */
     requestData: null as { id: number; mrk: LatLon; finalTrack: number; remainingNm: number; gateNm: number; plan: TransitionPlan } | null,
     refused: null as string | null,
-    /** Why the transition was refused at TDN, as the planner put it (below gate speed, no closure, …). */
+    /** Why the transition was refused at TDN, as the planner put it (below gate speed, no closure, â€¦). */
     refusedReason: null as string | null,
     functionLost: false,
     /** At TDN: the position against the final track, the remaining distance, the state and the recomputed decision. */
@@ -749,7 +783,7 @@ export class ScriptedFms implements CduBackend {
   }
   angleText(trueAngle: number | undefined, at = this.position) {
     const angle = trueAngle === undefined ? null : this.displayAngle(trueAngle, at);
-    return `${angle === null ? "---" : String(Math.round(angle) || 360).padStart(3, "0")}${this.angleReference === "TRUE" ? "T" : "°"}`;
+    return `${angle === null ? "---" : String(Math.round(angle) || 360).padStart(3, "0")}${this.angleReference === "TRUE" ? "T" : "Â°"}`;
   }
   toggleAngleReference() {
     if (polarRegion(this.position)) return false;
@@ -1053,7 +1087,7 @@ export class ScriptedFms implements CduBackend {
     this.previousTruthVelocity = null;
     this.engineering = [...this.engineering, {
       at: this.now, action: "PLACE AIRCRAFT",
-      detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
+      detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}Â°, ${Math.round(state.altitude)} FT`,
     }];
     this.updateNavigation(0);
     this.emit();
@@ -1551,12 +1585,11 @@ export class ScriptedFms implements CduBackend {
     const bias = { north: this.apirsBias.north + this.apirsFaultBias.north, east: this.apirsBias.east + this.apirsFaultBias.east };
     const apirs = { northMs2: accel(north, previous?.north, bias.north), eastMs2: accel(east, previous?.east, bias.east) };
     const heading = (this.aircraft.heading ?? this.heading) * Math.PI / 180;
-    const overSurfaceNorth = north - this.surfaceDrift.northKt, overSurfaceEast = east - this.surfaceDrift.eastKt;
-    const dvs = { surface: this.dvsInputSurface, verticalFtMin: this.aircraft.verticalSpeed ?? 0, alongKt: overSurfaceNorth * Math.cos(heading) + overSurfaceEast * Math.sin(heading),
-      acrossKt: -overSurfaceNorth * Math.sin(heading) + overSurfaceEast * Math.cos(heading) };
+    // The Doppler measures over a still surface: no surface drift is modelled.
+    const dvs = { surface: this.dvsInputSurface, verticalFtMin: this.aircraft.verticalSpeed ?? 0, alongKt: north * Math.cos(heading) + east * Math.sin(heading),
+      acrossKt: -north * Math.sin(heading) + east * Math.cos(heading) };
     const word = <T>(value: T, failed: boolean) => ({ at: now, sequence, status: failed ? "FAIL" as const : "NORMAL" as const, value: failed ? null : value });
-    return { apirs: word(apirs, this.sensorHealth.APIRS === "FAIL" || this.injected.has("apirsFail")),
-      dvs: word(dvs, this.sensorHealth.DVS === "FAIL" || this.injected.has("dvsFail")) };
+    return { apirs: word(apirs, this.injected.has("apirsFail")), dvs: word(dvs, this.injected.has("dvsFail")) };
   }
   /**
    * A power interruption of the stated duration in simulation time (plan C2), independent of the flight tick: over
@@ -1569,9 +1602,8 @@ export class ScriptedFms implements CduBackend {
     this.navigation.resetKalman();
     this.apirsBias = nominalApirsBias(++this.powerCycles);
   }
-  /** Bench fault stimulus (plan C2, F14): a deliberate APIRS accelerometer bias outside the nominal model, m/s². */
+  /** Bench fault stimulus (plan C2, F14): a deliberate APIRS accelerometer bias outside the nominal model, m/sÂ². */
   setApirsFaultBias(northMs2: number, eastMs2: number) { this.apirsFaultBias = { north: northMs2, east: eastMs2 }; }
-  setSensorHealth(sensor: "APIRS" | "DVS", health: "NORMAL" | "FAIL") { this.sensorHealth[sensor] = health; }
   /** DVS STATUS 2/2 WATER CURRENT (M300 12-23): the surface's drift the crew enters, direction toward and speed. */
   private dvsMagnetic = false;
   /** DVS STATUS 2/2 shows the wind magnetic (or true); outside the polar area the crew toggles it (M300 12-22). */
@@ -1616,10 +1648,6 @@ export class ScriptedFms implements CduBackend {
   setWaterCurrent(toward: number | null, speedKt = 0) {
     this.waterCurrent = toward === null ? null
       : { northKt: speedKt * Math.cos(toward * Math.PI / 180), eastKt: speedKt * Math.sin(toward * Math.PI / 180) };
-  }
-  /** Bench: the true surface drift (a sea current) the Doppler measures against. */
-  setSurfaceDrift(toward: number, speedKt: number) {
-    this.surfaceDrift = { northKt: speedKt * Math.cos(toward * Math.PI / 180), eastKt: speedKt * Math.sin(toward * Math.PI / 180) };
   }
 
   /** The Doppler velocity in earth axes, rotated with the FMS's own heading (null without a valid word). */
@@ -1907,7 +1935,7 @@ export class ScriptedFms implements CduBackend {
     });
     const chosen = selection.chosen;
     this.gpsSelection = { qualified: selection.qualified, refused: selection.refused };
-    // A qualified approach transfer is annunciated (AC 20-138D Change 2 §21-2.2(g)); the nav source log records it too.
+    // A qualified approach transfer is annunciated (AC 20-138D Change 2 Â§21-2.2(g)); the nav source log records it too.
     if (selection.transferred && chosen !== null) this.alert(alert(`APPR ON GPS${chosen + 1}`));
     // A receiver lost is annunciated whether or not the other takes over: a transfer never hides the failure or the lost
     // redundancy. Its recovery is logged, and by itself changes nothing.
@@ -2491,7 +2519,7 @@ export class ScriptedFms implements CduBackend {
 
   /**
    * Burns fuel for dt seconds and checks the plan: FUEL RESERVE when fuel on board reaches the reserve, NOT ENOUGH
-   * FUEL when the prediction at the destination is below it, UNABLE NEXT ALTITUDE (the manual’s wording is not in
+   * FUEL when the prediction at the destination is below it, UNABLE NEXT ALTITUDE (the manualâ€™s wording is not in
    * the alert list, so the advisory is used) when a climb constraint cannot be made.
    */
   updatePerformance(dt: number) {
@@ -3761,7 +3789,7 @@ export class ScriptedFms implements CduBackend {
   routeLoadReport: string[] = [];
 
   /**
-   * Loads a stored route (CO ROUTE). INVERSE (E6; M300 3-10…3-11 define the INV prefix and the toggle, not the leg
+   * Loads a stored route (CO ROUTE). INVERSE (E6; M300 3-10â€¦3-11 define the INV prefix and the toggle, not the leg
    * semantics) follows the nearest S300 rule, BACKTRACK [M300 11-35], and is inferred and labelled: the origin and
    * destination swap, the waypoints are flown in reverse order, every leg as TF with the first as DF (the route
    * before it is not kept), and airways and altitude constraints, which belong to the direction flown, are not
@@ -3771,7 +3799,7 @@ export class ScriptedFms implements CduBackend {
    * load refused, never substituted; a fix a user route recorded at another position is reported as moved (it is
    * flown where the database has it now).
    *
-   * Airborne, a load into the active route appends rather than replaces (#1369; M300 3-10…3-13). The destination
+   * Airborne, a load into the active route appends rather than replaces (#1369; M300 3-10â€¦3-13). The destination
    * becomes the stored route's (its origin, inversed), the active waypoint is kept and followed by a discontinuity and
    * the stored route's waypoints, and a procedure in the plan (SID, STAR, approach) is replaced as a whole. The origin
    * stays: the manual names only the destination. The RTE page marks the name with "+". An inversed append drops the
@@ -4146,7 +4174,7 @@ export class ScriptedFms implements CduBackend {
     return ident;
   }
 
-  // ------------------------------------------------------------------ transition down to hover (M300 11-18…11-22)
+  // ------------------------------------------------------------------ transition down to hover (M300 11-18â€¦11-22)
 
   /**
    * Designates the hover mark (HOVER page 1L/1R, M300 A-75): MARK ON TOP (present position), a waypoint by ident, or
