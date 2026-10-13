@@ -149,16 +149,33 @@ jobs:
           find_product_run() {
             read_api "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
               --output "$RUNNER_TEMP/product-runs.json"
-            python - "$RUNNER_TEMP/product-runs.json" "$HEAD_SHA" "$PR_NUMBER" "$HEAD_REF" <<'PY'
+            python - "$RUNNER_TEMP/product-runs.json" "$HEAD_SHA" "$PR_NUMBER" "$HEAD_REF" "$RUNNER_TEMP/dispatched-before-runs.json" "${selected_run_id:-}" <<'PY'
           import json
+          import os
           import sys
 
-          path, head_sha, pr_number, head_ref = sys.argv[1:]
+          path, head_sha, pr_number, head_ref, before_path, selected_id = sys.argv[1:]
           pr_number = int(pr_number)
-          with open(path, encoding="utf-8") as handle:
-              runs = json.load(handle).get("workflow_runs", [])
+          def read_runs(path):
+              with open(path, encoding="utf-8") as handle:
+                  page = json.load(handle)
+              runs = page.get("workflow_runs") if isinstance(page, dict) else None
+              count = page.get("total_count") if isinstance(page, dict) else None
+              if not isinstance(runs, list) or type(count) is not int or count != len(runs):
+                  raise SystemExit("ERROR Product-run response is incomplete.")
+              ids = [run.get("id") if isinstance(run, dict) else None for run in runs]
+              if any(type(run_id) is not int or run_id <= 0 for run_id in ids) or len(set(ids)) != len(ids):
+                  raise SystemExit("ERROR Product-run identities are invalid or duplicated.")
+              return runs
+          runs = read_runs(path)
+          # A dispatch returns no run ID. Capture the complete pre-dispatch set, then accept exactly one
+          # newly registered trusted run. Old failures cannot terminate the new request (#1595).
+          recovering = os.path.exists(before_path)
+          before_ids = {run["id"] for run in read_runs(before_path)} if recovering else set()
           matches = []
           for run in runs:
+              if run["id"] in before_ids:
+                  continue
               prs = {item.get("number") for item in run.get("pull_requests", [])}
               if (
                   run.get("head_sha") == head_sha
@@ -168,11 +185,20 @@ jobs:
                   and run.get("triggering_actor", {}).get("login") == "github-actions[bot]"
                   and pr_number in prs
               ):
+                  if run.get("status") not in {"queued", "in_progress", "completed", "waiting", "requested", "pending"}:
+                      raise SystemExit("ERROR Trusted Product-run status is unresolved.")
+                  if run.get("status") == "completed" and run.get("conclusion") not in {
+                      "success", "failure", "neutral", "cancelled", "skipped", "timed_out",
+                      "action_required", "stale", "startup_failure",
+                  }:
+                      raise SystemExit("ERROR Completed trusted Product-run conclusion is unresolved.")
                   matches.append(run)
-          # Every run reaching here is already trusted: exact head SHA, exact branch, dispatched by the bot on
-          # behalf of this PR. So a second one is not an ambiguity to refuse, it is another attempt at the same
-          # question. Refusing outright made a SHA permanently unbindable once a first attempt timed out and a
-          # retry dispatched a second, with a fresh commit the only escape.
+          if recovering and len(matches) > 1:
+              raise SystemExit("ERROR Multiple fresh trusted Product runs followed one dispatch.")
+          if selected_id and matches and str(matches[0]["id"]) != selected_id:
+              raise SystemExit("ERROR Fresh trusted Product run identity changed while waiting.")
+          # Before dispatch, multiple trusted attempts at this immutable head may legitimately exist.
+          # Reuse authentic success or await pending work; recovery above instead requires one fresh identity.
           successful = [
               run for run in matches
               if run.get("status") == "completed" and run.get("conclusion") == "success"
@@ -183,31 +209,26 @@ jobs:
               run = min(successful, key=lambda item: item["id"])
               print(f"FOUND {run['id']} completed success")
           elif matches and all(run.get("status") == "completed" for run in matches):
-              # All attempts finished and none passed. Report one so the caller fails on the real conclusion
-              # rather than on a timeout that names nothing.
+              # All attempts finished and none passed. Name the real failure for recovery diagnostics or,
+              # while polling, fail this request on its selected attempt instead of a nameless timeout.
               run = min(matches, key=lambda item: item["id"])
               print(f"FOUND {run['id']} completed {run.get('conclusion')}")
           elif matches:
               # An attempt is still running. Wait for it; dispatching another is what created the deadlock.
-              print("PENDING")
+              print(f"PENDING {matches[0]['id']}" if recovering else "PENDING")
           else:
               print("NONE")
           PY
           }
 
-          verify_live_pr
-          node "$RUNNER_TEMP/verify-readiness-target.mjs"
-          match="$(find_product_run)"
-          case "$match" in
-            ERROR*) echo "::error::$match"; exit 1 ;;
-            FOUND*) read -r _ run_id _ _ <<< "$match" ;;
-            PENDING) run_id="" ;;
-            NONE)
-              # The readiness event can be delayed behind an unrelated label event. Refreshes use the
-              # existing bounded polling loop while the separate dispatcher lane creates the trusted run.
-              # They never dispatch Full themselves, and missing proof still times out as failure.
-              if [ "$REQUEST_LABEL" = "ready-for-full-ci" ]; then
-              python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
+          dispatch_product() {
+            # Only a fresh readiness request may recover. Retain all historical runs and diagnostics;
+            # POST once, never retry it or dispatch again from the polling loop.
+            cp "$RUNNER_TEMP/product-runs.json" "$RUNNER_TEMP/dispatched-before-runs.json"
+            echo "::notice::Requesting one fresh trusted Product run; prior selection: $match"
+            verify_live_pr
+            node "$RUNNER_TEMP/verify-readiness-target.mjs"
+            python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
           import json, os
           print(json.dumps({
               "ref": os.environ["HEAD_REF"],
@@ -219,11 +240,32 @@ jobs:
               },
           }))
           PY
-              curl --fail-with-body --silent --show-error \
-                --request POST "${headers[@]}" \
-                --header "Content-Type: application/json" \
-                --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
-                "$api/actions/workflows/ci.yml/dispatches"
+            curl --fail-with-body --silent --show-error \
+              --request POST "${headers[@]}" \
+              --header "Content-Type: application/json" \
+              --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
+              "$api/actions/workflows/ci.yml/dispatches"
+            run_id=""
+          }
+
+          verify_live_pr
+          node "$RUNNER_TEMP/verify-readiness-target.mjs"
+          match="$(find_product_run)"
+          case "$match" in
+            ERROR*) echo "::error::$match"; exit 1 ;;
+            FOUND*)
+              read -r _ run_id _ conclusion <<< "$match"
+              if [ "$conclusion" != "success" ] && [ "$REQUEST_LABEL" = "ready-for-full-ci" ]; then
+                dispatch_product
+              fi
+              ;;
+            PENDING) run_id="" ;;
+            NONE)
+              # The readiness event can be delayed behind an unrelated label event. Refreshes use the
+              # existing bounded polling loop while the separate dispatcher lane creates the trusted run.
+              # They never dispatch Full themselves, and missing proof still times out as failure.
+              if [ "$REQUEST_LABEL" = "ready-for-full-ci" ]; then
+                dispatch_product
               fi
               run_id=""
               ;;
@@ -259,7 +301,13 @@ jobs:
             match="$(find_product_run)"
             case "$match" in
               ERROR*) echo "::error::$match"; exit 1 ;;
-              NONE|PENDING) poll_pause; continue ;;
+              NONE) poll_pause; continue ;;
+              PENDING*)
+                read -r _ candidate_id <<< "$match"
+                if [ -n "$candidate_id" ]; then selected_run_id="$candidate_id"; fi
+                poll_pause
+                continue
+                ;;
               FOUND*)
                 read -r _ run_id status conclusion <<< "$match"
                 if [ "$status" != "completed" ]; then
