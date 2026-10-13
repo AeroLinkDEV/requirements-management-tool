@@ -147,6 +147,8 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
     await controls.getByRole('button', { name: 'Open instructor station in a window', exact: true }).click()
     instructor = await opened
   }
+  // Station arrangement is presentation-only; close its sticky disclosure before using the underlying controls.
+  await page.locator('.fmsStationDock > summary').click()
   const ios = instructor.getByRole('region', { name: 'Instructor station', exact: true })
   const tab = (name: string) => ios.getByRole('tab', { name, exact: true }).click()
   await tab('Flight and setup')
@@ -157,6 +159,13 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
   await ios.getByLabel('CDU inspected', { exact: true }).selectOption('1')
   await ios.getByRole('button', { name: 'Jump to next waypoint', exact: true }).click()
   await ios.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  // Jump already leaves the default flight in LNAV. Select the real basic mode first, with TRUE heading while failed.
+  await tab('Conditions')
+  await ios.getByRole('checkbox', { name: /^FMS failure/ }).check()
+  await page.getByLabel('Selected heading', { exact: true }).fill('45')
+  await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
+  await ios.getByRole('checkbox', { name: /^FMS failure/ }).uncheck()
+  await tab('Flight and setup')
   await page.getByRole('button', { name: 'LNAV', exact: true }).click()
   await page.getByLabel('Preselected altitude', { exact: true }).fill('4000')
   await page.getByRole('button', { name: 'SET', exact: true }).click()
@@ -169,10 +178,6 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
   await page.getByLabel('Selected ground speed', { exact: true }).fill('5')
   await page.getByRole('button', { name: 'GSPD', exact: true }).click()
   await tab('Conditions')
-  await ios.getByRole('checkbox', { name: /^FMS failure/ }).check()
-  await page.getByLabel('Selected heading', { exact: true }).fill('45')
-  await page.getByRole('button', { name: 'HDG SEL', exact: true }).click()
-  await ios.getByRole('checkbox', { name: /^FMS failure/ }).uncheck()
   await ios.getByRole('checkbox', { name: /^GPS lost sensor/ }).check()
   await ios.getByRole('checkbox', { name: /^GPS lost sensor/ }).uncheck()
   await ios.getByLabel('Alert message to raise', { exact: true }).fill('D5 LITERAL')
@@ -226,13 +231,13 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
     literal('ios.jump', 'ios', 'flight.overrideDiscontinuity', 'fms1', { kind: 'ios.jump', unit: 1, op: 'overrideDiscontinuity' }),
     literal('afcs.sourceSelect', 'ui', 'flight.guidanceSource', 'afcs', { kind: 'afcs.sourceSelect', side: 2 }, 'accepted', 'main'),
     literal('ios.jump', 'ios', 'flight.jump', 'fms2', { kind: 'ios.jump', unit: 2, op: 'sequence' }),
+    literal('ios.condition', 'ios', 'conditions.fmsFail', 'fms2', { kind: 'ios.condition', unit: 2, condition: 'fmsFail', on: true }),
+    literal('afcs.select', 'ui', 'afcs.heading', 'afcs', { kind: 'afcs.select', selection: { select: 'heading', heading: 45 } }, 'accepted', 'main'),
+    literal('ios.condition', 'ios', 'conditions.fmsFail', 'fms2', { kind: 'ios.condition', unit: 2, condition: 'fmsFail', on: false }),
     ...[{ select: 'lnav' }, { select: 'altitude', altitude: 4000 }, { select: 'speed', knots: 100 }].map(selection => literal('afcs.select', 'ui', `afcs.${selection.select}`, 'afcs', { kind: 'afcs.select', selection }, 'accepted', 'main')),
     literal('afcs.select', 'ui', 'afcs.toga', 'afcs', { kind: 'afcs.select', selection: { select: 'toga' } }, 'refused', 'main'),
     ...[{ select: 'verticalSpeed', fpm: -500 }, { select: 'altitudeHold' }, { select: 'forceTrimRelease' }].map(selection => literal('afcs.select', 'ui', `afcs.${selection.select}`, 'afcs', { kind: 'afcs.select', selection }, 'accepted', 'main')),
     literal('afcs.select', 'ui', 'afcs.groundSpeed', 'afcs', { kind: 'afcs.select', selection: { select: 'groundSpeed', knots: 5 } }, 'refused', 'main'),
-    literal('ios.condition', 'ios', 'conditions.fmsFail', 'fms2', { kind: 'ios.condition', unit: 2, condition: 'fmsFail', on: true }),
-    literal('afcs.select', 'ui', 'afcs.heading', 'afcs', { kind: 'afcs.select', selection: { select: 'heading', heading: 45 } }, 'accepted', 'main'),
-    literal('ios.condition', 'ios', 'conditions.fmsFail', 'fms2', { kind: 'ios.condition', unit: 2, condition: 'fmsFail', on: false }),
     ...[true, false].map(on => literal('ios.condition', 'ios', 'conditions.gpsLost', 'fms1', { kind: 'ios.condition', unit: 1, condition: 'gpsLost', on })),
     literal('ios.alert', 'ios', 'alerts.other', 'fms2', { kind: 'ios.alert', unit: 2, text: 'D5 LITERAL' }),
     literal('fms.baroSetting', 'ui', 'baro.setting', 'fms2', { kind: 'fms.baroSetting', unit: 2, setting: { kind: 'QNH', hPa: 1002 } }),
@@ -275,6 +280,7 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
   await ios.getByRole('button', { name: 'Cold start FMS', exact: true }).click()
   await tab('Scenarios')
   expect((await exportFrom(page, ios)).journal.at(-1)).toMatchObject({ kind: 'ios.unitPower', target: 'fms2', source: { kind: 'ios', id: 'navdata.coldStart', surface: popped ? 'popout' : 'main' }, payload: { kind: 'ios.unitPower', unit: 2, mode: 'COLD', onGround: true }, outcome: { status: 'accepted' } })
+  await page.locator('.fmsStationDock > summary').click()
   await controls.getByRole('button', { name: 'Return all panels', exact: true }).click()
   if (popped) await expect.poll(() => instructor.isClosed()).toBe(true)
 })
@@ -322,6 +328,12 @@ for (const popped of [false, true]) for (const paused of [false, true]) test(`re
   const downloaded = page.waitForEvent('download')
   await card.getByRole('button', { name: 'Download run report', exact: true }).click()
   expect(await readFile((await (await downloaded).path())!, 'utf8')).toContain('ended after 0 s of simulated time')
+  await page.clock.runFor(1000)
+  const later = await exportFrom(page, ios)
+  expect(later.frame).toBe(paused ? 0 : 4)
+  expect(later.journal).toEqual(after.journal)
+  expect(later.control).toEqual(after.control)
+  await expect(card.getByText(/^STOPPED by the operator:/)).toBeVisible()
   if (popped) {
     await page.getByRole('region', { name: 'Station arrangement', exact: true }).getByRole('button', { name: 'Return Instructor station', exact: true }).click()
     await expect.poll(() => instructor.isClosed()).toBe(true)
