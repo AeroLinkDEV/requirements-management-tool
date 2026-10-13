@@ -1,5 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
@@ -146,16 +147,39 @@ test('a window that stops gaining frames ends at once and is accounted, so a mis
 })
 
 const host = { quietBefore: { quiet: true } }
+const reportProtocol = JSON.parse(readFileSync('perf/protocol.json', 'utf8'))
+const reportHarness = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), apiTree: 'b'.repeat(40), apiAssemblySha256: 'f'.repeat(64), dirtyEntries: 0 }
 const browserRecord = (index: number, rate: number, completed: number, wallSeconds: number, extra: Record<string, unknown> = {}) => ({
   index, kind: 'browser', status: 'passed', block: index, arm: 'B', configuration: 'view-off-svs-off', rate, host,
-  armIdentity: { commit: 'a'.repeat(40), srcTree: 's'.repeat(40), distSha256: 'd'.repeat(64) },
-  result: { schema: 'aerolink.fms-perf-browser-run.v2', accountingRevision: 2, windowSimSeconds: completed / 4, wallSeconds, throughput: completed / 4 / wallSeconds,
+  armIdentity: { commit: 'a'.repeat(40), srcTree: 'b'.repeat(40), lockBlob: 'b'.repeat(40), viteBlob: 'c'.repeat(40), distSha256: 'd'.repeat(64), distFiles: 2 },
+  result: { schema: 'aerolink.fms-perf-browser-run.v2', accountingRevision: 2, scenario: reportProtocol.browser.scenario, rate, configuration: 'view-off-svs-off', windowSimSeconds: completed / 4, wallSeconds, throughput: completed / 4 / wallSeconds,
     accounting: { achievedRate: completed / 4 / wallSeconds, achievedFraction: completed / 4 / wallSeconds / rate,
       simulation: { slices: { p50: 20, p95: 30, p99: 31 } }, continuation: { yieldGaps: { p95: 4 }, taskTails: { p95: 3 } } },
     longTasks: { count: 0 }, raf: null, interaction: { entries: [], resolutionStepMs: null }, heapUsedBytesAfterGc: 2 ** 20,
     browser: { version: 'fixture', headless: true, renderer: 'fixture', viewport: { width: 1440, height: 900, deviceScaleFactor: 1 } } },
   ...extra,
 })
+
+// Independent synthetic receipts at the real CLI boundary. Values and expected levels are hand-defined, not
+// produced by qualification. Session start precedes seeding; the end and each run carry its retained seed receipt.
+function browserSession(out: string, id: number, rows: ReturnType<typeof browserRecord>[], protocol = reportProtocol, harness = reportHarness) {
+  const startedAt = `2026-10-13T12:${String(id).padStart(2, '0')}:00.000Z`
+  const seedFile = `seed-${id}.json`, seedBytes = '{"fixture":"independent seed"}'
+  const seed = { file: seedFile, sha256: createHash('sha256').update(seedBytes).digest('hex') }
+  writeFileSync(join(out, seedFile), seedBytes)
+  const start = { kind: 'browser', startedAt, harness, dirtyOverride: false, protocol,
+    environment: { node: '24-fixture', v8: 'fixture', playwright: '1-fixture', os: { platform: 'fixture', release: 'fixture', arch: 'x64' }, cpu: { model: 'fixture', logicalCores: 4 }, memoryGiB: 8, powerPlan: null, environmentVariableNames: [] },
+    arms: [{ arm: 'B', ...rows[0].armIdentity }], rounds: 2, cells: [{ configuration: rows[0].configuration, rate: rows[0].rate }] }
+  const end = { ...start, endedAt: `2026-10-13T12:${String(id).padStart(2, '0')}:59.000Z`, harnessAtEnd: harness,
+    servedAtEnd: { distSha256: rows[0].armIdentity.distSha256, distFiles: rows[0].armIdentity.distFiles }, seed }
+  const linked = rows.map(row => ({ ...row, sessionStartedAt: startedAt, startedAt: `2026-10-13T12:${String(id).padStart(2, '0')}:30.000Z`, seed }))
+  return { start, end, rows: linked }
+}
+
+function writeBrowserSession(out: string, id: number, receipt: { start: object; end: object }) {
+  writeFileSync(join(out, `session-${id}.json`), JSON.stringify(receipt.start))
+  writeFileSync(join(out, `session-end-${id}.json`), JSON.stringify(receipt.end))
+}
 
 test('the report scores completed-frame browser records beside the selected rate and keeps older records NOT_QUALIFIED', ({ browserName: _browserName }, testInfo) => {
   const out = testInfo.outputPath('mixed-records')
@@ -167,11 +191,14 @@ test('the report scores completed-frame browser records beside the selected rate
     { ...browserRecord(2, 64, 0, 1), result: historical },
     { ...browserRecord(3, 64, 0, 1), status: 'failed', result: null },
     // Another build of arm B in the same --out (another served dist): its own cell, never pooled. 6,400 frames, 40x.
-    browserRecord(5, 64, 6400, 40, { armIdentity: { commit: 'a'.repeat(40), srcTree: 's'.repeat(40), distSha256: 'e'.repeat(64) } }),
+    browserRecord(5, 64, 6400, 40, { armIdentity: { commit: 'a'.repeat(40), srcTree: 'b'.repeat(40), lockBlob: 'b'.repeat(40), viteBlob: 'c'.repeat(40), distSha256: 'e'.repeat(64), distFiles: 2 } }),
     { index: 4, kind: 'headless', status: 'passed', block: 0, arm: 'B', workload: 'W1', topology: 'single', host,
       result: { p50: 1, p95: 2, p99: 3, throughput: 250, heapUsedBytesAfterGc: 1024, sync: null } },
   ]
-  const input = rows.map(row => JSON.stringify(row)).join('\n') + '\n'
+  const first = browserSession(out, 0, rows.slice(0, 4) as ReturnType<typeof browserRecord>[])
+  const second = browserSession(out, 1, [rows[4]] as ReturnType<typeof browserRecord>[])
+  writeBrowserSession(out, 0, first); writeBrowserSession(out, 1, second)
+  const input = [...first.rows, ...second.rows, rows[5]].map(row => JSON.stringify(row)).join('\n') + '\n'
   writeFileSync(join(out, 'runs.jsonl'), input)
   const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
   expect(child.status, child.stderr).toBe(0)
@@ -184,12 +211,12 @@ test('the report scores completed-frame browser records beside the selected rate
   // Two runs: the median of 55 and 56.25 is 55.625; achieved / selected 55.625 / 64.
   expect(report.browser[0].levels.throughput.estimate).toBeCloseTo(55.625, 12)
   expect(report.browser[0].levels['achieved / selected'].estimate).toBeCloseTo(55.625 / 64, 12)
-  expect(report.browser[1]).toMatchObject({ arm: `B@${'a'.repeat(12)}/${'s'.repeat(12)}/${'e'.repeat(12)}`, runs: 1 })
+  expect(report.browser[1]).toMatchObject({ arm: `B@${'a'.repeat(12)}/${'b'.repeat(12)}/${'e'.repeat(12)}`, runs: 1 })
   expect(report.browser[1].levels.throughput.estimate).toBe(40)
   const prose = readFileSync(join(out, 'report.md'), 'utf8')
   expect(prose).toContain('## Browser matrix (accounting revision 2, completed frames')
-  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'s'.repeat(12)}/${'d'.repeat(12)} | view-off-svs-off | 64x | 2 | 55.6 [55.0, 56.3]`)
-  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'s'.repeat(12)}/${'e'.repeat(12)} | view-off-svs-off | 64x | 1 | 40.0 [40.0, 40.0]`)
+  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'b'.repeat(12)}/${'d'.repeat(12)} | view-off-svs-off | 64x | 2 | 55.6 [55.0, 56.3]`)
+  expect(prose).toContain(`| B@${'a'.repeat(12)}/${'b'.repeat(12)}/${'e'.repeat(12)} | view-off-svs-off | 64x | 1 | 40.0 [40.0, 40.0]`)
   expect(prose).toContain('No browser budget verdict is made under this revision')
   expect(prose).toContain('- historical-interval-inference: 1 (runs 2)')
   expect(prose).toContain('- failed-run: 1 (runs 3)')
@@ -197,8 +224,86 @@ test('the report scores completed-frame browser records beside the selected rate
   expect(readFileSync(join(out, 'runs.jsonl'), 'utf8')).toBe(input)
 })
 
+test('browser report cells retain actual scenario, protocol, runtime, harness and full build identities', ({ browserName: _browserName }, testInfo) => {
+  const out = testInfo.outputPath('browser-cohorts')
+  mkdirSync(out, { recursive: true })
+  const normal = browserRecord(0, 64, 1600, 40) // 10x; its identical repeat combines, each other cohort stays 50x.
+  const otherScenario = 'kbtv-rnav15-advisory'
+  const scenario = browserRecord(2, 64, 8000, 40)
+  scenario.result.scenario = otherScenario
+  const runtime = browserRecord(3, 64, 8000, 40)
+  runtime.result.browser = { version: 'other-chromium', headless: false, renderer: 'other-renderer', viewport: { width: 1280, height: 720, deviceScaleFactor: 2 } }
+  const lock = browserRecord(6, 64, 8000, 40)
+  lock.armIdentity.lockBlob = 'e'.repeat(40)
+  // Equal display prefixes do not establish equal immutable hashes.
+  const prefix = browserRecord(7, 64, 8000, 40)
+  prefix.armIdentity.distSha256 = 'd'.repeat(12) + 'e'.repeat(52)
+  const receipts = [
+    browserSession(out, 0, [normal, browserRecord(1, 64, 1600, 40)]),
+    browserSession(out, 1, [scenario], { ...reportProtocol, browser: { ...reportProtocol.browser, scenario: otherScenario } }),
+    browserSession(out, 2, [runtime], { ...reportProtocol, browser: { ...reportProtocol.browser, viewport: runtime.result.browser.viewport } }),
+    browserSession(out, 3, [browserRecord(4, 64, 8000, 40)], { ...reportProtocol, statistics: { ...reportProtocol.statistics, seed: 99 } }),
+    browserSession(out, 4, [browserRecord(5, 64, 8000, 40)], reportProtocol, { ...reportHarness, apiAssemblySha256: 'e'.repeat(64) }),
+    browserSession(out, 5, [lock]), browserSession(out, 6, [prefix]),
+  ]
+  receipts.forEach((receipt, id) => writeBrowserSession(out, id, receipt))
+  writeFileSync(join(out, 'runs.jsonl'), receipts.flatMap(receipt => receipt.rows).map(row => JSON.stringify(row)).join('\n') + '\n')
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
+  expect(report.browserQualification.accepted).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+  expect(report.browser.map((cell: any) => [cell.runs, cell.levels.throughput.estimate])).toEqual([[2, 10], [1, 50], [1, 50], [1, 50], [1, 50], [1, 50], [1, 50]])
+  expect(report.browser[1].identity.scenario).toBe(otherScenario)
+  expect(report.browser[2].identity.runtime).toMatchObject({ version: 'other-chromium', headless: false })
+  expect(report.browser[3].identity.protocol.statistics.seed).toBe(99)
+  expect(report.browser[4].identity.harness.apiAssemblySha256).toBe('e'.repeat(64))
+  const prose = readFileSync(join(out, 'report.md'), 'utf8')
+  expect(prose).toContain(otherScenario)
+  expect(prose).toContain('other-chromium, headed, renderer: other-renderer, viewport 1280x720 at DPR 2')
+})
+
+test('browser report requires an unambiguous complete clean session with matching source and retained seed', ({ browserName: _browserName }, testInfo) => {
+  const out = testInfo.outputPath('browser-session-evidence')
+  mkdirSync(out, { recursive: true })
+  const variants = ['valid', 'missing-session', 'missing-end', 'changed-dist', 'changed-harness', 'dirty-smoke', 'changed-seed', 'missing-seed-file', 'incomplete-identity', 'duplicate-end', 'wrong-run-arm', 'changed-protocol', 'wrong-session', 'duplicate-session', 'wrong-run-seed', 'incomplete-runtime', 'incomplete-protocol']
+  const rows = variants.map((variant, id) => {
+    const receipt = browserSession(out, id, [browserRecord(id, 64, 1600, 40)])
+    const row = receipt.rows[0]
+    if (variant === 'changed-dist') receipt.end.servedAtEnd.distSha256 = 'e'.repeat(64)
+    if (variant === 'changed-harness') receipt.end.harnessAtEnd = { ...reportHarness, commit: 'e'.repeat(40) }
+    if (variant === 'dirty-smoke') receipt.start.dirtyOverride = true
+    if (variant === 'changed-seed') receipt.end.seed = { ...receipt.end.seed, sha256: 'e'.repeat(64) }
+    if (variant === 'missing-seed-file') { receipt.end.seed = { ...receipt.end.seed, file: 'absent-seed.json' }; row.seed = receipt.end.seed }
+    if (variant === 'incomplete-identity') receipt.start.harness = { ...reportHarness, apiAssemblySha256: '' }
+    if (variant === 'wrong-run-arm') row.armIdentity = { ...row.armIdentity, lockBlob: 'e'.repeat(40) }
+    if (variant === 'changed-protocol') receipt.end.protocol = { ...reportProtocol, browser: { ...reportProtocol.browser, scenario: 'other-scenario' } }
+    if (variant === 'wrong-session') row.sessionStartedAt = 'unknown-session'
+    if (variant === 'wrong-run-seed') row.seed = { ...row.seed, sha256: 'e'.repeat(64) }
+    if (variant === 'incomplete-runtime') row.result.browser.version = ''
+    if (variant === 'incomplete-protocol') {
+      receipt.start.protocol = { ...reportProtocol, statistics: { ...reportProtocol.statistics, iterations: undefined } }
+      receipt.end.protocol = receipt.start.protocol
+    }
+    if (variant !== 'missing-session') writeFileSync(join(out, `session-${id}.json`), JSON.stringify(receipt.start))
+    if (variant !== 'missing-end') writeFileSync(join(out, `session-end-${id}.json`), JSON.stringify(receipt.end))
+    if (variant === 'duplicate-end') writeFileSync(join(out, 'session-end-100.json'), JSON.stringify(receipt.end))
+    if (variant === 'duplicate-session') writeFileSync(join(out, 'session-100.json'), JSON.stringify(receipt.start))
+    return row
+  })
+  const input = rows.map(row => JSON.stringify(row)).join('\n') + '\n'
+  writeFileSync(join(out, 'runs.jsonl'), input)
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
+  expect(report.browserQualification.accepted).toEqual([0])
+  expect(report.browserQualification.notQualified.map((row: any) => row.index)).toEqual(variants.slice(1).map((_, i) => i + 1))
+  expect(report.browserQualification.notQualified.every((row: any) => row.compatibility === 'session-evidence' && row.reason)).toBe(true)
+  expect(report.browser[0]).toMatchObject({ runs: 1, levels: { throughput: { estimate: 10 } } })
+  expect(readFileSync(join(out, 'runs.jsonl'), 'utf8')).toBe(input)
+})
+
 test('the headless report titles a set by its arms: A/A when both carry one client identity, otherwise A/B', ({ browserName: _browserName }, testInfo) => {
-  const same = { srcTree: 's'.repeat(40), lockBlob: 'l'.repeat(40), viteBlob: 'v'.repeat(40) }
+  const same = { srcTree: 'b'.repeat(40), lockBlob: 'l'.repeat(40), viteBlob: 'v'.repeat(40) }
   const titled = (name: string, b: Record<string, string>) => {
     const out = testInfo.outputPath(name)
     mkdirSync(out, { recursive: true })

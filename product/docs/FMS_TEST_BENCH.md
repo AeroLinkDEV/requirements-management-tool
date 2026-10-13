@@ -424,7 +424,15 @@ window must be closed by one: the epoch continues past the window end, or ends i
 refuses, and is recorded as failed with its numbers, when the timeline cannot be conserved, the window is not
 closed, a slice straddles a boundary, the window holds a second epoch, a slice ran outside an observed timer task,
 or the arm publishes no timeline (an arm built before it). The session records the SHA-256 of the served dist at
-its start and end, and of its seed; the report never pools two arm builds in one cell.
+its start and end, and of its seed. Each new run records its session identity. Reporting requires a unique complete
+clean session, matching harness and arm identities at both ends, an unchanged served-dist receipt, and a run/end
+seed receipt that matches the retained seed file. Older records can bind only through one unambiguous recorded
+session time interval; absent, incomplete or contradictory evidence remains `NOT_QUALIFIED` with its reason.
+Start/end agreement does not prove that files never changed and were restored between those observations.
+Report cells use the complete recorded build, scenario, protocol/scoring, harness, environment and measured-browser
+runtime identities, rather than displayed hash prefixes. Their labels and descriptive intervals come from those
+recorded cohorts; different identities in a reused output directory are never pooled or relabelled with the current
+report checkout's protocol.
 
 Browser levels are descriptive only, and revision 2 admits no browser budget verdict.
 [#1542](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1542) first needs a counterbalanced

@@ -163,19 +163,65 @@ export async function measureWindow(probe: WindowProbe, targetFrames: number, st
   return { recorded, steps, stalled }
 }
 
-type BrowserRecord ={ index: number; status: string; arm: string; configuration?: string; rate?: number; armIdentity?: { commit?: string }; result?: Record<string, unknown> | null }
+type BrowserRecord = { index: number; status: string; arm: string; configuration?: string; rate?: number;
+  startedAt?: string; sessionStartedAt?: string; seed?: any; armIdentity?: Record<string, any>; result?: Record<string, any> | null }
+type BrowserSession = Record<string, any> & { endRecords: (Record<string, any> & { seedValid: boolean })[] }
 
-/** Passed records under accounting revision 2 are reported; every other browser record is retained as NOT_QUALIFIED. */
-export function browserQualification(protocol: { browser?: { accounting?: { revision?: number } } }, records: readonly BrowserRecord[]) {
-  const accepted = records.filter(record => record.status === 'passed' && record.result?.schema === BROWSER_RUN_SCHEMA)
+// Compare complete recorded identities, independent of object key order. Display prefixes never decide equality.
+function canonical(value: any): any {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]))
+  return value
+}
+const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
+const text = (value: unknown) => typeof value === 'string' && value.length > 0
+const hash = (value: unknown, length: number) => typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`).test(value)
+const harnessComplete = (id: any) => id && hash(id.commit, 40) && hash(id.apiTree, 40) && hash(id.apiAssemblySha256, 64) && id.dirtyEntries === 0
+const armComplete = (id: any) => id && ['commit', 'srcTree', 'lockBlob', 'viteBlob'].every(key => hash(id[key], 40)) && hash(id.distSha256, 64) && Number.isSafeInteger(id.distFiles) && id.distFiles > 0
+
+/**
+ * Revision-2 levels require an attributable run and complete consistent start/end receipts. An explicit session
+ * link is emitted by new runs; older runs may bind only through one unambiguous recorded time interval. Missing
+ * historical evidence stays NOT_QUALIFIED, never supplied from the reporting checkout's current protocol.
+ */
+export function browserQualification(_protocol: unknown, records: readonly BrowserRecord[], sessions: readonly BrowserSession[] = []) {
+  const accepted: (BrowserRecord & { browserIdentity: Record<string, any> })[] = []
+  const acceptedRecords = new Set<BrowserRecord>()
+  const refusals = new Map<BrowserRecord, string>()
+  for (const record of records) {
+    if (record.status !== 'passed' || record.result?.schema !== BROWSER_RUN_SCHEMA) continue
+    const at = Date.parse(record.startedAt ?? '')
+    const matches = sessions.filter(session => record.sessionStartedAt !== undefined
+      ? session.startedAt === record.sessionStartedAt
+      : Number.isFinite(at) && at >= Date.parse(session.startedAt) && session.endRecords.some(end => at <= Date.parse(end.endedAt)))
+    let reason: string | null = null
+    const session = matches[0], end = session?.endRecords[0], result = record.result!
+    if (matches.length !== 1) reason = 'the run has no unambiguous recorded browser session'
+    else if (session.endRecords.length !== 1) reason = 'the session has no unique closing receipt'
+    else if (!Number.isFinite(at) || !Number.isFinite(Date.parse(session.startedAt)) || !Number.isFinite(Date.parse(end.endedAt)) || at < Date.parse(session.startedAt) || at > Date.parse(end.endedAt)) reason = 'the run is outside its recorded session span'
+    else if (session.dirtyOverride !== false || !harnessComplete(session.harness) || !harnessComplete(end.harnessAtEnd) || !same(session.harness, end.harnessAtEnd)) reason = 'the harness identity is missing, dirty or changed during the session'
+    else if (!same(session.harness, end.harness) || !same(session.protocol, end.protocol) || !same(session.arms, end.arms) || !same(session.environment, end.environment)) reason = 'the closing receipt changes the declared harness, protocol, arms or environment'
+    else if (!text(session.protocol?.schema) || session.protocol?.browser?.accounting?.revision !== 2 || session.protocol?.browser?.accounting?.schema !== BROWSER_RUN_SCHEMA || !text(session.protocol?.browser?.scenario) || !Number.isSafeInteger(session.protocol?.statistics?.iterations) || session.protocol.statistics.iterations < 1 || !Number.isSafeInteger(session.protocol?.statistics?.seed) || !(session.protocol?.statistics?.targetHalfWidthPp > 0) || !Number.isSafeInteger(session.protocol?.caps?.browserRunsPerCell) || session.protocol.caps.browserRunsPerCell < 1) reason = 'the session protocol or scoring identity is incomplete or unsupported'
+    else if (!session.environment || !['node', 'v8', 'playwright'].every(key => text(session.environment[key])) || !['platform', 'release', 'arch'].every(key => text(session.environment.os?.[key])) || !text(session.environment.cpu?.model) || !Number.isSafeInteger(session.environment.cpu?.logicalCores) || session.environment.cpu.logicalCores < 1 || !(session.environment.memoryGiB > 0)) reason = 'the recorded runtime environment is incomplete'
+    else if (!Array.isArray(session.arms) || session.arms.length !== 1 || session.arms[0].arm !== record.arm || !armComplete(record.armIdentity) || !same(session.arms[0], { arm: record.arm, ...record.armIdentity })) reason = 'the run does not carry its session\'s complete arm identity'
+    else if (!same(end.servedAtEnd, { distSha256: record.armIdentity!.distSha256, distFiles: record.armIdentity!.distFiles })) reason = 'the served client identity is missing or changed at session end'
+    else if (!end.seedValid || !same(record.seed, end.seed)) reason = 'the retained seed receipt is missing, changed or disagrees with the run'
+    else if (!Number.isSafeInteger(record.rate) || record.rate! < 1 || !text(record.configuration) || result.accountingRevision !== 2 || result.scenario !== session.protocol.browser.scenario || result.rate !== record.rate || result.configuration !== record.configuration || !Array.isArray(session.cells) || !session.cells.some((cell: any) => cell?.rate === record.rate && cell?.configuration === record.configuration)) reason = 'the result does not match its recorded scenario, configuration or rate'
+    else if (!text(result.browser?.version) || !text(result.browser?.renderer) || typeof result.browser?.headless !== 'boolean' || !['width', 'height', 'deviceScaleFactor'].every(key => Number.isFinite(result.browser?.viewport?.[key]) && result.browser.viewport[key] > 0) || !same(result.browser.viewport, session.protocol.browser.viewport)) reason = 'the measured browser runtime identity is incomplete or contradicts its protocol'
+    if (reason) { refusals.set(record, reason); continue }
+    acceptedRecords.add(record)
+    accepted.push({ ...record, browserIdentity: canonical({ arm: record.arm, armIdentity: record.armIdentity,
+      scenario: result.scenario, protocol: session.protocol, harness: session.harness, environment: session.environment, runtime: result.browser }) })
+  }
   return {
-    accountingIssue: '#1557', policyRevision: protocol.browser?.accounting?.revision ?? null, supportedAccountingSchemas: [BROWSER_RUN_SCHEMA],
+    accountingIssue: '#1557', policyRevision: 2, supportedAccountingSchemas: [BROWSER_RUN_SCHEMA],
     accepted,
-    notQualified: records.filter(record => !accepted.includes(record)).map(record => ({
+    notQualified: records.filter(record => !acceptedRecords.has(record)).map(record => ({
       index: record.index, status: record.status, arm: record.arm, commit: record.armIdentity?.commit ?? null,
       configuration: record.configuration ?? null, rate: record.rate ?? null, accountingSchema: record.result?.schema ?? null,
       qualification: 'NOT_QUALIFIED' as const,
-      compatibility: record.result?.schema === HISTORICAL_BROWSER_RUN_SCHEMA ? 'historical-interval-inference' : record.status !== 'passed' ? 'failed-run' : 'unsupported-or-missing',
+      compatibility: record.result?.schema === HISTORICAL_BROWSER_RUN_SCHEMA ? 'historical-interval-inference' : record.status !== 'passed' ? 'failed-run' : refusals.has(record) ? 'session-evidence' : 'unsupported-or-missing',
+      ...(refusals.has(record) ? { reason: refusals.get(record) } : {}),
     })),
   }
 }

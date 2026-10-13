@@ -15,7 +15,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { arch, cpus, platform, release, totalmem } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
@@ -272,7 +272,7 @@ function browser() {
         cpSync(join(template, 'evidence'), storage.evidence, { recursive: true })
         try {
           // The served dist digest is part of the browser arm's identity: the report never pools two builds in a cell.
-          run(dir, { kind: 'browser', block: round, round, position, arm: arm.arm, armIdentity: { ...arm.identity, ...served }, seed: seedRecord, configuration, rate }, {
+          run(dir, { kind: 'browser', sessionStartedAt: session.startedAt, block: round, round, position, arm: arm.arm, armIdentity: { ...arm.identity, ...served }, seed: seedRecord, configuration, rate }, {
             AEROLINK_PERF_MODE: 'browser', AEROLINK_PERF_DIST: dist, AEROLINK_E2E_RUN_ID: runId,
             AEROLINK_SHOWCASE_SEED: readFileSync(seedPath, 'utf8'), AEROLINK_PERF_RATE: String(rate), AEROLINK_PERF_CONFIGURATION: configuration,
           })
@@ -346,10 +346,22 @@ function report() {
     if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) return null
     try { return JSON.parse(git(root, 'show', `${commit}:product/client/perf/protocol.json`)).statistics ?? null } catch { return null }
   }
-  const sessions: SessionEvidence[] = records(/^session-\d+\.json$/).map(session => {
+  const starts = records(/^session-\d+\.json$/)
+  const sessions: SessionEvidence[] = starts.map(session => {
     const end = ends.find(record => record.startedAt === session.startedAt && record.kind === session.kind)
     return { ...session, committedStatistics: committed(session.harness?.commit), end: end?.harnessAtEnd ?? null, primedRuns: end?.primedRuns ?? null }
   })
+  const browserSessions = starts.filter(session => session.kind === 'browser').map(session => ({ ...session,
+    endRecords: ends.filter(end => end.startedAt === session.startedAt && end.kind === 'browser').map(end => {
+      const seed = end.seed
+      let seedValid = false
+      try {
+        seedValid = typeof seed?.file === 'string' && basename(seed.file) === seed.file && /^[0-9a-f]{64}$/.test(seed?.sha256 ?? '') &&
+          existsSync(join(dir, seed.file)) && createHash('sha256').update(readFileSync(join(dir, seed.file))).digest('hex') === seed.sha256
+      } catch { /* unreadable retained evidence is not qualified */ }
+      return { ...end, seedValid }
+    }),
+  }))
   const declaredFamilySize = protocol.headless.workloads.length * protocol.headless.topologies.length * aaMeasures.length
   const lines: string[] = []
   const json: Record<string, unknown> = {
@@ -460,49 +472,52 @@ function report() {
 
   const web = recorded.filter(e => e.kind === 'browser')
   if (web.length) {
-    const { accepted, ...qualification } = browserQualification(protocol, web)
+    const { accepted, ...qualification } = browserQualification(protocol, web, browserSessions)
     json.browserQualification = { ...qualification, accepted: accepted.map(e => e.index) }
     if (accepted.length) {
-      const rows = accepted as Entry[]
-      // A cell is one configuration and rate of one arm build (commit, client source tree, served dist): runs of two
-      // arms or two builds in one --out are never pooled.
+      const rows = accepted as (Entry & { browserIdentity: Record<string, any> })[]
+      // Complete immutable recorded identities decide comparability. Prefixes below are display only.
       const armOf = (e: Entry) => {
         const id = e.armIdentity as { commit?: string; srcTree?: string; distSha256?: string } | undefined
         return `${e.arm}@${id?.commit?.slice(0, 12) ?? '?'}/${id?.srcTree?.slice(0, 12) ?? '?'}/${id?.distSha256?.slice(0, 12) ?? '?'}`
       }
-      const key = (e: Entry) => `${e.configuration}|${e.rate}|${armOf(e)}`
+      const key = (e: typeof rows[number]) => JSON.stringify([e.configuration, e.rate, e.browserIdentity])
       const cells = [...new Set(rows.map(key))]
-      lines.push(`## Browser matrix (accounting revision ${protocol.browser.accounting.revision}, completed frames; ${protocol.browser.scenario}; median over runs, 95% CI; half-width as % of median)`, '',
-        'Descriptive levels only. No browser budget verdict is made under this revision: #1542 first needs a counterbalanced browser protocol revision (its run order still starts every round at 1x and ends it at 64x), then a quiet-host browser A/A under it.', '',
-        `| Arm (commit/src/dist) | Configuration | Rate | runs | ${Object.keys(browserMeasures).join(' | ')} |`, `|---|---|---|---|${Object.keys(browserMeasures).map(() => '---').join('|')}|`)
+      lines.push('## Browser matrix (accounting revision 2, completed frames; median over comparable runs, 95% CI; half-width as % of median)', '',
+        'Descriptive levels only. No browser budget verdict is made under this revision: #1542 first needs a counterbalanced browser protocol revision (its run order still starts every round at 1x and ends it at 64x), then a quiet-host browser A/A under it.', '')
       const browserJson: Record<string, unknown>[] = []
       const plannedBrowser: Record<string, number> = {}
       for (const cell of cells) {
-        const [configuration, rate, arm] = cell.split('|')
         const cellRows = rows.filter(e => key(e) === cell)
+        const first = cellRows[0], { configuration, rate } = first, arm = armOf(first), identity = first.browserIdentity
+        const cellProtocol = identity.protocol, cellStats = { iterations: cellProtocol.statistics.iterations, seed: cellProtocol.statistics.seed }
         const levels = Object.fromEntries(Object.entries(browserMeasures).map(([name, take]) => {
           const values = cellRows.map(e => take(e.result!)).filter(value => Number.isFinite(value))
-          return [name, values.length ? medianLevel(values, stats) : null]
+          return [name, values.length ? medianLevel(values, cellStats) : null]
         }))
-        browserJson.push({ arm, configuration, rate: Number(rate), runs: cellRows.length, levels })
+        browserJson.push({ arm, configuration, rate, identity, runs: cellRows.length, levels })
         plannedBrowser[cell] = Math.max(...['slice p95', 'throughput'].map(name => levels[name]
-          ? plannedRuns({ halfWidthPp: levels[name]!.halfWidthPct ?? 0, runsPerArm: cellRows.length }, targetHalfWidthPp, protocol.caps.browserRunsPerCell) : 0))
+          ? plannedRuns({ halfWidthPp: levels[name]!.halfWidthPct ?? 0, runsPerArm: cellRows.length }, cellProtocol.statistics.targetHalfWidthPp, cellProtocol.caps.browserRunsPerCell) : 0))
+        const runtime = identity.runtime
+        const protocolDigest = createHash('sha256').update(JSON.stringify(cellProtocol)).digest('hex')
+        lines.push(`### Browser cohort ${browserJson.length}: ${identity.scenario}`, '',
+          `Protocol SHA-256 ${protocolDigest}; harness ${identity.harness.commit} / API assembly ${identity.harness.apiAssemblySha256}. Chromium ${runtime.version}, ${runtime.headless ? 'headless' : 'headed'}, renderer: ${runtime.renderer}, viewport ${runtime.viewport.width}x${runtime.viewport.height} at DPR ${runtime.viewport.deviceScaleFactor}. Full build, protocol, harness and environment identities are retained in report.json.`, '',
+          `| Arm (commit/src/dist) | Configuration | Rate | runs | ${Object.keys(browserMeasures).join(' | ')} |`, `|---|---|---|---|${Object.keys(browserMeasures).map(() => '---').join('|')}|`)
         lines.push(`| ${arm} | ${configuration} | ${rate}x | ${cellRows.length} | ${Object.keys(browserMeasures).map(name => {
           const level = levels[name]; const scale = name === 'heap' ? 2 ** 20 : 1; const digits = name === 'achieved / selected' ? 3 : 1
           return level ? `${fixed(level.estimate / scale, digits)} [${fixed(level.low / scale, digits)}, ${fixed(level.high / scale, digits)}] (±${width(level, 1)})` : 'n/a'
-        }).join(' | ')} |`)
+        }).join(' | ')} |`, '')
       }
-      const sample = rows[0].result as Record<string, any>
       const steps = [...new Set(rows.map(e => (e.result as Record<string, any>).interaction.resolutionStepMs))]
-      lines.push('', `Throughput is completed simulated seconds per wall second; achieved / selected divides it by the selected rate. Slice times are the simulation's own frame attempts per task (ms). Yield gap: wall time from one slice's end to the next slice of its batch, which the bench yields to rendering, input and other tasks; it contains the earlier task's tail, so gaps and tails are not added. Task tail: the rest of the slice's timer task after the slice ends, through the microtask queued after it (sync work and the render a published frame causes). Interaction = Event Timing, key -> next paint, longest entry per interaction (observed duration step ${steps.join('/')} ms; exempt from the 1% target). Heap in MiB after a forced GC. Worker backlog: not applicable before I3. Chromium ${sample.browser.version}, ${sample.browser.headless ? 'headless' : 'headed'}, renderer: ${sample.browser.renderer}, viewport ${sample.browser.viewport.width}x${sample.browser.viewport.height} at DPR ${sample.browser.viewport.deviceScaleFactor}.`, '')
+      lines.push('', `Throughput is completed simulated seconds per wall second; achieved / selected divides it by the selected rate. Slice times are the simulation's own frame attempts per task (ms). Yield gap: wall time from one slice's end to the next slice of its batch, which the bench yields to rendering, input and other tasks; it contains the earlier task's tail, so gaps and tails are not added. Task tail: the rest of the slice's timer task after the slice ends, through the microtask queued after it (sync work and the render a published frame causes). Interaction = Event Timing, key -> next paint, longest entry per interaction (observed duration step ${steps.join('/')} ms; exempt from the 1% target). Heap in MiB after a forced GC. Worker backlog: not applicable before I3.`, '')
       if (options.pilot) {
-        lines.push('### Pilot: runs per cell for a 1% half-width on slice p95 and throughput (capped)', '', '| Cell | planned N |', '|---|---|', ...Object.entries(plannedBrowser).map(([cell, n]) => { const [c, r, a] = cell.split('|'); return `| ${c} ${r}x ${a} | ${n} |` }), '')
+        lines.push('### Pilot: runs per cohort cell for its declared half-width on slice p95 and throughput (capped)', '', '| Cohort | planned N |', '|---|---|', ...Object.values(plannedBrowser).map((n, i) => `| ${i + 1} | ${n} |`), '')
         json.browserPilotPlanned = plannedBrowser
       }
       json.browser = browserJson
     }
     if (qualification.notQualified.length) lines.push('## Browser records NOT_QUALIFIED', '',
-      `${qualification.notQualified.length} browser records are not under accounting revision ${protocol.browser.accounting.revision} or did not pass, and are not scored: interval count x selected rate (v1) is not completed simulation, and a failed run includes an accounting refusal. They remain in their original input files and identities.`, '',
+      `${qualification.notQualified.length} browser records did not pass, use unsupported accounting, or lack complete consistent session evidence, and are not scored: interval count x selected rate (v1) is not completed simulation, and a failed run includes an accounting refusal. They remain in their original input files and identities.`, '',
       ...Object.entries(Object.groupBy(qualification.notQualified, record => record.compatibility)).map(([compatibility, list]) => `- ${compatibility}: ${list!.length} (runs ${list!.map(record => record.index).join(', ')})`), '')
   }
   writeFileSync(join(dir, 'report.md'), `${lines.join('\n')}\n`)
