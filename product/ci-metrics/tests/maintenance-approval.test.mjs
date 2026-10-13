@@ -325,11 +325,13 @@ for (const [name, mutate] of [
     if (approvalReads >= 2) mutate(value, path)
     return value
   }
-  const published = []
-  const run = publishApprovedMaintenance({ ...input, expectedDigest: review.digest, publish: async result => published.push(result.decision) })
+  const published = [], diagnostics = []
+  const run = publishApprovedMaintenance({ ...input, expectedDigest: review.digest,
+    onFailure: code => diagnostics.push(code), publish: async result => published.push(result.decision) })
   if (name === 'no late mutation') {
     assert.equal((await run).decision, 'PASS')
     assert.deepEqual(published, ['PENDING', 'PASS'])
+    assert.deepEqual(diagnostics, [])
   } else {
     await assert.rejects(run, /immediately before publication/)
     assert.deepEqual(published, ['PENDING'])
@@ -363,6 +365,70 @@ test('runtime refuses locally forged, candidate or rerun contexts before checkin
   const env = { GITHUB_REPOSITORY: repository, GITHUB_REF: 'refs/heads/main',
     GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/merge-queue-binding.yml@refs/heads/main`, GITHUB_RUN_ID: '50', GITHUB_RUN_ATTEMPT: '2' }
   assert.throws(() => trustedMaintenanceContext(event, env), /first-attempt/)
+})
+
+for (const [name, expected, breakAt] of [
+  ['initial invalidation', 'initial-publication', 'initial'],
+  ['approval read', 'approval-read', 'approval'],
+  ['approval reread', 'approval-reread', 'approval-reread'],
+  ['approval history guard', 'approval-history-guard', 'history'],
+  ['ordinary collector', 'collection-pr-read', 'rest'],
+  ['privileged collector', 'collection-ruleset-read', 'ruleset'],
+  ['queue collector', 'collection-graphql-read', 'graphql'],
+  ['review guard', 'review-validation', 'review'],
+  ['final Product read', 'final-product-read', 'final-read'],
+  ['final binding read', 'final-binding-read', 'final-binding'],
+  ['final identity guard', 'final-execution-guard', 'guard'],
+  ['final publication', 'final-publication', 'publish'],
+]) test(`publisher failure diagnostics: ${name}`, async () => {
+  const { input, values } = githubFixture()
+  const review = await collectMaintenanceReview(input)
+  values.set(`${root}/actions/runs/50/approvals`, approval(review))
+  const toxic = 'SECRET_TOKEN ::error:: private response candidate payload'
+  const injected = new Error(toxic)
+  // Neither lower-layer status nor a forged diagnostic attribute is trusted metadata.
+  Object.defineProperties(injected, {
+    status: { get: () => { throw new Error(toxic) } },
+    response: { get: () => { throw new Error(toxic) } },
+    stage: { value: toxic },
+  })
+  if (breakAt === 'ruleset') input.rulesetReader = async () => { throw injected }
+  if (breakAt === 'graphql') input.graphql = async () => { throw injected }
+  if (breakAt === 'review') values.get(`${root}/environments/${environmentName}`).can_admins_bypass = true
+  const read = input.read
+  let approvalsRead = 0
+  input.read = async path => {
+    if (path.endsWith('/approvals')) {
+      approvalsRead++
+      if (breakAt === 'approval' || (approvalsRead === 2 && breakAt === 'approval-reread')) throw injected
+    }
+    if (breakAt === 'rest' && path.endsWith('/pulls/946')) throw injected
+    if (approvalsRead >= 2 && path.endsWith('/runs/42') && breakAt === 'final-read') throw injected
+    if (approvalsRead >= 2 && path.endsWith('/runs/50') && breakAt === 'final-binding') throw injected
+    const value = await read(path)
+    if (approvalsRead >= 2 && path.endsWith('/runs/50') && breakAt === 'guard') value.status = 'completed'
+    if (approvalsRead === 2 && path.endsWith('/approvals') && breakAt === 'history') value[0].comment = toxic
+    return value
+  }
+  const published = [], diagnostics = []
+  await assert.rejects(publishApprovedMaintenance({ ...input, expectedDigest: review.digest,
+    onFailure: code => diagnostics.push(code), publish: async result => {
+      if ((result.decision === 'PENDING' && breakAt === 'initial') || (result.decision !== 'PENDING' && breakAt === 'publish')) throw injected
+      published.push(result.decision)
+    } }))
+  assert.deepEqual(published, breakAt === 'initial' ? [] : ['PENDING'])
+  assert.deepEqual(diagnostics, [expected])
+  assert.doesNotMatch(diagnostics.join(' '), /SECRET_TOKEN|::error::|private response|candidate payload/)
+})
+
+test('a throwing diagnostic sink preserves the publisher exception and cannot post authority', async () => {
+  const { input } = githubFixture()
+  const failure = new Error('SECRET_TOKEN private response')
+  input.read = async () => { throw failure }
+  const published = []
+  await assert.rejects(publishApprovedMaintenance({ ...input, onFailure: () => { throw new Error('sink') },
+    publish: async result => published.push(result.decision) }), error => error === failure)
+  assert.deepEqual(published, ['PENDING'])
 })
 
 test('workflow keeps owner approval free of credentials and candidate execution; all code uses protected SHA', () => {
