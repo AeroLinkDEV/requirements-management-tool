@@ -371,7 +371,30 @@ export type SelectionResult = {
   refused: string;
 };
 
-type Guidance = { at: number; lateralFt: number; verticalFt: number; scale: DeviationScale };
+export type ApproachGuidanceReference = { at: number; lateralFt: number; verticalFt: number; scale: DeviationScale };
+type Guidance = ApproachGuidanceReference;
+/** A computed local output. Raw bus status, producer identity and permission travel with the decoded words. */
+export type ApproachSensorOutput = {
+  computer: 1 | 2; sourceEpoch: number; receiver: number | null; at: number;
+  sample: { at: number; sequence: number; status: "NORMAL" | "NCD" | "FAIL" } | null;
+  approachKey: string | null; sentKey: string | null;
+  bus: GpsBus | null; words: GpsApproachWords; authority: ApproachAuthority;
+  eligible: boolean; eligibleSince: number | null; receiversDisagree: boolean;
+};
+export type ApproachConsumptionPort = { consumed(output: ApproachSensorOutput, at: number): void };
+
+/** Shared numerical policy for local AUTO selection and system adoption; neither caller creates a flown receipt here. */
+export function approachTransferRefusal(receiver: number, time: number, since: number | null, disagree: boolean,
+  next: GpsApproachWords, flown: ApproachGuidanceReference | null): string {
+  if (since === null || time - since < ELIGIBILITY_DWELL_S * 1000) return `GPS${receiver + 1} NOT YET ESTABLISHED`;
+  if (disagree) return "GPS1/GPS2 DISAGREE";
+  if (!flown || time - flown.at > TRANSFER_REFERENCE_MS || next.lateralFt === null || next.verticalFt === null || next.scale === null) return "";
+  const off = (a: number, b: number) => Math.abs(a - b) > TRANSFER_SCALE_TOLERANCE * Math.max(a, b);
+  if (off(flown.scale.lateralFullScaleFt, next.scale.lateralFullScaleFt) || off(flown.scale.verticalFullScaleFt, next.scale.verticalFullScaleFt)) return `GPS${receiver + 1} SCALING DIFFERS`;
+  if (Math.abs(next.lateralFt - flown.lateralFt) > TRANSFER_JUMP_FRACTION * next.scale.lateralFullScaleFt) return `GPS${receiver + 1} LATERAL JUMP`;
+  if (Math.abs(next.verticalFt - flown.verticalFt) > TRANSFER_JUMP_FRACTION * next.scale.verticalFullScaleFt) return `GPS${receiver + 1} VERTICAL JUMP`;
+  return "";
+}
 type Snapshot = { at: LatLon; words: (number | null)[] };
 
 export class AutoSelection {
@@ -381,6 +404,9 @@ export class AutoSelection {
   private eligibleSince: (number | null)[] = [null, null];
   private snapshots: (Snapshot | null)[] = [null, null];
   private fresh = [false, false];
+  private eligible = [false, false];
+  /** Last computed eligibility facts, including real elapsed dwell; reading never samples or selects. */
+  get approachEligibility() { return this.eligible.map((eligible, i) => ({ eligible, since: this.eligibleSince[i] })); }
   /** The last full approach guidance flown (an eligible receiver's 116, 117 and scaling, and when), for the jump check. */
   private flown: Guidance | null = null;
   private approach: number | null = null;
@@ -392,6 +418,7 @@ export class AutoSelection {
     const words = input.buses.map(approachWords);
     [0, 1].forEach(i => this.judgeFreshness(i, input.position, words[i]));
     const eligible = [0, 1].map(i => this.eligibleForApproach(i, input, words[i]));
+    this.eligible = eligible;
     eligible.forEach((ok, i) => { this.eligibleSince[i] = ok ? this.eligibleSince[i] ?? time : null; });
     // Case 6: a receiver chosen by hand, or GPS deselected: the manual contract, unchanged.
     const result: SelectionResult = input.choice !== "AUTO" || !input.selected
@@ -434,18 +461,9 @@ export class AutoSelection {
 
   /** Why receiver i may not take the approach over now (case 4), or "" when it may. */
   private transferRefusal(i: number, input: SelectionInput, words: GpsApproachWords[]): string {
-    const since = this.eligibleSince[i];
-    if (since === null || input.time - since < ELIGIBILITY_DWELL_S * 1000) return `GPS${i + 1} NOT YET ESTABLISHED`;
     const [one, two] = input.assessed.map(a => a.fix);
-    if (one && two && distanceNm(one, two) > GPS_DISAGREE_NM) return "GPS1/GPS2 DISAGREE";
-    // Guidance being flown is continued only without a jump; before any is flown (or long after) there is none to jump from.
-    const flown = this.flown, next = words[i];
-    if (!flown || !this.guiding(input.time) || next.lateralFt === null || next.verticalFt === null || next.scale === null) return "";
-    const off = (a: number, b: number) => Math.abs(a - b) > TRANSFER_SCALE_TOLERANCE * Math.max(a, b);
-    if (off(flown.scale.lateralFullScaleFt, next.scale.lateralFullScaleFt) || off(flown.scale.verticalFullScaleFt, next.scale.verticalFullScaleFt)) return `GPS${i + 1} SCALING DIFFERS`;
-    if (Math.abs(next.lateralFt - flown.lateralFt) > TRANSFER_JUMP_FRACTION * next.scale.lateralFullScaleFt) return `GPS${i + 1} LATERAL JUMP`;
-    if (Math.abs(next.verticalFt - flown.verticalFt) > TRANSFER_JUMP_FRACTION * next.scale.verticalFullScaleFt) return `GPS${i + 1} VERTICAL JUMP`;
-    return "";
+    return approachTransferRefusal(i, input.time, this.eligibleSince[i], !!one && !!two && distanceNm(one, two) > GPS_DISAGREE_NM,
+      words[i], this.flown);
   }
 
   /** May receiver i fly the selected approach: usable, the executed approach accepted, LPV, and fresh valid guidance. */

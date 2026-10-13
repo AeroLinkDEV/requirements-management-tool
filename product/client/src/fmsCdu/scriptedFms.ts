@@ -21,7 +21,7 @@ import { stimulusFor } from "./gpsStimulus";
 import { asComputations } from "./computation";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
-  ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
+  ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachSensorOutput, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
 } from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type Navaid, type Procedure, type ProcedureHold, type Runway, type StoredRoute } from "./navData";
@@ -328,12 +328,15 @@ export class ScriptedFms implements CduBackend {
   /** AUTO receiver selection, approach-aware (gpsSensors.ts, the AeroLink simulator policy), and its last verdict. */
   private autoSelection = new AutoSelection();
   private gpsSelection = { qualified: true, refused: "" };
-  private systemApproachSource: { chosen: number | null; qualified: boolean } | null = null;
+  private systemApproachSource: { chosen: number | null; qualified: boolean; output?: ApproachSensorOutput; refused?: string } | null = null;
+  private localApproachOutput: ApproachSensorOutput | null = null;
+  private localNavigationWind: { north: number; east: number } | null = null;
   private selectionLog = new SelectionLog();
   /** The approach selection last sent to the receivers (its path identifier and CRC), so it is sent once per change. */
   private sentApproach: string | null = null;
   /** The FAS block last sent, for the final approach course the GPS deviations are measured from. */
   private sentFas: FasDataBlock | null = null;
+  private sharedReceiverCommand: (() => FasDataBlock | null) | null = null;
   /** The FAS pinned with the executed plan (pinActive): what the receivers are sent, whatever cycle is active now. */
   private pinnedFas: { fas: FasDataBlock; cycle: string; revision: number } | null = null;
   /** The executed approach's final approach fix and runway, pinned with the plan (pinActive); null without an approach. */
@@ -1799,6 +1802,25 @@ export class ScriptedFms implements CduBackend {
     if (disagree && !this.nav.disagreeAlerted) { this.nav.disagreeAlerted = true; this.alert(alert("GPS DISAGREE"), "NAV:GPS_DISAGREE"); }
     if (!disagree) this.nav.disagreeAlerted = false;
 
+    // Publish the completed local calculation by value. A peer reads this output, never assesses its own copy of our bus.
+    const receiver = selection.mode === "GPS" && selection.gpsSource !== null ? selection.gpsSource - 1 : null;
+    const sample = receiver === null ? null : this.sensorFrame?.gps[receiver] ?? null;
+    const bus = receiver === null ? null : gps.buses[receiver];
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    const eligibility = receiver === null ? null : this.autoSelection.approachEligibility[receiver];
+    const sent = this.receiverApproachCommand;
+    const approachOutput: ApproachSensorOutput = { computer: this.crossTalk?.side ?? 1, sourceEpoch: this.powerCycles, receiver, at: now,
+      sample: sample ? { at: sample.at, sequence: sample.sequence, status: sample.status } : null,
+      approachKey: this.approachGuidanceIdentity, sentKey: sent ? `${sent.referencePathId}:${sent.crc}` : null,
+      bus, words: approachWords(bus), authority: selection.mode === "GPS" && approach?.approachType === "RNAV"
+        ? approachAuthority(bus, receiver === null ? null : assessReceiver(bus, 0.3), fasRequirement(approach, this.pinnedFas?.fas ?? null))
+        : { annunciation: "NO APPR", lateral: false, vertical: false, reason: "NO RNAV GPS NAVIGATION" },
+      eligible: (eligibility?.eligible ?? false) && this.approachGuidanceIdentity !== null
+        && sent !== null && this.approachGuidanceIdentity === `${sent.referencePathId}:${sent.crc}`,
+      eligibleSince: eligibility?.since ?? null, receiversDisagree: disagree };
+    this.localApproachOutput = structuredClone(approachOutput);
+    this.localNavigationWind = structuredClone(this.navigation.windEstimate);
+
     // M300 3-24/25: SYNC monitoring uses system navigation, adopted after local selection. Transient onside
     // integrity must neither latch the approach phase nor raise a false system integrity/performance alert (#1538).
     if (this.crossTalk?.mode !== "SYNC") this.refreshNavigationMonitoring();
@@ -1903,7 +1925,7 @@ export class ScriptedFms implements CduBackend {
     const selection = this.autoSelection.choose({
       choice: this.gpsChoice, selected: this.gpsSelected, assessed, buses, time,
       position: assessed[this.nav.gpsSource === 2 ? 1 : 0]?.fix ?? this.here, positionSource: this.nav.gpsSource === null ? null : this.nav.gpsSource - 1,
-      executedCrc: this.pinnedFas?.fas.crc ?? null, sentCrc: this.sentFas?.crc ?? null, approachArmed: !this.s300Advisory && this.armedApproach,
+      executedCrc: this.pinnedFas?.fas.crc ?? null, sentCrc: this.receiverApproachCommand?.crc ?? null, approachArmed: !this.s300Advisory && this.armedApproach,
     });
     const chosen = selection.chosen;
     this.gpsSelection = { qualified: selection.qualified, refused: selection.refused };
@@ -1919,7 +1941,15 @@ export class ScriptedFms implements CduBackend {
    * The FAS data block of the active RNAV approach, sent to both receivers whenever the approach changes (GPS phase 3b);
    * no selection when the route has none, or an ILS.
    */
-  setReceiverCommandAuthority(enabled: boolean) { this.receiverCommands = enabled; if (enabled) { this.sentApproach = null; this.sendApproach(); } }
+  setReceiverCommandAuthority(enabled: boolean, command?: () => FasDataBlock | null) {
+    this.receiverCommands = enabled; this.sharedReceiverCommand = command ?? null;
+    if (enabled) { this.sentApproach = null; this.sendApproach(); }
+  }
+  /** Actual installation sender's last command; an observer never synthesizes a send from its own executed plan. */
+  get receiverApproachCommand() {
+    const fas = this.receiverCommands ? this.sentFas : this.sharedReceiverCommand?.() ?? null;
+    return fas ? structuredClone(fas) : null;
+  }
   private sendApproach() {
     if (!this.receiverCommands) return;
     // The receivers fly the FAS pinned with the executed plan (pinActive), never one re-derived from a cycle activated since.
@@ -2085,8 +2115,8 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** SYNC's phase-dependent monitoring follows system navigation adoption, including the no-usable-source case. */
-  refreshSystemNavigationMonitoring(approachSource: { chosen: number | null; qualified: boolean } | null) {
-    this.systemApproachSource = approachSource;
+  refreshSystemNavigationMonitoring(approachSource: { chosen: number | null; qualified: boolean; output?: ApproachSensorOutput; refused?: string } | null) {
+    this.systemApproachSource = approachSource ? structuredClone(approachSource) : null;
     this.refreshNavigationMonitoring();
   }
 
@@ -3115,6 +3145,19 @@ export class ScriptedFms implements CduBackend {
     }
     this.pendingHoverPoints = null; this.pendingJoin = null;
   }
+  /** Computed peer output only: no sampling, choosing or elapsed-time update on a read. */
+  get navigationOutput() { return { solution: this.localNavigationSolution, wind: structuredClone(this.localNavigationWind ?? this.navigationWindEstimate),
+    approach: this.powerState === "ON" && !this.hasCondition("fmsFail") && this.localApproachOutput?.sourceEpoch === this.powerCycles
+      ? structuredClone(this.localApproachOutput) : null }; }
+  /** Executed FAS identity, not MOD or object identity. */
+  get approachGuidanceIdentity() { return this.pinnedFas ? `${this.pinnedFas.fas.referencePathId}:${this.pinnedFas.fas.crc}` : null; }
+  /** The exact adopted operand (or the local computed operand in INDEPENDENT) for a real simulator integration. */
+  get approachGuidanceOutput() {
+    if (this.powerState !== "ON" || this.hasCondition("fmsFail")) return null;
+    const output = this.crossTalk?.mode === "SYNC" && !this.s300Advisory ? this.systemApproachSource?.output ?? null
+      : this.localApproachOutput?.sourceEpoch === this.powerCycles ? this.localApproachOutput : null;
+    return output ? structuredClone(output) : null;
+  }
   get localNavigationSolution() { return this.localSolution ? structuredClone(this.localSolution) : this.navigation.current; }
   get navigationWindEstimate() { return this.navigation.windEstimate; }
   receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }) {
@@ -3132,7 +3175,9 @@ export class ScriptedFms implements CduBackend {
   get otherFms() { return this.crossTalk?.peerRoute ?? null; }
   get dualOperation() { return this.crossTalk; }
   get radioRequests() { return this.rms?.requests ?? []; }
-  attachComputerPorts(crossTalk: CrossTalkPort, rms: RadioManagementPort) { this.crossTalk = crossTalk; this.rms = rms; this.ownRms = null; }
+  attachComputerPorts(crossTalk: CrossTalkPort, rms: RadioManagementPort) { this.crossTalk = crossTalk; this.rms = rms; this.ownRms = null;
+    if (this.localApproachOutput) this.localApproachOutput = { ...this.localApproachOutput, computer: crossTalk.side };
+  }
   notifyComputerState() { this.emit(); }
 
   /** Whether the other FMS holds the same active route: always in dual operation, not necessarily when independent. */
@@ -3178,13 +3223,17 @@ export class ScriptedFms implements CduBackend {
         && !this.approachCancelled && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4 && (assessment.usable || delayed);
       return { annunciation: valid ? "LNAV" : "NO APPR", lateral: !!valid, vertical: false, reason: valid ? "" : "S300 GPS APPROACH UNAVAILABLE" };
     }
+    if (this.crossTalk?.mode === "SYNC" && this.systemApproachSource) {
+      return this.systemApproachSource.qualified && this.systemApproachSource.output
+        ? structuredClone(this.systemApproachSource.output.authority)
+        : { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
+    }
     return this.laterApproachAuthority(this.gpsAssessment.chosen, this.gpsSelection.qualified);
   }
 
-  /** Shared integrity availability does not authorize an AFCS 116/117 source transfer (#1538). */
+  /** Shared monitoring and selected AFCS consume the same qualified system output. */
   private get navigationApproachAuthority(): ApproachAuthority {
-    if (this.crossTalk?.mode !== "SYNC" || this.s300Advisory || this.systemApproachSource === null) return this.gpsApproachAuthority;
-    return this.laterApproachAuthority(this.systemApproachSource.chosen, this.systemApproachSource.qualified);
+    return this.gpsApproachAuthority;
   }
 
   private laterApproachAuthority(chosen: number | null, qualified: boolean): ApproachAuthority {
@@ -3205,13 +3254,15 @@ export class ScriptedFms implements CduBackend {
   get gpsApproach(): GpsApproachWords | null {
     if (this.s300Advisory) return null;
     if (findProcedure(this.db, this.active, "APPROACH")?.approachType !== "RNAV" || this.nav.mode !== "GPS") return null;
+    if (this.crossTalk?.mode === "SYNC" && this.systemApproachSource) return this.systemApproachSource.output
+      ? structuredClone(this.systemApproachSource.output.words) : null;
     const chosen = this.gpsAssessment.chosen;
     return chosen === null ? null : approachWords(this.gpsBus(chosen));
   }
 
   /** The final approach course of the FAS block sent (LTP to FPAP), degrees true; null without one. */
   get finalApproachCourse() {
-    const fas = this.sentFas;
+    const fas = this.receiverApproachCommand;
     return fas ? bearingDeg(fas.ltp, { lat: fas.ltp.lat + fas.fpapDelta.lat, lon: fas.ltp.lon + fas.fpapDelta.lon }) : null;
   }
 
