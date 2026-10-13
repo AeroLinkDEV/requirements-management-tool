@@ -172,13 +172,51 @@ const openD5Cockpit = async (page: Page, popped: boolean) => {
   } }
 }
 
+// Observe the actual public input before the journal receives it; never read the expected context from the journal.
+// This test instrumentation makes no model query and forwards the original submit exactly once, synchronously.
+const observePinSInput = async (page: Page) => {
+  await page.evaluate(async () => {
+    const modulePath = '/src/fmsCdu/kernel/kernel.ts'
+    const { FmsKernel } = await import(modulePath)
+    const prototype = FmsKernel.prototype
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'submit')!
+    if (typeof descriptor?.value !== 'function') throw new Error('Actual public submit boundary unavailable')
+    const original = descriptor.value
+    const state = { inputs: [] as { action: unknown; source: unknown }[], error: null as string | null, restore: () => {} }
+    const host = window as typeof window & { __aerolinkI1bPinsInput?: typeof state }
+    if (host.__aerolinkI1bPinsInput) throw new Error('Input observation already active')
+    Object.defineProperty(prototype, 'submit', { ...descriptor, value: function (this: unknown, ...args: unknown[]) {
+      const action = args[0] as { kind?: string; selection?: { select?: string } }
+      if (action.kind === 'afcs.select' && action.selection?.select === 'pinsContinue') {
+        try { state.inputs.push(structuredClone({ action: args[0], source: args[1] })) }
+        catch (error) { state.error = String(error) }
+      }
+      return Reflect.apply(original, this, args)
+    } })
+    state.restore = () => { Object.defineProperty(prototype, 'submit', descriptor); delete host.__aerolinkI1bPinsInput }
+    host.__aerolinkI1bPinsInput = state
+  })
+  return {
+    read: () => page.evaluate(() => {
+      const host = window as typeof window & { __aerolinkI1bPinsInput?: { inputs: { action: unknown; source: unknown }[]; error: string | null } }
+      if (!host.__aerolinkI1bPinsInput) throw new Error('Input observation missing')
+      return structuredClone({ inputs: host.__aerolinkI1bPinsInput.inputs, error: host.__aerolinkI1bPinsInput.error })
+    }),
+    restore: () => page.evaluate(() => {
+      const host = window as typeof window & { __aerolinkI1bPinsInput?: { restore: () => void } }
+      host.__aerolinkI1bPinsInput?.restore()
+      return !host.__aerolinkI1bPinsInput
+    }),
+  }
+}
+
 // Conditional producer owner: the lab's failure/recovery path supplies a real hold; its UI has no ALT button.
 // The failure law itself stays with fms-modes; these rows detect missing/wrong input receipts and window attribution.
 for (const popped of [false, true]) test(`D5 eligible VNAV on cockpit ${popped ? 'popout' : 'main'} submits its literal action at the paused instant`, async ({ page }) => {
   const { ios } = await openD5Instructor(page, false)
   await expect(page.getByRole('button', { name: 'VNAV', exact: true })).toHaveCount(0)
   await ios.getByLabel('CDU inspected', { exact: true }).selectOption('1')
-  await ios.getByLabel('Aircraft profile', { exact: true }).selectOption('lab-airline-vnav')
+  await ios.getByRole('combobox', { name: 'Aircraft profile', exact: true }).selectOption('lab-airline-vnav')
   const cockpit = await openD5Cockpit(page, popped)
   const vnav = cockpit.surface.getByRole('button', { name: 'VNAV', exact: true })
   await expect(vnav).toBeDisabled() // healthy initial managed guidance has no altitude-hold latch
@@ -237,15 +275,28 @@ for (const popped of [false, true]) test(`D5 shipped PinS on cockpit ${popped ? 
   await expect(continuation).toBeDisabled() // at the MAP, the real chart still requires the crew's VFR declaration
   await cockpit.surface.getByLabel('Basic VFR conditions met', { exact: true }).check()
   await expect(continuation).toBeEnabled()
-  await continuation.click()
+  const observation = await observePinSInput(page)
+  let input: { action: unknown; source: unknown }[] = []
+  try {
+    await continuation.click()
+    const captured = await observation.read()
+    expect(captured.error).toBeNull()
+    input = captured.inputs
+    expect(input, 'the actual public submit must observe this one native continuation').toHaveLength(1)
+  } finally {
+    expect(await observation.restore(), 'restore the public prototype before further observations').toBe(true)
+  }
   await expect(cockpit.surface.getByRole('region', { name: 'Flight', exact: true })).toContainText('crew flying the visual segment')
   await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
   await expect(ios.getByTestId('fms-input-outcome')).toHaveText('Last executed input: accepted.')
   const after = await exportFrom(page, ios)
-  await test.info().attach('pins-public-journals', { body: JSON.stringify({ before, after }, null, 2), contentType: 'application/json' })
+  await test.info().attach('pins-public-input-and-journals', { body: JSON.stringify({ input, before, after }, null, 2), contentType: 'application/json' })
   expect(after.frame).toBe(0)
   expect(after.control).toEqual(before.control)
-  // Declaration also carries a UI session/revision context tag. Match the independent crew contract, not that tag.
+  // Includes the dynamic declaration context: expected preservation is bound before submit, independently of encoding.
+  expect(after.journal.at(-1)!.payload).toEqual(input[0].action)
+  expect(after.journal.at(-1)!.source).toEqual(input[0].source)
+  // The literal crew/source/time contract remains independently asserted, rather than inferred from observed input.
   expect(after.journal.slice(before.journal.length)).toMatchObject([
     { submissionSeq: 4, recordOrdinal: 4, frame: 0, phase: 'ACTION', orderInPhase: 3, origin: 'native', kind: 'ios.jump', target: 'fms1', source: { kind: 'ios', id: 'flight.jump', surface: 'main' }, payload: { kind: 'ios.jump', unit: 1, op: 'sequence' }, outcome: { status: 'accepted' } },
     { submissionSeq: 5, recordOrdinal: 5, frame: 0, phase: 'ACTION', orderInPhase: 4, origin: 'native', kind: 'ios.jump', target: 'fms1', source: { kind: 'ios', id: 'flight.jump', surface: 'main' }, payload: { kind: 'ios.jump', unit: 1, op: 'sequence' }, outcome: { status: 'accepted' } },
