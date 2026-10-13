@@ -158,7 +158,7 @@ for (const popped of [false, true]) test(`D5 actual instructor ${popped ? 'popou
   await ios.getByRole('button', { name: 'Jump to next waypoint', exact: true }).click()
   await ios.getByLabel('CDU inspected', { exact: true }).selectOption('2')
   await page.getByRole('button', { name: 'LNAV', exact: true }).click()
-  await page.getByLabel('Selected altitude', { exact: true }).fill('4000')
+  await page.getByLabel('Preselected altitude', { exact: true }).fill('4000')
   await page.getByRole('button', { name: 'SET', exact: true }).click()
   await page.getByLabel('Selected speed', { exact: true }).fill('100')
   await page.getByRole('button', { name: 'SET SPD', exact: true }).click()
