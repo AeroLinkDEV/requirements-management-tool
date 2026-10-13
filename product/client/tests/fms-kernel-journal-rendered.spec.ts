@@ -150,6 +150,110 @@ const openD5Instructor = async (page: Page, popped: boolean) => {
   return { instructor, ios }
 }
 
+// AFCS controls belong to the cockpit surface. Keep the instructor on main so the wrong adapter cannot pass.
+const openD5Cockpit = async (page: Page, popped: boolean) => {
+  if (!popped) return { surface: page, close: async () => {} }
+  await page.locator('.fmsStationDock > summary').click()
+  const controls = page.getByRole('region', { name: 'Station arrangement', exact: true })
+  await controls.getByLabel('Fixed station arrangement', { exact: true }).selectOption('three')
+  await controls.getByLabel('Instructor apart', { exact: true }).uncheck()
+  // The native station route opens the outside window before it admits the cockpit window.
+  const outsideOpened = page.waitForEvent('popup')
+  await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
+  const outside = await outsideOpened
+  const cockpitOpened = page.waitForEvent('popup')
+  await controls.getByRole('button', { name: 'Open cockpit in a window', exact: true }).click()
+  const cockpit = await cockpitOpened
+  await page.locator('.fmsStationDock > summary').click()
+  return { surface: cockpit, close: async () => {
+    await page.locator('.fmsStationDock > summary').click()
+    await controls.getByRole('button', { name: 'Return all panels', exact: true }).click()
+    await expect.poll(() => cockpit.isClosed() && outside.isClosed()).toBe(true)
+  } }
+}
+
+// Conditional producer owner: the lab's failure/recovery path supplies a real hold; its UI has no ALT button.
+// The failure law itself stays with fms-modes; these rows detect missing/wrong input receipts and window attribution.
+for (const popped of [false, true]) test(`D5 eligible VNAV on cockpit ${popped ? 'popout' : 'main'} submits its literal action at the paused instant`, async ({ page }) => {
+  const { ios } = await openD5Instructor(page, false)
+  await expect(page.getByRole('button', { name: 'VNAV', exact: true })).toHaveCount(0)
+  await ios.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  await ios.getByLabel('Aircraft profile', { exact: true }).selectOption('lab-airline-vnav')
+  const cockpit = await openD5Cockpit(page, popped)
+  const vnav = cockpit.surface.getByRole('button', { name: 'VNAV', exact: true })
+  await expect(vnav).toBeDisabled() // healthy initial managed guidance has no altitude-hold latch
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const before = await exportFrom(page, ios)
+  expect(before.frame).toBe(0)
+  expect(before.journal).toEqual([])
+  expect(before.control).toEqual([])
+  await ios.getByRole('tab', { name: 'Conditions', exact: true }).click()
+  const failure = ios.getByRole('checkbox', { name: /^FMS failure/ })
+  await failure.check()
+  await expect(vnav).toBeDisabled()
+  await failure.uncheck()
+  await expect(vnav).toBeEnabled() // actual recovery keeps the hold until this explicit selection
+  await vnav.click()
+  await expect(vnav).toBeDisabled() // the native accepted selection releases that latch
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  await expect(ios.getByTestId('fms-input-outcome')).toHaveText('Last executed input: accepted.')
+  const after = await exportFrom(page, ios)
+  await test.info().attach('vnav-public-journals', { body: JSON.stringify({ before, after }, null, 2), contentType: 'application/json' })
+  expect(after.frame).toBe(0)
+  expect(after.control).toEqual(before.control)
+  expect(after.journal.map(entry => [entry.submissionSeq, entry.recordOrdinal, entry.frame, entry.phase, entry.orderInPhase, entry.origin, entry.kind, entry.target, entry.source, entry.payload, entry.outcome])).toEqual([
+    [1, 1, 0, 'ACTION', 0, 'native', 'ios.condition', 'fms1', { kind: 'ios', id: 'conditions.fmsFail', surface: 'main' }, { kind: 'ios.condition', unit: 1, condition: 'fmsFail', on: true }, { status: 'accepted' }],
+    [2, 2, 0, 'ACTION', 1, 'native', 'ios.condition', 'fms1', { kind: 'ios', id: 'conditions.fmsFail', surface: 'main' }, { kind: 'ios.condition', unit: 1, condition: 'fmsFail', on: false }, { status: 'accepted' }],
+    [3, 3, 0, 'ACTION', 2, 'native', 'afcs.select', 'afcs', { kind: 'ui', id: 'afcs.vnav', surface: popped ? 'popout' : 'main' }, { kind: 'afcs.select', selection: { select: 'vnav' } }, { status: 'accepted' }],
+  ])
+  await cockpit.close()
+})
+
+// Published 87N Proceed VFR fixture from the existing PinS UI owner. No private route or chart declaration is used.
+for (const popped of [false, true]) test(`D5 shipped PinS on cockpit ${popped ? 'popout' : 'main'} journals the crew continuation at its actual MAP`, async ({ page }) => {
+  const { ios } = await openD5Instructor(page, false)
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const card = ios.getByRole('region', { name: 'Scenarios', exact: true })
+  const scenario = { id: 'd5-pins', title: 'D5 published PinS input', objective: 'Actual MAP continuation receipt', maxSeconds: 1,
+    start: '87n-rnav190-final', startTime: '2026-09-29T15:00:00Z', steps: [{ when: { kind: 'start' }, action: { kind: 'expectActive', waypoint: 'STAYS' } }] }
+  await card.getByLabel('Scenario file', { exact: true }).setInputFiles(fixtureFile('d5-pins.json', scenario))
+  await card.getByRole('button', { name: 'Run the scenario', exact: true }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  const before = await exportFrom(page, ios)
+  expect(before.frame).toBe(0)
+  expect(before.control).toEqual([])
+  expect(before.journal.map(entry => [entry.submissionSeq, entry.frame, entry.phase, entry.origin, entry.kind, entry.outcome.status])).toEqual([
+    [1, 0, 'ACTION', 'v1-translated', 'ios.place', 'accepted'],
+    [2, 0, 'ACTION', 'v1-translated', 'scenario.check', 'accepted'],
+    [3, 0, 'ACTION', 'native', 'ios.flightFreeze', 'accepted'],
+  ])
+  const cockpit = await openD5Cockpit(page, popped)
+  const continuation = cockpit.surface.getByRole('button', { name: 'Continue from MAP', exact: true })
+  await expect(continuation).toBeDisabled()
+  await expect(cockpit.surface.getByLabel('Landing area in sight', { exact: true })).toHaveCount(0)
+  await ios.getByRole('tab', { name: 'Flight and setup', exact: true }).click()
+  await ios.getByRole('button', { name: 'Jump to next waypoint', exact: true }).click()
+  await ios.getByRole('button', { name: 'Jump to next waypoint', exact: true }).click()
+  await expect(continuation).toBeDisabled() // at the MAP, the real chart still requires the crew's VFR declaration
+  await cockpit.surface.getByLabel('Basic VFR conditions met', { exact: true }).check()
+  await expect(continuation).toBeEnabled()
+  await continuation.click()
+  await expect(cockpit.surface.getByRole('region', { name: 'Flight', exact: true })).toContainText('crew flying the visual segment')
+  await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  await expect(ios.getByTestId('fms-input-outcome')).toHaveText('Last executed input: accepted.')
+  const after = await exportFrom(page, ios)
+  await test.info().attach('pins-public-journals', { body: JSON.stringify({ before, after }, null, 2), contentType: 'application/json' })
+  expect(after.frame).toBe(0)
+  expect(after.control).toEqual(before.control)
+  // Declaration also carries a UI session/revision context tag. Match the independent crew contract, not that tag.
+  expect(after.journal.slice(before.journal.length)).toMatchObject([
+    { submissionSeq: 4, recordOrdinal: 4, frame: 0, phase: 'ACTION', orderInPhase: 3, origin: 'native', kind: 'ios.jump', target: 'fms1', source: { kind: 'ios', id: 'flight.jump', surface: 'main' }, payload: { kind: 'ios.jump', unit: 1, op: 'sequence' }, outcome: { status: 'accepted' } },
+    { submissionSeq: 5, recordOrdinal: 5, frame: 0, phase: 'ACTION', orderInPhase: 4, origin: 'native', kind: 'ios.jump', target: 'fms1', source: { kind: 'ios', id: 'flight.jump', surface: 'main' }, payload: { kind: 'ios.jump', unit: 1, op: 'sequence' }, outcome: { status: 'accepted' } },
+    { submissionSeq: 6, recordOrdinal: 6, frame: 0, phase: 'ACTION', orderInPhase: 5, origin: 'native', kind: 'afcs.select', target: 'afcs', source: { kind: 'ui', id: 'afcs.pinsContinue', surface: popped ? 'popout' : 'main' }, payload: { kind: 'afcs.select', selection: { select: 'pinsContinue', declaration: { basicVfr: true, landingAreaVisible: false, publishedVisibility: false } } }, outcome: { status: 'accepted' } },
+  ])
+  await cockpit.close()
+})
+
 for (const popped of [false, true]) test(`D5 GPS parameter branches retain literal receiver, values and instructor ${popped ? 'popout' : 'main'} source`, async ({ page }) => {
   const { instructor, ios } = await openD5Instructor(page, popped)
   await ios.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
