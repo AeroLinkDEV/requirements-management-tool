@@ -41,6 +41,15 @@ evidence. An unrelated label cannot dispatch a new Full run. If its event arrive
 lane waits under the existing timeout for the readiness dispatcher. Missing readiness or failed verification makes
 the native required check fail; it must never become a skipped success or disappear behind a different name.
 
+If every trusted exact-head Product attempt completed unsuccessfully, a fresh `ready-for-full-ci` label
+request may dispatch one new attempt for the unchanged ready head. Retain the original failures and diagnostics;
+reapply readiness only after their independent disposition. The requester records its prior selection, captures
+the complete pre-dispatch run identities, and waits for exactly one new trusted run. Pending work does not cause
+another dispatch, an existing genuine success may be reused, and unrelated label events cannot recover a failed
+run. Missing or ambiguous registration refuses within the existing wait; a new failure fails this request without
+another automatic attempt. The new success still requires Product's native readiness authentication and aggregate,
+live PR/queue revalidation, and the usual composed-candidate gate. Human Product reruns are not this recovery path.
+
 The readiness publisher checks the complete current queue before dispatch and again before publishing. It
 refuses a PR head that equals any current composed candidate, including another PR's candidate. Both paths
 use the same required App context, so a second PR must not provide readiness for an existing queue commit.

@@ -60,10 +60,12 @@ test('PR readiness refuses cross-PR current queue aliases through the actual pro
   assert.doesNotThrow(() => verifyReadinessTarget(sha('a'), queue([])))
   assert.throws(() => verifyReadinessTarget(sha('a'), queue([sha('a')])))
   const calls = [...requester.matchAll(/node "\$RUNNER_TEMP\/verify-readiness-target.mjs"/g)].map(match => match.index)
-  assert.equal(calls.length, 2)
-  assert.ok(calls[0] < requester.indexOf('match="$(find_product_run)"'), 'refuse before paying for Full CI')
-  assert.ok(calls[1] > requester.indexOf('- name: Publish trusted pull-request readiness'))
-  assert.ok(calls[1] < requester.indexOf('"$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/check-runs"'))
+  assert.equal(calls.length, 3)
+  assert.ok(calls[0] > requester.indexOf('dispatch_product() {'), 'revalidate the queue inside the dispatch owner')
+  assert.ok(calls[0] < requester.indexOf('"$api/actions/workflows/ci.yml/dispatches"'), 'refuse immediately before the dispatch POST')
+  assert.ok(calls[1] < requester.indexOf('match="$(find_product_run)"'), 'refuse before selecting Full evidence')
+  assert.ok(calls[2] > requester.indexOf('- name: Publish trusted pull-request readiness'))
+  assert.ok(calls[2] < requester.indexOf('"$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/check-runs"'))
 })
 
 test('workflow run metadata is mapped directly from the exact run endpoint', async () => {
