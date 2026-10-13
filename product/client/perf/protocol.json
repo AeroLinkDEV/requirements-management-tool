@@ -2,6 +2,14 @@
   "schema": "aerolink.fms-perf-protocol.v1",
   "issue": "#1510 (I0a of #1502 D10)",
   "declared": "Declared before the pilot. The browser windows are set by the pilot and declared here before any baseline run.",
+  "reporting": {
+    "comparison5": { "definition": "dual kernel versus single kernel at head", "budgeted": false },
+    "comparison5a": {
+      "definition": "dual kernel at head versus dual legacy composition at base, same build and topology",
+      "budget": { "p95": 0.05, "throughput": 0.05 },
+      "budgetMeaning": "maximum p95 increase and throughput decrease"
+    }
+  },
   "warmupSimSeconds": 60,
   "headless": {
     "topologies": ["single", "dual"],

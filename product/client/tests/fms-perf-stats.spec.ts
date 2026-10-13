@@ -324,6 +324,60 @@ test('the headless report titles a set by its arms: A/A when both carry one clie
   expect(ab.json.headless.comparison).toBe('A/B')
 })
 
+test('comparison 5 reports topology ratios without a budget verdict and leaves separate 5a unqualified', ({ browserName: _browserName }, testInfo) => {
+  // #1589 / #1502 D10 owner amendment: topology cost is descriptive. These are synthetic positive records,
+  // not measurements or performance qualification. Existing CLI-title coverage has only one topology and no session.
+  const protocol = JSON.parse(readFileSync('perf/protocol.json', 'utf8'))
+  const workloads = protocol.headless.workloads.map((workload: { id: string }) => workload.id) as string[]
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  const identity = { srcTree: 'b'.repeat(40), lockBlob: 'c'.repeat(40), viteBlob: 'd'.repeat(40) }
+  const priming = (['A', 'B'] as const).flatMap((arm, i) => workloads.flatMap((workload, w) =>
+    (i === 0 ? ['single', 'dual'] : ['dual', 'single']).map((topology, t) =>
+      ({ primed: true, slot: i - 2, arm, position: w * 2 + t, workload, topology }))))
+  const scored = Array.from({ length: 5 }, (_, block) => ['A', 'B', 'B', 'A'].flatMap((arm, slot) => workloads.flatMap(workload =>
+    ['single', 'dual'].map(topology => ({ primed: false, block, slot: block * 4 + slot, arm, workload, topology }))))).flat()
+  const runs = [...priming.map(row => ({ ...row, block: null })), ...scored].map((row, index) => ({ ...row, index,
+    kind: 'headless', status: 'passed', armIdentity: identity, host,
+    // Literal single 5/10/12 ms and 100 sim s/wall s; dual 15/30/36 ms and 25 sim s/wall s.
+    result: { p50: row.topology === 'single' ? 5 : 15, p95: row.topology === 'single' ? 10 : 30,
+      p99: row.topology === 'single' ? 12 : 36, throughput: row.topology === 'single' ? 100 : 25, heapUsedBytesAfterGc: 1024, sync: null } }))
+  const out = testInfo.outputPath('descriptive-topology')
+  mkdirSync(out, { recursive: true })
+  const input = runs.map(row => JSON.stringify(row)).join('\n') + '\n'
+  writeFileSync(join(out, 'runs.jsonl'), input)
+  const harness = { commit, dirtyEntries: 0 }, startedAt = 1
+  writeFileSync(join(out, 'session-1.json'), JSON.stringify({ kind: 'headless', startedAt, protocol, workloads, priming, harness }))
+  writeFileSync(join(out, 'session-end-1.json'), JSON.stringify({ kind: 'headless', startedAt, harnessAtEnd: harness,
+    primedRuns: runs.filter(row => row.primed).map(({ index, status }) => ({ index, status })) }))
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'report', '--out', out], { cwd: process.cwd(), encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const prose = readFileSync(join(out, 'report.md'), 'utf8'), report = JSON.parse(readFileSync(join(out, 'report.json'), 'utf8'))
+  // Admission and complete populated output come before the regression assertion: refusal/empty output cannot pass.
+  expect(report.headless).toMatchObject({ comparison: 'A/A', verdict: { verdict: 'passed', significant: 0 } })
+  expect(report.headless.aa.filter((row: { measure: string }) => row.measure !== 'heap')).toHaveLength(40)
+  expect(report.comparison5.rows).toHaveLength(20)
+  expect(report.comparison5.excluded).toEqual([])
+  for (const row of report.comparison5.rows) {
+    expect(row.effect).toMatchObject(row.measure === 'throughput'
+      ? { estimate: -0.75, low: -0.75, high: -0.75, halfWidthPp: 0 }
+      : { estimate: 2, low: 2, high: 2, halfWidthPp: 0 })
+    if (row.measure === 'p95') expect([row.single, row.dual]).toEqual([10, 30])
+    if (row.measure === 'throughput') expect([row.single, row.dual]).toEqual([100, 25])
+    expect(row.test.p).toBeGreaterThan(0)
+  }
+  const topology = prose.split('## Comparison 5:')[1].split('## Absolute baselines')[0]
+  expect(topology).toContain('+200.00% | +200.00% to +200.00%')
+  expect(topology).toContain('-75.00% | -75.00% to -75.00%')
+  expect(topology).not.toContain('over 5%?')
+  expect(topology).not.toContain('**yes**')
+  for (const row of report.comparison5.rows) expect(row).not.toHaveProperty('over')
+  expect(prose).toContain('reported, not budgeted')
+  expect(prose).toContain('Comparison 5a')
+  expect(report.comparison5a).toMatchObject({ status: 'NOT_QUALIFIED', budget: { p95: 0.05, throughput: 0.05 } })
+  expect(prose).toContain('dual kernel at head versus dual legacy composition at base, same build and topology')
+  expect(readFileSync(join(out, 'runs.jsonl'), 'utf8')).toBe(input)
+})
+
 test('an A/B family reads as differences found or none significant; an A/A keeps its verdict', () => {
   const judged = (verdict: 'failed' | 'passed' | 'refused', reason = '') => ({ verdict, reason, significant: verdict === 'failed' ? 3 : 0 })
   expect(headlessVerdict('A/B', judged('failed'))).toEqual({ kind: 'A/B', title: 'A/B result', verdict: 'differences found' })
