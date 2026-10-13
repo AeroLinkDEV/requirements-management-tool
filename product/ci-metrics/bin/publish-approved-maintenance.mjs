@@ -10,7 +10,7 @@ import { maintenanceFailureCode, maintenanceStage } from '../lib/maintenance-dia
 let reported = false
 function reportFailure(code) {
   reported = true
-  console.error(`[merge-authority-maintenance] Failed closed; stage=${code}; no maintenance authority was granted.`)
+  console.error(`[merge-authority-maintenance] Maintenance run failed; publication was not confirmed. stage=${code}`)
 }
 
 async function main() {
