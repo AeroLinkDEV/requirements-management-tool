@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, runClassification, scoredRuns, type Arm, type DispatchedRoute, type RunValue, type SessionEvidence } from './stats.ts'
 import { browserQualification } from './browser-accounting.ts'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest, w3EndRecord } from './browser-capture.ts'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest, w3EndRecord, archiveW3ColdInput } from './browser-capture.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -498,7 +498,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   if(harness.dirtyEntries || !harness.apiAssemblySha256 || closure.apiAssemblySha256!==harness.apiAssemblySha256 || closure.apiTree!==harness.apiTree)throw new Error('W3 API/seed/harness identity is not exact')
   const began=performance.now(),deadline=began+14_400_000,dir=out()
   if(nextIndex(dir))throw new Error('W3 requires fresh run output')
-  const archive=join(dir,'cold','payload');mkdirSync(archive,{recursive:true});copyColdPayload(payload,archive,entries)
+  const {archive,seed}=archiveW3ColdInput(input,dir,entries,cold)
   const session={schema:'aerolink.fms-w3-paired-session.v1',id:randomUUID(),plan,sessionIndex:index,slots,manifest,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
   writeFileSync(join(dir,'w3-session.json'),JSON.stringify(session,null,2),{flag:'wx'})
   let stopped:string|null=null,failure:{error:unknown}|null=null
@@ -510,7 +510,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
       const identity={original:arm.original,effectiveSourceSha256:arm.effectiveSourceSha256,overlaySha256:manifest.overlaySha256,harness:manifest.harness,build,manifestSha256:digest(manifest),rate:slot.rate,configuration:slot.configuration}
       const entry=run(dir,{kind:'browser-w3',route:selectedRoute,lineage:{sessionId:session.id,manifest:digest(plan),...slot},identity,cold,copiedInputs:coldPayload(storage.root),storageRoot:storage.root},
         {AEROLINK_PERF_MODE:'browser',AEROLINK_PERF_DIST:join(arm.root,'product/client/dist'),AEROLINK_PERF_ARM:join(arm.root,'product/client'),AEROLINK_E2E_RUN_ID:runId,
-          AEROLINK_SHOWCASE_SEED:readFileSync(join(input,'seed.json'),'utf8'),AEROLINK_PERF_WORKLOAD:selectedRoute.workload,AEROLINK_PERF_TOPOLOGY:selectedRoute.topology,AEROLINK_PERF_RATE:String(slot.rate),AEROLINK_PERF_CONFIGURATION:slot.configuration,AEROLINK_PERF_W3_IDENTITY:JSON.stringify(identity)},deadline,protocol.browser.w3Recipe.executorLimitSeconds*1000)
+          AEROLINK_SHOWCASE_SEED:readFileSync(seed,'utf8'),AEROLINK_PERF_WORKLOAD:selectedRoute.workload,AEROLINK_PERF_TOPOLOGY:selectedRoute.topology,AEROLINK_PERF_RATE:String(slot.rate),AEROLINK_PERF_CONFIGURATION:slot.configuration,AEROLINK_PERF_W3_IDENTITY:JSON.stringify(identity)},deadline,protocol.browser.w3Recipe.executorLimitSeconds*1000)
       if(entry.status!=='passed')throw new Error('W3 failed run retained; no retry or later favorable substitution')
     }
   } catch(error){stopped=error instanceof Error?error.message:'interrupted';failure={error}}

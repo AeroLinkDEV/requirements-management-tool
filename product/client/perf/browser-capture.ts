@@ -106,6 +106,11 @@ export function admitW3Manifest(manifest: any, requireBuild: boolean) {
   }
   return plan
 }
+/** Archives the already validated sealed W3 cold input under <out>/cold before any child; returns the seed every slot reads. */
+export function archiveW3ColdInput(input: string, dir: string, entries: readonly PayloadEntry[], _cold: { payloadSha256: string; seedSha256: string; closureSha256: string }) {
+  const archive=join(dir,'cold','payload');mkdirSync(archive,{recursive:true});copyColdPayload(join(input,'payload'),archive,entries)
+  return {archive,seed:join(input,'seed.json')}
+}
 /** The W3 session end record the executor writes to w3-end.json. The end re-admission outcome is recorded beside the
  * original stop reason and never replaces it or prevents the record; the caller decides what to throw after writing. */
 export function w3EndRecord(session: Record<string, unknown>, stopped: string | null, manifest: any, observed: Record<string, unknown>) {
