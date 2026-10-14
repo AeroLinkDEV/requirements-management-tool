@@ -6,6 +6,7 @@ import PersonPicker from "./PersonPicker";
 import { PersonName } from "./People";
 import { DocumentReviewComments } from "./DocumentReviewComments";
 import { stateLabel } from "./presentation";
+import { useLatestRequest } from "./useLatestRequest";
 import "./ManagedDocumentationCenter.css";
 
 type Summary = {
@@ -354,6 +355,7 @@ export default function ManagedDocumentationCenter({
     [linkOptions, setLinkOptions] = useState<LinkOption[]>([]),
     [linkCursor, setLinkCursor] = useState("");
   const [showSummaryEditor, setShowSummaryEditor] = useState(false);
+  const { begin: beginSelection } = useLatestRequest();
   const recovery = (() => {
     const query = new URLSearchParams(window.location.search);
     return {
@@ -377,6 +379,7 @@ export default function ManagedDocumentationCenter({
   );
   const load = useCallback(
     async (preferred?: string) => {
+      const isCurrentSelection = beginSelection();
       try {
         setError("");
         const query = inventoryQuery();
@@ -384,22 +387,27 @@ export default function ManagedDocumentationCenter({
           apiRequest<Page<Summary>>(`${api}/api/managed-documents?${query}`),
           apiRequest<Dashboard>(`${api}/api/managed-documents/dashboard?projectId=${projectId}`),
         ]);
+        if (!isCurrentSelection()) return;
         setItems(list.items);
         setTotalCount(list.totalCount ?? list.items.length);
         setNextCursor(list.nextCursor ?? "");
         setDashboard(metrics);
         const wanted = preferred;
+        let detail: Detail | undefined;
         if (wanted) {
-          setSelected(await apiRequest<Detail>(`${api}/api/managed-documents/${wanted}`));
+          detail = await apiRequest<Detail>(`${api}/api/managed-documents/${wanted}`);
         } else if (list.items.length) {
-          setSelected(await apiRequest<Detail>(`${api}/api/managed-documents/${list.items[0].id}`));
-        } else setSelected(undefined);
+          detail = await apiRequest<Detail>(`${api}/api/managed-documents/${list.items[0].id}`);
+        }
+        if (!isCurrentSelection()) return;
+        setSelected(detail);
         setHistoryVersion((value) => value + 1);
       } catch (reason) {
-        setError(operationError(reason, "Documentation Center could not be loaded."));
+        if (isCurrentSelection())
+          setError(operationError(reason, "Documentation Center could not be loaded."));
       }
     },
-    [api, projectId, inventoryQuery],
+    [api, projectId, inventoryQuery, beginSelection],
   );
   const loadMore = async () => {
     if (!nextCursor) return;
@@ -458,14 +466,18 @@ export default function ManagedDocumentationCenter({
     if (page?.nextCursor) void loadHistory(surface, page.nextCursor);
   };
   const open = async (id: string) => {
+    const isCurrentSelection = beginSelection();
     try {
       setError("");
-      const detail = await apiRequest<Detail>(`${api}/api/managed-documents/${id}`);
-      setSelected(detail);
       setTab("overview");
+      if (id !== selected?.id) setSelected(undefined);
+      const detail = await apiRequest<Detail>(`${api}/api/managed-documents/${id}`);
+      if (!isCurrentSelection()) return;
+      setSelected(detail);
       onSelected(id);
     } catch (reason) {
-      setError(operationError(reason, "The document could not be opened."));
+      if (isCurrentSelection())
+        setError(operationError(reason, "The document could not be opened."));
     }
   };
   const inWork = selected?.revisions.find((revision) =>
