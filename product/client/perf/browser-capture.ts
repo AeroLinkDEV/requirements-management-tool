@@ -106,10 +106,14 @@ export function admitW3Manifest(manifest: any, requireBuild: boolean) {
   }
   return plan
 }
-/** Archives the already validated sealed W3 cold input under <out>/cold before any child; returns the seed every slot reads. */
-export function archiveW3ColdInput(input: string, dir: string, entries: readonly PayloadEntry[], _cold: { payloadSha256: string; seedSha256: string; closureSha256: string }) {
+/** Archives the already validated sealed W3 cold input under <out>/cold before any child, as the W2 capture does: payload,
+ * seed and seed-writer closure, each re-observed against the sealed hashes. Returns the archived seed every slot reads. */
+export function archiveW3ColdInput(input: string, dir: string, entries: readonly PayloadEntry[], cold: { payloadSha256: string; seedSha256: string; closureSha256: string }) {
   const archive=join(dir,'cold','payload');mkdirSync(archive,{recursive:true});copyColdPayload(join(input,'payload'),archive,entries)
-  return {archive,seed:join(input,'seed.json')}
+  const seed=join(dir,'cold','seed.json'),closure=join(dir,'cold','closure.json')
+  cpSync(join(input,'seed.json'),seed,{errorOnExist:true,force:false});cpSync(join(input,'closure.json'),closure,{errorOnExist:true,force:false})
+  if(fileDigest(seed)!==cold.seedSha256 || fileDigest(closure)!==cold.closureSha256)throw new Error('W3 archived seed or writer closure bytes disagree with the sealed cold input')
+  return {archive,seed}
 }
 /** The W3 session end record the executor writes to w3-end.json. The end re-admission outcome is recorded beside the
  * original stop reason and never replaces it or prevents the record; the caller decides what to throw after writing. */
