@@ -12,7 +12,7 @@
 // variables are recorded by name only.
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { arch, cpus, platform, release, totalmem } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
 import { browserQualification } from './browser-accounting.ts'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA } from './browser-capture.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -33,6 +34,7 @@ const { values: options, positionals } = parseArgs({
     out: { type: 'string' }, work: { type: 'string' }, arm: { type: 'string', multiple: true }, sha: { type: 'string', multiple: true },
     blocks: { type: 'string' }, rounds: { type: 'string' }, workloads: { type: 'string' }, rates: { type: 'string' },
     configurations: { type: 'string' }, hours: { type: 'string' }, pilot: { type: 'boolean' }, 'dirty-smoke': { type: 'boolean' },
+    'cold-input': { type: 'string' },
   },
 })
 
@@ -82,16 +84,19 @@ function busy(samples: ReturnType<typeof cpus>, later: ReturnType<typeof cpus>) 
 function wait(ms: number) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) }
 
 /** The quiet-host criterion (declared in protocol.json): sampled CPU busy %, never os.loadavg (zeros on Windows). */
-function quietHost() {
+function quietHost(remainingMs = Infinity) {
   const { sampleSeconds, maxBusyPercent, maxWaitSeconds } = protocol.quietHost
   const started = Date.now()
+  const began = performance.now(), samples: { utc: string; monotonicMs: number; busyPercent: number }[] = []
   for (;;) {
+    if (performance.now() - began + sampleSeconds * 1000 > remainingMs) throw new Error('whole capture deadline prevents quiet admission')
     const before = cpus()
     wait(sampleSeconds * 1000)
     const busyPercent = busy(before, cpus())
+    samples.push({ utc: new Date().toISOString(), monotonicMs: performance.now(), busyPercent })
     const waitedSeconds = (Date.now() - started) / 1000
     if (busyPercent <= maxBusyPercent || waitedSeconds >= maxWaitSeconds)
-      return { busyPercent, waitedSeconds, quiet: busyPercent <= maxBusyPercent }
+      return { busyPercent, waitedSeconds, quiet: busyPercent <= maxBusyPercent, samples }
   }
 }
 
@@ -127,14 +132,14 @@ function nextIndex(dir: string) {
 }
 
 /** One run: a fresh `playwright test` process. The record is appended whatever happens. */
-function run(dir: string, record: Record<string, unknown>, env: Record<string, string>) {
+function run(dir: string, record: Record<string, unknown>, env: Record<string, string>, deadline = Infinity, childCapMs = 40 * 60_000) {
   const index = nextIndex(dir)
   const name = `run-${String(index).padStart(4, '0')}`
   const resultPath = join(dir, 'runs', `${name}.json`)
-  const quiet = quietHost()
+  const quiet = quietHost(deadline - performance.now())
   const before = cpus(), started = Date.now(), startedAt = new Date(started).toISOString()
   const child = spawnSync(process.execPath, [cli, 'test', '--config=perf/playwright.perf.config.ts'], {
-    cwd: client, encoding: 'utf8', timeout: 40 * 60_000, maxBuffer: 64 * 1024 * 1024,
+    cwd: client, encoding: 'utf8', timeout: Math.max(1, Math.min(childCapMs, deadline - performance.now())), maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, ...env, AEROLINK_PERF_RESULT: resultPath, AEROLINK_PERF_OUTPUT_DIR: join(dir, 'logs', name) },
   })
   const wallSeconds = (Date.now() - started) / 1000
@@ -285,6 +290,94 @@ function browser() {
   writeFileSync(join(dir, `session-end-${Date.now()}.json`), JSON.stringify({ ...session, endedAt: new Date().toISOString(), harnessAtEnd: harnessIdentity(), servedAtEnd: distIdentity(dist), seed: seedRecord }, null, 2))
 }
 
+/** One fixed same-source instrument study. Actual execution still requires the separately reviewed 446d outer
+ * owner and quiet-window admission. This process is not the independent deadline/closure authority. */
+function browserPlan() {
+  const plan = browserCapturePlan()
+  console.log(JSON.stringify({ ...plan, manifestSha256: digest(plan) }, null, 2))
+}
+function browserCapture() {
+  const began = performance.now(), deadline = began + protocol.browser.capture.bounds.measurementSeconds * 1000
+  if (!options['cold-input'] || options['dirty-smoke'] || options.rounds || options.rates || options.configurations || options.hours)
+    throw new Error('paired capture requires a sealed --cold-input; no dirty, order, subset or cap override')
+  const dir = out(), list = arms(), plan = browserCapturePlan()
+  if (nextIndex(dir) || existsSync(join(dir, 'paired-session.json'))) throw new Error('paired capture needs a fresh output')
+  if (list.length !== 2 || !list.some(arm => arm.arm === 'A') || !list.some(arm => arm.arm === 'B')) throw new Error('paired capture requires arms A and B')
+  const servedArms = Object.fromEntries(list.map(arm => [arm.arm, { ...arm.identity, ...distIdentity(join(arm.root, 'product/client/dist')) }]))
+  if (digest(servedArms.A) !== digest(servedArms.B)) throw new Error('capture-only A/A requires identical source/lock/Vite/dist identities and overlays')
+  const input = resolve(options['cold-input']), payload = join(input, 'payload')
+  const manifest = JSON.parse(readFileSync(join(input, 'cold.json'), 'utf8'))
+  const closure = JSON.parse(readFileSync(join(input, 'closure.json'), 'utf8'))
+  requireClosure(closure)
+  const entries = coldPayload(payload)
+  if (digest(entries) !== manifest.payloadSha256 || fileDigest(join(input, 'seed.json')) !== manifest.seedSha256 || fileDigest(join(input, 'closure.json')) !== manifest.closureSha256)
+    throw new Error('sealed cold payload, seed or writer-closure bytes disagree')
+  // Archive exact observed payload bytes after the externally proven seed-writer closure, before any API starts.
+  const archive = join(dir, 'cold', 'payload')
+  mkdirSync(archive, { recursive: true })
+  copyColdPayload(payload, archive, entries)
+  cpSync(join(input, 'seed.json'), join(dir, 'cold', 'seed.json'))
+  cpSync(join(input, 'closure.json'), join(dir, 'cold', 'closure.json'))
+  const cold = { payloadSha256: digest(entries), seedSha256: manifest.seedSha256, closureSha256: manifest.closureSha256 }
+  writeFileSync(join(dir, 'cold', 'manifest.json'), JSON.stringify({ schema: CAPTURE_SCHEMA, ...cold, entries }, null, 2), { flag: 'wx' })
+  const harness = harnessIdentity()
+  if (harness.dirtyEntries || !harness.apiAssemblySha256) throw new Error('paired capture needs a clean harness and exact built API provenance')
+  if (closure.apiTree !== harness.apiTree || closure.apiAssemblySha256 !== harness.apiAssemblySha256) throw new Error('cold seed writer API identity disagrees with the harness')
+  const cohort = { harness, runtime: environment(), protocol }
+  const session = { id: randomUUID(), plan, kind: 'browser-capture', startedAt: new Date().toISOString(),
+    monotonicStart: began, deadline, cohort, arms: servedArms, cold, closure: 'UNPROVEN' }
+  writeFileSync(join(dir, 'paired-session.json'), JSON.stringify(session, null, 2), { flag: 'wx' })
+  let stopped: string | null = null
+  try {
+    for (const slot of plan.slots) {
+      if (performance.now() >= deadline) throw new Error('whole capture deadline reached')
+      const arm = list.find(arm => arm.arm === slot.arm)!, runId = `paired-${session.id}-${slot.slot}`
+      const current = { ...armIdentity(arm.root), ...distIdentity(join(arm.root, 'product/client/dist')) }
+      if (digest(current) !== digest(servedArms[slot.arm]) || digest(harnessIdentity()) !== digest(harness)) throw new Error('per-run build identity changed')
+      const storage = createBrowserStorage(runId)
+      copyColdPayload(archive, storage.root, entries)
+      const copiedInputs = coldPayload(storage.root), copySha256 = digest(copiedInputs)
+      // Preserve every raw failed record and disposable run input. Outer owner closes all writers before cleanup.
+      const entry = run(dir, { kind: 'browser-capture', lineage: { session: session.id, manifest: digest(plan), ...slot },
+        arm: slot.arm, armIdentity: current, servedAtEnd: null, cold, copySha256, copiedInputs, cohort, storageRoot: storage.root }, {
+        AEROLINK_PERF_MODE: 'browser', AEROLINK_PERF_DIST: join(arm.root, 'product/client/dist'), AEROLINK_E2E_RUN_ID: runId,
+        AEROLINK_SHOWCASE_SEED: readFileSync(join(dir, 'cold/seed.json'), 'utf8'),
+        AEROLINK_PERF_RATE: String(slot.rate), AEROLINK_PERF_CONFIGURATION: slot.configuration,
+      }, deadline, 180_000)
+      appendFileSync(join(dir, 'paired-completions.jsonl'), `${JSON.stringify({ index: entry.index,
+        servedAtEnd: { ...armIdentity(arm.root), ...distIdentity(join(arm.root, 'product/client/dist')) } })}\n`)
+    }
+  } catch (error) { stopped = error instanceof Error ? error.message : 'capture interrupted'; throw error }
+  finally {
+    const end = { ...session, endedAt: new Date().toISOString(), monotonicEnd: performance.now(), stopped,
+      cohort: { ...cohort, harness: harnessIdentity() }, arms: Object.fromEntries(list.map(arm => [arm.arm, { ...armIdentity(arm.root), ...distIdentity(join(arm.root, 'product/client/dist')) }])),
+      cold: { ...cold, payloadSha256: digest(coldPayload(archive)) }, closure: 'UNPROVEN' }
+    writeFileSync(join(dir, 'paired-end.json'), JSON.stringify(end, null, 2), { flag: 'wx' })
+  }
+}
+function browserCaptureReport() {
+  const dir = out(), session = JSON.parse(readFileSync(join(dir, 'paired-session.json'), 'utf8'))
+  const end = existsSync(join(dir, 'paired-end.json')) ? JSON.parse(readFileSync(join(dir, 'paired-end.json'), 'utf8')) : null
+  // The outer owner writes this only after the measured job actually exits/drains/closes. Without it, partial.
+  if (end && existsSync(join(dir, 'closure.json'))) end.closure = JSON.parse(readFileSync(join(dir, 'closure.json'), 'utf8'))
+  const readLines = (name: string) => existsSync(join(dir, name)) ? readFileSync(join(dir, name), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : []
+  const rows = readLines('runs.jsonl'), completions = readLines('paired-completions.jsonl')
+  rows.forEach(row => { const matches = completions.filter(item => item.index === row.index); if (matches.length === 1) row.servedAtEnd = matches[0].servedAtEnd })
+  const disposition = captureDisposition(session.plan, session, rows, end)
+  // Re-observe retained archive, sidecars, seed and closure bytes instead of trusting declared hashes in JSON.
+  try {
+    const seedClosure = JSON.parse(readFileSync(join(dir, 'cold/closure.json'), 'utf8'))
+    requireClosure(seedClosure)
+    if (seedClosure.apiTree !== session.cohort.harness.apiTree || seedClosure.apiAssemblySha256 !== session.cohort.harness.apiAssemblySha256) throw new Error('seed writer changed')
+    if (digest(coldPayload(join(dir, 'cold/payload'))) !== session.cold.payloadSha256 || fileDigest(join(dir, 'cold/seed.json')) !== session.cold.seedSha256 ||
+      fileDigest(join(dir, 'cold/closure.json')) !== session.cold.closureSha256) throw new Error('changed')
+  } catch {
+    disposition.reasons.push('retained cold archive, seed or writer-closure bytes are missing or changed')
+    disposition.status = 'CAPTURE_PARTIAL'; disposition.qualification = 'NOT_QUALIFIED'
+  }
+  writeFileSync(join(dir, 'paired-report.json'), JSON.stringify(disposition, null, 2))
+  console.log(JSON.stringify(disposition, null, 2))
+}
 function prepare() {
   if (!options.work) throw new Error('--work <dir> is required')
   const work = resolve(options.work), root = git(client, 'rev-parse', '--show-toplevel')
@@ -525,7 +618,7 @@ function report() {
   console.log(lines.join('\n'))
 }
 
-const commands: Record<string, () => void> = { prepare, headless, browser, report }
+const commands: Record<string, () => void> = { prepare, headless, browser, report, 'browser-plan': browserPlan, 'browser-capture': browserCapture, 'browser-capture-report': browserCaptureReport }
 const command = commands[positionals[0] ?? '']
 if (!command) throw new Error(`usage: node perf/run-perf.ts <${Object.keys(commands).join('|')}> ...`)
 command()

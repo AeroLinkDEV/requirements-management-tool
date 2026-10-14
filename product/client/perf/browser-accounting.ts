@@ -232,18 +232,21 @@ export function browserQualification(_protocol: unknown, records: readonly Brows
  * needs every entry from the epoch's first admission) and, while measuring, every timer task with the end of the
  * microtask queued after it (the tail), rAF intervals, long tasks, Long Animation Frames and Event Timing entries.
  */
-export function installBrowserRecorder(names: { slice: string; discard: string }) {
+export function installBrowserRecorder(names: { slice: string; discard: string; clock?: string }) {
   if (window !== window.top) return
   type Entry = { kind: 'slice' | 'discard'; start: number; end: number; detail: Record<string, unknown> }
   const state = {
     measuring: false, begin: 0, end: 0, timeline: [] as Entry[], tasks: [] as { start: number; end: number; tail: number | null }[],
     lastFrame: -1, rafIntervals: [] as number[], longTasks: [] as { start: number; duration: number }[],
     loaf: [] as { start: number; duration: number; blocking: number }[],
-    events: [] as { start: number; name: string; duration: number; processing: number; delay: number; interaction: number }[],
+    events: [] as { start: number; name: string; duration: number; processing: number; delay: number; interaction: number; targetKey: string | null; targetIndex: number }[],
+    clocks: [] as Record<string, any>[], boundaries: [] as Record<string, any>[],
+    inputs: [] as Record<string, unknown>[],
   }
   const take = (entry: PerformanceEntry) => {
     const kind = entry.name === names.slice ? 'slice' : entry.name === names.discard ? 'discard' : null
     if (kind) state.timeline.push({ kind, start: entry.startTime, end: entry.startTime + entry.duration, detail: (entry as PerformanceMeasure).detail as Record<string, unknown> })
+    if (entry.name === names.clock) state.clocks.push((entry as PerformanceMeasure).detail)
   }
   const timeline = new PerformanceObserver(list => list.getEntries().forEach(take))
   timeline.observe({ type: 'measure', buffered: true })
@@ -268,33 +271,112 @@ export function installBrowserRecorder(names: { slice: string; discard: string }
     }
     callback(time)
   })
+  const observers: { observer: PerformanceObserver; take: (entry: PerformanceEntry) => void }[] = []
   const observe = (type: string, onEntry: (entry: PerformanceEntry) => void, extra: Record<string, unknown> = {}) => {
-    try { new PerformanceObserver(list => list.getEntries().forEach(onEntry)).observe({ type, buffered: true, ...extra } as PerformanceObserverInit) } catch { /* unsupported: recorded as absent */ }
+    try {
+      const observer = new PerformanceObserver(list => list.getEntries().forEach(onEntry))
+      observer.observe({ type, buffered: true, ...extra } as PerformanceObserverInit)
+      observers.push({ observer, take: onEntry })
+    } catch { /* unsupported: recorded as absent, never assumed zero cost */ }
   }
   observe('longtask', entry => state.longTasks.push({ start: entry.startTime, duration: entry.duration }))
   observe('long-animation-frame', entry => state.loaf.push({ start: entry.startTime, duration: entry.duration, blocking: (entry as unknown as { blockingDuration: number }).blockingDuration }))
   observe('event', entry => {
     const timing = entry as PerformanceEventTiming
     state.events.push({ start: timing.startTime, name: timing.name, duration: timing.duration, processing: timing.processingEnd - timing.processingStart,
-      delay: timing.processingStart - timing.startTime, interaction: (timing as unknown as { interactionId: number }).interactionId })
+      delay: timing.processingStart - timing.startTime, interaction: (timing as unknown as { interactionId: number }).interactionId,
+      targetKey: timing.target instanceof Element ? timing.target.closest('[data-fn]')?.getAttribute('data-fn') ?? null : null,
+      targetIndex: timing.target instanceof Element ? Array.from(document.querySelectorAll('[data-fn="BRT"]')).indexOf(timing.target.closest('[data-fn]')!) : -1 })
   }, { durationThreshold: 16 })
-  const flush = () => timeline.takeRecords().forEach(take)
+  // Event Timing and other observers may have queued records before their callback is delivered. Drain all of them.
+  const flush = () => { timeline.takeRecords().forEach(take); observers.forEach(({ observer, take }) => observer.takeRecords().forEach(take)) }
+  const boundary = (label: string) => {
+    flush()
+    const receipt = { label, utcMs: Date.now(), monotonicMs: performance.now(), timeOrigin: performance.timeOrigin,
+      // A direct sample from the most recently completed slice, with its actual observation time retained. It is
+      // not relabelled as an observation taken at this later page-task boundary.
+      trace: state.clocks.at(-1) ?? null }
+    state.boundaries.push(receipt)
+    return receipt
+  }
+  document.addEventListener('click', event => {
+    const key = event.target instanceof Element ? event.target.closest('[data-fn]') : null
+    if (key?.getAttribute('data-fn') !== 'BRT') return
+    const pending = state.inputs.at(-1)
+    if (!pending || pending.eventTime !== undefined) return
+    Object.assign(pending, { utcMs: Date.now(), observedAt: performance.now(), eventTime: event.timeStamp,
+      trusted: event.isTrusted, key: 'BRT', target: Array.from(document.querySelectorAll('[data-fn="BRT"]')).indexOf(key),
+      before: key.closest('.fmsCdu')?.getAttribute('style') ?? null })
+  }, true)
   ;(window as unknown as { __fmsPerf: unknown }).__fmsPerf = {
-    begin() { flush(); state.measuring = true; state.begin = performance.now(); state.tasks = []; state.rafIntervals = []; state.lastFrame = -1; return state.begin },
+    boundary,
+    keyDispatch() { state.inputs.push({ dispatchStart: performance.now() }) },
+    begin() { const receipt = boundary('scoredStart'); state.measuring = true; state.begin = receipt.monotonicMs; state.tasks = []; state.rafIntervals = []; state.lastFrame = -1; return state.begin },
+    keyOutcome() {
+      const press = state.inputs.at(-1)
+      if (press) {
+        press.dispatchEnd = performance.now()
+        press.after = Array.from(document.querySelectorAll('[data-fn="BRT"]'))[Number(press.target)]?.closest('.fmsCdu')?.getAttribute('style') ?? null
+      }
+    },
     /** Completed frames of slices observed since begin: the run loop's progress, not the accounting. */
     get completed() { flush(); return state.timeline.filter(entry => entry.kind === 'slice' && entry.start >= state.begin).reduce((total, entry) => total + Number(entry.detail.completed), 0) },
     /** The whole timeline so far; it keeps recording after finish(), so the entry that closes the window arrives. */
     get timeline() { flush(); return state.timeline },
+    drain() { flush(); return state.events.filter(entry => entry.start >= state.begin && entry.start <= state.end) },
     finish() {
       // The window ends here, between tasks; every measure queued before it is taken now.
-      state.end = performance.now(); state.measuring = false; flush()
+      state.end = boundary('scoredEnd').monotonicMs; state.measuring = false; flush()
       const inside = <T extends { start: number }>(list: T[]) => list.filter(entry => entry.start >= state.begin && entry.start <= state.end)
       return { begin: state.begin, end: state.end, timeline: state.timeline, tasks: state.tasks, rafIntervals: state.rafIntervals,
         longTasks: inside(state.longTasks).map(entry => entry.duration), loaf: inside(state.loaf).map(({ duration, blocking }) => ({ duration, blocking })),
-        events: inside(state.events).map(({ name, duration, processing, delay, interaction }) => ({ name, duration, processing, delay, interaction })) }
+        events: inside(state.events), capture: { boundaries: state.boundaries, clocks: state.clocks, inputs: state.inputs } }
     },
   }
 }
 /** What the recorder's finish() returns. */
 export type RecordedWindow = { begin: number; end: number; timeline: TimelineEntry[]; tasks: TimerTask[]; rafIntervals: number[]; longTasks: number[];
-  loaf: { duration: number; blocking: number }[]; events: { name: string; duration: number; processing: number; delay: number; interaction: number }[] }
+  loaf: { duration: number; blocking: number }[]; events: { start?: number; targetKey?: string | null; targetIndex?: number; name: string; duration: number; processing: number; delay: number; interaction: number }[];
+  capture?: { boundaries: Record<string, any>[]; clocks: Record<string, any>[]; inputs: Record<string, any>[] } }
+
+/** Cross-check direct observations against conserved work; missing evidence is never filled from rate x callbacks. */
+export function captureEvidence(recorded: RecordedWindow, accounting: WindowAccounting | null) {
+  const reasons: string[] = [], capture = recorded.capture
+  const finite = (value: unknown) => typeof value === 'number' && Number.isFinite(value)
+  if (!capture || !accounting) return { boundaryStatus: 'INCOMPLETE', eventTimingStatus: 'INCOMPLETE', reasons: ['no direct capture or conserved accounting'] }
+  const { clocks, boundaries, inputs } = capture
+  let prior: any = null
+  for (const clock of clocks) {
+    const { entry, exit } = clock
+    if (clock.schema !== 1 || clock.sequence !== (prior?.sequence ?? 0) + 1 || (prior && clock.epoch !== prior.epoch) ||
+      ![entry?.utcMs, entry?.monotonicMs, entry?.timeOrigin, entry?.kernelTime, entry?.unitClockMs, entry?.completed,
+        exit?.utcMs, exit?.monotonicMs, exit?.timeOrigin, exit?.kernelTime, exit?.unitClockMs, exit?.completed].every(finite) ||
+      exit.monotonicMs < entry.monotonicMs || exit.completed < entry.completed ||
+      exit.kernelTime - entry.kernelTime !== (exit.completed - entry.completed) * 2_500_000 ||
+      exit.unitClockMs - entry.unitClockMs !== (exit.completed - entry.completed) * 250 ||
+      entry.timeOrigin !== exit.timeOrigin || (prior && (entry.kernelTime !== prior.exit.kernelTime || entry.unitClockMs !== prior.exit.unitClockMs || entry.completed !== prior.exit.completed)))
+      reasons.push('direct clock/work sequence is missing, discontinuous or includes incomplete work')
+    prior = clock
+  }
+  if (!clocks.length || boundaries.length !== 3 || boundaries.map(boundary => boundary.label).join(',') !== 'warmupEnd,scoredStart,scoredEnd') reasons.push('warmup/scored boundary receipts are missing')
+  for (const boundary of boundaries) {
+    const latest = clocks.filter(clock => clock.exit?.monotonicMs <= boundary.monotonicMs).at(-1)
+    if (![boundary.utcMs, boundary.monotonicMs, boundary.timeOrigin].every(finite) || !latest || JSON.stringify(latest) !== JSON.stringify(boundary.trace) || boundary.timeOrigin !== latest.exit.timeOrigin)
+      reasons.push('page boundary is not bound to its actual latest direct observation')
+  }
+  const [warm, start, end] = boundaries
+  if (!warm || !start || !end || warm.monotonicMs > start.monotonicMs || start.monotonicMs !== recorded.begin || end.monotonicMs !== recorded.end ||
+      end.trace?.exit?.completed - start.trace?.exit?.completed !== accounting.frames.completed ||
+      end.trace?.exit?.unitClockMs - start.trace?.exit?.unitClockMs !== accounting.simSeconds * 1000)
+    reasons.push('boundary completed work contradicts conserved timeline')
+  const eventReasons: string[] = []
+  if (!inputs.length) eventReasons.push('no native BRT input observed')
+  const interactions = inputs.map((input): Record<string, any> => ({ ...input, entries: recorded.events.filter(event => event.name === 'click' && event.targetKey === 'BRT' && event.targetIndex === input.target && event.interaction > 0 &&
+    finite(event.start) && event.start! >= input.dispatchStart && event.start! <= input.dispatchEnd) }))
+  for (const input of interactions) if (!input.trusted || input.key !== 'BRT' || input.target !== 0 || !finite(input.eventTime) ||
+      !finite(input.dispatchStart) || !finite(input.dispatchEnd) || input.eventTime < input.dispatchStart || input.eventTime > input.dispatchEnd ||
+      typeof input.before !== 'string' || typeof input.after !== 'string' || input.entries.length !== 1)
+    eventReasons.push('native key, observed display effect or attributable EventTiming entry is missing')
+  return { boundaryStatus: reasons.length ? 'INCOMPLETE' : 'OBSERVED', eventTimingStatus: eventReasons.length ? 'INCOMPLETE' : 'OBSERVED',
+    reasons: [...reasons, ...eventReasons], interactions, metric: 'EventTiming click-to-next-paint proxy; exact CDU pixel repaint unproven' }
+}

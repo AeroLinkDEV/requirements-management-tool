@@ -53,7 +53,26 @@
       { "id": "view-off-svs-on", "outsideView": false, "svs": true },
       { "id": "view-on-svs-on", "outsideView": true, "svs": true }
     ],
-    "interaction": { "key": "BRT", "pairs": "two presses 1 s apart (brighten, then dim back), a pair every 6 s of wall time in the window" },
+    "interaction": { "key": "BRT", "pairs": "two BRT presses 1 wall second apart, then 5 wall seconds; observe native target and display outcome. Dim-back is not guaranteed at 64x." },
+    "capture": {
+      "revision": 1,
+      "schema": "aerolink.fms-browser-paired-capture.v1",
+      "status": "NOT_CALIBRATED",
+      "inference": "DISABLED",
+      "scenario": "87n-offshore-sar",
+      "rows": 16,
+      "cells": 8,
+      "slots": 128,
+      "clockTimeline": "aerolink.fms-bench.pacing-clock",
+      "scope": "Capture-only 87N instrument study; not the full D10/C1 workload family. Same-source arms, identical declared measurement overlays; no browser budget or calibration pass.",
+      "warmup": "15 wall seconds is a diagnostic condition, not proven stabilization. Retain early rows; no retrospective warmup removal.",
+      "bounds": {
+        "measurementSeconds": 14400,
+        "cleanupSeconds": 300,
+        "authority": "Existing qualified446d plus independent outer monotonic whole owner, starting before source/seed/quiet and covering final I/O; actual native admission remains required."
+      },
+      "inferenceGate": "Before any qualification sampling: reviewed full workload/topology/metric mapping, mechanism study, independent justified serial/session inference, pilot-defined N<=1pp, fixed complete-block/session/failure rules, quiet same-source A/A. This path enables none of those verdicts."
+    },
     "chromiumArgs": ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--enable-precise-memory-info"]
   },
   "statistics": {
