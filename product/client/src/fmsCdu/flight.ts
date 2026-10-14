@@ -7,6 +7,7 @@ import { asComputations } from "./computation";
 import { speedCommandIas, verticalArrived, verticalCommand } from "./transition";
 import { altitudeMeets, type AltitudeConstraint, type ProfilePoint, type VerticalPhase } from "./vnav";
 import type { GuidanceOutputPort } from "./sensorPorts";
+import type { ApproachConsumptionPort, ApproachSensorOutput } from "./gpsSensors";
 
 /**
  * A simple flight model for the test bench: an aircraft that flies what the scripted FMS asks for, the way an
@@ -320,7 +321,12 @@ export class FlightSimulator {
   private unableHoldKey: string | null = null;
 
   private readonly beforeGuidance: (() => void) | null;
-  constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>, beforeGuidance?: () => void) {
+  private readonly approachConsumption: ApproachConsumptionPort | null;
+  private consumptionOperand: ApproachSensorOutput | null = null;
+  private integrationConsumesApproach = false;
+  private consumedLateral = false;
+  private consumedVertical = false;
+  constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>, beforeGuidance?: () => void, approachConsumption?: ApproachConsumptionPort) {
     this.fms = fms;
     // The FMS times the manual hold's next crossing along the path flown here: where the aircraft is in the entry or the
     // racetrack, and which segment ends at the fix passage (Astra F1). In this bench the flight builds the hold path the
@@ -331,6 +337,7 @@ export class FlightSimulator {
     });
     this.outputPort = outputPort ?? null;
     this.beforeGuidance = beforeGuidance ?? null;
+    this.approachConsumption = approachConsumption ?? null;
     this.profile = fms.aircraftProfile.parameters;
     this.hoverHeightFt = this.profile.hoverHeightDefault.value;
     this.airspeed = fms.physicalTrueAirspeed;
@@ -873,6 +880,10 @@ export class FlightSimulator {
     const fms = this.fms;
     fms.refreshSensorInput();
     this.beforeGuidance?.();
+    this.integrationConsumesApproach = true;
+    this.consumptionOperand = fms.approachGuidanceOutput;
+    this.consumedLateral = false; this.consumedVertical = false;
+    try {
     this.watchFailure();
     this.watchGoAround();
     this.watchGpsLateral();
@@ -946,6 +957,13 @@ export class FlightSimulator {
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     // Bank and pitch too: the displays and the cameras show them, and they tilt the GPS antennas.
     const { pitch, bank } = this.attitudeFor(heading, track, groundSpeed, verticalSpeed, dt);
+    // Both final branches must actually have consumed the same eligible operand after all precedence/recursion.
+    const operand = this.consumptionOperand;
+    if (operand && this.consumedLateral && this.consumedVertical && !this.lowHorizontal && guidance.mode === "LNAV"
+      && this.approach === "CAPTURED" && this.altitudeHold === null && operand.approachKey === fms.approachGuidanceIdentity
+      && fms.gpsApproachLateral && fms.gpsApproachVertical && !fms.hasCondition("fmsFail")) {
+      this.approachConsumption?.consumed(operand, fms.now.getTime());
+    }
     fms.setAircraft({ position, track, heading, groundSpeed, tas: this.airspeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
@@ -968,6 +986,9 @@ export class FlightSimulator {
       const path = first ? this.descentPath(first) : null;
       // The path, uncapped by cruise: DES NOW began below it, so it ends where the sloping path reaches the aircraft.
       if (path && path.sloped && path.altitude <= fms.altitude + 50) fms.vnav.desNow = false;
+    }
+    } finally {
+      this.integrationConsumesApproach = false; this.consumptionOperand = null; this.consumedLateral = false; this.consumedVertical = false;
     }
   }
 
@@ -1033,7 +1054,13 @@ export class FlightSimulator {
     const fasAngle = this.rnavApproach ? fms.executedFas?.fas.gpaDeg ?? null : null;
     const vpa = fasAngle !== null ? (fasAngle * Math.PI) / 180 : Math.atan((fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12));
     // On an RNAV approach the correction is toward the GPS's FAS path, from its 117 deviation (GPS phase 3b).
-    if (this.rnavApproach && fms.gpsApproachVertical) return -groundSpeed * 101.27 * Math.tan(vpa) + clamp(-fms.gpsApproach!.verticalFt! * 2, -300, 300);
+    if (this.rnavApproach && fms.gpsApproachVertical) {
+      const words = this.consumptionOperand?.words ?? fms.gpsApproach;
+      if (words?.verticalFt !== null && words?.verticalFt !== undefined) {
+        this.consumedVertical = this.consumptionOperand !== null;
+        return -groundSpeed * 101.27 * Math.tan(vpa) + clamp(-words.verticalFt * 2, -300, 300);
+      }
+    }
     const pathAltitude = fms.vnav.runwayElevation + distanceNm(fms.position, rwyPos) * 6076.12 * Math.tan(vpa);
     // The path's descent rate, corrected toward the path.
     return -groundSpeed * 101.27 * Math.tan(vpa) + clamp((pathAltitude - fms.altitude) * 2, -300, 300);
@@ -1704,6 +1731,7 @@ export class FlightSimulator {
 
   /** Works out the guidance for this instant, and sequences waypoints, holds and patterns as they are reached. */
   private guide(dt = 0): Guidance {
+    this.consumedLateral = false;
     // With the FMS failed there is no managed guidance to consume: basic heading hold only.
     if (this.fms.hasCondition("fmsFail")) {
       this.managedRoll = null;
@@ -1735,7 +1763,10 @@ export class FlightSimulator {
 
   /** The guidance LNAV would fly. With dt > 0 (and LNAV engaged) it also sequences what the aircraft has reached. */
   private managedGuidance(dt: number): Guidance {
+    // Recursive sequencing discards the earlier leg's operand; only the final returned guidance counts.
+    this.consumedLateral = false;
     const fms = this.fms;
+    if (this.integrationConsumesApproach) this.consumptionOperand = fms.approachGuidanceOutput;
     const route = fms.activeRoute;
     const leg = route.legs[0];
     const base = { targetAltitude: this.targetAltitude() };
@@ -1769,7 +1800,8 @@ export class FlightSimulator {
     const shift = this.offsetApplies(leg) ? route.offset!.nm : 0;
     // With GPS lateral authority on an RNAV final, the cross-track is the selected GPS's 116 deviation from the FAS course
     // (GPS phase 3b), captured or after a vertical loss (GPS-01); watchGpsLateral ends it, announced, when 116 goes.
-    const gpsLateral = this.gpsLateral && fms.gpsApproachLateral ? fms.gpsApproach?.lateralFt ?? null : null;
+    const gpsLateral = this.gpsLateral && fms.gpsApproachLateral ? (this.consumptionOperand?.words ?? fms.gpsApproach)?.lateralFt ?? null : null;
+    this.consumedLateral = this.consumptionOperand !== null && gpsLateral !== null;
     const crossTrack = gpsLateral !== null ? gpsLateral / 6076.12 : g.crossTrack - shift;
     // Along the FAS course, from which 116 is measured, not the leg from the FAF.
     const desiredTrack = gpsLateral !== null ? fms.finalApproachCourse ?? g.track : g.track;

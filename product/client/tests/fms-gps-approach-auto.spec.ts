@@ -3,7 +3,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
 import type { GpsBus } from '../src/fmsCdu/gps'
 import {
-  AutoSelection, ELIGIBILITY_DWELL_S, TRANSFER_JUMP_FRACTION, TRANSFER_SCALE_TOLERANCE, approachWords, assessReceiver, type SelectionInput,
+  AutoSelection, ELIGIBILITY_DWELL_S, TRANSFER_JUMP_FRACTION, TRANSFER_SCALE_TOLERANCE, approachTransferRefusal, approachWords, assessReceiver, type SelectionInput,
 } from '../src/fmsCdu/gpsSensors'
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
 import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
@@ -284,6 +284,30 @@ const selectionOn = (bench: Bench) => {
   return { base, crc, run }
 }
 
+test('a same-instant comparison-position correction keeps healthy GPS2; later motion still detects frozen guidance', () => {
+  const { base, crc } = selectionOn(onFinal())
+  const selection = new AutoSelection(1)
+  const input = (k: number, gps1Words = k, gps2Words = k, lon = -73): SelectionInput => {
+    const buses = base.map((bus, i) => {
+      const next = structuredClone(bus), words = i === 0 ? gps1Words : gps2Words
+      // Independent literal guidance updates; all three words change during real movement.
+      next['116'].value = 10 + words * 0.01
+      next['117'].value = 20 + words * 0.01
+      next['201'].value = 3 - words * 0.001
+      return next
+    })
+    return { choice: 'AUTO', selected: true, assessed: buses.map(bus => assessReceiver(bus, 0.3)), buses,
+      time: k * 250, position: { lat: 44 + k * 0.001, lon }, executedCrc: crc, sentCrc: crc, approachArmed: true }
+  }
+  for (let k = 0; k <= 12; k += 1) {
+    expect(selection.choose(input(k))).toMatchObject({ chosen: 1, transferred: false, qualified: true })
+  }
+  // GPS1's measured position/words correct during another refresh at the SAME clock. GPS2 has not moved or failed.
+  expect(selection.choose(input(12, 13, 12, -73.005))).toEqual({ chosen: 1, transferred: false, qualified: true, refused: '' })
+  // A later physical instant moves over 0.01 NM with GPS2's three words frozen: its approach is now stale.
+  expect(selection.choose(input(13, 14, 12, -73.005))).toEqual({ chosen: 0, transferred: true, qualified: true, refused: '' })
+})
+
 test('the transfer thresholds: the dwell, the jump fraction of full scale, and the scaling tolerance, at their boundaries', () => {
   const { base, run } = selectionOn(onFinal())
   expect(run({})).toMatchObject({ chosen: 1, transferred: true, refused: '' })
@@ -301,6 +325,19 @@ test('the transfer thresholds: the dwell, the jump fraction of full scale, and t
   expect(run({ lateralFt: flownLateral + lateralLimit + 1 - gps2Lateral })).toMatchObject({ chosen: 0, refused: 'GPS2 LATERAL JUMP' })
   expect(run({ scale: 1 + TRANSFER_SCALE_TOLERANCE - 0.01 })).toMatchObject({ chosen: 1, refused: '' })
   expect(run({ scale: 1 + TRANSFER_SCALE_TOLERANCE + 0.01 })).toMatchObject({ chosen: 0, refused: 'GPS2 SCALING DIFFERS' })
+  // Independent literal policy vectors for the shared production comparator: a larger denominator allows
+  // exactly100→95 and95→100, while100→94 exceeds5%. Both local AUTO and system adoption call this boundary.
+  const scale100 = { lateralFullScaleFt: 100, verticalFullScaleFt: 100, lateralAngleDeg: 1, verticalAngleDeg: 1 }
+  const reference = { at: 4000, lateralFt: 0, verticalFt: 0, scale: scale100 }
+  const words = { level: 'LPV' as const, status: null, lateralFt: 0, verticalFt: 0, toThresholdNm: 1, scale: scale100 }
+  expect(approachTransferRefusal(1, 3750, 2000, false, words, null)).toBe('GPS2 NOT YET ESTABLISHED')
+  expect(approachTransferRefusal(1, 4000, 2000, false, words, null)).toBe('')
+  for (const [from, to, refusal] of [[100, 95, ''], [95, 100, ''], [100, 94, 'GPS2 SCALING DIFFERS']] as const) {
+    const previous = { ...reference, scale: { ...scale100, verticalFullScaleFt: from } }
+    const next = { ...words, scale: { ...scale100, verticalFullScaleFt: to } }
+    expect(approachTransferRefusal(1, 4000, 2000, false, next, previous)).toBe(refusal)
+  }
+
 })
 
 test('eligibility needs the executed approach sent, and an unqualified change disqualifies only that approach', () => {
