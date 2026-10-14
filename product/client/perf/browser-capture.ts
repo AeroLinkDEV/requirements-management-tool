@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 import { browserWindowAccounting, captureEvidence } from './browser-accounting.ts'
 
 export const CAPTURE_SCHEMA = 'aerolink.fms-browser-paired-capture.v1'
@@ -12,6 +13,85 @@ const canonical = (value: any): any => Array.isArray(value) ? value.map(canonica
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
 export const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(canonical(value)) ?? 'undefined').digest('hex')
 export const fileDigest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
+
+export const W3_PAIR = { A: '7f2b53aec7f567089455c7c6b69f05f518a8e563', B: '5c7ec720845612271fb38a99880a341a6845f3ba' } as const
+const W3_FILES = ['product/client/src/fmsCdu/benchPacing.ts', 'product/client/src/fmsCdu/FmsCduTestBench.tsx']
+const w3Git = (root: string, ...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding:'utf8',maxBuffer:16*1024*1024 }).trim()
+/** A separate paired plan. Calling browserCapturePlan() without W3 still returns the original128-slot W2 bytes. */
+export function w3PairedPlan(manifest: any) {
+  if (manifest?.schema !== 'aerolink.fms-w3-observation-overlay.v1' || !manifest.overlaySha256 || !manifest.harness?.commit ||
+      !['A','B'].every(arm => manifest.arms?.[arm]?.original?.commit === W3_PAIR[arm as 'A'|'B'] && manifest.arms[arm].effectiveSourceSha256))
+    throw new Error('W3 requires the exact paired original/effective observation manifest before output or children')
+  const sessions=Array.from({length:16},(_,repeat)=>firstRow.map((offset,position)=>{
+    const row=repeat%8,cycle=Math.floor(repeat/8),cell=(row+offset)%8,first=(row+position+cycle)%2?'B':'A'
+    return {repeat,session:position,cell,configuration:configurations[Math.floor(cell/2)],rate:cell%2?64:1,orientation:first==='A'?'ABBA':'BAAB',
+      slots:(first==='A'?['A','B','B','A']:['B','A','A','B']).map((arm,position)=>({slot:repeat*32+position,arm,position}))}
+  })).flat()
+  const slots=sessions.flatMap(session=>session.slots.map(slot=>({...slot,repeat:session.repeat,session:session.session,cell:session.cell,configuration:session.configuration,rate:session.rate,slot:session.repeat*32+session.session*4+slot.position})))
+  return {schema:'aerolink.fms-w3-paired-plan.v1',recipe:'aerolink.fms-perf-w3-prefix.v1',workload:'W3',inference:'DISABLED',qualification:'NOT_CALIBRATED',
+    manifestSha256:digest(manifest),allocation:'16-row periodic Williams cell order; alternating first rate; ABBA/BAAB balanced across row/position and cycle. One complete four-run cell-session is ONE block/session unit, not four independent samples. Pilot must declare repetitions/N and serial/session treatment before qualification; this schedule is not inference.',sessions,slots}
+}
+function sourceFiles(root: string, relativePath = ''): {path:string;sha256:string}[] {
+  const at = join(root,relativePath), out: {path:string;sha256:string}[] = []
+  for(const name of readdirSync(at).sort()) {
+    const next = relativePath ? `${relativePath}/${name}` : name, path=join(root,next), stat=lstatSync(path)
+    if(stat.isSymbolicLink()) throw new Error('W3 source copies refuse links')
+    if(stat.isDirectory()) {if(!['node_modules','dist','.git'].includes(name))out.push(...sourceFiles(root,next))}
+    else if(stat.isFile())out.push({path:next,sha256:fileDigest(path)})
+    else throw new Error('W3 source copy contains unsupported filesystem input')
+  }
+  return out
+}
+/** SOURCE-only preparation: archive EACH original arm, then apply the same pinned observation hunks. No build,
+ * install, serving or current-model replacement. The head's distinct submission/journal source remains its own. */
+export function materializeW3Arms(harness: string, destination: string) {
+  if(existsSync(destination)) throw new Error('W3 needs a fresh owned source-copy destination')
+  if(w3Git(harness,'status','--porcelain'))throw new Error('W3 overlay producer must be a clean committed harness')
+  const patch=execFileSync('git',['-C',harness,'diff',W3_PAIR.A,'HEAD','--',...W3_FILES],{encoding:'utf8',maxBuffer:16*1024*1024})
+  if(!patch.includes('PACING_FRAME') || !patch.includes('observeFrame'))throw new Error('W3 observation delta is missing')
+  const resolved=resolve(destination), fromHarness=relative(resolve(harness),resolved)
+  if(!fromHarness || (!fromHarness.startsWith('..') && !/^[A-Za-z]:/.test(fromHarness)))throw new Error('W3 source copies must be outside the harness')
+  for(let p=dirname(resolved);;p=dirname(p)){if(lstatSync(p).isSymbolicLink())throw new Error('W3 copy parent aliases another path');if(dirname(p)===p)break}
+  // All static compatibility checks precede creation of any output.
+  for(const commit of Object.values(W3_PAIR))if(w3Git(harness,'rev-parse',`${commit}:${W3_FILES[0]}`)!=='f56d3fd89a4e84868e3ea695a5f5de539a038789')throw new Error('W3 immediate-arm pacing source changed')
+  mkdirSync(resolved);writeFileSync(join(resolved,'observation.patch'),patch,{flag:'wx'})
+  const arms: Record<string,any>={}
+  for(const [arm,commit] of Object.entries(W3_PAIR)) {
+    const root=join(resolved,arm);mkdirSync(root)
+    const archive=execFileSync('git',['-C',harness,'archive',commit,'product/client'],{maxBuffer:64*1024*1024})
+    const extracted=spawnSync('tar',['-xf','-','-C',root],{input:archive,encoding:'utf8'})
+    if(extracted.status!==0)throw new Error('W3 exact arm archive extraction failed')
+    const before=sourceFiles(root), applied=spawnSync('git',['apply','--no-index','--whitespace=nowarn','-'],{cwd:root,input:patch,encoding:'utf8'})
+    if(applied.status!==0)throw new Error(`W3 observation hunks do not apply to arm ${arm}; no fallback`)
+    const after=sourceFiles(root), changed=after.filter((file,i)=>file.sha256!==before[i]?.sha256)
+    if(changed.length!==2 || changed.some(file=>!W3_FILES.includes(file.path)))throw new Error('W3 overlay changes non-observation source paths')
+    arms[arm]={root:realpathSync(root),original:{commit,tree:w3Git(harness,'rev-parse',`${commit}^{tree}`),srcTree:w3Git(harness,'rev-parse',`${commit}:product/client/src`),
+      lockBlob:w3Git(harness,'rev-parse',`${commit}:product/client/package-lock.json`),files:W3_FILES.map(path=>({path,blob:w3Git(harness,'rev-parse',`${commit}:${path}`)}))},archiveSha256:createHash('sha256').update(archive).digest('hex'),originalFiles:before,effectiveFiles:after,effectiveSourceSha256:digest(after),changed}
+  }
+  const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',harness:{commit:w3Git(harness,'rev-parse','HEAD'),tree:w3Git(harness,'rev-parse','HEAD^{tree}')},
+    overlaySha256:createHash('sha256').update(patch).digest('hex'),patch:'observation.patch',arms,builds:null,qualification:'NOT_CALIBRATED',inference:'DISABLED'}
+  w3PairedPlan(manifest);writeFileSync(join(resolved,'source-manifest.json'),JSON.stringify(manifest,null,2),{flag:'wx'});return manifest
+}
+/** Parses asserted build/closure provenance and checks actual bytes. This is not independent native proof. */
+export function admitW3Manifest(manifest: any, requireBuild: boolean) {
+  const plan=w3PairedPlan(manifest)
+  if(fileDigest(join(dirname(manifest.arms.A.root),'observation.patch'))!==manifest.overlaySha256)throw new Error('W3 declared observation patch changed')
+  for(const arm of ['A','B']) {
+    const entry=manifest.arms[arm]
+    if(lstatSync(entry.root).isSymbolicLink() || !sameFiles(sourceFiles(entry.root),entry.effectiveFiles) || digest(entry.effectiveFiles)!==entry.effectiveSourceSha256)
+      throw new Error('W3 effective source bytes changed')
+    if(requireBuild) {
+      const build=manifest.builds?.[arm]
+      if(!build || build.sourceSha256!==entry.effectiveSourceSha256 || build.harnessCommit!==manifest.harness.commit || !build.command ||
+          !Array.isArray(build.dependencies) || !build.dependencies.length || digest(build.dependencies)!==build.dependenciesSha256 ||
+          build.dependencies.some((file:any)=>fileDigest(join(entry.root,file.path))!==file.sha256) || !Array.isArray(build.dist) || !build.dist.length ||
+          !sameFiles(sourceFiles(join(entry.root,'product/client/dist')),build.dist))throw new Error('W3 exact source/build/dependency provenance missing or changed')
+      requireClosure(build.closure)
+    }
+  }
+  return plan
+}
+function sameFiles(a: unknown,b: unknown){return JSON.stringify(a)===JSON.stringify(b)}
 
 /** The production allocation, not a randomization or an inference procedure. */
 export function browserCapturePlan() {

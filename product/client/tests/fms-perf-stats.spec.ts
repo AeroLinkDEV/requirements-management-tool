@@ -14,12 +14,102 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
-import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, type WindowProbe } from '../perf/browser-accounting'
+import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN } from '../perf/browser-capture'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, w3PairedPlan } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
+
+function literalW3(rate=64,total=7232) {
+  const initialUtc=Date.parse('2026-09-27T14:00:00.000Z'),frames:any[]=[],timeline:any[]=[],clocks:any[]=[],tasks:any[]=[]
+  for(let first=1,batch=1;first<=total;first+=rate,batch++) {
+    const last=Math.min(total,first+rate-1),entry={utcMs:10000+first-1,monotonicMs:first-1,timeOrigin:10000,kernelTime:(first-1)*2_500_000,unitClockMs:initialUtc+(first-1)*250,completed:first-1}
+    for(let ordinal=first;ordinal<=last;ordinal++)frames.push({schema:1,epoch:7,rate,batch,sequence:batch,ordinal,entry,
+      frame:{utcMs:10000+ordinal,monotonicMs:ordinal,timeOrigin:10000,kernelTime:ordinal*2_500_000,unitClockMs:initialUtc+ordinal*250,completed:ordinal},
+      state:{sync:'SYNC',unitClocksMs:[initialUtc+ordinal*250,initialUtc+ordinal*250],boundary:ordinal===240||ordinal===7200?{frames:ordinal,causes:'literal'}:null}})
+    const exit=frames.at(-1).frame
+    timeline.push({kind:'slice',start:first-.1,end:last,detail:{schema:1,epoch:7,rate,batch,admitted:rate,attempted:rate,completed:rate,remaining:0}})
+    clocks.push({schema:1,epoch:7,rate,batch,sequence:batch,entry,exit})
+    tasks.push({start:first-.5,end:last+.5,tail:last+.8})
+  }
+  const identity={original:{commit:'a'.repeat(40)},effectiveSourceSha256:'b'.repeat(64),overlaySha256:'c'.repeat(64),harness:{commit:'d'.repeat(40)},manifestSha256:'e'.repeat(64),
+    build:{sourceSha256:'b'.repeat(64),harnessCommit:'d'.repeat(40),dist:[{path:'index.html',sha256:'f'.repeat(64)}]}}
+  const expected={...finiteExpected,scenario:'literal-w3-prefix',maxSimSeconds:1800}
+  const setupReport=`# FMS Test Bench run: Independent W3 setup
+**Result: PASS**
+- Scenario: literal-w3-prefix, fnv1a-12345678
+- Started: 2026-09-27T14:00:00.000Z; ended after 0 s of simulated time
+- Aircraft profile: ${finiteProfileSummary}
+- GPS: model literal-model/1; constellation seed 1; receiver seeds 101 and 202; retained sky
+| 1 | At start, action. | 0 s | DONE | observed |
+| 2 | At start, check. | 0 s | PASS | observed |
+`
+  const raw:W3Observation={identity,setupReport,timeline,clocks,frames,tasks,closes:[{schema:1,epoch:7,rate,sequence:clocks.length,batch:clocks.length,kind:'cancelled',admitted:total,attempted:total,completed:total,discarded:0,debt:0,monotonicMs:total+2,lastClock:clocks.at(-1)}],frozen:[],inputs:[],events:[],longTasks:[{start:238,duration:60}],loaf:[],availability:{longtask:'SUPPORTED','long-animation-frame':'UNAVAILABLE',event:'SUPPORTED'}}
+  return {raw,expected,identity}
+}
+test('W3 whole cohorts retain193..256 and7169..7232 crossers with independent16+32 frame exposure',()=>{
+  const {raw,expected,identity}=literalW3(),result=w3PrefixAccounting(raw,expected,identity)
+  expect(result).toMatchObject({status:'OBSERVED',totalFrames:7200,warmupFrames:240,scoredFrames:6960,begin:240,end:7200,overrun:{completed:32},heap:{retainedF7200:'UNAVAILABLE'}})
+  expect(result.primaryTimerHandlers).toMatchObject({representedScoredFrames:6912,excludedScoredFrames:48})
+  expect(result.primaryTimerHandlers.raw.filter(row=>row.relation==='crossing').map(row=>[row.first,row.last,row.scoredFrameExposure])).toEqual([[193,256,16],[7169,7232,32]])
+  expect(result.simulationSlices).toMatchObject({representedScoredFrames:6912,excludedScoredFrames:48})
+  expect(result.longTasks[0].relation).toBe('crossing')
+  expect(result.taskTails[0].timerPlusTailMs).not.toBe(result.primaryTimerHandlers.raw[0].durationMs)
+})
+test('W3 1x terminal timer crossing is excluded even when its real slice ends atF7200',()=>{
+  const {raw,expected,identity}=literalW3(1,7200),result=w3PrefixAccounting(raw,expected,identity)
+  expect(result.primaryTimerHandlers).toMatchObject({representedScoredFrames:6959,excludedScoredFrames:1})
+  expect(result.simulationSlices).toMatchObject({representedScoredFrames:6960,excludedScoredFrames:0})
+  expect(result.primaryTimerHandlers.raw.at(-1)).toMatchObject({first:7200,last:7200,relation:'crossing',durationMs:1})
+})
+test('W3 refuses missing finalzero-debt success, moved faultclock, transientSYNC, lateF0 and mismatched setup/profile/arm',()=>{
+  for(const change of [
+    (r:W3Observation)=>{r.frames.pop()},(r:W3Observation)=>{r.clocks.at(-1)!.exit.kernelTime+=2_500_000},
+    (r:W3Observation)=>{r.frames[300].state.sync='INDEP'},(r:W3Observation)=>{r.frames[0].entry.kernelTime=2_500_000},
+    (r:W3Observation)=>{r.setupReport=r.setupReport.replace('ended after 0 s','ended after 0.25 s')},
+    (r:W3Observation)=>{r.setupReport=r.setupReport.replace('Result: PASS','Result: FAIL')},
+    (r:W3Observation)=>{r.setupReport=r.setupReport.replace('cma9000-s300-heli-civil','wrong-profile')},
+    (r:W3Observation)=>{r.identity={...r.identity,overlaySha256:'0'.repeat(64)}},
+    (r:W3Observation)=>{r.frames[239].state.boundary=null},
+    (r:W3Observation)=>{r.clocks[1].entry={...r.clocks[1].entry,kernelTime:999}},
+    (r:W3Observation)=>{r.frames[240].frame.monotonicMs=0},
+  ]){const {raw,expected,identity}=literalW3();change(raw);expect(()=>w3PrefixAccounting(raw,expected,identity)).toThrow(/W3/)}
+  const valid=literalW3();expect(w3SetupEvidence(valid.raw.setupReport,valid.expected).endedAfter).toBe(0)
+})
+test('W3 paired allocation alternates first rate and balances completeABBA/BAAB sessions without changing old128plan',()=>{
+  const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',overlaySha256:'literal',harness:{commit:'literal'},arms:{A:{original:{commit:'7f2b53aec7f567089455c7c6b69f05f518a8e563'},effectiveSourceSha256:'literal'},B:{original:{commit:'5c7ec720845612271fb38a99880a341a6845f3ba'},effectiveSourceSha256:'literal'}}}
+  const plan=w3PairedPlan(manifest)
+  expect(plan.sessions).toHaveLength(128);expect(plan.slots).toHaveLength(512)
+  expect(plan.sessions.filter(row=>row.session===0).map(row=>row.rate)).toEqual([1,64,1,64,1,64,1,64,1,64,1,64,1,64,1,64])
+  for(let repeat=0;repeat<16;repeat++)expect(new Set(plan.sessions.filter(row=>row.repeat===repeat).map(row=>row.cell)).size).toBe(8)
+  expect(plan.sessions.filter(row=>row.orientation==='ABBA')).toHaveLength(64)
+  expect(plan.sessions.filter(row=>row.orientation==='BAAB')).toHaveLength(64)
+  expect(browserCapturePlan().slots).toHaveLength(128)
+  expect(()=>w3PairedPlan({...manifest,arms:{...manifest.arms,A:{...manifest.arms.A,original:{commit:'0'.repeat(40)}}}})).toThrow(/paired/)
+})
+
+test('real dual setup and success-frame producer feed the W3 reader without another model step at closure',()=>{
+  const protocol=JSON.parse(readFileSync(new URL('../perf/protocol.json',import.meta.url),'utf8'))
+  const scenario={...protocol.headless.workloads.find((row:any)=>row.id==='W3').definition,id:'perf-w3-owner-prefix-v1',startTime:'2026-09-29T15:00:00.000Z'}
+  const composed=dualComposition(Date.parse(scenario.startTime)),host=new TimelineHost()
+  host.performance={...host.performance,timeOrigin:10000}
+  const runner=new ScenarioRunner(scenario,composed.system.computers[0],{variant:'public producer owner'},composed.system.flights[0],composed.settleStart)
+  expect([runner.finished,runner.outcome,runner.endedAfter]).toEqual([true,'passed',0])
+  const setupReport=reportMarkdown(runner),kernel=new FmsKernel(composed.plant,runner)
+  const stop=startKernelPacing(64,kernel,host,{haltOnRunEnd:false,onFault:error=>{throw error},onInstantClose:()=>{host.wall+=.1},
+    observeFrame:ordinal=>({sync:composed.system.mode,unitClocksMs:[kernel.unitClockMs,kernel.unitClockMs],boundary:ordinal===240||ordinal===7200?{outsideView:'off',frames:null}:null})})
+  while(kernel.now<18_000_000_000)host.runNext()
+  const beforeStop=kernel.now;stop();expect(kernel.now).toBe(beforeStop)
+  const base=literalW3(),raw:W3Observation={...base.raw,setupReport,timeline:host.timeline(),tasks:host.timerTasks,
+    frames:host.measures.filter(row=>row.name==='aerolink.fms-bench.pacing-success-frame').map(row=>row.detail),
+    clocks:host.measures.filter(row=>row.name==='aerolink.fms-bench.pacing-clock').map(row=>row.detail),closes:host.measures.filter(row=>row.name==='aerolink.fms-bench.pacing-close').map(row=>row.detail)}
+  const expected={...base.expected,scenario:scenario.id,digest:scenarioDigest(scenario),startUtc:scenario.startTime,gps:{model:'aerolink-cma5024-sim/1',constellation:1,receivers:[101,202]}}
+  const result=w3PrefixAccounting(raw,expected,base.identity)
+  expect(result).toMatchObject({status:'OBSERVED',totalFrames:7200,scoredFrames:6960,sync:{total:7200,scored:6960},overrun:{completed:32}})
+  expect(result.overrun.close.kind).toBe('cancelled')
+})
+
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
 // order, the exact bootstrap of a three-run sample, blocking, the within-block permutation test (protocol revision 2)
 // and its calibration under a null with block effects, and Holm's step-down adjustment.
@@ -843,7 +933,7 @@ test('the route CLI declares the actual five mission extents, hosts and topology
   expect(headless.every((route: any) => route.status === 'IMPLEMENTED' && route.pacing === 'unpaced' && route.metrics.includes('frame-duration-percentiles'))).toBe(true)
   const ui = plan.routes.filter((route: any) => route.host === 'browser-paced')
   expect(ui.map((route: any) => [route.workload, route.topology, route.status])).toEqual([
-    ['W1', 'dual', 'IMPLEMENTED'], ['W2', 'dual', 'IMPLEMENTED'], ['W3', 'dual', 'NOT_IMPLEMENTED'], ['W4a', 'dual', 'IMPLEMENTED'], ['W4b', 'dual', 'IMPLEMENTED'],
+    ['W1', 'dual', 'IMPLEMENTED'], ['W2', 'dual', 'IMPLEMENTED'], ['W3', 'dual', 'IMPLEMENTED'], ['W4a', 'dual', 'IMPLEMENTED'], ['W4b', 'dual', 'IMPLEMENTED'],
   ])
   expect(ui[1]).toMatchObject({ warmup: { unit: 'wall-seconds', value: 15 }, scored: { kind: 'completed-work-by-rate', simSecondsByRate: { '1': 60, '64': 2400 } }, terminal: 'still-running-no-stall-no-discard' })
   expect(ui.filter((route: any) => ['W1', 'W4a', 'W4b'].includes(route.workload)).map((route: any) =>
@@ -852,7 +942,7 @@ test('the route CLI declares the actual five mission extents, hosts and topology
     ['W4a/browser-paced/dual/v2', { unit: 'completed-frames', value: 256, simMilliseconds: 64000 }, { kind: 'successful-scenario-end-after-warmup', maxTotalSimSeconds: 3600 }, '2026-09-27T14:00:00.000Z', 'single-arm-browser'],
     ['W4b/browser-paced/dual/v2', { unit: 'completed-frames', value: 256, simMilliseconds: 64000 }, { kind: 'successful-scenario-end-after-warmup', maxTotalSimSeconds: 900 }, '2026-09-27T14:00:00.000Z', 'single-arm-browser'],
   ])
-  expect(ui.find((route: any) => route.workload === 'W3')).toMatchObject({ warmup: null, scored: null, terminal: null })
+  expect(ui.find((route: any) => route.workload === 'W3')).toMatchObject({warmup:{unit:'completed-frames',value:240},scored:{kind:'fixed-successful-prefix',maxTotalSimSeconds:1800,fixedMeasuredSimSeconds:1740},terminal:'actual-7200-prefix-then-public-Pause-with-overrun'})
   const unpaced = plan.routes.filter((route: any) => route.host === 'browser-unpaced')
   expect(unpaced).toHaveLength(10)
   expect(unpaced.every((route: any) => JSON.stringify(route.armCapabilities) === JSON.stringify(['CURRENT_KERNEL', 'LEGACY_PUBLIC_ADVANCE_TICKS']) && JSON.stringify(route.requiredCommonArmModules) === JSON.stringify(['scenario.ts', 'profile.ts', 'gps.ts']))).toBe(true)
@@ -871,7 +961,7 @@ test('the route CLI declares the actual five mission extents, hosts and topology
 test('execution route refusal precedes output, arm and child setup', ({ browserName: _browserName }, info) => {
   for (const [command, workload, topology, message] of [
     ['browser-capture', 'W1', 'dual', 'paired browser planning/capture supports W2 only'],
-    ['browser-capture', 'W3', 'dual', 'route W3/browser-paced/dual is NOT_IMPLEMENTED'],
+    ['browser-capture', 'W3', 'dual', 'W3 requires a pinned --w3-input'],
     ['browser', 'W2', 'single', 'topology single is not available for browser-paced'],
     ['headless', 'UNKNOWN', 'dual', 'unknown workload UNKNOWN'],
   ]) {

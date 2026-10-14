@@ -243,10 +243,11 @@ export function browserQualification(_protocol: unknown, records: readonly Brows
  * needs every entry from the epoch's first admission) and, while measuring, every timer task with the end of the
  * microtask queued after it (the tail), rAF intervals, long tasks, Long Animation Frames and Event Timing entries.
  */
-export function installBrowserRecorder(names: { slice: string; discard: string; clock?: string; close?: string }) {
+export function installBrowserRecorder(names: { slice: string; discard: string; clock?: string; close?: string; successFrame?: string; frozen?: string }) {
   if (window !== window.top) return
   type Entry = { kind: 'slice' | 'discard'; start: number; end: number; detail: Record<string, unknown> }
   const state = {
+    w3: false, frames: [] as Record<string, any>[], frozen: [] as Record<string, any>[], availability:{} as Record<string,string>,
     finite: null as null | { target: number; error: string | null; ended: boolean }, closes: [] as Record<string, any>[],
     measuring: false, begin: 0, end: 0, timeline: [] as Entry[], tasks: [] as { start: number; end: number; tail: number | null }[],
     lastFrame: -1, rafIntervals: [] as number[], longTasks: [] as { start: number; duration: number }[],
@@ -260,6 +261,8 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
     if (kind) state.timeline.push({ kind, start: entry.startTime, end: entry.startTime + entry.duration, detail: (entry as PerformanceMeasure).detail as Record<string, unknown> })
     if (entry.name === names.close) state.closes.push((entry as PerformanceMeasure).detail)
     if (entry.name === names.clock) state.clocks.push((entry as PerformanceMeasure).detail)
+    if (entry.name === names.successFrame) state.frames.push((entry as PerformanceMeasure).detail)
+    if (entry.name === names.frozen) state.frozen.push((entry as PerformanceMeasure).detail)
   }
   const timeline = new PerformanceObserver(list => list.getEntries().forEach(take))
   timeline.observe({ type: 'measure', buffered: true })
@@ -290,7 +293,8 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
       const observer = new PerformanceObserver(list => list.getEntries().forEach(onEntry))
       observer.observe({ type, buffered: true, ...extra } as PerformanceObserverInit)
       observers.push({ observer, take: onEntry })
-    } catch { /* unsupported: recorded as absent, never assumed zero cost */ }
+      state.availability[type]='SUPPORTED'
+    } catch { state.availability[type]='UNAVAILABLE' }
   }
   observe('longtask', entry => state.longTasks.push({ start: entry.startTime, duration: entry.duration }))
   observe('long-animation-frame', entry => state.loaf.push({ start: entry.startTime, duration: entry.duration, blocking: (entry as unknown as { blockingDuration: number }).blockingDuration }))
@@ -299,7 +303,7 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
     state.events.push({ start: timing.startTime, name: timing.name, duration: timing.duration, processing: timing.processingEnd - timing.processingStart,
       delay: timing.processingStart - timing.startTime, interaction: (timing as unknown as { interactionId: number }).interactionId,
       targetKey: timing.target instanceof Element ? timing.target.closest('[data-fn]')?.getAttribute('data-fn') ?? null : null,
-      targetIndex: timing.target instanceof Element ? Array.from(document.querySelectorAll('[data-fn="BRT"]')).indexOf(timing.target.closest('[data-fn]')!) : -1 })
+      targetIndex: timing.target instanceof Element ? Array.from(document.querySelectorAll(state.w3 ? '[data-fn]' : '[data-fn="BRT"]')).indexOf(timing.target.closest('[data-fn]')!) : -1 })
   }, { durationThreshold: 16 })
   // Event Timing and other observers may have queued records before their callback is delivered. Drain all of them.
   const flush = () => { timeline.takeRecords().forEach(take); observers.forEach(({ observer, take }) => observer.takeRecords().forEach(take)) }
@@ -337,28 +341,40 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
   }
   document.addEventListener('click', event => {
     const key = event.target instanceof Element ? event.target.closest('[data-fn]') : null
-    if (key?.getAttribute('data-fn') !== 'BRT') return
+    if (!key || (!state.w3 && key.getAttribute('data-fn') !== 'BRT')) return
     const pending = state.inputs.at(-1)
     if (!pending || pending.eventTime !== undefined) return
     Object.assign(pending, { utcMs: Date.now(), observedAt: performance.now(), eventTime: event.timeStamp,
-      trusted: event.isTrusted, key: 'BRT', target: Array.from(document.querySelectorAll('[data-fn="BRT"]')).indexOf(key),
-      before: key.closest('.fmsCdu')?.getAttribute('style') ?? null })
+      trusted: event.isTrusted, key: key.getAttribute('data-fn'), target: Array.from(document.querySelectorAll(state.w3 ? '[data-fn]' : '[data-fn="BRT"]')).indexOf(key),
+      before: state.w3 ? key.closest('.fmsCdu')?.querySelector('.fmsCduScreen')?.getAttribute('aria-label') ?? null : key.closest('.fmsCdu')?.getAttribute('style') ?? null,
+      ...(state.w3 ? { completedAtDispatch: state.frames.at(-1)?.ordinal ?? 0 } : {}) })
   }, true)
   ;(window as unknown as { __fmsPerf: unknown }).__fmsPerf = {
     boundary,
+    armW3() {
+      state.w3 = true; state.measuring = true; state.tasks = []; state.frames = []; state.frozen = []
+      state.timeline = []; state.clocks = []; state.closes = []; state.inputs = []; state.events = []; state.boundaries = []
+    },
+    w3Snapshot() {
+      flush()
+      return { timeline: state.timeline, clocks: state.clocks, closes: state.closes, frames: state.frames, frozen: state.frozen,
+        tasks: state.tasks, inputs: state.inputs, events: state.events, longTasks: state.longTasks, loaf: state.loaf,availability:state.availability }
+    },
     armFinite() {
       // Called before the public Run action: retain only the fresh scenario's epoch, not an earlier Fly.
       state.timeline = []; state.clocks = []; state.closes = []; state.boundaries = []; state.inputs = []
       state.finite = { target: 256, error: null, ended: false }
     },
     get finiteStatus() { flush(); return { started: state.begin > 0, ended: state.finite?.ended ?? false, error: state.finite?.error ?? null } },
-    keyDispatch() { state.inputs.push({ dispatchStart: performance.now() }) },
+    keyDispatch(expectedKey?: string) { state.inputs.push({ dispatchStart: performance.now(), ...(state.w3 ? { expectedKey } : {}) }) },
     begin() { const receipt = boundary('scoredStart'); state.measuring = true; state.begin = receipt.monotonicMs; state.tasks = []; state.rafIntervals = []; state.lastFrame = -1; return state.begin },
     keyOutcome() {
       const press = state.inputs.at(-1)
       if (press) {
         press.dispatchEnd = performance.now()
-        press.after = Array.from(document.querySelectorAll('[data-fn="BRT"]'))[Number(press.target)]?.closest('.fmsCdu')?.getAttribute('style') ?? null
+        const key = Array.from(document.querySelectorAll(state.w3 ? '[data-fn]' : '[data-fn="BRT"]'))[Number(press.target)]
+        press.after = state.w3 ? key?.closest('.fmsCdu')?.querySelector('.fmsCduScreen')?.getAttribute('aria-label') ?? null : key?.closest('.fmsCdu')?.getAttribute('style') ?? null
+        if(state.w3) press.outcomeObservedAt=performance.now()
       }
     },
     /** Completed frames of slices observed since begin: the run loop's progress, not the accounting. */
@@ -476,4 +492,101 @@ export function finiteMissionEvidence(recorded: RecordedWindow, accounting: Wind
     fail('public finite mission report is not complete PASS with the exact input, UTC, profile, seeds and end frame')
   return { status: 'OBSERVED', inference: 'DISABLED', qualification: 'NOT_CALIBRATED', totalFrames: close.completed,
     scoredFrames: accounting.frames.completed, endedSimSeconds: endedSeconds, close, expected, report }
+}
+
+/** W3 is a separate estimator. It never changes the between-task W2/finite readers above. */
+export const W3_SCHEMA = 'aerolink.fms-perf-w3-prefix.v1'
+export type W3Observation = { identity: Record<string, unknown>; setupReport: string; timeline: TimelineEntry[];
+  frames: Record<string, any>[]; clocks: Record<string, any>[]; closes: Record<string, any>[]; tasks: TimerTask[];
+  frozen: Record<string, any>[]; inputs: Record<string, any>[]; events: Record<string, any>[];
+  longTasks: { start: number; duration: number }[]; loaf: { start: number; duration: number; blocking: number }[];availability:Record<string,string> }
+export function w3SetupEvidence(report: string, expected: FiniteMissionIdentity) {
+  const lines = report.split('\n'), unique = (prefix: string, line: string) => lines.filter(value => value.startsWith(prefix)).length === 1 && lines.includes(line)
+  const rows = [...report.matchAll(/^\| (\d+) \| .* \| ([^|]*) \| (DONE|PASS) \| .* \|$/gm)]
+  if (!unique('**Result: ', '**Result: PASS**') || !unique('- Scenario: ', `- Scenario: ${expected.scenario}, ${expected.digest}`) ||
+      !unique('- Started: ', `- Started: ${expected.startUtc}; ended after 0 s of simulated time`) ||
+      !unique('- Aircraft profile: ', `- Aircraft profile: ${expected.profileSummary}`) || expected.profileSummary.split(' ')[0] !== expected.profile ||
+      lines.filter(line => line.startsWith('- GPS: ')).length !== 1 || !lines.some(line => line.startsWith(`- GPS: model ${expected.gps.model}; constellation seed ${expected.gps.constellation}; receiver seeds ${expected.gps.receivers.join(' and ')};`)) ||
+      rows.length !== expected.steps || rows.some((row, i) => Number(row[1]) !== i + 1 || row[3] !== expected.statuses[i]) || !rows.some(row => row[3] === 'PASS'))
+    throw new AccountingRefusal('W3 requires the exact complete public t0 setup PASS; this is not continuation END')
+  return { status: 'OBSERVED_SETUP_ONLY', endedAfter: 0, expected, report }
+}
+
+/** Fixed successful-frame prefix plus predeclared WHOLE timer/slice cohorts; crossings are never prorated. */
+export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionIdentity, identity: Record<string, unknown>) {
+  const refuse = (reason: string): never => { throw new AccountingRefusal(`W3 ${reason}`) }
+  const id=identity as Record<string,any>
+  if (!same(raw.identity, identity) || !hash(id.original?.commit,40) || !hash(id.overlaySha256,64) || !hash(id.effectiveSourceSha256,64) ||
+      !hash(id.harness?.commit,40) || id.build?.sourceSha256!==id.effectiveSourceSha256 || id.build?.harnessCommit!==id.harness.commit || !id.manifestSha256 || !id.build?.dist?.length)
+    refuse('arm/overlay/input identity changed or missing')
+  const setup = w3SetupEvidence(raw.setupReport, expected), frames = raw.frames, close = raw.closes.length === 1 ? raw.closes[0] : refuse('unique epoch close missing')
+  if (frames.length < 7200) refuse('successful prefix is incomplete')
+  const initial = frames[0].entry, epoch = frames[0].epoch, rate = frames[0].rate
+  if (!initial || ![initial.utcMs,initial.monotonicMs,initial.timeOrigin].every(Number.isFinite) || initial.completed !== 0 || initial.kernelTime !== 0 || initial.unitClockMs !== Date.parse(expected.startUtc)) refuse('first actual Fly ENTRY is not F0 at the fixed UTC')
+  const events = raw.timeline.map(row => parse(row, rate)); let debt = 0, batch = 0, completed = 0, admitted = 0, attempted = 0, discarded = 0, sequence = 0, previousEnd = -Infinity
+  const slices: { event: Slice; first: number; last: number }[] = []
+  for (const event of events) {
+    if (event.epoch !== epoch || event.end < previousEnd) refuse('epoch/order mismatch')
+    previousEnd = event.end
+    if (event.kind === 'discard') {
+      if (event.batch !== batch || event.discarded !== debt) refuse('discard does not close actual debt')
+      discarded += event.discarded; debt = 0; continue
+    }
+    if (event.admitted ? debt !== 0 || event.batch !== batch + 1 : debt === 0 || event.batch !== batch) refuse('admission/continuation is not conserved')
+    if (event.admitted) batch = event.batch
+    admitted += event.admitted; attempted += event.attempted; debt += event.admitted - event.attempted
+    if (debt < 0 || debt !== event.remaining || event.completed !== event.attempted) refuse('missing/faulted frame or inconsistent debt')
+    sequence++; const first = completed + 1; completed += event.completed
+    slices.push({ event, first, last: completed })
+    const clock = raw.clocks[sequence - 1]
+    if (!clock || clock.sequence !== sequence || clock.epoch !== epoch || clock.batch !== batch || clock.rate !== rate ||
+        clock.entry.completed !== first - 1 || clock.exit.completed !== completed || clock.exit.kernelTime - clock.entry.kernelTime !== event.completed * 2_500_000 ||
+        clock.exit.unitClockMs - clock.entry.unitClockMs !== event.completed * 250 || !same(clock.entry,frames[first-1]?.entry) ||
+        clock.exit.kernelTime!==frames[completed-1]?.frame.kernelTime || clock.exit.unitClockMs!==frames[completed-1]?.frame.unitClockMs || clock.exit.monotonicMs<frames[completed-1]?.frame.monotonicMs) refuse('slice/direct clock coverage disagrees')
+    for (let ordinal = first; ordinal <= completed; ordinal++) {
+      const f = frames[ordinal - 1], stamp = f?.frame
+      if (!f || f.schema !== 1 || f.epoch !== epoch || f.rate !== rate || f.sequence !== sequence || f.batch !== batch || f.ordinal !== ordinal ||
+          !stamp || stamp.completed !== ordinal || stamp.kernelTime !== ordinal * 2_500_000 || stamp.unitClockMs !== initial.unitClockMs + ordinal * 250 ||
+          !Number.isFinite(stamp.utcMs) || !Number.isFinite(stamp.monotonicMs) || stamp.monotonicMs < event.start || stamp.monotonicMs > event.end ||
+          !same(f.entry,clock.entry) || stamp.timeOrigin !== initial.timeOrigin || (ordinal > 1 && stamp.monotonicMs < frames[ordinal - 2].frame.monotonicMs) ||
+          !Array.isArray(f.state?.unitClocksMs) || f.state.unitClocksMs.length !== 2 || f.state.unitClocksMs.some((ms: number) => ms !== stamp.unitClockMs)) refuse('successful-frame identity/clock/slice coverage disagrees')
+      if (ordinal <= 7200 && f.state.sync !== 'SYNC') refuse('dual SYNC was missing or dropped within the prefix')
+    }
+  }
+  if (completed !== frames.length || raw.clocks.length !== sequence || close.schema !== 1 || close.kind !== 'cancelled' || close.epoch !== epoch || close.rate !== rate ||
+      close.sequence !== sequence || close.batch !== batch || close.admitted !== admitted || close.attempted !== attempted || close.completed !== completed || close.discarded !== discarded || close.debt !== 0 || debt !== 0 ||
+      !Number.isFinite(close.monotonicMs) || close.monotonicMs < previousEnd || !same(close.lastClock, raw.clocks.at(-1))) refuse('final Pause close does not bind all real work, including zero-debt final slices')
+  const begin = frames[239].frame.monotonicMs, end = frames[7199].frame.monotonicMs
+  if (!(end > begin) || !frames[239].state.boundary || !frames[7199].state.boundary) refuse('actual F240/F7200 boundary observations missing')
+  const relation = (start: number, finish: number) => start >= begin && finish <= end ? 'contained' : finish < begin || start > end ? 'outside' : 'crossing'
+  const exposure = (first: number, last: number) => Math.max(0, Math.min(7200,last) - Math.max(241,first) + 1)
+  const timerRows: any[] = [], sliceRows: any[] = [], tails: any[] = [], gaps: any[] = []
+  for (const [i,row] of slices.entries()) {
+    const s = row.event, matched = raw.tasks.filter(task => task.start <= s.start && task.end >= s.end)
+    if (matched.length !== 1) refuse('slice has no unique real timer handler')
+    const task = matched[0]
+    if (task.tail === null || !Number.isFinite(task.tail) || task.tail < task.end || task.end < task.start) refuse('timer/tail observation incomplete')
+    const tail=task.tail as number
+    const common = { first: row.first, last: row.last, attempted: s.attempted, completed: s.completed, scoredFrameExposure: exposure(row.first,row.last), batch:s.batch }
+    timerRows.push({ ...common, start: task.start, end: task.end, durationMs: task.end-task.start, relation: relation(task.start,task.end) })
+    sliceRows.push({ ...common, start: s.start, end:s.end, durationMs:s.end-s.start, relation:relation(s.start,s.end) })
+    tails.push({ ...common, start:task.end, end:tail, durationMs:tail-task.end, timerPlusTailMs:tail-task.start, relation:relation(task.end,tail) })
+    if(i && !s.admitted && slices[i-1].event.batch===s.batch) gaps.push({start:slices[i-1].event.end,end:s.start,durationMs:s.start-slices[i-1].event.end,relation:relation(slices[i-1].event.end,s.start)})
+  }
+  const cohort = (rows: any[]) => {const contained=rows.filter(row=>row.relation==='contained');return {unit:'whole-observation',raw:rows,contained:contained.length,summary:contained.length?frameSummary(contained.map(row=>row.durationMs)):null,
+    representedScoredFrames:contained.reduce((n,row)=>n+row.scoredFrameExposure,0),excludedScoredFrames:6960-contained.reduce((n,row)=>n+row.scoredFrameExposure,0)}}
+  const interactions = raw.inputs.map(input => {
+    const title=input.expectedKey==='PROG'?'PROGRESS':input.expectedKey==='LEGS'?'RTE 1 LEGS':null
+    const entries=raw.events.filter(event=>event.name==='click' && event.targetKey===input.key && event.targetIndex===input.target && Math.abs(event.start-input.eventTime)<=1)
+    const outcome=input.trusted===true && input.key===input.expectedKey && title && typeof input.before==='string' && typeof input.after==='string' &&
+      input.after.split('\n')[0].includes(title) && !input.before.split('\n')[0].includes(title) && Number.isFinite(input.outcomeObservedAt) ? 'CDU_OUTCOME_AFTER_PAINT_OBSERVED':'UNAVAILABLE'
+    return {...input,entries,outcome,eventTiming:outcome!=='UNAVAILABLE'&&entries.length===1?'NATIVE_NEXT_PAINT_ENTRY_CORRELATED':'CENSORED_OR_UNAVAILABLE'}
+  })
+  return {schema:W3_SCHEMA,status:'OBSERVED',qualification:'NOT_CALIBRATED',inference:'DISABLED',setup,totalFrames:7200,warmupFrames:240,scoredFrames:6960,begin,end,
+    primaryTimerHandlers:cohort(timerRows),simulationSlices:cohort(sliceRows),taskTails:tails,yieldGaps:gaps,
+    boundaryCounters:{warmup:frames[239].state.boundary,end:frames[7199].state.boundary},sync:{total:7200,scored:6960,firstDrop:null},
+    overrun:{completed:completed-7200,frames:frames.slice(7200),close,frozen:raw.frozen},
+    availability:raw.availability,longTasks:raw.longTasks.map(row=>({...row,relation:relation(row.start,row.start+row.duration)})),loaf:raw.loaf.map(row=>({...row,relation:relation(row.start,row.start+row.duration)})),
+    interactions,eventTiming:{thresholdMs:16,roundingMs:8,missing:'CENSORED_OR_UNAVAILABLE_NOT_ZERO',exactLatencyP95:'UNAVAILABLE_UNTIL_COMPLETE_CENSORING_ADMISSION'},
+    heap:{retainedF7200:'UNAVAILABLE',laterPostGc:'CONTEXTUAL_ONLY',clockCoverage:'FROZEN_TIMELINE_ONLY_NO_TERMINAL_CLOCK_GETTER',reason:'ordinary Pause freezes flight but does not stop existing clock advances'},workerBacklog:'NOT_APPLICABLE_BEFORE_I3'}
 }

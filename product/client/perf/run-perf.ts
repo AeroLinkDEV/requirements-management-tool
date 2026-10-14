@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
 import { browserQualification } from './browser-accounting.ts'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA } from './browser-capture.ts'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest } from './browser-capture.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -35,6 +35,7 @@ const { values: options, positionals } = parseArgs({
     blocks: { type: 'string' }, rounds: { type: 'string' }, workloads: { type: 'string' }, rates: { type: 'string' },
     configurations: { type: 'string' }, hours: { type: 'string' }, pilot: { type: 'boolean' }, 'dirty-smoke': { type: 'boolean' },
     'cold-input': { type: 'string' }, host: { type: 'string' }, topology: { type: 'string' },
+    'w3-input': { type: 'string' }, 'w3-input-sha256': { type: 'string' }, session: { type:'string' }, repeat:{type:'string'},
   },
 })
 
@@ -77,7 +78,8 @@ function browserRoute(paired = false) {
   if (ids.length !== 1) throw new Error('one browser workload is required')
   const selected = route(ids[0], options.host ?? 'browser-paced', options.topology ?? 'dual')
   if (selected.host !== 'browser-paced') throw new Error('the product UI dispatcher requires browser-paced')
-  if (paired && selected.workload !== 'W2') throw new Error('paired browser planning/capture supports W2 only')
+  if (paired && !['W2','W3'].includes(selected.workload)) throw new Error('paired browser planning/capture supports W2 only or the separate W3 recipe')
+  if (!paired && selected.workload === 'W3') throw new Error('W3 requires its paired observation manifest and browser-capture executor')
   return selected
 }
 function routePlan() {
@@ -401,12 +403,14 @@ function browser() {
 /** One fixed same-source instrument study. Actual execution still requires the separately reviewed 446d outer
  * owner and quiet-window admission. This process is not the independent deadline/closure authority. */
 function browserPlan() {
-  browserRoute(true)
+  const selected=browserRoute(true)
+  if(selected.workload==='W3'){console.log(JSON.stringify(w3Input(false).plan,null,2));return}
   const plan = browserCapturePlan()
   console.log(JSON.stringify({ ...plan, manifestSha256: digest(plan) }, null, 2))
 }
 function browserCapture() {
   const selectedRoute = browserRoute(true)
+  if(selectedRoute.workload==='W3'){browserW3Capture(selectedRoute);return}
   const startedAt = new Date().toISOString(), began = performance.now(), deadline = began + protocol.browser.capture.bounds.measurementSeconds * 1000
   if (!options['cold-input'] || options['dirty-smoke'] || options.rounds || options.rates || options.configurations || options.hours)
     throw new Error('paired capture requires a sealed --cold-input; no dirty, order, subset or cap override')
@@ -468,6 +472,53 @@ function browserCapture() {
     const end = { ...session, cohort: cohortAtEnd, arms: armsAtEnd, cold: coldAtEnd, closure: 'UNPROVEN', stopped,
       endedAt: new Date().toISOString(), monotonicEnd: performance.now() }
     writeFileSync(join(dir, 'paired-end.json'), JSON.stringify(end, null, 2), { flag: 'wx' })
+  }
+}
+function w3Input(built: boolean) {
+  const path=options['w3-input'], expected=options['w3-input-sha256']
+  if(!path || !expected || !/^[0-9a-f]{64}$/i.test(expected) || fileDigest(resolve(path))!==expected.toLowerCase())throw new Error('W3 requires a pinned --w3-input and --w3-input-sha256 before output or children')
+  const manifest=JSON.parse(readFileSync(resolve(path),'utf8')), plan=admitW3Manifest(manifest,built)
+  if(manifest.harness.commit!==git(client,'rev-parse','HEAD') || manifest.harness.tree!==git(client,'rev-parse','HEAD^{tree}'))throw new Error('W3 overlay harness revision changed')
+  return {manifest,plan}
+}
+function browserW3Prepare() {
+  if(!options.work || options.out || options.arm || options.sha || options.rounds || options.rates || options.configurations)throw new Error('W3 source preparation takes only a fresh --work path; exact immediate pair is declared by the recipe')
+  const root=git(client,'rev-parse','--show-toplevel'), manifest=materializeW3Arms(root,resolve(options.work))
+  console.log(JSON.stringify({schema:manifest.schema,manifest:join(resolve(options.work),'source-manifest.json'),manifestSha256:fileDigest(join(resolve(options.work),'source-manifest.json')),builds:'UNRUN',qualification:'NOT_CALIBRATED',inference:'DISABLED'},null,2))
+}
+function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
+  // Validate every source/build/input before out() or any child. This source route supplies no scientific admission.
+  const {manifest,plan}=w3Input(true), index=Number(options.session), repeat=Number(options.repeat)
+  if(options.session===undefined || options.repeat===undefined || !Number.isSafeInteger(index) || index<0 || index>7 || !Number.isSafeInteger(repeat) || repeat<0 || repeat>15)throw new Error('W3 requires explicit planned repeat0..15 and complete cell-block session index0..7')
+  if(!options['cold-input'] || options.arm || options.rounds || options.rates || options.configurations || options.hours || options['dirty-smoke'])throw new Error('W3 session requires sealed cold input and refuses allocation/budget/arm overrides')
+  const slots=plan.slots.filter(slot=>slot.repeat===repeat&&slot.session===index)
+  if(slots.length!==4)throw new Error('W3 complete ABBA session missing')
+  const input=resolve(options['cold-input']), payload=join(input,'payload'), cold=JSON.parse(readFileSync(join(input,'cold.json'),'utf8')), closure=JSON.parse(readFileSync(join(input,'closure.json'),'utf8'))
+  requireClosure(closure);const entries=coldPayload(payload)
+  if(digest(entries)!==cold.payloadSha256 || fileDigest(join(input,'seed.json'))!==cold.seedSha256 || fileDigest(join(input,'closure.json'))!==cold.closureSha256)throw new Error('W3 cold input changed')
+  const harness=harnessIdentity()
+  if(harness.dirtyEntries || !harness.apiAssemblySha256 || closure.apiAssemblySha256!==harness.apiAssemblySha256 || closure.apiTree!==harness.apiTree)throw new Error('W3 API/seed/harness identity is not exact')
+  const began=performance.now(),deadline=began+14_400_000,dir=out()
+  if(nextIndex(dir))throw new Error('W3 requires fresh run output')
+  const archive=join(dir,'cold','payload');mkdirSync(archive,{recursive:true});copyColdPayload(payload,archive,entries)
+  const session={schema:'aerolink.fms-w3-paired-session.v1',id:randomUUID(),plan,sessionIndex:index,slots,manifest,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
+  writeFileSync(join(dir,'w3-session.json'),JSON.stringify(session,null,2),{flag:'wx'})
+  let stopped:string|null=null
+  try {
+    for(const slot of slots) {
+      admitW3Manifest(manifest,true)
+      const arm=manifest.arms[slot.arm],build=manifest.builds[slot.arm],runId=`w3-${session.id}-${slot.slot}`,storage=createBrowserStorage(runId)
+      copyColdPayload(archive,storage.root,entries)
+      const identity={original:arm.original,effectiveSourceSha256:arm.effectiveSourceSha256,overlaySha256:manifest.overlaySha256,harness:manifest.harness,build,manifestSha256:digest(manifest)}
+      const entry=run(dir,{kind:'browser-w3',route:selectedRoute,lineage:{sessionId:session.id,manifest:digest(plan),...slot},identity,cold,copiedInputs:coldPayload(storage.root),storageRoot:storage.root},
+        {AEROLINK_PERF_MODE:'browser',AEROLINK_PERF_DIST:join(arm.root,'product/client/dist'),AEROLINK_PERF_ARM:join(arm.root,'product/client'),AEROLINK_E2E_RUN_ID:runId,
+          AEROLINK_SHOWCASE_SEED:readFileSync(join(input,'seed.json'),'utf8'),AEROLINK_PERF_WORKLOAD:'W3',AEROLINK_PERF_TOPOLOGY:'dual',AEROLINK_PERF_RATE:String(slot.rate),AEROLINK_PERF_CONFIGURATION:slot.configuration,AEROLINK_PERF_W3_IDENTITY:JSON.stringify(identity)},deadline,protocol.browser.w3Recipe.executorLimitSeconds*1000)
+      if(entry.status!=='passed')throw new Error('W3 failed run retained; no retry or later favorable substitution')
+    }
+  } catch(error){stopped=error instanceof Error?error.message:'interrupted';throw error}
+  finally {
+    admitW3Manifest(manifest,true)
+    writeFileSync(join(dir,'w3-end.json'),JSON.stringify({...session,stopped,harnessAtEnd:harnessIdentity(),coldAtEnd:digest(coldPayload(archive)),endedAt:new Date().toISOString(),monotonicEnd:performance.now(),closure:'UNPROVEN'},null,2),{flag:'wx'})
   }
 }
 function browserCaptureReport() {
@@ -734,7 +785,7 @@ function report() {
   console.log(lines.join('\n'))
 }
 
-const commands: Record<string, () => void> = { prepare, headless, browser, report, 'browser-unpaced': browserUnpaced, 'route-plan': routePlan, 'browser-plan': browserPlan, 'browser-capture': browserCapture, 'browser-capture-report': browserCaptureReport }
+const commands: Record<string, () => void> = { prepare, headless, browser, report, 'browser-unpaced': browserUnpaced, 'route-plan': routePlan, 'browser-plan': browserPlan, 'browser-w3-prepare':browserW3Prepare, 'browser-capture': browserCapture, 'browser-capture-report': browserCaptureReport }
 const command = commands[positionals[0] ?? '']
 if (!command) throw new Error(`usage: node perf/run-perf.ts <${Object.keys(commands).join('|')}> ...`)
 command()

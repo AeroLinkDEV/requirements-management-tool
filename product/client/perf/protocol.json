@@ -54,6 +54,22 @@
       { "id": "view-on-svs-on", "outsideView": true, "svs": true }
     ],
     "interaction": { "key": "BRT", "pairs": "two BRT presses 1 wall second apart, then 5 wall seconds; observe native target and display outcome. Dim-back is not guaranteed at 64x." },
+    "w3Recipe": {
+      "schema": "aerolink.fms-perf-w3-prefix.v1",
+      "qualification": "NOT_CALIBRATED",
+      "inference": "DISABLED",
+      "warmupFrames": 240,
+      "totalFrames": 7200,
+      "scoredFrames": 6960,
+      "executorLimitSeconds": 2100,
+      "successFrame": "aerolink.fms-bench.pacing-success-frame",
+      "frozenFrame": "aerolink.fms-bench.frozen-frame",
+      "primary": "Actual timer handler end-start wholly contained in direct [F240,F7200] monotonic boundaries; unique simulation-slice join. Retain whole crossers and excluded scored-frame exposure separately per metric; never prorate.",
+      "terminal": "Public t0 setup PASS is separate from 7200 successful continuation frames. Observe real overrun until ordinary public Pause and conserved cancelled epoch close; never stop-after-N or create END.",
+      "heap": "Later Pause/CDP heap is contextual with actual flight-overrun/frozen-clock receipts. Retained-F7200 heap is UNAVAILABLE; no clock hold.",
+      "interaction": "Alternating native PROG and LEGS page keys; retain trusted event, exact actual CDU before/after outcome and next-paint Event Timing. Threshold16ms/rounding8ms; absence is censored/unavailable, never zero or exact latency p95.",
+      "pair": "Exact owned source copies of actual7f2b53ae and5c7ec720; identical pinned observation patches only. Original/effective source, harness, overlay, build and dependencies required before capture. Permanent20b paced remains a later stage-exit gate."
+    },
     "capture": {
       "revision": 1,
       "schema": "aerolink.fms-browser-paired-capture.v1",
@@ -300,12 +316,15 @@
             }
           },
           "browser-paced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
+            "status": "IMPLEMENTED",
+            "version": 1,
+            "executor": "paired-w3-public-ui",
+            "warmup": { "unit": "completed-frames", "value": 240, "simMilliseconds": 60000 },
+            "scored": { "kind": "fixed-successful-prefix", "maxTotalSimSeconds": 1800, "fixedMeasuredSimSeconds": 1740 },
+            "terminal": "actual-7200-prefix-then-public-Pause-with-overrun",
+            "scenarioStartUtc": "2026-09-29T15:00:00.000Z",
             "requiredTotalSimLimit": 1800,
-            "missing": "Public scenario import, setup, deliberate Fly continuation and actual SYNC residency"
+            "scope": "Source mechanism only; all eight paced cells. Requires pinned paired observation overlays and actual builds. NOT_CALIBRATED/inferenceDISABLED."
           },
           "browser-unpaced": {
             "status": "IMPLEMENTED",

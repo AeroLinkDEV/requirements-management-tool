@@ -21,7 +21,7 @@ test('profiling observes direct kernel and unit clocks at slice entry and exit, 
     if (attempts === 2) { composed.clock.advanceFrame(); throw new Error('retained observation fault') }
     composed.plant.integrate()
   } })
-  startKernelPacing(64, kernel, host, { onFault: () => {} })
+  startKernelPacing(64, kernel, host, { onFault: () => {}, observeFrame: () => ({ sync: 'SYNC' }) })
   host.runNext()
   const observation = host.measures.find(entry => entry.name === 'aerolink.fms-bench.pacing-clock')
   // The failed second INTEGRATE advances both clocks but never completes a frame. These literals are not
@@ -35,7 +35,31 @@ test('profiling observes direct kernel and unit clocks at slice entry and exit, 
   expect([entry.utcMs, exit.utcMs].every(Number.isFinite)).toBe(true) // UTC observations are retained, not assumed monotonic.
   expect(entry.timeOrigin).toBeNull() // This deterministic host has no browser timeOrigin.
   expect(kernel.faulted).toBe(true)
+  expect(host.measures.filter(entry => entry.name === 'aerolink.fms-bench.pacing-success-frame').map(row => row.detail.ordinal)).toEqual([1])
   expect(host.measures.at(-1)?.detail).toMatchObject({ kind: 'fault', admitted: 64, attempted: 2, completed: 1, discarded: 62, debt: 0 })
+})
+
+test('successful-frame profiling is after real completion, keeps slice order and cannot control work', () => {
+  const run = (observe: boolean) => {
+    const host = new TimelineHost(), composed = singleComposition(epoch), kernel = new FmsKernel(composed.plant)
+    const instants: number[] = []
+    const stop = startKernelPacing(64,kernel,host,{onFault:noFault,onInstantClose:()=>{instants.push(kernel.now);host.wall+=8},
+      ...(observe?{observeFrame:(ordinal:number)=>{if(ordinal===2)throw new Error('lost observation');return {sync:'SYNC'}}}:{})})
+    for(let i=0;i<16;i++)host.runNext()
+    stop()
+    return {host,kernel,instants}
+  }
+  const off=run(false),on=run(true)
+  expect(on.instants).toEqual(off.instants)
+  expect(on.kernel.now).toBe(160_000_000)
+  expect(on.kernel.unitClockMs).toBe(epoch+16000)
+  const work = (host: TimelineHost) => host.timeline().map(({detail,...row})=>{const {epoch:_epoch,...counts}=detail;return {...row,detail:counts}})
+  expect(work(on.host)).toEqual(work(off.host)) // distinct Fly epochs are identities, not scheduling differences
+  const frames=on.host.measures.filter(row=>row.name==='aerolink.fms-bench.pacing-success-frame')
+  expect(frames).toHaveLength(63)
+  expect(frames[0].detail).toMatchObject({ordinal:1,sequence:1,batch:1,entry:{kernelTime:0,completed:0},frame:{kernelTime:2_500_000,unitClockMs:epoch+250,completed:1}})
+  expect(frames.at(-1)?.detail).toMatchObject({ordinal:64,sequence:16,frame:{kernelTime:160_000_000,completed:64}})
+  expect(on.host.measures.at(-1)?.detail).toMatchObject({kind:'cancelled',completed:64,admitted:64,attempted:64,discarded:0,debt:0})
 })
 
 for (const rate of [1, 4, 16, 64]) test(`${rate}x retains every real whole kernel frame across slices`, () => {

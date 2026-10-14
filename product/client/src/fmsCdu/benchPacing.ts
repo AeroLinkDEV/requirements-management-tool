@@ -14,7 +14,7 @@ export type TickSlice = { readonly batch: number; readonly admitted: number; rea
   readonly began: number; readonly ended: number };
 /** Admitted frames that will never be attempted: the batch was cancelled, the run ended or a frame faulted. */
 export type TickDiscard = { readonly batch: number; readonly discarded: number; readonly at: number };
-export type TickTrace = { readonly entry?: () => void; readonly slice: (slice: TickSlice) => void; readonly discard: (discard: TickDiscard) => void; readonly close?: (batch: number) => void };
+export type TickTrace = { readonly entry?: (batch: number) => void; readonly success?: () => void; readonly slice: (slice: TickSlice) => void; readonly discard: (discard: TickDiscard) => void; readonly close?: (batch: number) => void };
 
 /**
  * One finite rate-sized batch, admitted at monotonic deadlines. Slow hosts expire old wall-time admissions rather
@@ -62,7 +62,7 @@ export function startTickPacing(rate: number, advance: () => boolean, host: Tick
     let attempted = 0;
     waking = true;
     try {
-      trace?.entry?.();
+      trace?.entry?.(batch);
       do {
         remaining -= 1; attempted += 1;
         if (!advance()) { stop(); return; }
@@ -91,6 +91,8 @@ export type KernelPacingOptions = {
   readonly haltOnRunEnd?: boolean;
   readonly onInstantClose?: () => void;
   readonly frame?: <T>(action: () => T) => T;
+  /** Pure observation after a successful whole advance. Failure loses evidence, never controls the driver. */
+  readonly observeFrame?: (ordinal: number) => Record<string, unknown>;
   readonly onProgress?: (progress: PacingProgress) => void;
   readonly onStopped?: () => void;
   readonly onFault: (error: unknown) => void;
@@ -109,6 +111,8 @@ export const PACING_TIMELINE = { schema: 1, slice: "aerolink.fms-bench.pacing-sl
 /** Read-only profiling overlay: sampled at the actual slice boundary, never inferred from selected rate. */
 export const PACING_CLOSE = "aerolink.fms-bench.pacing-close";
 export const PACING_CLOCK = "aerolink.fms-bench.pacing-clock";
+export const PACING_FRAME = "aerolink.fms-bench.pacing-success-frame";
+export const PACING_FROZEN = "aerolink.fms-bench.frozen-frame";
 export type PacingClockSample = { readonly utcMs: number; readonly monotonicMs: number; readonly timeOrigin: number | null;
   readonly kernelTime: number; readonly unitClockMs: number; readonly completed: number };
 export type PacingSliceDetail = { readonly schema: 1; readonly epoch: number; readonly rate: number; readonly batch: number;
@@ -116,11 +120,11 @@ export type PacingSliceDetail = { readonly schema: 1; readonly epoch: number; re
 export type PacingDiscardDetail = { readonly schema: 1; readonly epoch: number; readonly rate: number; readonly batch: number; readonly discarded: number };
 let pacingEpochs = 0;
 
-function pacingTimeline(rate: number, host: TickSchedulingHost, completedSinceLastSlice: () => number, sample: () => PacingClockSample, stopKind: () => string): TickTrace | undefined {
+function pacingTimeline(rate: number, host: TickSchedulingHost, completedSinceLastSlice: () => number, sample: () => PacingClockSample, stopKind: () => string, observation?: KernelPacingOptions['observeFrame']): TickTrace | undefined {
   const { measure, clearMeasures } = host.performance;
   if (!measure || !clearMeasures) return undefined;
   const epoch = ++pacingEpochs;
-  let entry: PacingClockSample, sequence = 0;
+  let entry: PacingClockSample, sequence = 0, activeBatch = 0;
   let admittedTotal = 0, attemptedTotal = 0, completedTotal = 0, discardedTotal = 0, debt = 0;
   let lastClock: Record<string, unknown> | null = null;
   const emit = (name: string, start: number, end: number, detail: PacingSliceDetail | PacingDiscardDetail | Record<string, unknown>) => {
@@ -128,7 +132,16 @@ function pacingTimeline(rate: number, host: TickSchedulingHost, completedSinceLa
     try { measure.call(host.performance, name, { start, end, detail }); clearMeasures.call(host.performance, name); } catch { /* reader refuses */ }
   };
   return {
-    entry: () => { entry = sample(); },
+    entry: batch => { activeBatch = batch; entry = sample(); },
+    success: () => {
+      if (!observation) return;
+      // Positive advance already returned. No step, dispatch, publication or scheduling belongs here.
+      try {
+        const frame = sample(), state = observation(frame.completed);
+        emit(PACING_FRAME, frame.monotonicMs, frame.monotonicMs,
+          { schema: 1, epoch, rate, batch: activeBatch, sequence: sequence + 1, ordinal: frame.completed, entry, frame, state });
+      } catch { /* a missing successful-frame witness invalidates the external reader */ }
+    },
     slice: ({ batch, admitted, attempted, remaining, began, ended }) => {
       const exit = sample();
       const completed = completedSinceLastSlice();
@@ -184,22 +197,24 @@ export function startKernelPacing(rate: number, kernel: FmsKernel, host: TickSch
     report();
     progressTimer = host.setTimeout(progressWake, 250);
   };
+  const trace = pacingTimeline(rate, host, () => {
+    const done = completedFrames - traced; traced = completedFrames; return done;
+  }, () => ({ utcMs: Date.now(), monotonicMs: host.performance.now(), timeOrigin: host.performance.timeOrigin ?? null,
+    kernelTime: kernel.now, unitClockMs: kernel.unitClockMs, completed: completedFrames }), () => stopKind, options.observeFrame);
   const stopFrames = startTickPacing(rate, () => {
     const advance = () => kernel.advance(1, { haltOnRunEnd, onInstantClose: options.onInstantClose });
     const done = options.frame ? options.frame(advance) : advance();
     // A throwing INTEGRATE moves kernel.now but never returns a completed frame, so it is never counted here.
     completedFrames += done;
     for (let i = 0; i < done; i++) completions.push(host.performance.now());
+    if (done > 0) trace?.success?.();
     const ended = haltOnRunEnd && kernel.runFinished;
     if (ended) { stopKind = "run-end"; report(true); }
     else if (done === 0) stopKind = "no-work";
     if (done === 0 || ended) cancelProgress();
     if (ended) options.onStopped?.();
     return done > 0 && !ended;
-  }, host, error => { stopKind = "fault"; cancelProgress(); report(true); options.onFault(error); }, () => report(), pacingTimeline(rate, host, () => {
-    const done = completedFrames - traced; traced = completedFrames; return done;
-  }, () => ({ utcMs: Date.now(), monotonicMs: host.performance.now(), timeOrigin: host.performance.timeOrigin ?? null,
-    kernelTime: kernel.now, unitClockMs: kernel.unitClockMs, completed: completedFrames }), () => stopKind));
+  }, host, error => { stopKind = "fault"; cancelProgress(); report(true); options.onFault(error); }, () => report(), trace);
   if (options.onProgress) progressTimer = host.setTimeout(progressWake, 250);
   return () => { cancelProgress(); stopFrames(); };
 }

@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
-import { scenarioDigest } from '../src/fmsCdu/scenario'
+import { scenarioDigest, type Scenario } from '../src/fmsCdu/scenario'
 import { ACTIVE_PROFILE } from '../src/fmsCdu/profile'
 import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { apiLogin, login, selectProgram } from '../tests/auth'
-import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
+import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3SetupEvidence, type W3Observation, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
 import { frameSummary } from './stats.ts'
 
 // One browser run (#1510 I0a; accounting revision 2, #1557): the 87N offshore SAR mission from its planned start, at
@@ -38,7 +38,8 @@ if (!family || declaredRoute?.status !== 'IMPLEMENTED' || topology !== 'dual')
   throw new Error(`unsupported product UI route ${workload}/browser-paced/${topology}`)
 const route = { schema: protocol.routeContract.schema, id: `${workload}/browser-paced/${topology}/v${declaredRoute.version ?? 1}`, workload, scenario: family.scenario, topology, ...declaredRoute }
 const finite = declaredRoute.scored.kind === 'successful-scenario-end-after-warmup'
-type Recorder = { __fmsPerf: { armFinite(): void; finiteStatus: { started: boolean; ended: boolean; error: string | null }; begin(): number; boundary(label: string): unknown; keyDispatch(): void; keyOutcome(): void; drain(): RecordedWindow['events']; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
+const w3 = workload === 'W3'
+type Recorder = { __fmsPerf: { armW3(): void; w3Snapshot(): Omit<W3Observation, 'identity' | 'setupReport'>; armFinite(): void; finiteStatus: { started: boolean; ended: boolean; error: string | null }; begin(): number; boundary(label: string): unknown; keyDispatch(expectedKey?: string): void; keyOutcome(): void; drain(): RecordedWindow['events']; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
 // The protocol declares the run schema this owner writes; a mismatch is a protocol edit without a harness edit.
 if (protocol.browser.accounting.schema !== BROWSER_RUN_SCHEMA) throw new Error(`protocol.json declares ${protocol.browser.accounting.schema}; this owner writes ${BROWSER_RUN_SCHEMA}`)
 
@@ -49,12 +50,13 @@ test.use({
 })
 
 test('browser frame cost', async ({ page, request, context, headless }) => {
-  test.setTimeout(15 * 60_000)
+  test.setTimeout(w3 ? protocol.browser.w3Recipe.executorLimitSeconds * 1000 : 15 * 60_000)
   if (!result || !configuration || !protocol.browser.rates.includes(rate)) throw new Error('AEROLINK_PERF_RATE, _CONFIGURATION and _RESULT are required')
   const windowSim: number = protocol.browser.windowSimSeconds[String(rate)]
   const targetFrames = finite ? null : windowSim * 4
   const { timeline } = protocol.browser.accounting
-  await context.addInitScript(installBrowserRecorder, { slice: timeline.slice, discard: timeline.discard, clock: protocol.browser.capture.clockTimeline, ...(finite ? { close: declaredRoute.closeTimeline } : {}) })
+  await context.addInitScript(installBrowserRecorder, { slice: timeline.slice, discard: timeline.discard, clock: protocol.browser.capture.clockTimeline,
+    ...(finite ? { close: declaredRoute.closeTimeline } : {}), ...(w3 ? { close: 'aerolink.fms-bench.pacing-close', successFrame: protocol.browser.w3Recipe.successFrame, frozen: protocol.browser.w3Recipe.frozenFrame } : {}) })
 
   await apiLogin(request)
   await login(page)
@@ -77,14 +79,15 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
 
   await page.getByLabel('Simulation rate').selectOption(String(rate))
   const scenarios = page.getByRole('region', { name: 'Scenarios' })
-  await scenarios.getByLabel('Scenario', { exact: true }).selectOption(family.scenario)
-  const sourceScenario = finite ? SCENARIO_LIBRARY.find(entry => entry.id === family.scenario) : null
-  if (finite && !sourceScenario) throw new Error('finite public scenario source is missing')
+  if (!w3) await scenarios.getByLabel('Scenario', { exact: true }).selectOption(family.scenario)
+  const sourceScenario: Scenario | null | undefined = w3 ? protocol.headless.workloads.find((entry: any) => entry.id === 'W3').definition : finite ? SCENARIO_LIBRARY.find(entry => entry.id === family.scenario) : null
+  if ((finite || w3) && !sourceScenario) throw new Error('declared public scenario source is missing')
   // Public import needs a distinct ID: the card deliberately resolves built-ins before custom scenarios.
-  const scenario = sourceScenario ? { ...sourceScenario, id: `${sourceScenario.id}-perf-finite-v2`,
+  const scenario = sourceScenario ? { ...sourceScenario, id: `${sourceScenario.id}-${w3 ? 'perf-prefix-v1' : 'perf-finite-v2'}`,
     startTime: declaredRoute.scenarioStartUtc, profile: sourceScenario.profile ?? ACTIVE_PROFILE.id } : null
   const inputBytes = scenario ? JSON.stringify(scenario, null, 2) : null
   let expectedProfileSummary: string | null = null
+  let expectedGpsModel = GPS_MODEL_VERSION
   if (scenario) {
     const arm = process.env.AEROLINK_PERF_ARM
     if (!arm) throw new Error('finite browser capture requires its declared arm source')
@@ -93,6 +96,7 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     const selected = profiles.profileById(scenario.profile)
     if (!selected || selected.id !== scenario.profile) throw new Error('finite input profile is not available in the declared arm')
     expectedProfileSummary = profiles.profileSummary(selected)
+    if(w3) expectedGpsModel = (await import(pathToFileURL(join(arm,'src/fmsCdu/gps.ts')).href)).GPS_MODEL_VERSION
   }
   const downloadText = async (name: string) => {
     const pending = page.waitForEvent('download')
@@ -108,9 +112,55 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     await scenarios.getByLabel('Scenario file').setInputFiles({ name: 'perf-finite-v2.json', mimeType: 'application/json', buffer: Buffer.from(inputBytes) })
     await expect(scenarios.getByLabel('Scenario', { exact: true })).toHaveValue(scenario!.id)
     expect(await downloadText('Save as JSON'), 'the actual public selection is the exact frozen input').toBe(inputBytes)
-    await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.armFinite())
+    if (finite) await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.armFinite())
   }
   await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
+  if (w3) {
+    const identity = JSON.parse(process.env.AEROLINK_PERF_W3_IDENTITY ?? 'null')
+    if (!identity) throw new Error('W3 requires its exact original/effective/overlay/build/dependency identity')
+    const setupReport = await downloadText('Download run report')
+    const expected = { scenario: scenario!.id, digest: scenarioDigest(scenario!), startUtc: scenario!.startTime!, profile: scenario!.profile!, profileSummary: expectedProfileSummary!,
+      steps: scenario!.steps.length, statuses: ['DONE', 'PASS'] as ('DONE' | 'PASS')[], maxSimSeconds: 1800,
+      gps: { model: expectedGpsModel, constellation: 1, receivers: [101,202] } }
+    w3SetupEvidence(setupReport, expected)
+    writeFileSync(`${result}.setup.md`, setupReport)
+    await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.armW3())
+    await page.getByRole('button', { name: 'Fly', exact: true }).click()
+    let raw: Omit<W3Observation, 'identity' | 'setupReport'>, refusal: string | null = null, key = 0
+    try { do {
+      raw = await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.w3Snapshot())
+      const first = raw.frames[0]
+      if (first && (first.entry.kernelTime !== 0 || first.entry.unitClockMs !== Date.parse(expected.startUtc))) { refusal = 'first actual Fly ENTRY was late; no rewind or retry'; break }
+      if (raw.closes.length) { refusal = 'unexpected stop before ordinary public Pause'; break }
+      if ((raw.frames.at(-1)?.ordinal ?? 0) >= 7200) break
+      // Real non-commanding CDU page keys; before/after is actual committed aria-label, not a BRT proxy.
+      const expectedKey=key++ % 2 ? 'LEGS' : 'PROG'
+      await page.evaluate(key => (window as unknown as Recorder).__fmsPerf.keyDispatch(key),expectedKey)
+      await page.locator(`.fmsCduKey[data-fn="${expectedKey}"]`).first().click()
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.keyOutcome())
+      await page.waitForTimeout(1000)
+    } while (true) } catch(error) { refusal=error instanceof Error?error.message:String(error) }
+    const pause = page.getByRole('button', { name: 'Pause', exact: true })
+    try { if (await pause.count()) await pause.click() } catch(error) { refusal??=error instanceof Error?error.message:String(error) } // ordinary public cancellation; retain actual batch overrun/discard
+    await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)))
+    const beforeHeap = await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.w3Snapshot())
+    const cdp = await context.newCDPSession(page); let gc = 'UNAVAILABLE'
+    try { await cdp.send('HeapProfiler.collectGarbage'); gc = 'CDP_COLLECTED' } catch { /* retain availability */ }
+    const heap = await page.evaluate(() => ({ utcMs:Date.now(),monotonicMs:performance.now(),usedBytes:(performance as any).memory?.usedJSHeapSize ?? null,
+      observations:(window as unknown as Recorder).__fmsPerf.w3Snapshot() }))
+    const observation: W3Observation = { ...heap.observations, identity, setupReport }
+    let accounting: ReturnType<typeof w3PrefixAccounting> | null = null
+    try { accounting = w3PrefixAccounting(observation,expected,identity) } catch(error) { refusal ??= error instanceof Error ? error.message : String(error) }
+    const summary = { schema:protocol.browser.w3Recipe.schema,route,rate,configuration:configuration.id,identity,expected,rawObservation:observation,accounting,refusal,
+      qualification:'NOT_CALIBRATED',inference:'DISABLED',scenarioInput:{sourceScenario:family.scenario,bytes:inputBytes,sha256:createHash('sha256').update(inputBytes!).digest('hex')},
+      heap:{status:gc==='CDP_COLLECTED'&&heap.usedBytes!==null?'CONTEXTUAL_OBSERVATION':'UNAVAILABLE',retainedF7200:'UNAVAILABLE',method:gc,utcMs:heap.utcMs,monotonicMs:heap.monotonicMs,usedBytes:heap.usedBytes,
+        beforeFrozen:beforeHeap.frozen,afterFrozen:observation.frozen,frozenDuringCollection:observation.frozen.length-beforeHeap.frozen.length,flightClose:observation.closes},
+      browser:{version:context.browser()?.version()??null,headless,viewport:protocol.browser.viewport} }
+    writeFileSync(result,JSON.stringify(summary,null,2))
+    if(refusal) throw new Error(refusal)
+    expect(accounting?.status).toBe('OBSERVED'); return
+  }
   if (finite) await page.waitForFunction(() => {
     const status = (window as unknown as Recorder).__fmsPerf.finiteStatus
     return status.started || status.ended

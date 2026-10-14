@@ -28,7 +28,7 @@ import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./pro
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, scenarioStart, type Scenario } from "./scenario";
 import { FmsKernel } from "./kernel/kernel";
 import { dualComposition } from "./kernel/legacyPlantAdapter";
-import { startKernelPacing } from "./benchPacing";
+import { startKernelPacing, PACING_FROZEN } from "./benchPacing";
 import { BenchPresentation } from "./benchPresentation";
 import type { ScriptedFms } from "./scriptedFms";
 import type { FmsSide } from "./crossTalk";
@@ -309,7 +309,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     if (!playing) {
       const timer = window.setInterval(() => {
         if ((!runner || runner.finished) && !kernel.faulted) {
-          try { presentation.frame(() => kernel.advance(1, { flightFreeze: true })); }
+          try {
+            const done = presentation.frame(() => kernel.advance(1, { flightFreeze: true }));
+            // Public profiling only: the existing frozen advance already returned; never advance to observe it.
+            if (done > 0) {
+              try { const at = performance.now(); performance.measure(PACING_FROZEN, { start: at, end: at,
+                detail: { schema: 1, utcMs: Date.now(), monotonicMs: at, kernelTime: kernel.now, unitClockMs: kernel.unitClockMs, completed: done } }); performance.clearMeasures(PACING_FROZEN); } catch { /* recorder refuses missing evidence */ }
+            }
+          }
           catch (error) {
             window.clearInterval(timer);
             presentation.flush(); setPacingFault(error instanceof Error ? error.message : String(error)); setPlaying(false);
@@ -322,6 +329,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     const stop = startKernelPacing(rate, kernel, window, {
       haltOnRunEnd: runner !== null && !runner.finished,
       frame: presentation.frame,
+      observeFrame: ordinal => ({ sync: system.mode, clockKind: "SHARED_DUAL_COMPOSITION_CLOCK",
+        unitClocksMs: [kernel.unitClockMs, kernel.unitClockMs],
+        boundary: ordinal === 240 || ordinal === 7200 ? {
+          outsideView: document.querySelector(".fmsOtw")?.getAttribute("data-status") ?? "off",
+          frames: document.querySelector(".fmsOtwScene")?.getAttribute("data-frames") ?? null,
+          causes: document.querySelector(".fmsOtwScene")?.getAttribute("data-frame-causes") ?? null,
+          svs: window.localStorage.getItem("aerolink.fmsCdu.svs"),
+        } : null }),
       onProgress: progress => { achieved.publish(progress.achievedRate); },
       onStopped: () => { pausedFor.current = runner; presentation.flush(); setPlaying(false); },
       onFault: error => {
