@@ -18,6 +18,23 @@ public sealed class IntegritySourcePackageTests
     public async Task The_real_extractor_preserves_scoped_bytes_and_typed_source_facts_and_is_not_live_evidence()
     {
         var (bytes, hash) = await IntegrityFixturePackage.ReadAsync();
+        // The browser consumes this sealed synthetic package without rebuilding Java. This existing
+        // extractor owner catches stale or changed browser fixture bytes independently of the importer.
+        var browserFixture = Path.Combine(IntegrityFixturePackage.Repository(), "product/client/tests/fixtures/integrity-source/source.zip");
+        Assert.Equal(File.ReadAllText(browserFixture + ".manifest.sha256").Trim(), hash);
+        using (var generated = new ZipArchive(new MemoryStream(bytes), ZipArchiveMode.Read))
+        using (var browser = ZipFile.OpenRead(browserFixture))
+        {
+            Assert.Equal(browser.Entries.Select(x => x.FullName).Order(StringComparer.Ordinal),
+                generated.Entries.Select(x => x.FullName).Order(StringComparer.Ordinal));
+            foreach (var entry in browser.Entries)
+            {
+                using var expected = new MemoryStream(); using var actual = new MemoryStream();
+                using (var stream = entry.Open()) stream.CopyTo(expected);
+                using (var stream = generated.GetEntry(entry.FullName)!.Open()) stream.CopyTo(actual);
+                Assert.Equal(expected.ToArray(), actual.ToArray());
+            }
+        }
         Assert.Throws<DomainException>(() => IntegritySourcePackage.Read(bytes, hash, false));
         var package = IntegritySourcePackage.Read(bytes, hash, true);
         Assert.Equal(["1001", "1002"], package.Items.Select(x => x.Item.Id));
