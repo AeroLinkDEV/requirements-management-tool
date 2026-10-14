@@ -208,6 +208,8 @@ test('notification settings recover the original receipt after reload and keep e
   await page.getByLabel('New SMTP credential').fill(secret)
   await page.getByRole('button', { name: 'Save settings only' }).click()
   await expect(page.getByRole('heading', { name: 'Recover the original operation' })).toBeVisible()
+  // Intent is rendered before the POST; enabled recovery proves the aborted request was handled.
+  await expect(page.getByRole('button', { name: 'Check original receipt', exact: true })).toBeEnabled()
   expect(submissions).toHaveLength(1)
   expect(submissions[0]).toMatchObject({ family: 'Settings', expectedVersion: 7, credential: secret, clearCredential: false })
   expect(submissions[0].userName).toBeUndefined() // Hidden configured username is preserved.
