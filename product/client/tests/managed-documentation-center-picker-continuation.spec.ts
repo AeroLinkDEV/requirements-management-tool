@@ -119,6 +119,7 @@ test('the build picker freezes membership across pages and links the exact selec
     },
   })
   expect(documentResponse.ok(), await documentResponse.text()).toBeTruthy()
+  const document = await documentResponse.json() as { id: string }
 
   // Fifty-five extra in-work builds bring the picker to 56 candidates (default page size 50), so the
   // dialog exercises a real continuation. They are inserted directly into the attempt's disposable run
@@ -130,9 +131,41 @@ test('the build picker freezes membership across pages and links the exact selec
   await login(page, stewardUserName, { openProject: false })
   await page.goto(`/programs/${programId}/projects/${projectId}/documentation-center`)
   await expect(page.getByRole('heading', { name: 'Documentation Center' })).toBeVisible()
-  await page.getByRole('button', { name: new RegExp(`^${acronym} `) }).click()
   await expect(page.getByRole('heading', { name: `Picker continuation ${attempt}` })).toBeVisible()
-  await page.getByRole('button', { name: 'links', exact: true }).click()
+  // The inventory already opened this document. Keep the actual card-open refresh pending while the
+  // reader chooses Links: its eventual completion must not replace that newer section choice.
+  let releaseDetail!: () => void
+  let detailHeld!: () => void
+  let detailDelivered!: () => void
+  const detailGate = new Promise<void>(resolve => { releaseDetail = resolve })
+  const held = new Promise<void>(resolve => { detailHeld = resolve })
+  const delivered = new Promise<void>(resolve => { detailDelivered = resolve })
+  await page.route(`${apiBase}/api/managed-documents/${document.id}`, async route => {
+    const response = await route.fetch()
+    expect(response.ok()).toBeTruthy()
+    detailHeld()
+    await detailGate
+    await route.fulfill({ response })
+    detailDelivered()
+  }, { times: 1 })
+  const links = page.getByRole('button', { name: 'links', exact: true })
+  try {
+    await page.getByRole('button', { name: new RegExp(`^${acronym} `) }).click()
+    await held
+    await expect(page.getByRole('heading', { name: `Picker continuation ${attempt}` })).toBeVisible()
+    await links.click()
+    await expect(links).toHaveAttribute('aria-current', 'page')
+    releaseDetail()
+    await delivered
+    await expect(page).toHaveURL(new RegExp(`/documentation-center/${document.id}$`))
+    // Observe the first painted result of the released response/navigation, not a still-pending render.
+    await page.evaluate(() => new Promise<void>(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    }))
+    await expect(links).toHaveAttribute('aria-current', 'page')
+  } finally {
+    releaseDetail()
+  }
   await page.getByRole('button', { name: '+ Link artifact' }).click()
   await page.getByLabel('Artifact type').selectOption({ label: 'Build' })
 
@@ -179,4 +212,40 @@ test('the build picker freezes membership across pages and links the exact selec
   await page.getByRole('button', { name: 'Load more records' }).click()
   await expect(options).toHaveCount(59) // placeholder + all 58, now including the formerly late BUILD-9.9
   await expect(page.locator('select[name="artifactId"] option', { hasText: 'BUILD-9.9' })).toHaveCount(1)
+
+  // Changing document identity must not display the previous document's controls as the pending target.
+  const otherTitle = `Other picker continuation ${attempt}`
+  const otherResponse = await request.post(`${apiBase}/api/managed-documents`, {
+    data: {
+      projectId, acronym: `${acronym}ALT`, documentType: 'Software Configuration Management Plan',
+      title: otherTitle, ownerId: stewardUserName,
+      formalChangeSummary: 'Separate document identity control.', operationKey: crypto.randomUUID(),
+    },
+  })
+  expect(otherResponse.ok(), await otherResponse.text()).toBeTruthy()
+  const other = await otherResponse.json() as { id: string }
+  await page.goto(`/programs/${programId}/projects/${projectId}/documentation-center/${document.id}`)
+  await expect(page.getByRole('heading', { name: `Picker continuation ${attempt}` })).toBeVisible()
+  let releaseOther!: () => void
+  let otherHeld!: () => void
+  const otherGate = new Promise<void>(resolve => { releaseOther = resolve })
+  const pendingOther = new Promise<void>(resolve => { otherHeld = resolve })
+  await page.route(`${apiBase}/api/managed-documents/${other.id}`, async route => {
+    const response = await route.fetch()
+    expect(response.ok()).toBeTruthy()
+    otherHeld()
+    await otherGate
+    await route.fulfill({ response })
+  }, { times: 1 })
+  try {
+    await page.getByRole('button', { name: new RegExp(`^${acronym}ALT `) }).click()
+    await pendingOther
+    await expect(page.getByRole('heading', { name: `Picker continuation ${attempt}` })).toBeHidden()
+    await expect(page.getByRole('heading', { name: otherTitle })).toBeHidden()
+    releaseOther()
+    await expect(page.getByRole('heading', { name: otherTitle })).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/documentation-center/${other.id}$`))
+  } finally {
+    releaseOther()
+  }
 })
