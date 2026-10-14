@@ -115,6 +115,16 @@ export function archiveW3ColdInput(input: string, dir: string, entries: readonly
   if(fileDigest(seed)!==cold.seedSha256 || fileDigest(closure)!==cold.closureSha256)throw new Error('W3 archived seed or writer closure bytes disagree with the sealed cold input')
   return {archive,seed}
 }
+/** The runs.jsonl row recorded for one child run (run-perf.ts run()). */
+export function runRow(entry: Record<string, any>, _resultFile: string, _dir: string) {
+  return entry
+}
+/** The W3 session record (w3-session.json; w3-end.json repeats it). */
+export function w3SessionRecord(fields: { id: string; plan: unknown; sessionIndex: number; slots: unknown[]; manifest: unknown; manifestInput: string; dir: string;
+  cold: unknown; harness: unknown; startedAt: string; monotonicStart: number; deadline: number }) {
+  const { id, plan, sessionIndex, slots, manifest, cold, harness, startedAt, monotonicStart, deadline } = fields
+  return {schema:'aerolink.fms-w3-paired-session.v1',id,plan,sessionIndex,slots,manifest,cold,harness,startedAt,monotonicStart,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
+}
 /** The W3 session end record the executor writes to w3-end.json. The end re-admission outcome is recorded beside the
  * original stop reason and never replaces it or prevents the record; the caller decides what to throw after writing. */
 export function w3EndRecord(session: Record<string, unknown>, stopped: string | null, manifest: any, observed: Record<string, unknown>) {

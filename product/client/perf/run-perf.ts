@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, runClassification, scoredRuns, type Arm, type DispatchedRoute, type RunValue, type SessionEvidence } from './stats.ts'
 import { browserQualification } from './browser-accounting.ts'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest, w3EndRecord, archiveW3ColdInput } from './browser-capture.ts'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest, w3EndRecord, archiveW3ColdInput, runRow, w3SessionRecord } from './browser-capture.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -222,7 +222,7 @@ function run(dir: string, record: Record<string, unknown>, env: Record<string, s
     routeIdentityRefusal,
     host: { quietBefore: quiet, busyPercentDuringRun: busy(before, cpus()), powerPlan: powerPlan() }, result,
   }
-  appendFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify(entry)}\n`)
+  appendFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify(runRow(entry, resultPath, dir))}\n`)
   console.log(`${name} ${entry.status} ${JSON.stringify(record)} ${wallSeconds.toFixed(1)} s`)
   return entry
 }
@@ -499,7 +499,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   const began=performance.now(),deadline=began+14_400_000,dir=out()
   if(nextIndex(dir))throw new Error('W3 requires fresh run output')
   const {archive,seed}=archiveW3ColdInput(input,dir,entries,cold)
-  const session={schema:'aerolink.fms-w3-paired-session.v1',id:randomUUID(),plan,sessionIndex:index,slots,manifest,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
+  const session=w3SessionRecord({id:randomUUID(),plan,sessionIndex:index,slots,manifest,manifestInput:resolve(options['w3-input']!),dir,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline})
   writeFileSync(join(dir,'w3-session.json'),JSON.stringify(session,null,2),{flag:'wx'})
   let stopped:string|null=null,failure:{error:unknown}|null=null
   try {
