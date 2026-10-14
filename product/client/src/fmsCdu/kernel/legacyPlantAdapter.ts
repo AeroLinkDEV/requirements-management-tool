@@ -1,6 +1,7 @@
 import { DualFmsSystem } from "../dualFms";
 import { FlightSimulator } from "../flight";
 import { ScriptedFms } from "../scriptedFms";
+import type { KernelUnits } from "./actions";
 import { FRAME_SECONDS, FRAME_UNITS, epochMs, type KernelTime } from "./time";
 
 /**
@@ -27,9 +28,11 @@ export class LegacyUnitClock {
   advanceFrame() { this.units += FRAME_UNITS; }
 }
 
-/** One composition's legacy step, run as INTEGRATE. */
+/** One composition's legacy step, run as INTEGRATE, and the units its ACTION phase reaches. */
 export interface LegacyPlant {
   readonly clock: LegacyUnitClock;
+  /** The computers, flights and (on the bench's composition) the dual system that submitted actions act on (I1b). */
+  readonly units: KernelUnits;
   /** INTEGRATE while flying: L1, then L2 (`step(0.25)`). */
   integrate(): void;
   /** INTEGRATE in a flight freeze: L1, then the computers tick while the aircraft stands still. Absent where unsupported. */
@@ -44,9 +47,9 @@ export function singleComposition(utc0Ms: number, options: FmsOptions = {}) {
   const clock = new LegacyUnitClock(utc0Ms);
   const fms = new ScriptedFms(clock.now, options);
   const sim = new FlightSimulator(fms);
-  const plant: LegacyPlant = { clock, integrate: () => { clock.advanceFrame(); sim.step(FRAME_SECONDS); } };
   // Start-state placement is ACTION work: publish its observation before t0 checks without a plant/time step.
   const settleStart = () => sim.observe(0);
+  const plant: LegacyPlant = { clock, units: { computers: [fms], flights: [sim], system: null, settleStart }, integrate: () => { clock.advanceFrame(); sim.step(FRAME_SECONDS); } };
   return { clock, fms, sim, plant, settleStart };
 }
 
@@ -54,11 +57,12 @@ export function singleComposition(utc0Ms: number, options: FmsOptions = {}) {
 export function dualComposition(utc0Ms: number, options: DualOptions = {}) {
   const clock = new LegacyUnitClock(utc0Ms);
   const system = new DualFmsSystem(clock.now, options);
+  const settleStart = () => system.settleStart();
   const plant: LegacyPlant = {
     clock,
+    units: { computers: system.computers, flights: system.flights, system, settleStart },
     integrate: () => { clock.advanceFrame(); system.step(FRAME_SECONDS); },
     hold: () => { clock.advanceFrame(); system.tick(); },
   };
-  const settleStart = () => system.settleStart();
   return { clock, system, plant, settleStart };
 }

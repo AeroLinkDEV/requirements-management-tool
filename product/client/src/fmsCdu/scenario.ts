@@ -1,7 +1,10 @@
+import type { ReadView } from "./computation";
 import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, errorProblem, settingProblem } from "./baro";
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
+import type { MethodRoles, ViewOf } from "./computation";
+import type { ActionTarget, KernelOutcome } from "./kernel/actions";
 import { FmsKernel } from "./kernel/kernel";
 import { singleComposition } from "./kernel/legacyPlantAdapter";
 import { FRAME_SECONDS } from "./kernel/time";
@@ -162,7 +165,22 @@ export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed 
  */
 export type RunContext = { variant: string; cycle: string; data?: string; profile?: string; surface?: string };
 
-const isExpectation = (action: Action) => action.kind.startsWith("expect");
+const isExpectation = (action: ReadView<Action>) => action.kind.startsWith("expect");
+
+/**
+ * A v1 step or check as the runner executed it in the ACTION phase (#1502 D5 7.5), for the kernel to journal with
+ * origin v1-translated: a start state's placement, a step's action, or a check's result when it finished. The kernel
+ * takes them after each poll, in the order they ran, and allocates their submissionSeq then.
+ */
+export type Translation = {
+  readonly kind: "config.surface" | "ios.place" | "scenario.step" | "scenario.check";
+  /** The step (1-based) for a step or check; absent for the start state. */
+  readonly step?: number;
+  readonly payload: unknown;
+  readonly outcome: KernelOutcome;
+  readonly target: ActionTarget;
+};
+const NO_TRANSLATIONS: readonly Translation[] = Object.freeze([]);
 
 /** Characters a scenario's text entry can type, as the keys that type them. */
 export const keysFor = (text: string): CduFunction[] =>
@@ -173,7 +191,7 @@ export const linePattern = (text: string) =>
   `^\\s*${text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ +/g, "\\s+")}\\s*$`;
 
 /** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
-export function describeStep(step: ScenarioStep, index = 0): string {
+export function describeStep(step: ReadView<ScenarioStep>, index = 0): string {
   const w = step.when;
   const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "below" ? `At or below ${w.feet} ft` : w.kind === "above" ? `When the altimeter reads ${w.feet} ft or more` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : w.kind === "fafDistance" ? `Within ${w.nm} NM along the predicted path to the FAF` : `When ${w.waypoint} is the active waypoint`;
   const a = step.action;
@@ -415,6 +433,13 @@ export function scenarioProblems(value: unknown): string[] {
 // ------------------------------------------------------------------ running
 
 /**
+ * Every public method of ScenarioRunner and what it is (computation.ts MethodRole; #1517 I1b's structural guard): the
+ * kernel polls the run, takes what it translated and stops it (`scenario.stop`); the bench reads it through RunView.
+ */
+const SCENARIO_RUNNER_ROLES = { abandon: "kernel-internal", poll: "kernel-internal", takeTranslations: "kernel-internal" } as const satisfies MethodRoles<ScenarioRunner>;
+export type RunView = ViewOf<ScenarioRunner, typeof SCENARIO_RUNNER_ROLES>;
+
+/**
  * Runs a scenario against a simulation. It observes; it does not fly the aircraft or move the clock. The kernel
  * (kernel/kernel.ts) polls it in each frame's ACTION phase, after the step that led into the frame; the bench and
  * runHeadless both advance the kernel.
@@ -438,6 +463,8 @@ export class ScenarioRunner {
   private stopped = false;
   private failure: "error" | null = null;
   private endedAt: number | null = null;
+  /** What ran in ACTION since the kernel last took it (Translation). */
+  private translations: Translation[] = [];
 
   constructor(scenario: Scenario, fms: ScriptedFms, context: RunContext = { variant: "not recorded", cycle: fms.activeCycle.id }, sim: FlightSimulator | null = null, settleStart: () => void = () => sim?.observe(0)) {
     this.scenario = structuredClone(scenario);
@@ -446,12 +473,16 @@ export class ScenarioRunner {
     const problems = scenarioProblems(scenario);
     // The surface is declared first; the start state sets up the fresh simulation before the first step; the context
     // is read after both.
-    if (!problems.length && this.scenario.surface) fms.declareSurface(this.scenario.surface);
+    if (!problems.length && this.scenario.surface) {
+      fms.declareSurface(this.scenario.surface);
+      this.translations.push({ kind: "config.surface", payload: { kind: "config.surface", surface: this.scenario.surface }, outcome: { status: "accepted" }, target: "plant" });
+    }
     if (!problems.length && this.scenario.start) {
       const start = this.scenario.start;
       const set = fms.compute(() => START_STATES[start].setUp(fms, sim ?? undefined));
       if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
       else settleStart();
+      this.translations.push({ kind: "ios.place", payload: { kind: "ios.place", startState: start }, outcome: "refused" in set ? { status: "refused", reason: set.refused } : { status: "accepted" }, target: "plant" });
     }
     this.problems = problems;
     this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(fms.aircraftProfile), surface: `${fms.surface.id} (${fms.surface.basis})` };
@@ -462,6 +493,13 @@ export class ScenarioRunner {
   }
 
   get startedAt() { return new Date(this.start); }
+  /** The run's identity for `scenario.stop`: the scenario and the instant it started. */
+  get runId() { return `${this.scenario.id}@${new Date(this.start).toISOString()}`; }
+  /** Kernel-internal: the v1 steps and checks executed since the last call, in order (Translation). */
+  takeTranslations(): readonly Translation[] {
+    if (!this.translations.length) return NO_TRANSLATIONS;
+    const taken = this.translations; this.translations = []; return taken;
+  }
   /** The GPS inputs that, with the start time and the steps, fix the GPS timeline. */
   get gpsSeeds() { return { constellation: this.fms.gps[0].constellationSeed, receivers: this.fms.gps.map(receiver => receiver.seed) }; }
   get elapsed() { return (this.fms.now.getTime() - this.start) / 1000; }
@@ -508,11 +546,12 @@ export class ScenarioRunner {
           // A fresh alert check counts what the last action itself raised, so the baseline is taken just before it.
           this.previousAlerts = this.fms.recallList.length;
           // Each action is one kernel computation (#1518), settled when it ends as the bench settles a control.
-          this.fms.compute(() => this.act(step.action));
-          this.finish({ status: "done", at: now, ...(isSensorStimulus(step.action) ? { actual: describeSensorStimulus(step.action) } : {}) });
+          const execution = this.fms.compute(() => this.act(step.action));
+          this.finish({ status: "done", at: now, ...(isSensorStimulus(step.action) ? { actual: describeSensorStimulus(step.action) } : {}) }, execution);
         }
       } catch (error) {
         this.results[this.next] = { status: "error", at: now, actual: error instanceof Error ? error.message : String(error) };
+        this.translate(this.results[this.next]);
         this.next += 1;
         this.failure = "error";
         this.end("not reached");
@@ -535,7 +574,17 @@ export class ScenarioRunner {
     this.endedAt ??= this.elapsed;
   }
 
-  private finish(result: StepResult) {
+  /** The step at `next` as the kernel journals it: its action and outcome, or its check and result. */
+  private translate(result: StepResult, execution?: KernelOutcome) {
+    const action = this.scenario.steps[this.next].action, check = isExpectation(action);
+    this.translations.push({
+      kind: check ? "scenario.check" : "scenario.step", step: this.next + 1, payload: structuredClone(action), target: "scenario",
+      outcome: result.status === "error" ? { status: "refused", reason: result.actual ?? "error" } : check ? { status: "accepted", detail: { status: result.status, actual: result.actual } } : execution ?? { status: "accepted" },
+    });
+  }
+
+  private finish(result: StepResult, execution?: KernelOutcome) {
+    this.translate(result, execution);
     this.results[this.next] = result;
     this.previousAt = result.at ?? this.elapsed;
     this.next += 1;
@@ -564,7 +613,7 @@ export class ScenarioRunner {
     return leg?.kind === "wpt" ? leg.ident : null;
   }
 
-  private act(action: Action) {
+  private act(action: Action): KernelOutcome | undefined {
     const fms = this.fms;
     if (isSensorStimulus(action)) { applySensorStimulus(fms, action); return; }
     switch (action.kind) {
@@ -573,31 +622,40 @@ export class ScenarioRunner {
       case "condition": fms.setCondition(action.condition, action.on); return;
       case "alert": fms.raiseAlert(action.text); return;
       case "procedure": fms.selectProcedure(action.procedure, action.ident, action.transition); return;
-      case "armApproach": fms.armApproach(action.on !== false); return;
+      case "armApproach": {
+        const on = action.on !== false;
+        const armed = fms.armApproach(on);
+        // False on a disarm is the resolved off state, not a refusal. Preserve the legacy done/timing separately.
+        return !on || armed ? { status: "accepted" } : { status: "refused", reason: fms.approachRefusal ?? "the approach cannot be armed" };
+      }
       // TOGA: the FMS missed-approach request and, under the helicopter profile, the autopilot's GA.
       // A refused TOGA (no missed approach to go around onto, or the FMS failed) is an error in the run, never a silent pass.
       case "goAround": if (!fms.goAround()) throw new Error("TOGA refused by the FMS: no missed approach ahead, or the FMS has failed"); this.sim?.engageGoAround(); return;
       case "proceedPins": if (!(this.sim ? this.sim.proceedFromPins(action) : fms.proceedFromPins(action))) throw new Error("PinS continuation refused: MAP, chart or crew conditions unavailable"); return;
       case "wind": Object.assign(fms.wind, { direction: action.direction, speed: action.speed }); return;
-      case "baro":
-        if (action.declaredQnh !== undefined) fms.declareQnh(action.declaredQnh, "scenario");
-        if (action.errorFt !== undefined) fms.setBaroError(action.errorFt, "scenario");
-        if (action.setting !== undefined) fms.setBaroSetting(action.setting === "STD" ? { kind: "STD" } : { kind: "QNH", hPa: action.setting });
-        return;
+      case "baro": {
+        let applied = true;
+        // Do not short-circuit: retain every existing native call, its order and any partial effects.
+        if (action.declaredQnh !== undefined) applied = fms.declareQnh(action.declaredQnh, "scenario") && applied;
+        if (action.errorFt !== undefined) applied = fms.setBaroError(action.errorFt, "scenario") && applied;
+        if (action.setting !== undefined) applied = fms.setBaroSetting(action.setting === "STD" ? { kind: "STD" } : { kind: "QNH", hPa: action.setting }) && applied;
+        return applied ? { status: "accepted" } : { status: "refused", reason: "out of the bench's range" };
+      }
       case "autopilot": {
         const sim = this.sim;
         if (!sim) throw new Error("autopilot selections need the flight simulation");
-        if (action.altitude !== undefined) sim.selectAltitude(action.altitude);
+        let selected = true;
+        if (action.altitude !== undefined) selected = sim.selectAltitude(action.altitude) && selected;
         if (action.verticalSpeed !== undefined && !sim.engageVerticalSpeed(action.verticalSpeed)) throw new Error(`VS is not available in the ${fms.aircraftProfile.id} profile`);
         if (action.hold && !sim.engageAltitudeHold()) throw new Error(`ALT is not available in the ${fms.aircraftProfile.id} profile`);
-        if (action.speed !== undefined) sim.selectSpeed(action.speed);
+        if (action.speed !== undefined) selected = sim.selectSpeed(action.speed) && selected;
         if (action.heading !== undefined) sim.selectHeading(action.heading);
         if (action.lnav) sim.armLnav();
         if (action.hover && !sim.engageHover()) throw new Error("HOV is not available: above the coordinated-flight speed, or no eligible hover feedback");
         if (action.groundSpeed !== undefined && !sim.engageGroundSpeed(action.groundSpeed)) throw new Error("GSPD is not available: out of range, above the low-speed regime, or no eligible hover feedback");
         if (action.transitionUp && !sim.engageTransitionUp()) throw new Error("TU is not available: not in a hover mode, too fast, or no valid radio height");
         if (action.forceTrimRelease && !sim.releaseForceTrim()) throw new Error("the force trim release is the helicopter profile's");
-        return;
+        return selected ? { status: "accepted" } : { status: "refused", reason: "the autopilot refused a selection" };
       }
       case "gps": {
         // Through the same stimulus record as the GPS sensors tab, so the tab shows what the scenario applied.
@@ -727,7 +785,7 @@ export function runHeadless(scenario: Scenario, start = scenarioStart(scenario) 
 // ------------------------------------------------------------------ outputs
 
 /** The scenario as test procedure text, in the fields of an AeroLink test procedure proposal. */
-export function procedureText(scenario: Scenario) {
+export function procedureText(scenario: ReadView<Scenario>) {
   const checks = scenario.steps.filter(step => isExpectation(step.action));
   return {
     title: scenario.title,
@@ -748,7 +806,7 @@ export function procedureText(scenario: Scenario) {
   };
 }
 
-const usesGps = (scenario: Scenario) => scenario.steps.some(step => step.action.kind === "gps");
+const usesGps = (scenario: ReadView<Scenario>) => scenario.steps.some(step => step.action.kind === "gps");
 
 const OUTCOME_TEXT: Record<RunOutcome, string> = {
   running: "RUNNING",
@@ -762,7 +820,7 @@ const OUTCOME_TEXT: Record<RunOutcome, string> = {
 };
 
 /** A short, stable fingerprint of the scenario as run (FNV-1a over its JSON), so a report names what it ran. */
-export function scenarioDigest(scenario: Scenario) {
+export function scenarioDigest(scenario: ReadView<Scenario>) {
   let hash = 0x811c9dc5;
   for (const ch of JSON.stringify(scenario)) {
     hash ^= ch.codePointAt(0)!;
@@ -772,7 +830,7 @@ export function scenarioDigest(scenario: Scenario) {
 }
 
 /** A run report in Markdown, from the run as it was: its scenario, context and results are fixed when it starts. */
-export function reportMarkdown(runner: ScenarioRunner) {
+export function reportMarkdown(runner: RunView) {
   const { scenario, results, context } = runner;
   const rows = scenario.steps.map((step, i) => {
     const result = results[i];
@@ -807,7 +865,7 @@ export function reportMarkdown(runner: ScenarioRunner) {
 }
 
 /** The GPS stimuli the run applied, one row each (a clear is a row too), with its receiver, time and values. */
-function gpsRows(runner: ScenarioRunner) {
+function gpsRows(runner: RunView) {
   const cell = (value: string) => value.replace(/\|/g, "\\|");
   const rows = runner.scenario.steps.flatMap((step, i) => {
     const action = step.action, result = runner.results[i];

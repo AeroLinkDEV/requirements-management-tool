@@ -1,7 +1,8 @@
+import type { ReadView } from "./computation";
 import type { FmsSide } from "./crossTalk";
-import { racetrackOutline, sarTrack, segmentsOutline, type FlightSimulator, type Guidance } from "./flight";
+import { racetrackOutline, sarTrack, segmentsOutline, type FlightView, type Guidance } from "./flight";
 import { arcSweep, bearingDeg, distanceNm, longitudeDelta, offset, type LatLon, type Route } from "./fmsModel";
-import type { ScriptedFms } from "./scriptedFms";
+import type { FmsView } from "./scriptedFms";
 import { MAP_CF_EXTENT_NM, MAP_RADIUS_UNITS } from "./mapDrawing";
 import "./FmsMap.css";
 
@@ -15,8 +16,8 @@ import "./FmsMap.css";
  * for the leg it is flying, labelled with its side ("FMS 2 guiding → TOLGU"), so the two are never mixed.
  */
 
-type Computer = { side: FmsSide; fms: ScriptedFms; sim: FlightSimulator };
-type Props = { fms: ScriptedFms; sim: FlightSimulator; side: FmsSide; guiding: Computer | null; range: number };
+type Computer = { side: FmsSide; fms: FmsView; sim: FlightView };
+type Props = { fms: FmsView; sim: FlightView; side: FmsSide; guiding: Computer | null; range: number };
 
 const R = MAP_RADIUS_UNITS; // the map is drawn in a -R..R box; the range ring at R is the selected range
 
@@ -52,10 +53,10 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
     x: longitudeDelta(centre.lon, p.lon) * 60 * Math.cos((centre.lat * Math.PI) / 180) * scale,
     y: -(p.lat - centre.lat) * 60 * scale,
   });
-  const path = (points: LatLon[]) => points.map((p, i) => { const q = project(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join("");
+  const path = (points: readonly LatLon[]) => points.map((p, i) => { const q = project(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join("");
 
   /** Polylines of a route from a starting point; a discontinuity breaks the line. */
-  const routeLines = (start: LatLon, route: Route, joining = false) => {
+  const routeLines = (start: LatLon, route: ReadView<Route>, joining = false) => {
     const legs = route.legs;
     const lines: LatLon[][] = [];
     let current: LatLon[] = [start];
@@ -79,7 +80,7 @@ export default function FmsMap({ fms, sim, side, guiding, range }: Props) {
   };
 
   const active = fms.activeRoute;
-  const hasJoin = (route: Route) => route.legs.some(leg => leg.kind === "wpt" && leg.ident === "JN");
+  const hasJoin = (route: ReadView<Route>) => route.legs.some(leg => leg.kind === "wpt" && leg.ident === "JN");
   const previewJoin = fms.routeStatus === "MOD" && hasJoin(fms.route) ? fms.hoverJoinPreview : null;
   const committedJoin = hasJoin(active) ? fms.hoverJoin : null;
   // Preserve the existing MOD-preview priority: replace the ACT chord only when its ACT curve is displayed.

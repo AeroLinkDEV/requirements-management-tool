@@ -323,9 +323,17 @@ test('a step that throws ends the run as an execution error, not a pass or a fai
     { when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG'] } },
     { when: { kind: 'start' }, action: { kind: 'expectLamp', lamp: 'MSG', lit: false } },
   ]), fms)
-  new FmsKernel(plant, runner).advance(4)
+  const kernel = new FmsKernel(plant, runner)
+  kernel.advance(4)
   expect(runner.results).toEqual([{ status: 'error', at: 0, actual: 'panel disconnected' }, { status: 'not reached' }])
   expect(runner.outcome).toBe('error')
+  // The legacy error is separate from its D5 journal outcome; neither may silently become an accepted input.
+  expect(kernel.record().journal).toEqual([{
+    submissionSeq: 1, recordOrdinal: 1, frame: 0, phase: 'ACTION', orderInPhase: 0, origin: 'v1-translated',
+    kind: 'scenario.step', target: 'scenario', payload: { kind: 'keys', keys: ['PROG'] },
+    source: { kind: 'scenario', id: 'contract@2026-09-27T14:00:00.000Z step 1', surface: 'main' },
+    outcome: { status: 'refused', reason: 'panel disconnected' }, effectsDigest: null,
+  }])
 })
 
 test('stopping a run is its own outcome', () => {

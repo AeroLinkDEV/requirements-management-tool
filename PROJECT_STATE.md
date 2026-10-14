@@ -535,6 +535,11 @@ backend-only token URLs, disabled Esri request logging and redirects, attributio
     with no ADF position-navigation contribution or installed hardware acceptance claim.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
+- The bench's kernel journals crew, CDU, instructor and scenario actions, with receipt-only submission and separate
+  execution outcomes. Read-only unit views close nested mutation paths; both CDU sides and main/pop-out sources are
+  attributed. Control records have a separate sequence and share the journal's ordering ordinal. The exported ordering
+  journal is an analyzer foundation; complete content-addressed reproduction, replay, snapshots and transport remain
+  later stages, and this routing does not qualify model behavior or performance.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
   accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model: the aircraft flies a heading
   through the air, the wind carries the air mass, and the track and ground speed are the vector sum (no speed floor;

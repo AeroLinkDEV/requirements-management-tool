@@ -2,7 +2,7 @@ import { alert } from "./alerts";
 import type { AlertCauseOwner, CrossTalkPort, RadioManagementPort } from "./crossTalk";
 import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey, type StandbyKey, adfFrequency } from "./radioManagement";
 import type { CivilSolution } from "./civilNavigation";
-import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
+import { MagvarModel, normalizeAngle, polarRegion, type AngleReference, type MagvarView } from "./magvar";
 import { WMM2025_DATABASE } from "./wmm2025";
 import { STANDARD_HPA, errorProblem, formatSetting, indicatedAltitudeFt, settingProblem, type BaroSetting } from "./baro";
 import { parseArinc424, type Arinc424Result } from "./arinc424";
@@ -16,9 +16,9 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { Constellation, seededRandom } from "./gnss";
-import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
+import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus, type GpsReceiverView } from "./gps";
 import { stimulusFor } from "./gpsStimulus";
-import { asComputations } from "./computation";
+import { actionsOf, asComputations, type MethodRoles, type ReadView, type ViewOf } from "./computation";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachSensorOutput, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
@@ -199,6 +199,78 @@ export type DeselectableInput = "TAS" | "HDG" | "DME" | "VOR/DME/TCN" | "DVS" | 
 type Computation = { depth: number; observing: number; settling: boolean; dirty: boolean; members: ScriptedFms[] };
 const SETTLE_ROUNDS = 4;
 
+/**
+ * Every public method of ScriptedFms and what it is (computation.ts MethodRole; #1517 I1b's structural guard). The
+ * actions are the ones asComputations wraps; only the queries are in FmsView, the read-only view the bench's
+ * components get. A public method missing here fails the typecheck.
+ */
+const SCRIPTED_FMS_ROLES = {
+  // Crew, bench and scenario actions: each one kernel computation.
+  abeamPoints: "action", acknowledgeComputerMessage: "action", activateHover: "action", activateSar: "action", activateSecondary: "action",
+  addMark: "action", answerCall: "action", armApproach: "action", cancelHover: "action", cancelTdn: "action", changeHold: "action",
+  chooseEntry: "action", completeSar: "action", copyActiveToSecondary: "action", createPilot: "action", createUserWaypoint: "action",
+  declareQnh: "action", declareSurface: "action", defineHold: "action", defineMoving: "action", definePoint: "action",
+  defineTemporary: "action", deselectRaimSatellite: "action", designateHoverMark: "action", designateHoverMarkIdent: "action",
+  designateHoverMarkOnTop: "action", directTo: "action", endCall: "action", enterManualWind: "action", enterQnh: "action",
+  enterWaypoint: "action", eraseHold: "action", eraseModification: "action", executeTdn: "action", forgetPilot: "action",
+  goAround: "action", importUserDatabase: "action", initializePosition: "action", interceptCourse: "action", interruptSar: "action",
+  loadArinc424: "action", loadBacktrack: "action", loadCompanyRoute: "action", loadMagvar: "action", loadNavData: "action",
+  modify: "action", open: "action", overrideDiscontinuity: "action", placeAircraft: "action", powerOff: "action", powerOn: "action",
+  predictRaimAt: "action", predictRaimEta: "action", proceedFromPins: "action", raiseAlert: "action", readMessages: "action",
+  receiveComputerAlert: "action", receiveComputerPlan: "action", receiveComputerSettings: "action", refreshSystemNavigationMonitoring: "action", replaceLegs: "action",
+  requestMissedApproach: "action", saveCompanyRoute: "action", selectGpsReceiver: "action", selectProcedure: "action",
+  selectRunway: "action", sequence: "action", setAirInputFaults: "action", setApirsFaultBias: "action", setApproachTemperature: "action",
+  setBaroError: "action", setBaroSetting: "action", setDeselected: "action", setDmeDeselected: "action", setDvsInputSurface: "action",
+  setDvsWindMagnetic: "action", setFafAltitude: "action", setFuel: "action", setGpsBaro: "action", setInhibited: "action",
+  setNavRadioMode: "action", setNdbOffAir: "action", setOffset: "action", setRadio: "action", setRadioFaults: "action", setRnp: "action",
+  setScratch: "action", setStationFault: "action", setStationOffAir: "action", setUtcTime: "action", setWaterCurrent: "action",
+  squawk: "action", startSelfTest: "action", swapCycles: "action", swapRadio: "action", toggleAngleReference: "action",
+  // State changes that run their own computation.
+  press: "self-computing", setCondition: "self-computing",
+  // Reads: they change nothing (#1518), so they make up the read-only view.
+  adfBearing: "query", adfRelativeBearing: "query", angleFromEntry: "query", angleText: "query", brightness: "query",
+  compensatedAltitude: "query", compensatedConstraint: "query", coordinates: "query", displayAngle: "query", dmeDistance: "query",
+  dmeReportedIdent: "query", dmeSlantRangeNm: "query", dmeStation: "query", enrouteEnd: "query", entryFor: "query",
+  etaAlongPath: "query", exportUserDatabase: "query", fuelPerformance: "query", groundSpeedOn: "query", hasCondition: "query",
+  holdEntryFor: "query", holdExceedsProtection: "query", inputState: "query", isMoving: "query", lamps: "query", legGeometry: "query",
+  movingAge: "query", movingPositionNow: "query", navRadial: "query", navRadioMode: "query", navStation: "query",
+  nearestVorDme: "query", profile: "query", radioObservations: "query", radioReceiving: "query", rendezvous: "query",
+  rendezvousFor: "query", revision: "query", screen: "query", shownEta: "query", splitsHover: "query", subscribe: "query",
+  tacanBearingAndRange: "query", tacanStation: "query", tacanStations: "query", tdnAngle: "query", vorDmeStations: "query",
+  // The step's, the computation's and the dual system's own machinery.
+  advisory: "kernel-internal", alert: "kernel-internal", arrive: "kernel-internal", attachComputerPorts: "kernel-internal",
+  attachHoldPath: "kernel-internal", attachSettle: "kernel-internal", compute: "kernel-internal", gpsUpdated: "kernel-internal",
+  notifyComputerState: "kernel-internal", observe: "kernel-internal", observeAircraft: "kernel-internal",
+  powerInterrupt: "kernel-internal", receiveSystemNavigation: "kernel-internal", recordFault: "kernel-internal",
+  refreshSensorInput: "kernel-internal", resolveWaypoint: "kernel-internal", setAircraft: "kernel-internal",
+  setReceiverCommandAuthority: "kernel-internal", shareComputation: "kernel-internal", tick: "kernel-internal",
+  updateNavigation: "kernel-internal", updatePerformance: "kernel-internal", updateRendezvous: "kernel-internal",
+} as const satisfies MethodRoles<ScriptedFms>;
+
+// Ports are exposed only for display reads; their command and draining methods remain unit machinery.
+const CROSS_TALK_VIEW_ROLES = {
+  requestMode: "kernel-internal", confirmMode: "kernel-internal", beginEdit: "kernel-internal", finishEdit: "kernel-internal",
+  crossfill: "kernel-internal", settingsChanged: "kernel-internal", healthChanged: "kernel-internal", navigationChanged: "kernel-internal",
+  publishAlert: "kernel-internal", reportAlertCause: "kernel-internal", retainAlertCauses: "kernel-internal",
+  acknowledgeMessage: "kernel-internal", missedApproachRequested: "kernel-internal", setIndependent: "kernel-internal",
+} as const satisfies MethodRoles<CrossTalkPort>;
+const RADIO_PORT_VIEW_ROLES = {
+  tune: "kernel-internal", swap: "kernel-internal", receiving: "query", ndbTransmitting: "query",
+  setNdbOffAir: "kernel-internal", stationFaults: "query", setStationFaults: "kernel-internal", dmeReceiving: "query",
+  dmeTuning: "query", navMode: "query", setNavMode: "kernel-internal", autoTune: "kernel-internal", drainEvents: "kernel-internal",
+  faults: "query", setFaults: "kernel-internal", dmeHold: "query", setDmeHold: "kernel-internal", adf: "query",
+  setAdf: "kernel-internal", testState: "query", pressTest: "kernel-internal", setScanRoster: "kernel-internal",
+  scanRoster: "query", scanning: "query",
+} as const satisfies MethodRoles<RadioManagementPort>;
+
+/** What the bench's components get of a computer: its queries and properties, never a way to change it (submit()). */
+export type FmsView = Omit<ViewOf<ScriptedFms, typeof SCRIPTED_FMS_ROLES>, "gps" | "magvar" | "radioPort" | "dualOperation"> & {
+  readonly gps: readonly GpsReceiverView[];
+  readonly magvar: MagvarView;
+  readonly radioPort: ViewOf<RadioManagementPort, typeof RADIO_PORT_VIEW_ROLES> | null;
+  readonly dualOperation: ViewOf<CrossTalkPort, typeof CROSS_TALK_VIEW_ROLES> | null;
+};
+
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
   private changes = 0;
@@ -213,25 +285,7 @@ export class ScriptedFms implements CduBackend {
   private settler: (() => void) | null = null;
   // The actions the crew, the bench and the scenarios take, each one computation (press and setCondition compute
   // themselves). The steps' own internals (tick, arrive, updateNavigation, setAircraft...) run inside a step already.
-  static {
-    asComputations(ScriptedFms, [
-      "abeamPoints", "acknowledgeComputerMessage", "activateHover", "activateSar", "activateSecondary", "addMark", "answerCall",
-      "armApproach", "cancelHover", "cancelTdn", "changeHold", "chooseEntry", "completeSar", "copyActiveToSecondary",
-      "createPilot", "createUserWaypoint", "declareQnh", "declareSurface", "defineHold", "defineMoving", "definePoint",
-      "defineTemporary", "deselectRaimSatellite", "designateHoverMark", "designateHoverMarkIdent", "designateHoverMarkOnTop",
-      "directTo", "endCall", "enterManualWind", "enterQnh", "enterWaypoint", "eraseHold", "eraseModification", "executeTdn",
-      "forgetPilot", "goAround", "importUserDatabase", "initializePosition", "interceptCourse", "interruptSar", "loadArinc424",
-      "loadBacktrack", "loadCompanyRoute", "loadMagvar", "loadNavData", "modify", "open", "overrideDiscontinuity",
-      "placeAircraft", "powerOff", "powerOn", "predictRaimAt", "predictRaimEta", "proceedFromPins", "raiseAlert",
-      "readMessages", "receiveComputerAlert", "receiveComputerPlan", "receiveComputerSettings", "refreshSystemNavigationMonitoring", "replaceLegs",
-      "requestMissedApproach", "saveCompanyRoute", "selectGpsReceiver", "selectProcedure", "selectRunway", "sequence",
-      "setAirInputFaults", "setApirsFaultBias", "setApproachTemperature", "setBaroError", "setBaroSetting", "setDeselected",
-      "setDmeDeselected", "setDvsInputSurface", "setDvsWindMagnetic", "setFafAltitude", "setFuel", "setGpsBaro",
-      "setInhibited", "setNavRadioMode", "setNdbOffAir", "setOffset", "setRadio", "setRadioFaults", "setRnp", "setScratch",
-      "setSensorHealth", "setStationFault", "setStationOffAir", "setSurfaceDrift", "setUtcTime", "setWaterCurrent", "squawk",
-      "startSelfTest", "swapCycles", "swapRadio", "toggleAngleReference",
-    ], self => self);
-  }
+  static { asComputations(ScriptedFms, actionsOf<ScriptedFms>(SCRIPTED_FMS_ROLES), self => self); }
   private page: PageId = "IDENT";
   private index = 0;
   private scratch = "";
@@ -292,18 +346,16 @@ export class ScriptedFms implements CduBackend {
   private readonly sensorPort: SensorInputPort | null;
   private sensorSequence = 0;
   private sensorFrame: SensorFrame | null = null;
-  /** Plan F11: when the FMS was last powered (KALMAN is available a minute later), the APIRS and DVS health (bench
-   * stimuli), the crew's water current for the DVS (M300 12-23), and the simulated surface drift the DVS sees. */
+  /** Plan F11: when the FMS was last powered (KALMAN is available a minute later), and the crew's water current for the
+   * DVS (M300 12-23). The APIRS and DVS fail through the apirsFail and dvsFail conditions. */
   private poweredAt = 0;
   private poweredOffAt: number | null = null;
-  private sensorHealth: Record<"APIRS" | "DVS", "NORMAL" | "FAIL"> = { APIRS: "NORMAL", DVS: "NORMAL" };
   /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/s². */
   private apirsBias = nominalApirsBias(1);
   private apirsFaultBias = { north: 0, east: 0 };
   private airInputFaults = { tasValid: true, headingValid: true, headingBiasDeg: 0 };
   private powerCycles = 1;
   private waterCurrent: { northKt: number; eastKt: number } | null = null;
-  private surfaceDrift = { northKt: 0, eastKt: 0 };
   private truthVelocity: { north: number; east: number; at: number } | null = null;
   private previousTruthVelocity: { north: number; east: number; at: number } | null = null;
   readonly predictiveRaim = { ident: null as string | null, eta: null as number | null, requestedAt: null as number | null };
@@ -1554,12 +1606,11 @@ export class ScriptedFms implements CduBackend {
     const bias = { north: this.apirsBias.north + this.apirsFaultBias.north, east: this.apirsBias.east + this.apirsFaultBias.east };
     const apirs = { northMs2: accel(north, previous?.north, bias.north), eastMs2: accel(east, previous?.east, bias.east) };
     const heading = (this.aircraft.heading ?? this.heading) * Math.PI / 180;
-    const overSurfaceNorth = north - this.surfaceDrift.northKt, overSurfaceEast = east - this.surfaceDrift.eastKt;
-    const dvs = { surface: this.dvsInputSurface, verticalFtMin: this.aircraft.verticalSpeed ?? 0, alongKt: overSurfaceNorth * Math.cos(heading) + overSurfaceEast * Math.sin(heading),
-      acrossKt: -overSurfaceNorth * Math.sin(heading) + overSurfaceEast * Math.cos(heading) };
+    // The Doppler measures over a still surface: no surface drift is modelled.
+    const dvs = { surface: this.dvsInputSurface, verticalFtMin: this.aircraft.verticalSpeed ?? 0, alongKt: north * Math.cos(heading) + east * Math.sin(heading),
+      acrossKt: -north * Math.sin(heading) + east * Math.cos(heading) };
     const word = <T>(value: T, failed: boolean) => ({ at: now, sequence, status: failed ? "FAIL" as const : "NORMAL" as const, value: failed ? null : value });
-    return { apirs: word(apirs, this.sensorHealth.APIRS === "FAIL" || this.injected.has("apirsFail")),
-      dvs: word(dvs, this.sensorHealth.DVS === "FAIL" || this.injected.has("dvsFail")) };
+    return { apirs: word(apirs, this.injected.has("apirsFail")), dvs: word(dvs, this.injected.has("dvsFail")) };
   }
   /**
    * A power interruption of the stated duration in simulation time (plan C2), independent of the flight tick: over
@@ -1574,7 +1625,6 @@ export class ScriptedFms implements CduBackend {
   }
   /** Bench fault stimulus (plan C2, F14): a deliberate APIRS accelerometer bias outside the nominal model, m/s². */
   setApirsFaultBias(northMs2: number, eastMs2: number) { this.apirsFaultBias = { north: northMs2, east: eastMs2 }; }
-  setSensorHealth(sensor: "APIRS" | "DVS", health: "NORMAL" | "FAIL") { this.sensorHealth[sensor] = health; }
   /** DVS STATUS 2/2 WATER CURRENT (M300 12-23): the surface's drift the crew enters, direction toward and speed. */
   private dvsMagnetic = false;
   /** DVS STATUS 2/2 shows the wind magnetic (or true); outside the polar area the crew toggles it (M300 12-22). */
@@ -1619,10 +1669,6 @@ export class ScriptedFms implements CduBackend {
   setWaterCurrent(toward: number | null, speedKt = 0) {
     this.waterCurrent = toward === null ? null
       : { northKt: speedKt * Math.cos(toward * Math.PI / 180), eastKt: speedKt * Math.sin(toward * Math.PI / 180) };
-  }
-  /** Bench: the true surface drift (a sea current) the Doppler measures against. */
-  setSurfaceDrift(toward: number, speedKt: number) {
-    this.surfaceDrift = { northKt: speedKt * Math.cos(toward * Math.PI / 180), eastKt: speedKt * Math.sin(toward * Math.PI / 180) };
   }
 
   /** The Doppler velocity in earth axes, rotated with the FMS's own heading (null without a valid word). */
@@ -2680,10 +2726,10 @@ export class ScriptedFms implements CduBackend {
     return true;
   }
 
-  private rendezvousKey(route: Route, ident: string) { return (route === this.active ? "ACT:" : "MOD:") + ident; }
+  private rendezvousKey(route: ReadView<Route>, ident: string) { return (route === this.active ? "ACT:" : "MOD:") + ident; }
 
   /** The M300 11-37 condition a moving waypoint at `index` of `route` falls under. */
-  private rendezvousCondition(route: Route, index: number): 1 | 2 | 3 | 4 {
+  private rendezvousCondition(route: ReadView<Route>, index: number): 1 | 2 | 3 | 4 {
     const first = route.legs.findIndex(leg => leg.kind === "wpt") === index;
     return route === this.active ? (index === 0 ? 1 : 2) : first ? 4 : 3;
   }
@@ -2694,7 +2740,7 @@ export class ScriptedFms implements CduBackend {
    * reading between computations gets the same answer without keeping it. Every computation ends by determining the
    * rest (settleRendezvous), so a read between computations finds them determined.
    */
-  rendezvousFor(route: Route, index: number): MovingRendezvous | null {
+  rendezvousFor(route: ReadView<Route>, index: number): MovingRendezvous | null {
     const leg = route.legs[index];
     if (leg?.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return null;
     const key = this.rendezvousKey(route, leg.ident);
@@ -2726,7 +2772,7 @@ export class ScriptedFms implements CduBackend {
    * previous waypoint, reached along the route, otherwise (2 and 3). Unachievable when no such point lies within a
    * travelling distance of 500 NM from there.
    */
-  private solveRendezvous(route: Route, index: number, ident: string): MovingRendezvous {
+  private solveRendezvous(route: ReadView<Route>, index: number, ident: string): MovingRendezvous {
     const now = this.now.getTime();
     const condition = this.rendezvousCondition(route, index);
     const tas = this.trueAirspeed ?? this.plannedSpeed;
@@ -3557,7 +3603,7 @@ export class ScriptedFms implements CduBackend {
    * A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. A runway belongs to
    * an airport, so it resolves in the context of a route: the active route unless a page asks about the modification.
    */
-  coordinates(ident: string, route: Route = this.active): LatLon | undefined {
+  coordinates(ident: string, route: ReadView<Route> = this.active): LatLon | undefined {
     const snapshot = route.legs.find(leg => leg.kind === "wpt" && leg.ident === ident && leg.position);
     if (snapshot?.kind === "wpt" && snapshot.position) return { ...snapshot.position };
     if (route === this.modified && this.crossfillPending) {
@@ -3592,7 +3638,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** A database position in the active cycle, looked up now: a runway in the context of the route's airports. */
-  private lookup(ident: string, route: Route): LatLon | undefined {
+  private lookup(ident: string, route: ReadView<Route>): LatLon | undefined {
     const generated = route.legs.find(leg => leg.kind === "wpt" && leg.ident === ident && leg.position);
     if (generated?.kind === "wpt") return generated.position;
     if (/^RW\d{2}[LRC]?$/.test(ident)) {

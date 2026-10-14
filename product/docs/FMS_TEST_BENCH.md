@@ -510,6 +510,15 @@ paused free flight advances the clock and timers while the aircraft stays frozen
 shows a stopped error and retains its instant until deliberate Fly resumes without replay. These are browser and
 kernel lifecycle rules, not CMA operating logic.
 
+Crew, CDU, instructor and translated scenario mutations are journaled at their ACTION boundary. A submission returns
+only its sequence receipt; the kernel publishes its accepted or refused outcome separately and records resolved
+toggle values, the addressed computer and the main/pop-out source. Both CDU panels preserve the held-key flag.
+Components read structural observer views, including nested route, wind, collection and timestamp data, rather than
+calling unit mutators. Operator halt/resume, rate and session reset have their own control sequence and share the
+journal's record ordinal; Stop remains a `scenario.stop` action. Flight freeze is a journaled IOS action and can take
+effect between frames within one advance call. The exported ordering journal includes an empty, versioned live queue.
+It is not yet a complete reproduction/replay record; content identity, replay and snapshots belong to later slices.
+
 A hidden owner's throttled timer wake-up still executes a bounded slice, rather than a whole potentially blocking
 batch. That can reduce achieved rate for pop-out stations; child rendering never compensates by advancing the clock.
 The old interval-count performance instrument cannot infer work from these partial/expired admissions or include
