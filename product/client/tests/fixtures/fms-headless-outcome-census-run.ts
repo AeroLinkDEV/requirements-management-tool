@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 
-const { values: options, positionals } = parseArgs({ allowPositionals: true, options: { out: { type: 'string' }, only: { type: 'string' } } })
+const { values: options, positionals } = parseArgs({ allowPositionals: true, options: { out: { type: 'string' }, only: { type: 'string' }, files: { type: 'string' } } })
 const client = resolve(import.meta.dirname, '..', '..')
 const git = (...args: string[]) => execFileSync('git', ['-C', client, ...args], { encoding: 'utf8' }).trim()
 const identity = () => ({
@@ -92,7 +92,9 @@ const HAS_SCENARIO_IMPORT = new RegExp(SCENARIO_IMPORT.source)
 function sites() {
   const dir = outDir()
   const before = identity()
-  const found = inventory()
+  const all = inventory()
+  // --files narrows a trial run to spec files whose name contains the text; evidence runs take every file.
+  const found = options.files ? { ...all, files: all.files.filter(file => file.includes(options.files!)) } : all
   writeFileSync(join(dir, 'sites-inventory.json'), JSON.stringify(found, null, 1))
   console.log(`${found.calls} runHeadless calls on ${found.sites.length} lines in ${found.files.length} spec files`)
   const tests = join(client, 'tests')
@@ -107,8 +109,9 @@ function sites() {
       '',
     ].join('\n'))
     const begin = Date.now()
-    const result = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['playwright', 'test', '--config', config], {
-      cwd: client, env: { ...process.env, ...env }, encoding: 'utf8', shell: process.platform === 'win32', maxBuffer: 256 * 1024 * 1024,
+    // The CLI by path, with no shell: the checkout path may contain spaces.
+    const result = spawnSync(process.execPath, [join(client, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', '--config', config], {
+      cwd: client, env: { ...process.env, ...env }, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024,
     })
     writeFileSync(join(dir, `pw-${label}.log`), `${result.stdout}\n--- stderr ---\n${result.stderr}`)
     console.log(`${label}: exit ${result.status}, ${Math.round((Date.now() - begin) / 1000)} s`)
