@@ -442,7 +442,7 @@ export function captureEvidence(recorded: RecordedWindow, accounting: WindowAcco
 }
 
 
-export type FiniteMissionIdentity = { scenario: string; digest: string; startUtc: string; profile: string; steps: number; statuses: ('DONE' | 'PASS')[];
+export type FiniteMissionIdentity = { scenario: string; digest: string; startUtc: string; /** Input profile ID; the public report names its complete resolved identity below. */ profile: string; profileSummary: string; steps: number; statuses: ('DONE' | 'PASS')[];
   maxSimSeconds: number; gps: { model: string; constellation: number; receivers: number[] } }
 /** Admission of the public downloaded report, separately from the driver's non-PASS terminal observation. */
 export function finiteMissionEvidence(recorded: RecordedWindow, accounting: WindowAccounting, report: string, expected: FiniteMissionIdentity) {
@@ -469,7 +469,8 @@ export function finiteMissionEvidence(recorded: RecordedWindow, accounting: Wind
   const gps = `- GPS: model ${expected.gps.model}; constellation seed ${expected.gps.constellation}; receiver seeds ${expected.gps.receivers.join(' and ')};`
   if (!unique('**Result: ', '**Result: PASS**') ||
       !unique('- Scenario: ', `- Scenario: ${expected.scenario}, ${expected.digest}`) || started?.[1] !== expected.startUtc || lines.filter(line => line.startsWith('- Started: ')).length !== 1 ||
-      !unique('- Aircraft profile: ', `- Aircraft profile: ${expected.profile}`) || lines.filter(line => line.startsWith('- GPS: ')).length !== 1 || !lines.some(line => line.startsWith(gps)) ||
+      typeof expected.profileSummary !== 'string' || expected.profileSummary.split(' ')[0] !== expected.profile ||
+      !unique('- Aircraft profile: ', `- Aircraft profile: ${expected.profileSummary}`) || lines.filter(line => line.startsWith('- GPS: ')).length !== 1 || !lines.some(line => line.startsWith(gps)) ||
       expected.statuses.length !== expected.steps || rows.length !== expected.steps || rows.some((row, index) => Number(row[1]) !== index + 1 || row[3] !== expected.statuses[index]) || !rows.some(row => row[3] === 'PASS') ||
       !Number.isFinite(endedSeconds) || endedSeconds <= 64 || endedSeconds > expected.maxSimSeconds || endedSeconds * 4 !== close.completed)
     fail('public finite mission report is not complete PASS with the exact input, UTC, profile, seeds and end frame')

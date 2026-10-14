@@ -334,6 +334,7 @@ function browser() {
           // The served dist digest is part of the browser arm's identity: the report never pools two builds in a cell.
           run(dir, { kind: 'browser', sessionStartedAt: session.startedAt, block: round, round, position, arm: arm.arm, armIdentity: { ...arm.identity, ...served }, seed: seedRecord, configuration, rate, route: selectedRoute }, {
             AEROLINK_PERF_MODE: 'browser', AEROLINK_PERF_DIST: dist, AEROLINK_E2E_RUN_ID: runId,
+            ...(selectedRoute.workload !== 'W2' ? { AEROLINK_PERF_ARM: join(arm.root, 'product/client') } : {}),
             AEROLINK_PERF_WORKLOAD: selectedRoute.workload, AEROLINK_PERF_TOPOLOGY: selectedRoute.topology,
             AEROLINK_SHOWCASE_SEED: readFileSync(seedPath, 'utf8'), AEROLINK_PERF_RATE: String(rate), AEROLINK_PERF_CONFIGURATION: configuration,
           })

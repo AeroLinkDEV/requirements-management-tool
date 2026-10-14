@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
-import { ScenarioRunner } from '../src/fmsCdu/scenario'
+import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
 import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
 import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN } from '../perf/browser-capture'
@@ -891,13 +891,15 @@ function finiteRecord() {
   return { begin: 1003, end: 1253, timeline, tasks, closes: [close], rafIntervals: [], longTasks: [], loaf: [], events: [],
     capture: { clocks, boundaries: [boundary('warmupEnd', 1003, clocks[3]), boundary('scoredStart', 1003, clocks[3]), boundary('scoredEnd', 1253, clocks[4])], inputs: [] } }
 }
+// Full-format identity vector: declared profile v10/fingerprint/effectivity/configuration, independent of the reader.
+const finiteProfileSummary = 'cma9000-s300-heli-civil v10 (fnv1a-2bd6a2ac): CMA-9000 helicopter, civil SAR target (S/W -300 baseline); 80 of 81 parameters in force; declared only: settlingTime; civil-sar-s300: 87 configured references resolved; 46 options on (16 implemented, 21 partial, 9 pending)'
 const finiteExpected = { scenario: 'literal-perf-finite-v2', digest: 'fnv1a-12345678', startUtc: '2026-09-27T14:00:00.000Z',
-  profile: 'cma9000-s300-heli-civil', steps: 2, statuses: ['DONE', 'PASS'] as ('DONE' | 'PASS')[], maxSimSeconds: 900, gps: { model: 'literal-model/1', constellation: 1, receivers: [101, 202] } }
+  profile: 'cma9000-s300-heli-civil', profileSummary: finiteProfileSummary, steps: 2, statuses: ['DONE', 'PASS'] as ('DONE' | 'PASS')[], maxSimSeconds: 900, gps: { model: 'literal-model/1', constellation: 1, receivers: [101, 202] } }
 const finiteReport = `# FMS Test Bench run: Independent literal
 **Result: PASS**
 - Scenario: literal-perf-finite-v2, fnv1a-12345678
 - Started: 2026-09-27T14:00:00.000Z; ended after 1 min 4.75 s of simulated time
-- Aircraft profile: cma9000-s300-heli-civil
+- Aircraft profile: ${finiteProfileSummary}
 - GPS: model literal-model/1; constellation seed 1; receiver seeds 101 and 202; retained sky
 | 1 | At start, action. | 0 s | DONE |  |
 | 2 | Then check. | 1 min 4.75 s | PASS | observed |
@@ -991,4 +993,24 @@ test('the real recorder latches exactly256 completed warmup frames at a task tai
   expect(finiteRecorder(63).recorder.finiteStatus).toMatchObject({ ended: true, error: 'epoch ended before the scored window' })
   // Losing the actual frame256 clock must not let a later261-frame observation stand in for the exact boundary.
   expect(finiteRecorder(80, 7, true).recorder.finiteStatus).toMatchObject({ ended: true, error: 'warmup overshot its exact completed-frame boundary' })
+})
+
+
+test('finite admission binds the actual public report full profile identity separately from its input ID', ({ browserName: _browserName }, info) => {
+  const valid = finiteRecorder(64.75), recorded = valid.recorder.finish()
+  const report = reportMarkdown(valid.runner)
+  writeFileSync(info.outputPath('actual-public-finite-report.md'), report)
+  expect(valid.runner.outcome).toBe('passed')
+  expect(report).toContain('- Aircraft profile: cma9000-s300-heli-civil v10 (fnv1a-')
+  const expected = { ...finiteExpected, scenario: 'finite-recorder', digest: scenarioDigest(valid.runner.scenario),
+    steps: 1, statuses: ['PASS'] as ('DONE' | 'PASS')[], maxSimSeconds: 100,
+    profile: 'cma9000-s300-heli-civil', profileSummary: finiteProfileSummary,
+    gps: { model: 'aerolink-cma5024-sim/1', constellation: 1, receivers: [101, 202] } }
+  expect(report).toContain(`- Aircraft profile: ${finiteProfileSummary}`)
+  expect(expected.profileSummary).not.toBe(expected.profile)
+  const accounting = browserWindowAccounting({ rate: 64, ...recorded, closure: recorded.closes[0] })
+  expect(() => finiteMissionEvidence(recorded, accounting, report, expected)).not.toThrow()
+  expect(() => finiteMissionEvidence(recorded, accounting, report, { ...expected, profileSummary: expected.profile })).toThrow(/public finite mission report/)
+  for (const wrong of [report.replace(' v10 ', ' v11 '), report.replace('fnv1a-2bd6a2ac', 'fnv1a-deadbeef')])
+    expect(() => finiteMissionEvidence(recorded, accounting, wrong, expected)).toThrow(/public finite mission report/)
 })

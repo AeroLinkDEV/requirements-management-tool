@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { scenarioDigest } from '../src/fmsCdu/scenario'
 import { ACTIVE_PROFILE } from '../src/fmsCdu/profile'
@@ -82,6 +84,16 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
   const scenario = sourceScenario ? { ...sourceScenario, id: `${sourceScenario.id}-perf-finite-v2`,
     startTime: declaredRoute.scenarioStartUtc, profile: sourceScenario.profile ?? ACTIVE_PROFILE.id } : null
   const inputBytes = scenario ? JSON.stringify(scenario, null, 2) : null
+  let expectedProfileSummary: string | null = null
+  if (scenario) {
+    const arm = process.env.AEROLINK_PERF_ARM
+    if (!arm) throw new Error('finite browser capture requires its declared arm source')
+    // Same arm-module loading contract as the headless owner. Never borrow the harness model's profile identity.
+    const profiles = await import(pathToFileURL(join(arm, 'src/fmsCdu/profile.ts')).href)
+    const selected = profiles.profileById(scenario.profile)
+    if (!selected || selected.id !== scenario.profile) throw new Error('finite input profile is not available in the declared arm')
+    expectedProfileSummary = profiles.profileSummary(selected)
+  }
   const downloadText = async (name: string) => {
     const pending = page.waitForEvent('download')
     await scenarios.getByRole('button', { name, exact: true }).click()
@@ -166,7 +178,7 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     try {
       if (!accounting) throw new AccountingRefusal('finite mission has no conserved window')
       mission = finiteMissionEvidence(measured, accounting, report, { scenario: scenario!.id, digest: scenarioDigest(scenario!),
-        startUtc: scenario!.startTime!, profile: scenario!.profile!, steps: scenario!.steps.length, statuses: scenario!.steps.map(step => step.action.kind.startsWith('expect') ? 'PASS' : 'DONE'), maxSimSeconds: scenario!.maxSeconds,
+        startUtc: scenario!.startTime!, profile: scenario!.profile!, profileSummary: expectedProfileSummary!, steps: scenario!.steps.length, statuses: scenario!.steps.map(step => step.action.kind.startsWith('expect') ? 'PASS' : 'DONE'), maxSimSeconds: scenario!.maxSeconds,
         gps: { model: GPS_MODEL_VERSION, constellation: 1, receivers: [101, 202] } })
     } catch (error) { if (!(error instanceof AccountingRefusal)) throw error; refusal ??= error.message }
   }
