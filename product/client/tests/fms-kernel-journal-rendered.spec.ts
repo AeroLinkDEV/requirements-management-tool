@@ -1,6 +1,7 @@
 import type { KernelRecord } from '../src/fmsCdu/kernel/kernel'
 import type { Page, Locator } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { expect, renderedTest as test } from './isolated-client-test'
 
 // Only the real component can detect a first-render TDZ or a CDU/peer key bypassing the submission boundary.
@@ -130,6 +131,128 @@ const retainPublicJson = async (name: string, value: unknown) => {
   await writeFile(path, JSON.stringify(value, null, 2), 'utf8')
   await test.info().attach(name, { path, contentType: 'application/json' })
 }
+
+// The scripted replay owner cannot prove that the actual rendered download represents the live session.
+// Observe public boundaries only; the frozen encoder samples at the existing instant-close hook, with no step.
+test('the real exported journal replays every live frame in a fresh same-context composition', async ({ page }) => {
+  const context = {
+    utc0: '2026-09-29T15:00:00Z', profiles: ['cma9000-s300-heli-civil', 'cma9000-s300-heli-civil'],
+    variant: '002/003/005/102/103/302/303/502/503', flightFreeze: true, scenario: null,
+    start: 'kbtv-rnav15', data: 'bundled FAA CIFP 2609 KBTV over the built-in demonstration database',
+    userDatabase: 'anonymous, separate empty memory stores',
+  }
+  const epoch = new Date(context.utc0)
+  await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
+  await page.addInitScript(variant => { localStorage.clear(); localStorage.setItem('aerolink.fmsCdu.variant', variant) }, context.variant)
+  await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Hardware variation', exact: true })).toHaveValue(context.variant)
+  await page.evaluate(async () => {
+    const kernelPath = '/src/fmsCdu/kernel/kernel.ts', dualPath = '/src/fmsCdu/dualFms.ts', digestPath = '/tests/fixtures/fms-kernel-digest.ts'
+    const { FmsKernel }: typeof import('../src/fmsCdu/kernel/kernel') = await import(kernelPath)
+    const { DualFmsSystem }: typeof import('../src/fmsCdu/dualFms') = await import(dualPath)
+    const { CanonicalWriter, frameBytes }: typeof import('./fixtures/fms-kernel-digest') = await import(digestPath)
+    const submit = Object.getOwnPropertyDescriptor(FmsKernel.prototype, 'submit')!
+    const advance = Object.getOwnPropertyDescriptor(FmsKernel.prototype, 'advance')!
+    const settle = Object.getOwnPropertyDescriptor(DualFmsSystem.prototype, 'settleStart')!
+    let kernel: InstanceType<typeof FmsKernel> | null = null, system: InstanceType<typeof DualFmsSystem> | null = null
+    const frames: string[] = [], writer = new CanonicalWriter()
+    const observe = () => {
+      if (!system) throw new Error('Actual public start did not bind the live composition')
+      writer.length = 0
+      return Array.from(frameBytes({ computers: system.computers, flights: system.flights }, writer), byte => byte.toString(16).padStart(2, '0')).join('')
+    }
+    Object.defineProperty(DualFmsSystem.prototype, 'settleStart', { ...settle, value: function (this: InstanceType<typeof DualFmsSystem>, ...args: unknown[]) {
+      // eslint-disable-next-line typescript/no-this-alias -- retain the receiver observed at the real public start
+      system = this
+      return Reflect.apply(settle.value, this, args)
+    } })
+    Object.defineProperty(FmsKernel.prototype, 'submit', { ...submit, value: function (this: InstanceType<typeof FmsKernel>, ...args: unknown[]) {
+      // eslint-disable-next-line typescript/no-this-alias -- bind the real receiver, without a production getter
+      if ((args[0] as { kind?: string }).kind === 'ios.place') kernel = this
+      return Reflect.apply(submit.value, this, args)
+    } })
+    Object.defineProperty(FmsKernel.prototype, 'advance', { ...advance, value: function (this: InstanceType<typeof FmsKernel>, count: number, options: import('../src/fmsCdu/kernel/kernel').AdvanceOptions = {}) {
+      if (this !== kernel) return Reflect.apply(advance.value, this, [count, options])
+      return Reflect.apply(advance.value, this, [count, { ...options, onInstantClose: () => { options.onInstantClose?.(); frames.push(observe()) } }])
+    } })
+    const state = {
+      read: () => {
+        if (!kernel || !system) throw new Error('Actual public start/submit binding missing')
+        return { frames: [...frames], end: observe(), record: kernel.record(), profiles: system.computers.map(fms => fms.aircraftProfile.id) }
+      },
+      restore: () => {
+        Object.defineProperty(FmsKernel.prototype, 'submit', submit)
+        Object.defineProperty(FmsKernel.prototype, 'advance', advance)
+        Object.defineProperty(DualFmsSystem.prototype, 'settleStart', settle)
+      },
+    }
+    Object.assign(window, { __aerolinkRenderedReplay: state })
+  })
+  type Observation = { frames: string[]; end: string; record: KernelRecord; profiles: string[] }
+  type Host = typeof window & { __aerolinkRenderedReplay?: { read: () => Observation; restore: () => void } }
+  try {
+    await page.getByRole('tab', { name: 'Nav data', exact: true }).click()
+    await page.getByRole('button', { name: 'Set up KBTV RNAV RWY 15', exact: true }).click()
+    await page.getByLabel('Simulation rate', { exact: true }).selectOption('4')
+    await page.getByLabel('Simulation rate', { exact: true }).selectOption('1')
+    await page.getByRole('button', { name: 'Show peer CDU', exact: true }).click()
+    await page.getByTestId('fms-cdu-inspected').locator('[data-key="RTE"]').click()
+    const two = page.getByTestId('fms-cdu-peer')
+    await two.locator('[data-key="RTE"]').click()
+    const box = (await two.locator('[data-key="CLR"]').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down(); await page.clock.runFor(1000); await page.mouse.up()
+    await page.getByRole('button', { name: 'Fly', exact: true }).click()
+    await page.clock.runFor(1000)
+    await page.getByRole('button', { name: 'Pause', exact: true }).click()
+    await page.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+    const downloaded = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Export journal', exact: true }).click()
+    const download = await downloaded, exportedPath = test.info().outputPath('actual-rendered-export.json')
+    await download.saveAs(exportedPath)
+    await test.info().attach('actual-rendered-export', { path: exportedPath, contentType: 'application/json' })
+    const raw = await readFile(exportedPath), record: KernelRecord = JSON.parse(raw.toString('utf8'))
+    const live = await page.evaluate(() => (window as Host).__aerolinkRenderedReplay!.read())
+    await retainPublicJson('rendered-live-and-context', { context, live, download: { filename: download.suggestedFilename(), bytes: raw.length, sha256: createHash('sha256').update(raw).digest('hex') }, engine: page.context().browser()!.version() })
+    expect(live.profiles).toEqual(context.profiles)
+    expect(record.frame).toBe(8)
+    expect(live.frames).toHaveLength(8)
+    expect(record.journal.map(entry => [entry.kind, entry.payload, entry.source, entry.target, entry.outcome])).toEqual([
+      ['ios.place', { kind: 'ios.place', startState: 'kbtv-rnav15' }, { kind: 'ios', id: 'navdata.startState', surface: 'main' }, 'plant', { status: 'accepted' }],
+      ...([1, 2] as const).map(side => ['cdu.key', { kind: 'cdu.key', side, fn: 'RTE', held: false }, { kind: 'cdu', id: `CDU ${side}`, surface: 'main', side }, `fms${side}`, { status: 'accepted' }]),
+      ['cdu.key', { kind: 'cdu.key', side: 2, fn: 'CLR', held: true }, { kind: 'cdu', id: 'CDU 2', surface: 'main', side: 2 }, 'fms2', { status: 'accepted' }],
+      ...[false, true].map(on => ['ios.flightFreeze', { kind: 'ios.flightFreeze', on }, { kind: 'ui', id: 'flight.flyPause', surface: 'main' }, 'plant', { status: 'accepted' }]),
+    ])
+    expect(record.control.map(entry => [entry.kind, 'rate' in entry ? entry.rate : null, entry.recordOrdinal, entry.instant])).toEqual([['rate', 4, 2, 0], ['rate', 1, 3, 0]])
+    expect(record.counters).toEqual({ submissionSeq: 7, controlSeq: 3, recordOrdinal: 9 })
+    expect(record).toEqual(live.record)
+    await page.evaluate(() => { const host = window as Host; host.__aerolinkRenderedReplay!.restore(); delete host.__aerolinkRenderedReplay })
+    // A fresh realm has no bench, live object references, user store or sensor WeakMap from the producing session.
+    const fresh = await page.context().newPage()
+    try {
+      await fresh.goto('/tests/fixtures/fms-kernel-headless.html')
+      const replayed = await fresh.evaluate(async ({ record, context }) => {
+        const adapterPath = '/src/fmsCdu/kernel/legacyPlantAdapter.ts', kernelPath = '/src/fmsCdu/kernel/kernel.ts'
+        const profilePath = '/src/fmsCdu/profile.ts', replayPath = '/tests/fixtures/fms-kernel-session.ts', digestPath = '/tests/fixtures/fms-kernel-digest.ts'
+        const { dualComposition }: typeof import('../src/fmsCdu/kernel/legacyPlantAdapter') = await import(adapterPath)
+        const { FmsKernel }: typeof import('../src/fmsCdu/kernel/kernel') = await import(kernelPath)
+        const { profileById }: typeof import('../src/fmsCdu/profile') = await import(profilePath)
+        const { replay }: typeof import('./fixtures/fms-kernel-session') = await import(replayPath)
+        const { CanonicalWriter, frameBytes }: typeof import('./fixtures/fms-kernel-digest') = await import(digestPath)
+        const { system, plant } = dualComposition(Date.parse(context.utc0), { profile: profileById(context.profiles[0])!, secondaryProfile: profileById(context.profiles[1])! })
+        const kernel = new FmsKernel(plant, null, { flightFreeze: context.flightFreeze }), writer = new CanonicalWriter(), frames: string[] = []
+        const observe = () => { writer.length = 0; return Array.from(frameBytes({ computers: system.computers, flights: system.flights }, writer), byte => byte.toString(16).padStart(2, '0')).join('') }
+        replay(record, kernel, { onInstantClose: () => { frames.push(observe()) } })
+        return { frames, end: observe(), record: kernel.record(), profiles: system.computers.map(fms => fms.aircraftProfile.id) }
+      }, { record, context })
+      await retainPublicJson('rendered-export-fresh-replay', replayed)
+      expect(replayed).toEqual(live)
+    } finally { await fresh.close() }
+  } finally {
+    await page.evaluate(() => { const host = window as Host; host.__aerolinkRenderedReplay?.restore(); delete host.__aerolinkRenderedReplay })
+  }
+})
 
 // These rows own D5 bridge metadata, not the GPS/radio model's numerical effects (their existing owners remain).
 // A new operation can bypass or misaddress the shared adapter even when another operation on it is correct.
