@@ -669,12 +669,85 @@ Remove-Item -LiteralPath $racePath -Force
 Assert-True ($null -eq (Get-AeroLinkFileFirstLineIfPresent -Path $racePath)) 'A file removed between existence and read must yield $null, not throw.'
 Remove-AeroLinkFileIfPresent -Path $racePath
 Assert-True $true 'Removing an already-vanished file must be a no-op.'
+
+# Check the empty directory first: the old helper silently deletes it. Fail immediately rather than
+# continue into the nonempty-directory control, which could ask for confirmation on that old code.
+$emptyDirectory = Join-Path $helperData 'empty-directory'
+New-Item -ItemType Directory -Path $emptyDirectory -Force | Out-Null
+$emptyDirectoryThrew = $false
+try { Remove-AeroLinkFileIfPresent -Path $emptyDirectory } catch { $emptyDirectoryThrew = $true }
+if (-not $emptyDirectoryThrew -or -not [System.IO.Directory]::Exists($emptyDirectory)) {
+    throw 'File-only removal must refuse an empty directory and preserve it.'
+}
+
+$presentFile = Join-Path $helperData 'present.pid'
+Set-Content -LiteralPath $presentFile -Value 'ordinary-file' -Encoding ASCII
+Remove-AeroLinkFileIfPresent -Path $presentFile
+Assert-True (-not [System.IO.File]::Exists($presentFile)) 'An ordinary present file must be removed.'
+
+$literalFile = Join-Path $helperData 'postmaster[123].pid'
+$literalNeighbor = Join-Path $helperData 'postmaster1.pid'
+Set-Content -LiteralPath $literalFile -Value 'literal-file' -Encoding ASCII
+Set-Content -LiteralPath $literalNeighbor -Value 'neighbor-must-remain' -Encoding ASCII
+Remove-AeroLinkFileIfPresent -Path $literalFile
+Assert-True (-not [System.IO.File]::Exists($literalFile)) 'Bracket characters in a filename must remain literal.'
+Assert-True ([System.IO.File]::ReadAllText($literalNeighbor).Trim() -eq 'neighbor-must-remain') 'Literal removal must preserve a wildcard-like neighbor.'
+
+$readOnlyFile = Join-Path $helperData 'read-only.pid'
+Set-Content -LiteralPath $readOnlyFile -Value 'read-only-file' -Encoding ASCII
+(Get-Item -LiteralPath $readOnlyFile).IsReadOnly = $true
+Remove-AeroLinkFileIfPresent -Path $readOnlyFile
+Assert-True (-not [System.IO.File]::Exists($readOnlyFile)) 'The existing Force semantics must still remove a read-only file.'
+
+$lockedFile = Join-Path $helperData 'sharing-denied.pid'
+Set-Content -LiteralPath $lockedFile -Value 'locked-file-must-remain' -Encoding ASCII
+$lockedHandle = [System.IO.File]::Open($lockedFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read)
+$lockedThrew = $false
+try { try { Remove-AeroLinkFileIfPresent -Path $lockedFile } catch { $lockedThrew = $true } }
+finally { $lockedHandle.Dispose() }
+Assert-True $lockedThrew 'A sharing-denied removal must propagate failure rather than report disappearance.'
+Assert-True ([System.IO.File]::ReadAllText($lockedFile).Trim() -eq 'locked-file-must-remain') 'A sharing-denied file must retain its bytes.'
+
 $directoryInstead = Join-Path $helperData 'not-a-file'
 New-Item -ItemType Directory -Path $directoryInstead -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $directoryInstead 'keep.txt') -Value 'keep'
 $directoryThrew = $false
 try { Remove-AeroLinkFileIfPresent -Path $directoryInstead } catch { $directoryThrew = $true }
 Assert-True $directoryThrew 'A non-file removal failure must not be swallowed.'
+Assert-True ([System.IO.Directory]::Exists($directoryInstead)) 'A refused nonempty directory must remain present.'
+Assert-True ([System.IO.File]::ReadAllText((Join-Path $directoryInstead 'keep.txt')).Trim() -eq 'keep') 'Refusing a directory must preserve its child bytes.'
+
+# Link creation can be unavailable without symlink privilege. Only fixture creation is conditional;
+# once a link exists, helper errors and target changes are ordinary contract failures, never skips.
+foreach ($linkCase in @('file', 'directory', 'dangling')) {
+    $linkPath = Join-Path $helperData ("link-" + $linkCase)
+    $linkTarget = Join-Path $helperData ("target-" + $linkCase)
+    if ($linkCase -eq 'directory') {
+        New-Item -ItemType Directory -Path $linkTarget -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $linkTarget 'keep.txt') -Value 'link-target-must-remain' -Encoding ASCII
+    } else { Set-Content -LiteralPath $linkTarget -Value 'link-target-must-remain' -Encoding ASCII }
+    $created = $false
+    try {
+        New-Item -ItemType SymbolicLink -Path $linkPath -Value $linkTarget -ErrorAction Stop | Out-Null
+        $created = $true
+    } catch { Write-Host ("UNAVAILABLE file-removal control: {0} symbolic-link creation ({1})." -f $linkCase, $_.Exception.GetType().Name) }
+    if ($created) {
+        if ($linkCase -eq 'dangling') { [System.IO.File]::Delete($linkTarget) }
+        $linkThrew = $false
+        try { Remove-AeroLinkFileIfPresent -Path $linkPath } catch { $linkThrew = $true }
+        $entryRemains = @([System.IO.Directory]::EnumerateFileSystemEntries($helperData) | Where-Object { $_ -eq $linkPath }).Count -ne 0
+        if ($linkCase -eq 'directory') {
+            Assert-True $linkThrew 'A directory link must be refused as a non-file.'
+            Assert-True $entryRemains 'A refused directory link must remain present.'
+            Assert-True ([System.IO.File]::ReadAllText((Join-Path $linkTarget 'keep.txt')).Trim() -eq 'link-target-must-remain') 'Directory-link refusal must preserve target bytes.'
+        } else {
+            Assert-True (-not $linkThrew -and -not $entryRemains) ("A {0} file link must be removed without following its target." -f $linkCase)
+            if ($linkCase -eq 'file') { Assert-True ([System.IO.File]::ReadAllText($linkTarget).Trim() -eq 'link-target-must-remain') 'File-link removal must preserve target bytes.' }
+            else { Assert-True (-not [System.IO.File]::Exists($linkTarget)) 'Removing a dangling link must not create its absent target.' }
+        }
+        Write-Host ("EXECUTED file-removal control: {0} symbolic link." -f $linkCase)
+    }
+}
 
 $foreignPidFile = Join-Path $helperData 'postmaster.pid'
 Set-Content -LiteralPath $foreignPidFile -Value $PID

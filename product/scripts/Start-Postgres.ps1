@@ -77,7 +77,11 @@ function Remove-AeroLinkFileIfPresent {
       .SYNOPSIS Removes a file, tolerating only "it is already gone". Other failures still throw.
     #>
     param([Parameter(Mandatory)][string]$Path)
-    try { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($item -isnot [System.IO.FileInfo]) { throw "Refusing to remove a non-file path: $Path" }
+        Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+    }
     catch [System.Management.Automation.ItemNotFoundException] { }
 }
 
