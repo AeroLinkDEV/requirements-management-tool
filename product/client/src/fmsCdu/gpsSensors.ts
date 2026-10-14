@@ -403,6 +403,8 @@ export class AutoSelection {
   private current: number | null = null;
   private eligibleSince: (number | null)[] = [null, null];
   private snapshots: (Snapshot | null)[] = [null, null];
+  /** One measured comparison coordinate per instant: a paused receiver correction is not aircraft motion. */
+  private freshnessPosition: { time: number; position: LatLon } | null = null;
   private fresh = [false, false];
   private eligible = [false, false];
   /** Last computed eligibility facts, including real elapsed dwell; reading never samples or selects. */
@@ -414,9 +416,10 @@ export class AutoSelection {
 
   choose(input: SelectionInput): SelectionResult {
     const { assessed, time } = input;
+    if (this.freshnessPosition?.time !== time) this.freshnessPosition = { time, position: { ...input.position } };
     if (input.executedCrc !== this.approach) { this.approach = input.executedCrc; this.approachQualified = true; this.flown = null; }
     const words = input.buses.map(approachWords);
-    [0, 1].forEach(i => this.judgeFreshness(i, input.position, words[i]));
+    [0, 1].forEach(i => this.judgeFreshness(i, this.freshnessPosition!.position, words[i]));
     const eligible = [0, 1].map(i => this.eligibleForApproach(i, input, words[i]));
     this.eligible = eligible;
     eligible.forEach((ok, i) => { this.eligibleSince[i] = ok ? this.eligibleSince[i] ?? time : null; });

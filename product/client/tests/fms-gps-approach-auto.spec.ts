@@ -284,6 +284,30 @@ const selectionOn = (bench: Bench) => {
   return { base, crc, run }
 }
 
+test('a same-instant comparison-position correction keeps healthy GPS2; later motion still detects frozen guidance', () => {
+  const { base, crc } = selectionOn(onFinal())
+  const selection = new AutoSelection(1)
+  const input = (k: number, gps1Words = k, gps2Words = k, lon = -73): SelectionInput => {
+    const buses = base.map((bus, i) => {
+      const next = structuredClone(bus), words = i === 0 ? gps1Words : gps2Words
+      // Independent literal guidance updates; all three words change during real movement.
+      next['116'].value = 10 + words * 0.01
+      next['117'].value = 20 + words * 0.01
+      next['201'].value = 3 - words * 0.001
+      return next
+    })
+    return { choice: 'AUTO', selected: true, assessed: buses.map(bus => assessReceiver(bus, 0.3)), buses,
+      time: k * 250, position: { lat: 44 + k * 0.001, lon }, executedCrc: crc, sentCrc: crc, approachArmed: true }
+  }
+  for (let k = 0; k <= 12; k += 1) {
+    expect(selection.choose(input(k))).toMatchObject({ chosen: 1, transferred: false, qualified: true })
+  }
+  // GPS1's measured position/words correct during another refresh at the SAME clock. GPS2 has not moved or failed.
+  expect(selection.choose(input(12, 13, 12, -73.005))).toEqual({ chosen: 1, transferred: false, qualified: true, refused: '' })
+  // A later physical instant moves over 0.01 NM with GPS2's three words frozen: its approach is now stale.
+  expect(selection.choose(input(13, 14, 12, -73.005))).toEqual({ chosen: 0, transferred: true, qualified: true, refused: '' })
+})
+
 test('the transfer thresholds: the dwell, the jump fraction of full scale, and the scaling tolerance, at their boundaries', () => {
   const { base, run } = selectionOn(onFinal())
   expect(run({})).toMatchObject({ chosen: 1, transferred: true, refused: '' })
