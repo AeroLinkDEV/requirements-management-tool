@@ -729,6 +729,7 @@ const FMS_PATH_REFERENCES = {
   'product/client/fast-logic-durations.json': 'recorded hosted logic durations that weigh the advisory Fast logic shards; an optimisation, never a correctness input',
   'product/client/journey-durations.json': 'recorded spec durations the journey shard planner weighs files by; an optimisation, never a correctness input, read by every shard whatever the topology',
   'product/client/journey-durations.provenance.json': 'audit metadata for advisory journey scheduling weights; not read by the shard planner or runtime, never a correctness input, and adds no FMS observer or journey',
+  'product/client/perf/browser-accounting.ts': 'the capture-only browser performance helper (#1542) reads bench DOM; browser.perf.ts invokes it outside qualification gates, and fms-perf-stats.spec.ts covers its accounting in Fast logic',
   'product/client/perf/browser.perf.ts': 'the performance harness (#1510, #1557) drives the bench in a built arm; run only by perf/run-perf.ts, never by a gate',
   'product/client/perf/headless.perf.ts': 'the performance harness (#1510) loads an arm checkout\'s bench modules; run only by perf/run-perf.ts, never by a gate',
   'product/client/playwright.logic.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
