@@ -301,6 +301,35 @@ test('Restart builds the next session with the chosen per-FMS start mode and the
   expect(record.initial.setup.onGround).toBe(false)
 })
 
+// The build identity fetches the manifest and, in a built bundle, every emitted asset: work a session that is never
+// exported must not pay for. Observed at the public network boundary, which is where that cost lands.
+test('the bench resolves its build identity only on the first Export recording, once per page', async ({ page }) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
+  const identityRequests: string[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname === '/fms-recording-build.json') identityRequests.push(request.url()) })
+  await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await page.getByRole('button', { name: 'Restart the simulation', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Aircraft profile', exact: true }).first().selectOption('lab-airline-vnav')
+  await page.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  await page.getByRole('button', { name: 'Run the scenario', exact: true }).click()
+  await page.clock.runFor(1000)
+  expect(identityRequests, 'mount, Restart, a profile change and a scenario start resolve no build identity').toEqual([])
+  const exportOnce = async () => {
+    await page.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+    const downloading = page.waitForEvent('download')
+    await page.getByRole('region', { name: 'Kernel journal', exact: true }).getByRole('button', { name: 'Export recording', exact: true }).click()
+    await page.clock.runFor(250)
+    return JSON.parse(await readFile((await (await downloading).path())!, 'utf8')).recording
+  }
+  expect((await exportOnce()).identity.build.kind).toBe('development')
+  expect(identityRequests).toHaveLength(1)
+  await page.getByRole('button', { name: 'Restart the simulation', exact: true }).click()
+  expect((await exportOnce()).identity.build.kind).toBe('development')
+  expect(identityRequests, 'the page keeps the identity it resolved').toHaveLength(1)
+})
+
 // The scripted replay owner cannot prove that the actual rendered download represents the live session.
 // Observe public boundaries only; the frozen encoder samples at the existing instant-close hook, with no step.
 test('the real exported journal replays every live frame in a fresh same-context composition', async ({ page }) => {
