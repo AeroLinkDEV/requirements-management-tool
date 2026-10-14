@@ -47,8 +47,11 @@ function sourceFiles(root: string, relativePath = ''): {path:string;sha256:strin
 export function materializeW3Arms(harness: string, destination: string) {
   if(existsSync(destination)) throw new Error('W3 needs a fresh owned source-copy destination')
   if(w3Git(harness,'status','--porcelain'))throw new Error('W3 overlay producer must be a clean committed harness')
-  const patch=execFileSync('git',['-C',harness,'diff',W3_PAIR.A,'HEAD','--',...W3_FILES],{encoding:'utf8',maxBuffer:16*1024*1024})
-  if(!patch.includes('PACING_FRAME') || !patch.includes('observeFrame'))throw new Error('W3 observation delta is missing')
+  const patch=execFileSync('git',['-C',harness,'diff',W3_PAIR.A,'HEAD','--',W3_FILES[0]],{encoding:'utf8',maxBuffer:16*1024*1024})
+  const ui=readFileSync(join(harness,W3_FILES[1]),'utf8')
+  const observation=ui.match(/      observeFrame: ordinal => \(\{[\s\S]*?        \} : null \}\),\r?\n/)?.[0]
+  const frozen=ui.match(/          try \{\r?\n            const done = presentation.frame\(\(\) => kernel.advance\(1, \{ flightFreeze: true \}\)\);[\s\S]*?\r?\n          \}/)?.[0]
+  if(!patch.includes('PACING_FRAME') || !observation || !frozen)throw new Error('W3 observation delta is missing')
   const resolved=resolve(destination), fromHarness=relative(resolve(harness),resolved)
   if(!fromHarness || (!fromHarness.startsWith('..') && !/^[A-Za-z]:/.test(fromHarness)))throw new Error('W3 source copies must be outside the harness')
   for(let p=dirname(resolved);;p=dirname(p)){if(lstatSync(p).isSymbolicLink())throw new Error('W3 copy parent aliases another path');if(dirname(p)===p)break}
@@ -63,19 +66,31 @@ export function materializeW3Arms(harness: string, destination: string) {
     if(extracted.status!==0)throw new Error('W3 exact arm archive extraction failed')
     const before=sourceFiles(root), applied=spawnSync('git',['apply','--no-index','--whitespace=nowarn','-'],{cwd:root,input:patch,encoding:'utf8'})
     if(applied.status!==0)throw new Error(`W3 observation hunks do not apply to arm ${arm}; no fallback`)
+    const caller=join(root,W3_FILES[1]),oldCaller=readFileSync(caller,'utf8'),expectedBlob=arm==='A'?'a54ffb5150025c16a0c0f97f1b28cdc75f62ac08':'f27efbd30f118e816b65be9d6eb80e52d3b0a96b'
+    if(w3Git(harness,'rev-parse',`${commit}:${W3_FILES[1]}`)!==expectedBlob)throw new Error('W3 original caller source changed')
+    const once=(text:string,from:string,to:string)=>{if(text.split(from).length!==2)throw new Error('W3 exact caller observation anchor changed');return text.replace(from,to)}
+    let callerOverlay=once(oldCaller,'import { startKernelPacing } from "./benchPacing";','import { startKernelPacing, PACING_FROZEN } from "./benchPacing";')
+    const originalAdvance=arm==='A'?'kernel.advance(1, { flightFreeze: true })':'kernel.advance(1)'
+    callerOverlay=once(callerOverlay,`          try { presentation.frame(() => ${originalAdvance}); }`,frozen.replace('kernel.advance(1, { flightFreeze: true })',originalAdvance))
+    callerOverlay=once(callerOverlay,'      frame: presentation.frame,\n','      frame: presentation.frame,\n'+observation)
+    const originalPath=join(resolved,`${arm}.caller-original.tsx`);writeFileSync(originalPath,oldCaller,{flag:'wx'});writeFileSync(caller,callerOverlay)
+    const diff=spawnSync('git',['diff','--no-index','--',originalPath,caller],{encoding:'utf8',maxBuffer:16*1024*1024})
+    if(diff.status!==1)throw new Error('W3 exact caller observation patch missing')
+    writeFileSync(join(resolved,`${arm}.caller.patch`),diff.stdout,{flag:'wx'})
     const after=sourceFiles(root), changed=after.filter((file,i)=>file.sha256!==before[i]?.sha256)
     if(changed.length!==2 || changed.some(file=>!W3_FILES.includes(file.path)))throw new Error('W3 overlay changes non-observation source paths')
     arms[arm]={root:realpathSync(root),original:{commit,tree:w3Git(harness,'rev-parse',`${commit}^{tree}`),srcTree:w3Git(harness,'rev-parse',`${commit}:product/client/src`),
-      lockBlob:w3Git(harness,'rev-parse',`${commit}:product/client/package-lock.json`),files:W3_FILES.map(path=>({path,blob:w3Git(harness,'rev-parse',`${commit}:${path}`)}))},archiveSha256:createHash('sha256').update(archive).digest('hex'),originalFiles:before,effectiveFiles:after,effectiveSourceSha256:digest(after),changed}
+      lockBlob:w3Git(harness,'rev-parse',`${commit}:product/client/package-lock.json`),files:W3_FILES.map(path=>({path,blob:w3Git(harness,'rev-parse',`${commit}:${path}`)}))},archiveSha256:createHash('sha256').update(archive).digest('hex'),callerPatchSha256:fileDigest(join(resolved,`${arm}.caller.patch`)),originalFiles:before,effectiveFiles:after,effectiveSourceSha256:digest(after),changed}
   }
   const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',harness:{commit:w3Git(harness,'rev-parse','HEAD'),tree:w3Git(harness,'rev-parse','HEAD^{tree}')},
-    overlaySha256:createHash('sha256').update(patch).digest('hex'),patch:'observation.patch',arms,builds:null,qualification:'NOT_CALIBRATED',inference:'DISABLED'}
+    overlaySha256:digest({bench:fileDigest(join(resolved,'observation.patch')),A:arms.A.callerPatchSha256,B:arms.B.callerPatchSha256}),patch:'observation.patch',arms,builds:null,qualification:'NOT_CALIBRATED',inference:'DISABLED'}
   w3PairedPlan(manifest);writeFileSync(join(resolved,'source-manifest.json'),JSON.stringify(manifest,null,2),{flag:'wx'});return manifest
 }
 /** Parses asserted build/closure provenance and checks actual bytes. This is not independent native proof. */
 export function admitW3Manifest(manifest: any, requireBuild: boolean) {
   const plan=w3PairedPlan(manifest)
-  if(fileDigest(join(dirname(manifest.arms.A.root),'observation.patch'))!==manifest.overlaySha256)throw new Error('W3 declared observation patch changed')
+  const overlayRoot=dirname(manifest.arms.A.root)
+  if(dirname(manifest.arms.B.root)!==overlayRoot || digest({bench:fileDigest(join(overlayRoot,'observation.patch')),A:fileDigest(join(overlayRoot,'A.caller.patch')),B:fileDigest(join(overlayRoot,'B.caller.patch'))})!==manifest.overlaySha256)throw new Error('W3 declared observation patches changed')
   for(const arm of ['A','B']) {
     const entry=manifest.arms[arm]
     if(lstatSync(entry.root).isSymbolicLink() || !sameFiles(sourceFiles(entry.root),entry.effectiveFiles) || digest(entry.effectiveFiles)!==entry.effectiveSourceSha256)
