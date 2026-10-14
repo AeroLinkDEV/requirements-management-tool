@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { createServer } from 'vite'
@@ -18,6 +18,11 @@ test('browser unpaced public composition', async ({ page, context }) => {
   const arm = process.env.AEROLINK_PERF_ARM, output = process.env.AEROLINK_PERF_RESULT
   const workload = process.env.AEROLINK_PERF_WORKLOAD, topology = process.env.AEROLINK_PERF_TOPOLOGY
   if (!arm || !output || !workload || !['single', 'dual'].includes(topology ?? '')) throw new Error('explicit ARM, RESULT, WORKLOAD and TOPOLOGY required')
+  // Unique RESULT is bound by the real CLI to this run's task-owned output. Never cache in an ARM.
+  const cacheDir = resolve(`${output}.vite-cache`), fromArm = relative(resolve(arm), cacheDir)
+  if (!(fromArm === '..' || fromArm.startsWith('..' + sep) || isAbsolute(fromArm)) || existsSync(cacheDir))
+    throw new Error('a fresh task-output Vite cache outside the ARM is required')
+  mkdirSync(cacheDir)
   const capability = JSON.parse(process.env.AEROLINK_PERF_ARM_CAPABILITY ?? 'null')
   if (!capability || !['CURRENT_KERNEL', 'LEGACY_PUBLIC_ADVANCE_TICKS'].includes(capability.kind)) throw new Error('declared ARM capability required')
   for (const module of capability.modules) {
@@ -43,7 +48,7 @@ test('browser unpaced public composition', async ({ page, context }) => {
   const port = Number(process.env.AEROLINK_PERF_PORT)
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('explicit private AEROLINK_PERF_PORT required')
   const origin = `http://127.0.0.1:${port}`
-  const server = await createServer({ root: arm, configFile: resolve(arm, 'vite.config.ts'), logLevel: 'error',
+  const server = await createServer({ root: arm, configFile: resolve(arm, 'vite.config.ts'), configLoader: 'native', cacheDir, logLevel: 'error',
     server: { host: '127.0.0.1', port, strictPort: true, hmr: false } })
   try {
     await server.listen()
@@ -80,6 +85,7 @@ test('browser unpaced public composition', async ({ page, context }) => {
     const route = { schema: protocol.routeContract.schema, id: `${workload}/browser-unpaced/${topology}/v1`, workload, scenario: family.scenario,
       topology, host: 'browser-unpaced', ...declared }
     const summary = { ...observed, route, workload, scenario: family.scenario, input, capability,
+      viteFootprint: { configLoader: 'native', cacheDir, ownership: 'TASK_RUN_OUTPUT', actualServerWriteProof: 'UNPROVEN' },
       inputSha256: createHash('sha256').update(input.scenarioJson).digest('hex'),
       frames: observed.durations.length ? frameSummary(observed.durations) : null,
       heap: { status: gc === 'CDP_COLLECTED' && unchanged && heap.usedBytes !== null ? 'OBSERVED_RETAINED_STATE' : 'UNAVAILABLE', method: gc, unchanged, ...heap },
