@@ -56,7 +56,8 @@ export class TimelineHost extends SchedulingHost {
   }
   /** The recorded timeline as the browser recorder returns it. */
   timeline() {
-    return this.measures.map(({ name, start, end, detail }) => ({ kind: name === PACING_TIMELINE.slice ? 'slice' as const : 'discard' as const, start, end, detail }))
+    return this.measures.filter(({ name }) => name === PACING_TIMELINE.slice || name === PACING_TIMELINE.discard)
+      .map(({ name, start, end, detail }) => ({ kind: name === PACING_TIMELINE.slice ? 'slice' as const : 'discard' as const, start, end, detail }))
   }
   entries() { return this.timeline().map(({ kind, start, end, detail }) => `${kind}@${start}-${end} ${JSON.stringify(detail)}`) }
 }

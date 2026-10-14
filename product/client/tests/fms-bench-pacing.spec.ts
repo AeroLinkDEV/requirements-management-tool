@@ -13,6 +13,30 @@ import { SchedulingHost, TimelineHost } from './fixtures/fms-pacing-host'
 const epoch = Date.UTC(2026, 8, 27, 14)
 const noFault = (error: unknown) => { throw error }
 
+test('profiling observes direct kernel and unit clocks at slice entry and exit, including incomplete work', () => {
+  const host = new TimelineHost(), composed = singleComposition(epoch)
+  let attempts = 0
+  const kernel = new FmsKernel({ ...composed.plant, integrate: () => {
+    attempts++; host.wall += 10
+    if (attempts === 2) { composed.clock.advanceFrame(); throw new Error('retained observation fault') }
+    composed.plant.integrate()
+  } })
+  startKernelPacing(64, kernel, host, { onFault: () => {} })
+  host.runNext()
+  const observation = host.measures.find(entry => entry.name === 'aerolink.fms-bench.pacing-clock')
+  // The failed second INTEGRATE advances both clocks but never completes a frame. These literals are not
+  // reconstructed from the timeline or the successful-completion count under test.
+  expect(observation?.detail.entry).toMatchObject({ kernelTime: 0, unitClockMs: epoch, completed: 0 })
+  expect(observation?.detail.exit).toMatchObject({ kernelTime: 5_000_000, unitClockMs: epoch + 500, completed: 1 })
+  expect(observation?.detail).toMatchObject({ schema: 1, sequence: 1, rate: 64 })
+  const entry = observation!.detail.entry as { utcMs: number; monotonicMs: number; timeOrigin: number | null }
+  const exit = observation!.detail.exit as typeof entry
+  expect([entry.monotonicMs, exit.monotonicMs]).toEqual([250, 270])
+  expect([entry.utcMs, exit.utcMs].every(Number.isFinite)).toBe(true) // UTC observations are retained, not assumed monotonic.
+  expect(entry.timeOrigin).toBeNull() // This deterministic host has no browser timeOrigin.
+  expect(kernel.faulted).toBe(true)
+})
+
 for (const rate of [1, 4, 16, 64]) test(`${rate}x retains every real whole kernel frame across slices`, () => {
   const host = new SchedulingHost(), composed = singleComposition(epoch), kernel = new FmsKernel(composed.plant)
   const instants: number[] = []
