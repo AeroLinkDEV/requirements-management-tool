@@ -369,6 +369,7 @@ function browserCaptureReport() {
     const seedClosure = JSON.parse(readFileSync(join(dir, 'cold/closure.json'), 'utf8'))
     requireClosure(seedClosure)
     if (seedClosure.apiTree !== session.cohort.harness.apiTree || seedClosure.apiAssemblySha256 !== session.cohort.harness.apiAssemblySha256) throw new Error('seed writer changed')
+    if (Date.parse(seedClosure.closedAt) > Date.parse(session.startedAt)) throw new Error('seed writer closure does not precede the capture')
     if (digest(coldPayload(join(dir, 'cold/payload'))) !== session.cold.payloadSha256 || fileDigest(join(dir, 'cold/seed.json')) !== session.cold.seedSha256 ||
       fileDigest(join(dir, 'cold/closure.json')) !== session.cold.closureSha256) throw new Error('changed')
   } catch {

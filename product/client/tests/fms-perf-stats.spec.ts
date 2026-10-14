@@ -680,7 +680,7 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
   const cold = { payloadSha256: digest(coldPayload(archive)), seedSha256: bytesHash('cold/seed.json'), closureSha256: bytesHash('cold/closure.json') }
   const session = { id: 'literal-session', plan, cohort, cold, arms: { A: arm, B: arm }, startedAt: '2026-10-14T00:00:00Z', monotonicStart: 100, deadline: 14_400_100 }
   const closure = { guardianSha256: CAPTURE_GUARDIAN, status: 'EXITED', exitCode: 0, jobCount: 0, handlesClosed: true, forced: false,
-    producerBirth100ns: '134360000000000000', producerImage: 'literal-node.exe', producerArgv: 'literal-capture-cli', closedAt: '2026-10-14T00:00:00Z',
+    producerBirth100ns: '134360000000000000', producerImage: 'literal-node.exe', producerArgv: 'literal-capture-cli', closedAt: '2026-10-14T00:01:01Z',
     sessionId: session.id, sourceCommit: cohort.harness.commit }
   const end = { ...session, closure, stopped: null, endedAt: '2026-10-14T00:01:00Z', monotonicEnd: 60_100 }
   const rows = plan.slots.map(slot => {
@@ -721,6 +721,7 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
   reject(value => value.rows[0].copySha256 = 'c'.repeat(64))
   reject(value => value.end.closure.forced = true)
   reject(value => value.end.closure.sessionId = 'different-session')
+  reject(value => value.end.closure.closedAt = '2026-10-13T23:59:59Z')
   reject(value => value.rows[0].cohort.harness.dirtyEntries = 1)
   reject(value => value.rows[0].servedAtEnd = { ...arm, distSha256: 'd'.repeat(64) })
   reject(value => value.rows[0].result.rawObservation.capture.clocks[0].exit.unitClockMs += 250)

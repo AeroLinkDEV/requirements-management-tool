@@ -96,7 +96,7 @@ export function captureDisposition(plan: ReturnType<typeof browserCapturePlan>, 
   if (!['payloadSha256', 'seedSha256', 'closureSha256'].every(key => hash(session?.cold?.[key], 64)) || !equal(session.cold, end?.cold)) reasons.push('cold input provenance is missing or changed')
   try {
     requireClosure(end?.closure)
-    if (end.closure.sessionId !== session?.id || end.closure.sourceCommit !== cohort?.harness?.commit) throw new Error('wrong closure')
+    if (end.closure.sessionId !== session?.id || end.closure.sourceCommit !== cohort?.harness?.commit || Date.parse(end.closure.closedAt) < Date.parse(end?.endedAt)) throw new Error('wrong closure')
   } catch { reasons.push('whole-session native closure is unproven') }
   if (records.length !== 128) reasons.push('capture does not contain exactly 128 records')
   for (let i = 0; i < records.length; i++) {
