@@ -501,7 +501,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   const archive=join(dir,'cold','payload');mkdirSync(archive,{recursive:true});copyColdPayload(payload,archive,entries)
   const session={schema:'aerolink.fms-w3-paired-session.v1',id:randomUUID(),plan,sessionIndex:index,slots,manifest,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
   writeFileSync(join(dir,'w3-session.json'),JSON.stringify(session,null,2),{flag:'wx'})
-  let stopped:string|null=null
+  let stopped:string|null=null,failure:{error:unknown}|null=null
   try {
     for(const slot of slots) {
       admitW3Manifest(manifest,true)
@@ -513,13 +513,12 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
           AEROLINK_SHOWCASE_SEED:readFileSync(join(input,'seed.json'),'utf8'),AEROLINK_PERF_WORKLOAD:selectedRoute.workload,AEROLINK_PERF_TOPOLOGY:selectedRoute.topology,AEROLINK_PERF_RATE:String(slot.rate),AEROLINK_PERF_CONFIGURATION:slot.configuration,AEROLINK_PERF_W3_IDENTITY:JSON.stringify(identity)},deadline,protocol.browser.w3Recipe.executorLimitSeconds*1000)
       if(entry.status!=='passed')throw new Error('W3 failed run retained; no retry or later favorable substitution')
     }
-  } catch(error){stopped=error instanceof Error?error.message:'interrupted';throw error}
-  finally {
-    const end=w3EndRecord(session,stopped,manifest,{harnessAtEnd:harnessIdentity(),coldAtEnd:digest(coldPayload(archive)),endedAt:new Date().toISOString(),monotonicEnd:performance.now()})
-    writeFileSync(join(dir,'w3-end.json'),JSON.stringify(end,null,2),{flag:'wx'})
-    // An original error is already propagating; a refused end re-admission only fails an otherwise complete session.
-    if(stopped===null && end.endAdmission.status!=='ADMITTED')throw new Error(`W3 manifest refused at session end: ${end.endAdmission.error}`)
-  }
+  } catch(error){stopped=error instanceof Error?error.message:'interrupted';failure={error}}
+  const end=w3EndRecord(session,stopped,manifest,{harnessAtEnd:harnessIdentity(),coldAtEnd:digest(coldPayload(archive)),endedAt:new Date().toISOString(),monotonicEnd:performance.now()})
+  writeFileSync(join(dir,'w3-end.json'),JSON.stringify(end,null,2),{flag:'wx'})
+  // The original error is rethrown unchanged; a refused end re-admission only fails an otherwise complete session.
+  if(failure)throw failure.error
+  if(end.endAdmission.status!=='ADMITTED')throw new Error(`W3 manifest refused at session end: ${end.endAdmission.error}`)
 }
 function browserCaptureReport() {
   const dir = out(), session = JSON.parse(readFileSync(join(dir, 'paired-session.json'), 'utf8'))
