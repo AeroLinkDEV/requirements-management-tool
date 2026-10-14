@@ -106,6 +106,11 @@ export function admitW3Manifest(manifest: any, requireBuild: boolean) {
   }
   return plan
 }
+/** The W3 session end record the executor writes to w3-end.json, after re-admitting the manifest. */
+export function w3EndRecord(session: Record<string, unknown>, stopped: string | null, manifest: any, observed: Record<string, unknown>) {
+  admitW3Manifest(manifest,true)
+  return {...session,stopped,...observed,closure:'UNPROVEN'}
+}
 function sameFiles(a: unknown,b: unknown){return JSON.stringify(a)===JSON.stringify(b)}
 
 /** The production allocation, not a randomization or an inference procedure. */

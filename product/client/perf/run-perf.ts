@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, runClassification, scoredRuns, type Arm, type DispatchedRoute, type RunValue, type SessionEvidence } from './stats.ts'
 import { browserQualification } from './browser-accounting.ts'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest } from './browser-capture.ts'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest, w3EndRecord } from './browser-capture.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -515,8 +515,8 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
     }
   } catch(error){stopped=error instanceof Error?error.message:'interrupted';throw error}
   finally {
-    admitW3Manifest(manifest,true)
-    writeFileSync(join(dir,'w3-end.json'),JSON.stringify({...session,stopped,harnessAtEnd:harnessIdentity(),coldAtEnd:digest(coldPayload(archive)),endedAt:new Date().toISOString(),monotonicEnd:performance.now(),closure:'UNPROVEN'},null,2),{flag:'wx'})
+    const end=w3EndRecord(session,stopped,manifest,{harnessAtEnd:harnessIdentity(),coldAtEnd:digest(coldPayload(archive)),endedAt:new Date().toISOString(),monotonicEnd:performance.now()})
+    writeFileSync(join(dir,'w3-end.json'),JSON.stringify(end,null,2),{flag:'wx'})
   }
 }
 function browserCaptureReport() {
