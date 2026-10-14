@@ -319,6 +319,7 @@
             "status": "IMPLEMENTED",
             "version": 1,
             "executor": "paired-w3-public-ui",
+            "metrics": ["whole-contained-timer-handler-percentiles", "whole-contained-simulation-slices", "separate-task-tail-timer-plus-tail-and-yield-gap", "boundary-crosser-exposure", "exact-successful-prefix-and-SYNC", "long-task-and-LoAF-availability", "contextual-post-Pause-heap", "native-key-CDU-outcome-and-censored-EventTiming"],
             "warmup": { "unit": "completed-frames", "value": 240, "simMilliseconds": 60000 },
             "scored": { "kind": "fixed-successful-prefix", "maxTotalSimSeconds": 1800, "fixedMeasuredSimSeconds": 1740 },
             "terminal": "actual-7200-prefix-then-public-Pause-with-overrun",

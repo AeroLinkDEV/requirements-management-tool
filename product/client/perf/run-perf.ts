@@ -71,7 +71,7 @@ function route(workload: string, host: string, topology: string, implemented = t
     throw new Error(`route extent disagrees with executable browser workload ${workload}`)
   return { schema: protocol.routeContract.schema, id: `${workload}/${host}/${topology}/v${declared.version ?? 1}`, workload,
     scenario: family.scenario, source: family.source, host, topology, ...owner, ...declared,
-    metrics: declared.status === 'IMPLEMENTED' ? owner.metrics.filter((metric: string) => metric !== 'sync-residency-dual-only' || topology === 'dual') : [], role: declared.roleByTopology?.[topology] ?? null }
+    metrics: declared.status === 'IMPLEMENTED' ? (declared.metrics ?? owner.metrics).filter((metric: string) => metric !== 'sync-residency-dual-only' || topology === 'dual') : [], role: declared.roleByTopology?.[topology] ?? null }
 }
 function browserRoute(paired = false) {
   const ids = workloadIds(['W2'])

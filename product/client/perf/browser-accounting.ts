@@ -558,6 +558,12 @@ export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionId
       !Number.isFinite(close.monotonicMs) || close.monotonicMs < previousEnd || !same(close.lastClock, raw.clocks.at(-1))) refuse('final Pause close does not bind all real work, including zero-debt final slices')
   const begin = frames[239].frame.monotonicMs, end = frames[7199].frame.monotonicMs
   if (!(end > begin) || !frames[239].state.boundary || !frames[7199].state.boundary) refuse('actual F240/F7200 boundary observations missing')
+  let frozenKernel=close.lastClock.exit.kernelTime,frozenClock=close.lastClock.exit.unitClockMs,frozenAt=close.monotonicMs
+  for(const row of raw.frozen) {
+    if(row.schema!==1 || row.completed!==1 || !Number.isFinite(row.utcMs) || !Number.isFinite(row.monotonicMs) || row.monotonicMs<frozenAt ||
+      row.kernelTime!==frozenKernel+2_500_000 || row.unitClockMs!==frozenClock+250)refuse('recorded frozen-clock work is missing, reordered or contradictory')
+    frozenKernel=row.kernelTime;frozenClock=row.unitClockMs;frozenAt=row.monotonicMs
+  }
   const relation = (start: number, finish: number) => start >= begin && finish <= end ? 'contained' : finish < begin || start > end ? 'outside' : 'crossing'
   const exposure = (first: number, last: number) => Math.max(0, Math.min(7200,last) - Math.max(241,first) + 1)
   const timerRows: any[] = [], sliceRows: any[] = [], tails: any[] = [], gaps: any[] = []
@@ -580,7 +586,8 @@ export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionId
     const entries=raw.events.filter(event=>event.name==='click' && event.targetKey===input.key && event.targetIndex===input.target && Math.abs(event.start-input.eventTime)<=1)
     const outcome=input.trusted===true && input.key===input.expectedKey && title && typeof input.before==='string' && typeof input.after==='string' &&
       input.after.split('\n')[0].includes(title) && !input.before.split('\n')[0].includes(title) && Number.isFinite(input.outcomeObservedAt) ? 'CDU_OUTCOME_AFTER_PAINT_OBSERVED':'UNAVAILABLE'
-    return {...input,entries,outcome,eventTiming:outcome!=='UNAVAILABLE'&&entries.length===1?'NATIVE_NEXT_PAINT_ENTRY_CORRELATED':'CENSORED_OR_UNAVAILABLE'}
+    const entry=entries[0],native=entries.length===1&&entry.interaction>0&&Number.isFinite(entry.start)&&Number.isFinite(entry.duration)&&entry.duration>=16&&entry.duration%8===0&&entry.processing>=0&&entry.delay>=0
+    return {...input,entries,outcome,eventTiming:outcome!=='UNAVAILABLE'&&native?'NATIVE_NEXT_PAINT_ENTRY_CORRELATED':'CENSORED_OR_UNAVAILABLE'}
   })
   return {schema:W3_SCHEMA,status:'OBSERVED',qualification:'NOT_CALIBRATED',inference:'DISABLED',setup,totalFrames:7200,warmupFrames:240,scoredFrames:6960,begin,end,
     primaryTimerHandlers:cohort(timerRows),simulationSlices:cohort(sliceRows),taskTails:tails,yieldGaps:gaps,

@@ -21,16 +21,17 @@ import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVer
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
 
-function literalW3(rate=64,total=7232) {
+function literalW3(rate=64,total=7232,sliceFrames=rate) {
   const initialUtc=Date.parse('2026-09-27T14:00:00.000Z'),frames:any[]=[],timeline:any[]=[],clocks:any[]=[],tasks:any[]=[]
-  for(let first=1,batch=1;first<=total;first+=rate,batch++) {
-    const last=Math.min(total,first+rate-1),entry={utcMs:10000+first-1,monotonicMs:first-1,timeOrigin:10000,kernelTime:(first-1)*2_500_000,unitClockMs:initialUtc+(first-1)*250,completed:first-1}
-    for(let ordinal=first;ordinal<=last;ordinal++)frames.push({schema:1,epoch:7,rate,batch,sequence:batch,ordinal,entry,
+  for(let first=1;first<=total;first+=sliceFrames) {
+    const batch=Math.floor((first-1)/rate)+1,sequence=clocks.length+1
+    const last=Math.min(total,first+sliceFrames-1),entry={utcMs:10000+first-1,monotonicMs:first-1,timeOrigin:10000,kernelTime:(first-1)*2_500_000,unitClockMs:initialUtc+(first-1)*250,completed:first-1}
+    for(let ordinal=first;ordinal<=last;ordinal++)frames.push({schema:1,epoch:7,rate,batch,sequence,ordinal,entry,
       frame:{utcMs:10000+ordinal,monotonicMs:ordinal,timeOrigin:10000,kernelTime:ordinal*2_500_000,unitClockMs:initialUtc+ordinal*250,completed:ordinal},
       state:{sync:'SYNC',unitClocksMs:[initialUtc+ordinal*250,initialUtc+ordinal*250],boundary:ordinal===240||ordinal===7200?{frames:ordinal,causes:'literal'}:null}})
     const exit=frames.at(-1).frame
-    timeline.push({kind:'slice',start:first-.1,end:last,detail:{schema:1,epoch:7,rate,batch,admitted:rate,attempted:rate,completed:rate,remaining:0}})
-    clocks.push({schema:1,epoch:7,rate,batch,sequence:batch,entry,exit})
+    timeline.push({kind:'slice',start:first-.1,end:last,detail:{schema:1,epoch:7,rate,batch,admitted:(first-1)%rate===0?rate:0,attempted:sliceFrames,completed:sliceFrames,remaining:batch*rate-last}})
+    clocks.push({schema:1,epoch:7,rate,batch,sequence,entry,exit})
     tasks.push({start:first-.5,end:last+.5,tail:last+.8})
   }
   const identity={original:{commit:'a'.repeat(40)},effectiveSourceSha256:'b'.repeat(64),overlaySha256:'c'.repeat(64),harness:{commit:'d'.repeat(40)},manifestSha256:'e'.repeat(64),
@@ -45,7 +46,7 @@ function literalW3(rate=64,total=7232) {
 | 1 | At start, action. | 0 s | DONE | observed |
 | 2 | At start, check. | 0 s | PASS | observed |
 `
-  const raw:W3Observation={identity,setupReport,timeline,clocks,frames,tasks,closes:[{schema:1,epoch:7,rate,sequence:clocks.length,batch:clocks.length,kind:'cancelled',admitted:total,attempted:total,completed:total,discarded:0,debt:0,monotonicMs:total+2,lastClock:clocks.at(-1)}],frozen:[],inputs:[],events:[],longTasks:[{start:238,duration:60}],loaf:[],availability:{longtask:'SUPPORTED','long-animation-frame':'UNAVAILABLE',event:'SUPPORTED'}}
+  const raw:W3Observation={identity,setupReport,timeline,clocks,frames,tasks,closes:[{schema:1,epoch:7,rate,sequence:clocks.length,batch:Math.ceil(total/rate),kind:'cancelled',admitted:total,attempted:total,completed:total,discarded:0,debt:0,monotonicMs:total+2,lastClock:clocks.at(-1)}],frozen:[],inputs:[],events:[],longTasks:[{start:238,duration:60}],loaf:[],availability:{longtask:'SUPPORTED','long-animation-frame':'UNAVAILABLE',event:'SUPPORTED'}}
   return {raw,expected,identity}
 }
 test('W3 whole cohorts retain193..256 and7169..7232 crossers with independent16+32 frame exposure',()=>{
@@ -62,6 +63,26 @@ test('W3 1x terminal timer crossing is excluded even when its real slice ends at
   expect(result.primaryTimerHandlers).toMatchObject({representedScoredFrames:6959,excludedScoredFrames:1})
   expect(result.simulationSlices).toMatchObject({representedScoredFrames:6960,excludedScoredFrames:0})
   expect(result.primaryTimerHandlers.raw.at(-1)).toMatchObject({first:7200,last:7200,relation:'crossing',durationMs:1})
+})
+test('W3 unequal split-slices keep distinct whole timer exposure, tails and nonadditive yield gaps',()=>{
+  const {raw,expected,identity}=literalW3(64,7232,32),result=w3PrefixAccounting(raw,expected,identity)
+  expect(result.primaryTimerHandlers.excludedScoredFrames).toBe(48)
+  expect(result.simulationSlices.excludedScoredFrames).toBe(16)
+  expect(result.yieldGaps).toHaveLength(113)
+  expect(result.yieldGaps[0].durationMs).toBeCloseTo(.9,6)
+  expect(result.taskTails[0].durationMs).toBeCloseTo(.3,6)
+})
+test('W3 later frozen clocks and actual CDU outcome stay contextual; missing native timing is unavailable',()=>{
+  const {raw,expected,identity}=literalW3()
+  raw.frozen=[{schema:1,completed:1,utcMs:20000,monotonicMs:7235,kernelTime:18_082_500_000,unitClockMs:Date.parse(expected.startUtc)+1_808_250}]
+  raw.inputs=[{expectedKey:'PROG',key:'PROG',trusted:true,target:0,eventTime:500,before:'ACT RTE 1 LEGS\nold clock',after:'ACT PROGRESS\nnew clock',outcomeObservedAt:540,completedAtDispatch:300}]
+  raw.events=[{name:'click',targetKey:'PROG',targetIndex:0,start:500,duration:16,interaction:1,processing:2,delay:1}]
+  const result=w3PrefixAccounting(raw,expected,identity)
+  expect(result.interactions[0]).toMatchObject({outcome:'CDU_OUTCOME_AFTER_PAINT_OBSERVED',eventTiming:'NATIVE_NEXT_PAINT_ENTRY_CORRELATED'})
+  expect(result.heap.retainedF7200).toBe('UNAVAILABLE')
+  raw.events=[];expect(w3PrefixAccounting(raw,expected,identity).interactions[0].eventTiming).toBe('CENSORED_OR_UNAVAILABLE')
+  raw.inputs[0].after='ACT RTE 1 LEGS\nchanged clock only';expect(w3PrefixAccounting(raw,expected,identity).interactions[0].outcome).toBe('UNAVAILABLE')
+  raw.frozen[0].unitClockMs+=250;expect(()=>w3PrefixAccounting(raw,expected,identity)).toThrow(/frozen-clock/)
 })
 test('W3 refuses missing finalzero-debt success, moved faultclock, transientSYNC, lateF0 and mismatched setup/profile/arm',()=>{
   for(const change of [
@@ -85,6 +106,7 @@ test('W3 paired allocation alternates first rate and balances completeABBA/BAAB 
   for(let repeat=0;repeat<16;repeat++)expect(new Set(plan.sessions.filter(row=>row.repeat===repeat).map(row=>row.cell)).size).toBe(8)
   expect(plan.sessions.filter(row=>row.orientation==='ABBA')).toHaveLength(64)
   expect(plan.sessions.filter(row=>row.orientation==='BAAB')).toHaveLength(64)
+  expect(plan.sessions.flatMap(row=>row.slots).map(row=>row.slot)).toEqual(Array.from({length:512},(_,i)=>i))
   expect(browserCapturePlan().slots).toHaveLength(128)
   expect(()=>w3PairedPlan({...manifest,arms:{...manifest.arms,A:{...manifest.arms.A,original:{commit:'0'.repeat(40)}}}})).toThrow(/paired/)
 })

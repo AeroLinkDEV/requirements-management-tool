@@ -25,7 +25,7 @@ export function w3PairedPlan(manifest: any) {
   const sessions=Array.from({length:16},(_,repeat)=>firstRow.map((offset,position)=>{
     const row=repeat%8,cycle=Math.floor(repeat/8),cell=(row+offset)%8,first=(row+position+cycle)%2?'B':'A'
     return {repeat,session:position,cell,configuration:configurations[Math.floor(cell/2)],rate:cell%2?64:1,orientation:first==='A'?'ABBA':'BAAB',
-      slots:(first==='A'?['A','B','B','A']:['B','A','A','B']).map((arm,position)=>({slot:repeat*32+position,arm,position}))}
+      slots:(first==='A'?['A','B','B','A']:['B','A','A','B']).map((arm,withinSession)=>({slot:repeat*32+position*4+withinSession,arm,position:withinSession}))}
   })).flat()
   const slots=sessions.flatMap(session=>session.slots.map(slot=>({...slot,repeat:session.repeat,session:session.session,cell:session.cell,configuration:session.configuration,rate:session.rate,slot:session.repeat*32+session.session*4+slot.position})))
   return {schema:'aerolink.fms-w3-paired-plan.v1',recipe:'aerolink.fms-perf-w3-prefix.v1',workload:'W3',inference:'DISABLED',qualification:'NOT_CALIBRATED',
