@@ -6,7 +6,7 @@ import { apiLogin, login, selectProgram } from '../auth'
 // client has the emitted-asset manifest, the compiled verifier worker and the served bytes a qualified recording is
 // bound to; a Vite or hosting change that drops the worker from the manifest, or stops serving the manifest, turns
 // every real verification into a refusal. This journey owns that path on the artifact the API actually serves.
-test('a recording exported from the built bench verifies in a fresh worker, and a corrupt build identity is refused', async ({ page, context, request }) => {
+test('a recording exported from the built bench verifies in a fresh worker, and a corrupt or commit-unknown build identity is refused', async ({ page, context, request }) => {
   test.setTimeout(90_000)
   await apiLogin(request)
   await login(page)
@@ -37,11 +37,14 @@ test('a recording exported from the built bench verifies in a fresh worker, and 
   // The fresh worker resolves the CURRENT served identity itself; a manifest whose hash no longer binds its contents
   // is refused rather than trusting the identity the recording asserts.
   const manifest = await (await page.request.get('/fms-recording-build.json')).json()
-  const corrupt = async (route: import('@playwright/test').Route) => route.fulfill({ status: 200, contentType: 'application/json',
-    body: JSON.stringify({ ...manifest, bundleHash: '0'.repeat(64) }) })
-  await context.route('**/fms-recording-build.json', corrupt)
-  try {
-    await verify()
-    await expect(card.getByRole('status')).toHaveText('Verification refused: unqualified environment: corrupt build identity')
-  } finally { await context.unroute('**/fms-recording-build.json', corrupt) }
+  // A build made outside a git checkout records commit null: it is served and runs, but it cannot qualify.
+  for (const [served, reason] of [[{ ...manifest, bundleHash: '0'.repeat(64) }, 'corrupt build identity'],
+    [{ ...manifest, commit: null, dirty: null }, 'build commit unknown']] as const) {
+    const replace = async (route: import('@playwright/test').Route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(served) })
+    await context.route('**/fms-recording-build.json', replace)
+    try {
+      await verify()
+      await expect(card.getByRole('status')).toHaveText(`Verification refused: unqualified environment: ${reason}`)
+    } finally { await context.unroute('**/fms-recording-build.json', replace) }
+  }
 })
