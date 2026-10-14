@@ -1,11 +1,18 @@
 import { useState } from "react";
-import type { ScriptedFms } from "./scriptedFms";
+import type { FmsSide } from "./crossTalk";
+import type { Submit } from "./kernel/submission";
+import type { FmsView } from "./scriptedFms";
 import type { ScenarioRecorder } from "./scenario";
-import { applySensorStimulus, describeSensorStimulus, type SensorStimulus } from "./sensorStimulus";
+import { describeSensorStimulus, type SensorStimulus } from "./sensorStimulus";
 import { RADIO_NAMES, type DmeDevice, type RadioDevice, type RadioFaults } from "./radioManagement";
 
-/** Real sensor/world controls. Inputs and the recorded power target are FMS1; physical radios and stations are shared. */
-export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: { backend: ScriptedFms; sensorOwner: ScriptedFms; recordTo: ScenarioRecorder | null }) {
+/**
+ * Real sensor/world controls. Inputs and the recorded power target are FMS1; physical radios and stations are shared.
+ * Each stimulus is submitted to the kernel (`f14.sensor`) on the computer it addresses; the card shows its outcome.
+ */
+export default function FmsSensorFaultCard({ backend, side, sensorOwner, recordTo, submit }: {
+  backend: FmsView; side: FmsSide; sensorOwner: FmsView; recordTo: ScenarioRecorder | null; submit: Submit;
+}) {
   const [device, setDevice] = useState<RadioDevice | DmeDevice>("nav1");
   const [receiver, setReceiver] = useState<RadioFaults["receiver"]>("FAILED");
   const [path, setPath] = useState<RadioFaults["controlPath"]>("LOST");
@@ -17,14 +24,17 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
   const [headingBias, setHeadingBias] = useState("10");
   const [duration, setDuration] = useState("51");
   const [dvsSurface, setDvsSurface] = useState<"LAND" | "SEA">("LAND");
+  const [apirsNorth, setApirsNorth] = useState("0.3");
+  const [apirsEast, setApirsEast] = useState("0");
   const [notice, setNotice] = useState("No sensor stimulus applied.");
   const apply = (action: SensorStimulus) => {
-    try {
-      const owner = action.kind === "airInput" || action.kind === "dvsInput" || action.kind === "gpsPair" || action.kind === "powerInterrupt" ? sensorOwner : backend;
-      applySensorStimulus(owner, action);
+    const ownsInputs = action.kind === "airInput" || action.kind === "dvsInput" || action.kind === "gpsPair" || action.kind === "powerInterrupt" || action.kind === "apirsBias";
+    const owner = ownsInputs ? sensorOwner : backend;
+    submit({ kind: "f14.sensor", unit: ownsInputs ? 1 : side, stimulus: action }, { kind: "f14", id: `sensor.${action.kind}` }, event => {
+      if (event.outcome.status === "refused") { setNotice(`Refused: ${event.outcome.reason}`); return; }
       recordTo?.sensor(action);
       setNotice(`${owner.utcTime.toISOString()}: ${describeSensorStimulus(action)}.`);
-    } catch (error) { setNotice(`Refused: ${error instanceof Error ? error.message : String(error)}`); }
+    });
   };
   const faults = backend.radioPort?.faults(device);
   const input = sensorOwner.navigationInputs;
@@ -88,6 +98,12 @@ export default function FmsSensorFaultCard({ backend, sensorOwner, recordTo }: {
     <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); apply({ kind: "powerInterrupt", durationMs: Number(duration) }); }}>
       <label>Power interruption ms<input type="number" aria-label="Power interruption duration ms" min={0} max={3_600_000} value={duration} onChange={event => setDuration(event.target.value)} required /></label><button type="submit">Interrupt KALMAN power</button>
     </form>
+    <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); apply({ kind: "apirsBias", northMs2: Number(apirsNorth), eastMs2: Number(apirsEast) }); }}>
+      <label>APIRS bias north m/s²<input type="number" aria-label="APIRS accelerometer bias north m/s²" min={-10} max={10} step={0.01} value={apirsNorth} onChange={event => setApirsNorth(event.target.value)} required /></label>
+      <label>east m/s²<input type="number" aria-label="APIRS accelerometer bias east m/s²" min={-10} max={10} step={0.01} value={apirsEast} onChange={event => setApirsEast(event.target.value)} required /></label>
+      <button type="submit">Apply APIRS bias</button>
+    </form>
+    <p className="fmsBenchHint">An APIRS accelerometer bias outside the nominal model (C2): KALMAN coasts on it without knowing; 0 and 0 clears it.</p>
     <p className="fmsBenchReadout" data-testid="sensor-power-readout">FMS1 KALMAN available: {sensorOwner.sensorSolutions.some(solution => solution.mode === "KALMAN" && solution.available) ? "yes" : "no"}.</p>
     <p className="fmsBenchHint">C2 models the KALMAN rule only: more than 50 ms restarts its one-minute warm-up. Use Nav data for a full computer power cycle.</p>
     <div className="fmsBenchAlert">{(["NORMAL", "INTEGRITY_ONLY", "POSITION_GONE"] as const).map(mode => <button type="button" key={mode} onClick={() => apply({ kind: "gpsPair", mode })}>{mode === "NORMAL" ? "Restore GPS pair words" : mode === "INTEGRITY_ONLY" ? "GPS pair integrity only" : "GPS pair position gone"}</button>)}</div>

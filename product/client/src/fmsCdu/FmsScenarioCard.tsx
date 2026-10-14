@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { describeStep, parseScenario, procedureText, reportMarkdown, type RunOutcome, type Scenario, type ScenarioRunner } from "./scenario";
+import { describeStep, parseScenario, procedureText, reportMarkdown, type RunOutcome, type RunView, type Scenario } from "./scenario";
 import { SCENARIO_LIBRARY } from "./scenarioLibrary";
 
 const STATUS_LABEL = { pending: "Pending", done: "Done", pass: "Pass", fail: "Fail", "not reached": "Not reached", error: "Error" } as const;
@@ -36,7 +36,7 @@ const fileName = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, "
 export default function FmsScenarioCard({
   runner, recording, screenLines, onRun, onStop, onRecord, onFinishRecording, onCheckLine,
 }: {
-  runner: ScenarioRunner | null;
+  runner: RunView | null;
   recording: boolean;
   screenLines: readonly string[];
   onRun: (scenario: Scenario) => void;

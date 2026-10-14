@@ -19,6 +19,7 @@ function watched(composition: ReturnType<typeof singleComposition>) {
   let kernel: FmsKernel | null = null
   const plant: LegacyPlant = {
     clock: composition.plant.clock,
+    units: composition.plant.units,
     integrate: () => {
       const kernelBefore = kernel!.now, clockBefore = composition.clock.time
       composition.plant.integrate()
@@ -117,6 +118,11 @@ test('a run that ends in an ACTION halts the call there, with no INTEGRATE after
   expect(integrations).toHaveLength(4)
   expect(kernel.now).toBe(F(4))
   expect(kernel.unitClockMs).toBe(START + 1000)
+  kernel.submit({ kind: 'ios.alert', unit: 1, text: 'AFTER END' }, { kind: 'ios', id: 'terminal-input', surface: 'main' })
+  expect(kernel.journal.at(-1)).toMatchObject({ frame: 4, kind: 'ios.alert', outcome: { status: 'accepted' } })
+  expect(runner.endedAfter).toBe(1)
+  expect(integrations).toHaveLength(4)
+  expect(kernel.unitClockMs).toBe(START + 1000)
   expect(kernel.advance(2)).toBe(2)
   expect(integrations).toHaveLength(6)
 })
@@ -148,8 +154,10 @@ test('an INTEGRATE that throws leaves the kernel faulted at the next instant, it
     const atFault = flown(composition)
     if (input) {
       // An input executes in F_3's open ACTION: it causes no poll and moves nothing by itself.
-      fms.raiseAlert('INPUT')
-      sim.selectHeading((fms.track + 90) % 360)
+      kernel.submit({ kind: 'ios.alert', unit: 1, text: 'INPUT' }, { kind: 'ios', id: 'fault-input', surface: 'main' })
+      kernel.submit({ kind: 'afcs.select', selection: { select: 'heading', heading: (fms.track + 90) % 360 } }, { kind: 'ui', id: 'fault-heading', surface: 'main' })
+      expect(kernel.journal.filter(record => record.origin === 'native').map(record => [record.frame, record.kind]))
+        .toEqual([[3, 'ios.alert'], [3, 'afcs.select']])
       expect(runner.results[0]).toEqual({ status: 'pending' })
       expect(flown(composition)).toEqual(atFault)
     }
@@ -174,16 +182,20 @@ test('a flight freeze moves the clock a frame at a time and holds the aircraft; 
   const kernel = new FmsKernel(plant)
   const where = () => system.computers.map(fms => fms.truePosition)
   const before = where()
-  expect(kernel.advance(4, { flightFreeze: true })).toBe(4)
+  kernel.submit({ kind: 'ios.flightFreeze', on: true }, { kind: 'ios', id: 'test', surface: 'main' })
+  expect(kernel.advance(4)).toBe(4)
   expect(where()).toEqual(before)
   expect(clock.ms).toBe(START + 1000)
+  kernel.submit({ kind: 'ios.flightFreeze', on: false }, { kind: 'ios', id: 'test', surface: 'main' })
   kernel.advance(1)
   expect(where()).not.toEqual(before)
 
   const single = singleComposition(START)
   const refusing = new FmsKernel(single.plant)
-  expect(() => refusing.advance(1, { flightFreeze: true })).toThrow(/no flight freeze/)
-  expect(refusing.now).toBe(0)
-  expect(single.clock.time).toBe(0)
+  refusing.submit({ kind: 'ios.flightFreeze', on: true }, { kind: 'ios', id: 'test', surface: 'main' })
+  expect(refusing.journal.at(-1)!.outcome).toEqual({ status: 'refused', reason: 'this composition has no flight freeze' })
+  expect(refusing.flightFreeze).toBe(false)
+  expect(refusing.advance(1)).toBe(1)
+  expect(single.clock.time).toBe(2_500_000)
   expect(refusing.faulted).toBe(false)
 })

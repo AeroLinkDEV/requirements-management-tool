@@ -339,11 +339,11 @@ test('reading the whole dual system between computations changes none of its sta
   // Masking held while the integrity condition is on. No action can leave that state behind (the condition clears the
   // masking), so the condition is injected into the private condition set directly; drawing the GPS tab must not clear it.
   const stimulus = stimulusFor(one), injected = (one as unknown as { injected: Set<string> }).injected
-  stimulus.toggleMasked(0, 7); injected.add('gpsIntegrity')
+  stimulus.apply(0, { op: 'mask', prns: [7] }); injected.add('gpsIntegrity')
   expect(one.hasCondition('gpsIntegrity')).toBe(true)
   expect(stimulus.state(0).masked).toEqual([7])
   rest('masking-unsettled', system)
-  injected.delete('gpsIntegrity'); stimulus.toggleMasked(0, 7)
+  injected.delete('gpsIntegrity'); stimulus.apply(0, { op: 'mask', prns: [] })
   one.magvar.load({ ...WMM2025_DATABASE, coefficients: `${WMM2025_DATABASE.coefficients} ` })
   expect(one.magvar.valid).toBe(false)
   rest('fail-unsettled', system)
@@ -367,7 +367,7 @@ test('the GPS integrity condition clears the bench masking whether or not the GP
     const { fms } = single()
     const stimulus = stimulusFor(fms)
     const prn = 7 // the masking record, whichever satellites are in view
-    stimulus.toggleMasked(0, prn)
+    stimulus.apply(0, { op: 'mask', prns: [prn] })
     expect(stimulus.state(0).masked).toEqual([prn])
     fms.setCondition('gpsIntegrity', true)
     if (drawn) fmsGpsView(fms)

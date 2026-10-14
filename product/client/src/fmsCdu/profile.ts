@@ -1,3 +1,4 @@
+import type { ReadView } from "./computation";
 import { CIVIL_SAR_CONFIGURATION, configurationSummary, type AircraftConfiguration } from "./configuration";
 
 /**
@@ -223,7 +224,7 @@ export const PROFILES: readonly AircraftProfile[] = [HELICOPTER_PROFILE, LATER_S
 export const profileById = (id: string | null | undefined) => PROFILES.find(profile => profile.id === id);
 
 /** A short, stable fingerprint of the whole profile (FNV-1a over its JSON): any changed value changes it. */
-export function profileFingerprint(profile: AircraftProfile) {
+export function profileFingerprint(profile: ReadView<AircraftProfile>) {
   let hash = 0x811c9dc5;
   for (const ch of JSON.stringify(profile)) {
     hash ^= ch.codePointAt(0)!;

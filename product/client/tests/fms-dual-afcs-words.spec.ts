@@ -73,8 +73,8 @@ test('the HOVER page of the computer that has never guided shows the AFCS hover 
   system.simulator.selectHeading(0)
   expect(system.simulator.selectHoverHeight(80)).toBe(true)
   for (const receiver of [0, 1]) {
-    stimulusFor(one).setOverride(receiver, '166', { kind: 'FORCE', amount: 3, ssm: 'NORMAL' })
-    stimulusFor(one).setOverride(receiver, '174', { kind: 'FORCE', amount: 4, ssm: 'NORMAL' })
+    stimulusFor(one).apply(receiver, { op: 'override', label: '166', kind: 'FORCE', amount: 3, ssm: 'NORMAL' })
+    stimulusFor(one).apply(receiver, { op: 'override', label: '174', kind: 'FORCE', amount: 4, ssm: 'NORMAL' })
   }
   expect(two.afcs).toBeNull()
   fly(0.25)
@@ -85,7 +85,7 @@ test('the HOVER page of the computer that has never guided shows the AFCS hover 
   let page = screenText(two.screen()).join('\n')
   expect(page).toMatch(/\d+FT\s+80FT/); expect(page).toContain('VX +3.0KT'); expect(page).toContain('VY +4.0KT')
   // The AFCS loses its velocity feedback (north velocity NCD): the peer shows the AFCS's missing words, not stale ones.
-  for (const receiver of [0, 1]) stimulusFor(one).setOverride(receiver, '166', { kind: 'FORCE', amount: 3, ssm: 'NCD' })
+  for (const receiver of [0, 1]) stimulusFor(one).apply(receiver, { op: 'override', label: '166', kind: 'FORCE', amount: 3, ssm: 'NCD' })
   fly(0.25)
   expect(one.hoverFeedback).toBeNull()
   expect(two.afcs).toMatchObject({ hoverHeight: 80, vx: null, vy: null })

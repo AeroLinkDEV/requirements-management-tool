@@ -1,3 +1,4 @@
+import type { ReadView } from "./computation";
 import { distanceNm, offset, type LatLon } from "./fmsModel";
 import { withinLimit } from "./sensorState";
 import { DEFAULT_GEOID_SEPARATION_M, fasCrc, type ApproachLevel, type ApproachStatus, type DeviationScale, type FasDataBlock, type GpsBus, type GpsMode, type Integrity } from "./gps";
@@ -88,12 +89,12 @@ const valid = (value: number, nonNegative = false) => Number.isFinite(value) && 
  * The fix from the coarse and fine position words (110 + 120, 111 + 121): null unless all four are Normal, and null when
  * the assembled position is not finite or out of range (a Normal word is not a valid number: GPS-04).
  */
-export function busFix(bus: GpsBus): LatLon | null {
+export function busFix(bus: ReadView<GpsBus>): LatLon | null {
   const position = assembledPosition(bus);
   return position && !positionVeto(position) ? position : null;
 }
 
-function assembledPosition(bus: GpsBus): LatLon | null {
+function assembledPosition(bus: ReadView<GpsBus>): LatLon | null {
   const parts = [normal(bus["110"]), normal(bus["120"]), normal(bus["111"]), normal(bus["121"])];
   if (parts.some(part => part === null)) return null;
   const [lat, latFine, lon, lonFine] = parts as number[];
@@ -107,7 +108,7 @@ function positionVeto(position: LatLon) {
 }
 
 /** May this receiver be navigated on: the first veto of the precedence table above, with its detail. */
-export function assessReceiver(bus: GpsBus | null, halNm: number): ReceiverAssessment {
+export function assessReceiver(bus: ReadView<GpsBus> | null, halNm: number): ReceiverAssessment {
   if (!bus) return { usable: false, reason: "SILENT", detail: "NOT TRANSMITTING", fix: null, hil: null, hfom: null, mode: null, integrity: null, used: 0, visible: 0, level: "NONE", provider: null };
   const status = bus["273"].ssm === "NORMAL" ? bus["273"].value : null;
   const faults = bus["355"].ssm === "NORMAL" ? bus["355"].value : null;
@@ -229,7 +230,7 @@ export type GpsApproachWords = {
 const deviation = (word: { value: number | null; ssm: string }) => { const value = normal(word); return value !== null && valid(value) ? value : null; };
 
 /** The approach words of a receiver's bus, each used only when Normal and in its domain (GPS phase 3b). */
-export function approachWords(bus: GpsBus | null): GpsApproachWords {
+export function approachWords(bus: ReadView<GpsBus> | null): GpsApproachWords {
   if (!bus) return { level: "NONE", status: null, lateralFt: null, verticalFt: null, toThresholdNm: null, scale: null };
   return {
     level: bus["305"].ssm === "NORMAL" ? bus["305"].value?.level ?? "NONE" : "NONE",
@@ -270,7 +271,7 @@ export function fasRequirement(approach: Procedure, fas: FasDataBlock | null): F
  * May the approach be flown on the selected receiver: the approach half of the precedence table at the top of this file.
  * `receiver` is that receiver's assessment (null when none is selected).
  */
-export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessment | null, fas: FasRequirement = "FAS"): ApproachAuthority {
+export function approachAuthority(bus: ReadView<GpsBus> | null, receiver: ReceiverAssessment | null, fas: FasRequirement = "FAS"): ApproachAuthority {
   const none = (reason: string): ApproachAuthority => ({ annunciation: "NO APPR", lateral: false, vertical: false, reason });
   if (!bus || !receiver?.usable) return none(receiver ? `GPS ${receiver.detail}` : "NO GPS SELECTED");
   // A FAS the approach needs but does not have is not LNAV only: it may not be flown (Astra Q4).
