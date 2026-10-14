@@ -22,8 +22,12 @@ for (const [id, mode] of cases) {
     test.setTimeout(5 * 60_000)
     const run = CENSUS_RUNS.find(entry => entry.id === id)!
     const golden = GOLDEN_DIGESTS[id]
-    const result = runCensus(run, mode)
+    const observed: { kernelDigests?: readonly string[] } = {}
+    const result = runCensus(run, mode, observed)
     expect(result.frames.length).toBe(golden.frames)
+    // #1517 I1c: the kernel's own D_j equals the frozen encoder's digest of the same frame, for every frame of the run.
+    // Expected values are the frozen encoder's (result.frames), never the product codec's.
+    expect(observed.kernelDigests).toEqual(result.frames)
     expect(result.frames.filter((_, i) => i % 100 === 0)).toEqual(golden.every100th)
     expect(result.end).toBe(golden.end)
     expect({ outcome: result.outcome, endedAfter: result.endedAfter }).toEqual({ outcome: golden.outcome, endedAfter: golden.endedAfter })

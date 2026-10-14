@@ -148,8 +148,11 @@ function benchReads(units: DigestUnits, guidance: { fms: ScriptedFms; sim: Fligh
   fmsOutputs(guidance.fms, guidance.sim); aircraftData(guidance.fms, guidance.sim)
 }
 
-/** Runs one census run in one mode and returns its digests. */
-export function runCensus(run: CensusRun, mode: CensusMode): CensusResult {
+/**
+ * Runs one census run in one mode and returns its digests. `observed`, when given, receives the arm kernel's own
+ * per-frame digests (I1c's product D_j) after the run; the result itself is unchanged, so census records keep their shape.
+ */
+export function runCensus(run: CensusRun, mode: CensusMode, observed?: { kernelDigests?: readonly string[] }): CensusResult {
   const frames: string[] = []
   const sha = new Sha256()
   let bytes = 0
@@ -195,6 +198,7 @@ export function runCensus(run: CensusRun, mode: CensusMode): CensusResult {
   }
   // The end state is digested in every mode, so a run without frame digests can be compared with one that has them.
   const end = take(true)!
+  if (observed) observed.kernelDigests = composed.kernelDigests()
   const runner = composed.runner
   return {
     id: run.id, frames, end, sha256: mode.digest ? sha.hex() : '', bytes,
@@ -213,6 +217,8 @@ type Composed = {
   fly(frames: number): void
   /** One freeze frame. */
   freeze(): void
+  /** The arm kernel's own per-frame digests (I1c), for parity with the frozen encoder's frames. */
+  kernelDigests(): readonly string[]
 }
 
 type Arm = {
@@ -233,6 +239,7 @@ const ARM: Arm = {
       units: { computers: [fms], flights: [sim] }, runner, system: null, guidance: () => ({ fms, sim }),
       fly: frames => { kernel.advance(frames, { onInstantClose }) },
       freeze: () => { throw new Error('the single composition has no freeze') },
+      kernelDigests: () => kernel.frameDigests,
     }
   },
   dual(start, scenario, onInstantClose) {
@@ -247,6 +254,7 @@ const ARM: Arm = {
       guidance: () => ({ fms: system.computers[system.guidanceSide - 1], sim: system.simulator }),
       fly: frames => { freezing(false); kernel.advance(frames, { onInstantClose }) },
       freeze: () => { freezing(true); kernel.advance(1, { onInstantClose }) },
+      kernelDigests: () => kernel.frameDigests,
     }
   },
 }
