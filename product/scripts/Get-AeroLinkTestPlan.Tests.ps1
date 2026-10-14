@@ -146,6 +146,9 @@ $previewCases = @(
     @{ Name = 'longer argument option'; Text = $previewFixture.Replace('-RetentionDays 15', '-RetentionDaysExtra 15'); Pass = $false },
     @{ Name = 'prefixed argument option'; Text = $previewFixture.Replace('-RetentionDays 15', '--RetentionDays 15'); Pass = $false },
     @{ Name = 'scalar value 150'; Text = $previewFixture.Replace('RetentionDays    : 15', 'RetentionDays    : 150'); Pass = $false },
+    @{ Name = 'wrong retention property name'; Text = $previewFixture.Replace('RetentionDays    : 15', 'OtherRetentionDays : 15'); Pass = $false },
+    @{ Name = 'wrong schedule property name'; Text = $previewFixture.Replace('Schedule         : Daily', 'OtherSchedule : Daily'); Pass = $false },
+    @{ Name = 'wrong daily-time property name'; Text = $previewFixture.Replace('DailyAt          : 02:00', 'OtherDailyAt : 02:00'); Pass = $false },
     @{ Name = 'wrong schedule'; Text = $previewFixture.Replace('Schedule         : Daily', 'Schedule         : Weekly'); Pass = $false },
     @{ Name = 'wrong daily time'; Text = $previewFixture.Replace('DailyAt          : 02:00', 'DailyAt          : 03:00'); Pass = $false },
     @{ Name = 'wrong runner'; Text = $previewFixture.Replace('Invoke-AeroLinkScheduledBackup.ps1', 'OtherBackup.ps1'); Pass = $false }
