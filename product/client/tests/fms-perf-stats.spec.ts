@@ -1,13 +1,15 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { runInNewContext } from 'node:vm'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
-import { BROWSER_RUN_SCHEMA, browserWindowAccounting, measureWindow, type WindowProbe } from '../perf/browser-accounting'
+import { BROWSER_RUN_SCHEMA, browserWindowAccounting, installBrowserRecorder, measureWindow, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
@@ -619,4 +621,193 @@ test('the pilot plans an even number of runs per arm between the pilot and the c
   expect(plannedRuns({ halfWidthPp: 3, runsPerArm: 4 }, 1, 20)).toBe(20)
   expect(plannedRuns({ halfWidthPp: 0.5, runsPerArm: 4 }, 1, 20)).toBe(4)
   expect(plannedRuns({ halfWidthPp: 1.5, runsPerArm: 4 }, 1, 20)).toBe(10)
+})
+
+// #1542 capture-only contracts. Literal schedule arithmetic is independent of the allocator. File fixtures prove
+// byte binding, not SQLite consistency. Platform/event/closure fixtures prove admission, not native execution.
+test('paired browser CLI uses the declared Williams rows and balances arms and both rates at every position', () => {
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-plan'], { encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const plan = JSON.parse(child.stdout)
+  const rows = [
+    [0, 1, 7, 2, 6, 3, 5, 4], [1, 2, 0, 3, 7, 4, 6, 5],
+    [2, 3, 1, 4, 0, 5, 7, 6], [3, 4, 2, 5, 1, 6, 0, 7],
+    [4, 5, 3, 6, 2, 7, 1, 0], [5, 6, 4, 7, 3, 0, 2, 1],
+    [6, 7, 5, 0, 4, 1, 3, 2], [7, 0, 6, 1, 5, 2, 4, 3],
+  ]
+  expect(plan.slots).toHaveLength(128)
+  expect(plan.inference).toBe('NOT_CALIBRATED')
+  for (let cycle = 0; cycle < 2; cycle++) for (let row = 0; row < 8; row++) {
+    const slots = plan.slots.slice(cycle * 64 + row * 8, cycle * 64 + row * 8 + 8)
+    expect(slots.map((slot: any) => slot.cell)).toEqual(rows[row])
+    expect(slots[0].rate).toBe(row % 2 ? 64 : 1)
+    const declaredArms = ['A', 'B', 'B', 'A', 'A', 'B', 'B', 'A', 'B', 'A', 'A', 'B', 'B', 'A', 'A', 'B']
+    expect(slots.map((slot: any) => slot.arm)).toEqual(Array(8).fill(declaredArms[cycle * 8 + row]))
+  }
+  for (let cell = 0; cell < 8; cell++) for (let position = 0; position < 8; position++) {
+    expect(plan.slots.filter((slot: any) => slot.cell === cell && slot.position === position).map((slot: any) => slot.arm).sort()).toEqual(['A', 'B'])
+  }
+  for (let position = 0; position < 8; position++) expect(plan.slots.filter((slot: any) => slot.position === position && slot.rate === 64)).toHaveLength(8)
+})
+
+test('cold browser inputs preserve exact DB sidecar and evidence bytes, refuse changed input and retain empty directories', ({ browserName: _browserName }, info) => {
+  const source = info.outputPath('cold-source'), copy = info.outputPath('cold-copy')
+  mkdirSync(join(source, 'evidence', 'empty'), { recursive: true })
+  mkdirSync(copy)
+  writeFileSync(join(source, 'aerolink.db'), 'literal closed fixture bytes')
+  writeFileSync(join(source, 'aerolink.db-wal'), 'literal retained WAL bytes')
+  writeFileSync(join(source, 'evidence', 'controlled.bin'), new Uint8Array([0, 4, 255]))
+  const expected = coldPayload(source)
+  expect(expected.map(entry => entry.path)).toEqual(['aerolink.db', 'aerolink.db-wal', 'evidence', 'evidence/controlled.bin', 'evidence/empty'])
+  copyColdPayload(source, copy, expected)
+  expect(readFileSync(join(copy, 'evidence/controlled.bin'))).toEqual(Buffer.from([0, 4, 255]))
+  expect(coldPayload(copy)).toEqual(expected)
+  writeFileSync(join(source, 'aerolink.db-wal'), 'different retained WAL bytes')
+  expect(() => copyColdPayload(source, info.outputPath('must-not-copy'), expected)).toThrow('cold source bytes changed')
+})
+
+test('complete paired capture stays uncalibrated; contradictory direct clocks, lineage, source, seed or closure refuse', ({ browserName: _browserName }, info) => {
+  const plan = browserCapturePlan(), protocol = JSON.parse(readFileSync('perf/protocol.json', 'utf8'))
+  const arm = { commit: '1'.repeat(40), srcTree: '2'.repeat(40), lockBlob: '3'.repeat(40), viteBlob: '4'.repeat(40), distSha256: '5'.repeat(64), distFiles: 2 }
+  const cohort = { protocol, runtime: { node: '24.18.0', v8: 'fixture-v8', playwright: '1.61.1', os: { platform: 'win32', release: 'literal-os', arch: 'x64' }, cpu: { model: 'literal-cpu', logicalCores: 16 }, memoryGiB: 32 },
+    harness: { commit: '6'.repeat(40), apiTree: '7'.repeat(40), apiAssemblySha256: '8'.repeat(64), dirtyEntries: 0 } }
+  const out = info.outputPath('paired-report'), archive = join(out, 'cold/payload')
+  mkdirSync(join(archive, 'evidence'), { recursive: true })
+  writeFileSync(join(archive, 'aerolink.db'), 'literal already-closed payload fixture')
+  writeFileSync(join(out, 'cold/seed.json'), '{"seed":"literal"}')
+  writeFileSync(join(out, 'cold/closure.json'), JSON.stringify({ guardianSha256: CAPTURE_GUARDIAN, status: 'EXITED', exitCode: 0, jobCount: 0, handlesClosed: true, forced: false,
+    producerBirth100ns: '134360000000000000', producerImage: 'literal-seed-producer.exe', producerArgv: 'literal-seed-fixture', closedAt: '2026-10-14T00:00:00Z',
+    apiTree: cohort.harness.apiTree, apiAssemblySha256: cohort.harness.apiAssemblySha256 }))
+  const bytesHash = (name: string) => createHash('sha256').update(readFileSync(join(out, name))).digest('hex')
+  const cold = { payloadSha256: digest(coldPayload(archive)), seedSha256: bytesHash('cold/seed.json'), closureSha256: bytesHash('cold/closure.json') }
+  const session = { id: 'literal-session', plan, cohort, cold, arms: { A: arm, B: arm }, startedAt: '2026-10-14T00:00:00Z', monotonicStart: 100, deadline: 14_400_100 }
+  const closure = { guardianSha256: CAPTURE_GUARDIAN, status: 'EXITED', exitCode: 0, jobCount: 0, handlesClosed: true, forced: false,
+    producerBirth100ns: '134360000000000000', producerImage: 'literal-node.exe', producerArgv: 'literal-capture-cli', closedAt: '2026-10-14T02:40:01Z',
+    exitedAt: '2026-10-14T02:40:00.500Z',
+    // The outer owner's monotonic origin deliberately differs from the producer's100ms origin.
+    wholeOwner: { startedAt: '2026-10-14T00:00:00Z', monotonicStartMs: 1000, measurementDeadlineMs: 14_401_000,
+      cleanupDeadlineMs: 14_701_000, producerExitedMs: 9_601_500, closedMs: 9_602_000 },
+    sessionId: session.id, sourceCommit: cohort.harness.commit }
+  const end = { ...session, closure, stopped: null, endedAt: '2026-10-14T02:40:00Z', monotonicEnd: 9_600_100 }
+  let nextMonotonic = 100
+  const rows = plan.slots.map(slot => {
+    // Independent fixed-work receipt fixture: 60 warmup batches, then 240 one-frame batches at1x or168
+    // 64-frame batches at64x (42wallseconds/10,752frames, the seven6-second input steps' overshoot).
+    const batches = slot.rate === 1 ? 240 : 168, steps = slot.rate === 1 ? 10 : 7
+    const timeline: any[] = [], clocks: any[] = [], tasks: any[] = []
+    for (let batch = 1; batch <= 60 + batches + 1; batch++) {
+      const start = batch * 250, end = start + 1, before = (batch - 1) * slot.rate, after = batch * slot.rate
+      const sample = (monotonicMs: number, completed: number) => ({ utcMs: pacingEpoch + monotonicMs, monotonicMs, timeOrigin: pacingEpoch,
+        kernelTime: completed * 2_500_000, unitClockMs: pacingEpoch + completed * 250, completed })
+      timeline.push({ kind: 'slice', start, end, detail: { schema: 1, epoch: 1, rate: slot.rate, batch, admitted: slot.rate, attempted: slot.rate, completed: slot.rate, remaining: 0 } })
+      clocks.push({ schema: 1, epoch: 1, sequence: batch, rate: slot.rate, batch, entry: sample(start, before), exit: sample(end, after) })
+      tasks.push({ start, end, tail: end })
+    }
+    const begin = 15_001, end = (60 + batches) * 250 + 1
+    const boundary = (label: string, at: number) => ({ label, utcMs: pacingEpoch + at, monotonicMs: at, timeOrigin: pacingEpoch,
+      trace: clocks.filter(clock => clock.exit.monotonicMs <= at).at(-1) })
+    const inputs = Array.from({ length: steps * 2 }, (_, index) => {
+      const offset = Math.floor(index / 2) * 6000 + index % 2 * 1000
+      return { key: 'BRT', target: 0, trusted: true, eventTime: begin + offset + 0.2, dispatchStart: begin + offset + 0.1, dispatchEnd: begin + offset + 0.3, before: 'brightness:1', after: 'brightness:1' }
+    })
+    const rawObservation = { begin, end, timeline, tasks, rafIntervals: [], longTasks: [], loaf: [],
+      events: inputs.map((input, index) => ({ start: input.eventTime, name: 'click', targetKey: 'BRT', targetIndex: 0, duration: 16, processing: 1, delay: 0, interaction: index + 1 })),
+      capture: { clocks, boundaries: [boundary('warmupEnd', begin), boundary('scoredStart', begin), boundary('scoredEnd', end)], inputs } }
+    const accounting = browserWindowAccounting({ rate: slot.rate, ...rawObservation })
+    expect(accounting.frames.completed).toBe(slot.rate === 1 ? 240 : 10_752)
+    const monotonicStartedAt = nextMonotonic + 5000
+    const monotonicEndedAt = monotonicStartedAt + (slot.rate === 1 ? 76_000 : 58_000)
+    nextMonotonic = monotonicEndedAt
+    return { status: 'passed', startedAt: new Date(Date.UTC(2026, 9, 14) + monotonicStartedAt - 100).toISOString(), monotonicStartedAt, monotonicEndedAt, lineage: { session: session.id, manifest: digest(plan), ...slot }, cohort, cold, copySha256: cold.payloadSha256, copiedInputs: coldPayload(archive),
+      armIdentity: arm, servedAtEnd: arm, host: { quietBefore: { quiet: true, waitedSeconds: 5, samples: [{ utc: '2026-10-14T00:00:29Z', monotonicMs: 1000, busyPercent: 2 }] }, busyPercentDuringRun: 20 },
+      result: { accounting, rawObservation, scenario: plan.scenario, rate: slot.rate, configuration: slot.configuration,
+        window: { targetFrames: slot.rate === 1 ? 240 : 9600, stalled: false, steps }, interaction: { presses: steps * 2 }, refusal: null, scenarioFinishedInWindow: false,
+        browser: { version: 'literal-chromium', renderer: 'literal-renderer', headless: true, viewport: protocol.browser.viewport } } }
+  })
+  expect(captureDisposition(plan, session, rows, end)).toMatchObject({ status: 'CAPTURE_COMPLETE', qualification: 'NOT_CALIBRATED', inference: 'DISABLED', reasons: [] })
+  const orderedSamples = structuredClone(rows)
+  orderedSamples[0].result.rawObservation.capture.clocks[60].entry.monotonicMs += 0.25
+  orderedSamples[0].result.rawObservation.capture.clocks[60].exit.monotonicMs += 0.25
+  // Actual ENTRY follows slice start and EXIT follows the recorded slice end; equality is not required.
+  expect(captureDisposition(plan, session, orderedSamples, end).qualification).toBe('NOT_CALIBRATED')
+  const reject = (mutate: (value: any) => void, label = 'contradictory capture') => {
+    const value = structuredClone({ session, rows, end }); mutate(value)
+    expect.soft(captureDisposition(plan, value.session, value.rows, value.end).qualification, label).toBe('NOT_QUALIFIED')
+  }
+  const changeClocks = (value: any, change: (clocks: any[]) => void) => {
+    const capture = value.rows[0].result.rawObservation.capture
+    change(capture.clocks)
+    // Keep page receipts coherent with the changed direct stream: rejection must come from pacing attribution.
+    for (const boundary of capture.boundaries) boundary.trace = structuredClone(capture.clocks.filter((clock: any) => clock.exit.monotonicMs <= boundary.monotonicMs).at(-1))
+  }
+  reject(value => changeClocks(value, clocks => clocks.forEach(clock => clock.epoch = 2)), 'coherent wrong epoch must refuse')
+  reject(value => changeClocks(value, clocks => clocks.forEach(clock => clock.rate = 64)), 'coherent wrong rate must refuse')
+  reject(value => changeClocks(value, clocks => clocks.forEach(clock => clock.batch += 10)), 'coherent wrong batch must refuse')
+  reject(value => changeClocks(value, clocks => {
+    // Move one successful frame from the second scored slice into the first. Totals, continuity and clock deltas
+    // still agree, but the independently declared one-frame timeline slices do not.
+    for (const sample of [clocks[60].exit, clocks[61].entry]) {
+      sample.completed += 1; sample.kernelTime += 2_500_000; sample.unitClockMs += 250
+    }
+  }), 'coherent wrong per-slice completed work must refuse')
+  const capEdge = structuredClone(end)
+  Object.assign(capEdge.closure.wholeOwner, { producerExitedMs: 14_401_000, closedMs: 14_701_000 })
+  Object.assign(capEdge.closure, { exitedAt: '2026-10-14T04:00:00Z', closedAt: '2026-10-14T04:05:00Z' })
+  expect(captureDisposition(plan, session, rows, capEdge)).toMatchObject({ status: 'CAPTURE_COMPLETE', qualification: 'NOT_CALIBRATED' })
+  reject(value => value.end.closure.closedAt = '2026-10-15T00:00:00Z', 'late UTC closure must refuse')
+  reject(value => value.end.closure.wholeOwner.closedMs = 14_701_001, 'one millisecond beyond cleanup must refuse')
+  reject(value => delete value.end.closure.wholeOwner, 'missing original owner budget must refuse')
+  reject(value => value.end.closure.wholeOwner.cleanupDeadlineMs = 14_701_001, 'supplied budget cannot extend cleanup')
+  reject(value => value.end.closure.wholeOwner.measurementDeadlineMs = 14_401_001, 'supplied budget cannot extend measurement')
+  reject(value => value.end.closure.wholeOwner.producerExitedMs = 14_401_001, 'early end marker cannot hide final observations or I/O after deadline')
+  reject(value => value.rows.pop())
+  reject(value => value.rows[1].monotonicStartedAt = value.rows[0].monotonicStartedAt)
+  reject(value => value.rows[0].monotonicEndedAt = value.rows[0].monotonicStartedAt + 1000)
+  reject(value => value.rows[1] = value.rows[0])
+  reject(value => value.rows[0].copySha256 = 'c'.repeat(64))
+  reject(value => value.end.closure.forced = true)
+  reject(value => value.end.closure.sessionId = 'different-session')
+  reject(value => value.end.closure.closedAt = '2026-10-13T23:59:59Z')
+  reject(value => value.rows[0].cohort.harness.dirtyEntries = 1)
+  reject(value => value.rows[0].servedAtEnd = { ...arm, distSha256: 'd'.repeat(64) })
+  reject(value => value.rows[0].result.rawObservation.capture.clocks[0].exit.unitClockMs += 250)
+  reject(value => value.rows[0].result.rawObservation.events = [])
+  reject(value => value.rows[0].result.rawObservation.capture.inputs[0].trusted = false)
+  writeFileSync(join(out, 'paired-session.json'), JSON.stringify(session))
+  writeFileSync(join(out, 'paired-end.json'), JSON.stringify(end))
+  writeFileSync(join(out, 'runs.jsonl'), rows.map(row => JSON.stringify(row)).join('\n') + '\n')
+  const report = () => {
+    const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-capture-report', '--out', out], { encoding: 'utf8' })
+    expect(child.status, child.stderr).toBe(0)
+    return JSON.parse(readFileSync(join(out, 'paired-report.json'), 'utf8'))
+  }
+  expect(report()).toMatchObject({ status: 'CAPTURE_COMPLETE', qualification: 'NOT_CALIBRATED' })
+  const lateEnd = structuredClone(end)
+  lateEnd.closure.wholeOwner.producerExitedMs = 14_401_001
+  writeFileSync(join(out, 'paired-end.json'), JSON.stringify(lateEnd))
+  expect.soft(report().qualification, 'actual report CLI refuses late final work despite an in-bound producer end marker').toBe('NOT_QUALIFIED')
+  writeFileSync(join(out, 'paired-end.json'), JSON.stringify(end))
+  writeFileSync(join(archive, 'aerolink.db'), 'mutated cold payload fixture')
+  expect(report()).toMatchObject({ status: 'CAPTURE_PARTIAL', qualification: 'NOT_QUALIFIED', reasons: ['retained cold archive, seed or writer-closure bytes are missing or changed'] })
+})
+test('the actual recorder drains queued EventTiming before sealing its scored window', () => {
+  // A platform queue control: records are pending, and the observer callback has not fired. This exercises the
+  // real init-script boundary, not a copy of its flush predicate; it makes no native latency/paint claim.
+  const observers: { type: string; pending: unknown[] }[] = []
+  class Observer {
+    type = ''; pending: unknown[] = []
+    constructor(_callback: unknown) { observers.push(this) }
+    observe(options: { type: string }) { this.type = options.type }
+    takeRecords() { const records = this.pending; this.pending = []; return records }
+  }
+  let clock = 0
+  const page: any = { setTimeout: () => 1, requestAnimationFrame: () => 1 }
+  page.top = page
+  runInNewContext(`(${installBrowserRecorder.toString()})({slice:'slice',discard:'discard'})`, {
+    window: page, performance: { now: () => ++clock, timeOrigin: 1234 }, PerformanceObserver: Observer,
+    document: { addEventListener() {}, querySelectorAll: () => [] }, Element: class {}, Date, queueMicrotask,
+  })
+  const begin = page.__fmsPerf.begin()
+  observers.find(observer => observer.type === 'event')!.pending.push({ startTime: begin + 0.5, name: 'click', duration: 16, processingStart: begin + 0.5, processingEnd: begin + 1, interactionId: 2 })
+  expect(page.__fmsPerf.finish().events).toMatchObject([{ name: 'click', duration: 16, interaction: 2 }])
 })
