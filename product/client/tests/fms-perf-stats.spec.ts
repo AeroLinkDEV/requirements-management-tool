@@ -641,6 +641,8 @@ test('paired browser CLI uses the declared Williams rows and balances arms and b
     const slots = plan.slots.slice(cycle * 64 + row * 8, cycle * 64 + row * 8 + 8)
     expect(slots.map((slot: any) => slot.cell)).toEqual(rows[row])
     expect(slots[0].rate).toBe(row % 2 ? 64 : 1)
+    const declaredArms = ['A', 'B', 'B', 'A', 'A', 'B', 'B', 'A', 'B', 'A', 'A', 'B', 'B', 'A', 'A', 'B']
+    expect(slots.map((slot: any) => slot.arm)).toEqual(Array(8).fill(declaredArms[cycle * 8 + row]))
   }
   for (let cell = 0; cell < 8; cell++) for (let position = 0; position < 8; position++) {
     expect(plan.slots.filter((slot: any) => slot.cell === cell && slot.position === position).map((slot: any) => slot.arm).sort()).toEqual(['A', 'B'])
