@@ -75,6 +75,7 @@ test('swallowed browser violations are prevented and still fail even when mocked
   assert.notEqual(result.status, 0, output)
   // A failed assertion can quote the console.log source in a code frame; only the emitted whole line proves it ran.
   assert.match(output, /^receiving-server proof: API=0 external=0; native image and font loaded\r?$/m)
+  assert.match(output, /^mocked-response proof: fulfilled response verified; API=0\r?$/m)
   assert.match(output, /rendered fixture attempted API or external network access/)
   assert.match(output, /api\/mocked/)
   assert.match(output, /2 failed/)
