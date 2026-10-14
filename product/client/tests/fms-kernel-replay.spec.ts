@@ -77,9 +77,9 @@ test('a scenario run with v1 translations, a halt with input and resume, and a r
   expect(exported.journal.filter(entry => entry.origin === 'v1-translated').length).toBeGreaterThan(0)
   expect(exported.control.map(entry => entry.kind)).toEqual(['halt', 'resume', 'rate'])
   expect(await verifyRecording(exported, identity)).toEqual({ status: 'verified', frame: 81, exact: true })
-  const unpaused = structuredClone(exported)
-  ;(unpaused as { control: unknown[] }).control = exported.control.filter(entry => entry.kind === 'rate')
-  await expect(verifyRecording(unpaused, identity)).rejects.toThrow()
+  const unpaused = { ...exported, control: exported.control.filter(entry => entry.kind === 'rate') }
+  // Control records share recordOrdinal with the journal, so a record without its halt/resume cannot replay as recorded.
+  await expect(verifyRecording(unpaused, identity)).rejects.toThrow('journal or outcome replay differs')
 })
 
 // An accepted mid-session import replays from its content reference, and its persistence write lands only in the
