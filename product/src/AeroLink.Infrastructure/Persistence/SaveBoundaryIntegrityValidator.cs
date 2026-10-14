@@ -120,15 +120,9 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
     /// </summary>
     private async Task ValidateExecutionCutoverProvenanceIntegrityAsync(CancellationToken ct)
     {
-        var trackedEvents = _db.ChangeTracker.Entries<BaselineEvent>()
-            .Where(x => x.State != EntityState.Deleted)
-            .ToDictionary(x => x.Entity.Id, x => x.Entity);
-        var trackedProcedures = _db.ChangeTracker.Entries<TestProcedure>()
-            .Where(x => x.State != EntityState.Deleted)
-            .ToDictionary(x => x.Entity.Id, x => x.Entity);
-        var trackedRevisions = _db.ChangeTracker.Entries<TestProcedureRevision>()
-            .Where(x => x.State != EntityState.Deleted)
-            .ToDictionary(x => x.Entity.Id, x => x.Entity);
+        Dictionary<Guid, BaselineEvent>? trackedEvents = null;
+        Dictionary<Guid, TestProcedure>? trackedProcedures = null;
+        Dictionary<Guid, TestProcedureRevision>? trackedRevisions = null;
         var provenance = _db.ChangeTracker.Entries<BaselineExecutionCutoverProvenance>().ToList();
         foreach (var entry in provenance)
         {
@@ -138,6 +132,9 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
                 throw new DomainException(
                     "Execution cutover provenance is immutable historical evidence; it cannot be modified or deleted.");
             if (entry.State != EntityState.Added) continue;
+            trackedEvents ??= _db.ChangeTracker.Entries<BaselineEvent>()
+                .Where(x => x.State != EntityState.Deleted)
+                .ToDictionary(x => x.Entity.Id, x => x.Entity);
             var row = entry.Entity;
             BaselineEvent? linkedEvent = trackedEvents.GetValueOrDefault(row.EventId);
             if (linkedEvent is null)
@@ -161,6 +158,12 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
                 throw new DomainException(
                     "Procedure migration sources are immutable historical evidence; they cannot be modified or deleted.");
             if (entry.State != EntityState.Added) continue;
+            trackedProcedures ??= _db.ChangeTracker.Entries<TestProcedure>()
+                .Where(x => x.State != EntityState.Deleted)
+                .ToDictionary(x => x.Entity.Id, x => x.Entity);
+            trackedRevisions ??= _db.ChangeTracker.Entries<TestProcedureRevision>()
+                .Where(x => x.State != EntityState.Deleted)
+                .ToDictionary(x => x.Entity.Id, x => x.Entity);
             var source = entry.Entity;
             var sourceRevision = trackedRevisions.GetValueOrDefault(source.SourceCaseRevisionId);
             TestProcedure? sourceOwner = null;

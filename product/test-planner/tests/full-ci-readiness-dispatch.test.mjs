@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -139,32 +139,131 @@ test('Product aggregate is a real PR-suite job gated by trusted exact-run verifi
   )
 })
 
-test('an earlier refresh waits for the separate readiness dispatcher without dispatching Full', () => {
-  const noneBranch = requester.match(/            NONE\)\n([\s\S]*?)              ;;/)[1].replace(/^          /gm, '')
+test('trusted readiness recovers failed attempts once and binds only its fresh native run (#1595)', async (t) => {
   assert.match(requester, /REQUEST_LABEL: \$\{\{ github\.event\.label\.name \}\}/)
   assert.match(requester, /group: full-ci-request-.*github\.event\.label\.name == 'ready-for-full-ci' && 'dispatch' \|\| 'refresh'/)
-  assert.match(requester, /NONE\|PENDING\) poll_pause; continue ;;/)
-  assert.match(requester, /No successful trusted Product workflow_dispatch completed/)
-  const scratch = mkdtempSync(join(tmpdir(), 'aerolink-readiness-dispatch-'))
-  try {
-    // Execute the workflow's actual branch with transport/JSON production intercepted. No network call
-    // occurs; the ready event records one dispatch and the refresh enters polling with an empty run id.
-    const script = `set -euo pipefail\nheaders=()\napi=https://invalid.example\npython() { cat >/dev/null; printf '{}'; }\ncurl() { printf 'DISPATCH\\n'; }\n${noneBranch}\n[ -z "$run_id" ]`
-    for (const label of ['authority-maintenance-requested', 'documentation', '', 'READY-FOR-FULL-CI', 'ready-for-full-ci']) {
-      const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], {
-        env: { ...process.env, REQUEST_LABEL: label, RUNNER_TEMP: scratch.replaceAll('\\', '/') },
+  const step = boundStep()
+  const shell = step.slice(step.indexOf('          verify_live_pr() {')).replace(/^          /gm, '')
+  const head = 'a'.repeat(40)
+  const pr = { state: 'open', head: { sha: head, ref: 'topic', repo: { full_name: 'owner/repo' } }, labels: [{ name: 'ready-for-full-ci' }] }
+  const run = (id, patch = {}) => ({ id, head_sha: head, head_branch: 'topic', event: 'workflow_dispatch',
+    actor: { login: 'github-actions[bot]' }, triggering_actor: { login: 'github-actions[bot]' },
+    pull_requests: [{ number: 42 }], status: 'completed', conclusion: 'failure', ...patch })
+  const old = run(101)
+  const fresh = run(202, { conclusion: 'success' })
+  const pending = run(202, { status: 'in_progress', conclusion: null })
+  const page = (...runs) => ({ total_count: runs.length, workflow_runs: runs })
+  const jobs = { jobs: [
+    { name: 'Classify changed product areas', steps: [{ name: 'Authenticate label-dispatched pull-request context', status: 'completed', conclusion: 'success' }] },
+    { id: 900, name: 'Full Product evidence aggregate', status: 'completed', conclusion: 'success' },
+  ] }
+  // Independent fixture expectations execute the actual matcher, dispatch decision, wait and native jobs
+  // validator. Only network/queue transport and sleep are replaced; no copied selection algorithm or seam.
+  const cases = [
+    { name: 'all failed then fresh success', runs: [page(old, run(102)), page(old, run(102)), page(old, fresh)], dispatches: 1, bound: 202 },
+    { name: 'fresh failure remains failure', runs: [page(old), page(old, run(202))], dispatches: 1, error: 'run 202 completed with conclusion=failure' },
+    { name: 'dispatch registration absent', runs: [page(old)], dispatches: 1, error: 'before timeout' },
+    { name: 'uncertain POST never repeats', runs: [page(old)], dispatches: 1, postStatus: 22, status: 22, error: 'prior selection: FOUND 101 completed failure' },
+    { name: 'fresh pending then success', runs: [page(old), page(old, pending), page(old, fresh)], dispatches: 1, bound: 202 },
+    { name: 'fresh identity cannot switch', runs: [page(old), page(old, pending), page(old, run(203, { conclusion: 'success' }))], dispatches: 1, error: 'ERROR' },
+    { name: 'pending without duplicate', runs: [page(old, pending), page(old, fresh)], bound: 202 },
+    { name: 'genuine success reused', runs: [page(old, fresh)], bound: 202 },
+    { name: 'no prior run', runs: [page(), page(fresh)], dispatches: 1, bound: 202 },
+    { name: 'unrelated refresh awaits dispatcher', label: 'documentation', runs: [page(), page(fresh)], bound: 202 },
+    { name: 'refresh cannot recover', label: 'authority-maintenance-requested', runs: [page(old)], error: 'run 101 completed with conclusion=failure' },
+    { name: 'fresh ambiguity refuses', runs: [page(old), page(old, fresh, run(203, { conclusion: 'success' }))], dispatches: 1, error: 'ERROR' },
+    { name: 'incomplete baseline refuses', runs: [{ ...page(old), total_count: 2 }], error: 'ERROR' },
+    { name: 'duplicate baseline identity refuses', runs: [page(old, old)], error: 'ERROR' },
+    { name: 'missing baseline count refuses', runs: [{ workflow_runs: [old] }], error: 'ERROR' },
+    { name: 'unresolved terminal conclusion refuses', runs: [page(run(101, { conclusion: null }))], error: 'ERROR' },
+    { name: 'native aggregate failure refuses', runs: [page(old), page(old, fresh)], dispatches: 1,
+      jobs: { jobs: [jobs.jobs[0], { ...jobs.jobs[1], conclusion: 'failure' }] }, error: 'Product aggregate is not authoritative success' },
+    { name: 'native authentication failure refuses', runs: [page(old), page(old, fresh)], dispatches: 1,
+      jobs: { jobs: [{ ...jobs.jobs[0], steps: [{ ...jobs.jobs[0].steps[0], conclusion: 'failure' }] }, jobs.jobs[1]] }, error: 'Product authentication evidence refused' },
+    ...[
+      ['actor', { actor: { login: 'human' } }],
+      ['triggering actor', { triggering_actor: { login: 'human' } }],
+      ['head', { head_sha: 'b'.repeat(40) }],
+      ['branch', { head_branch: 'other' }],
+      ['associated PR', { pull_requests: [{ number: 43 }] }],
+      ['event', { event: 'pull_request' }],
+    ].map(([name, patch]) => ({ name: `wrong ${name} cannot bind`, runs: [page(old), page(old, run(202, { conclusion: 'success', ...patch }))], dispatches: 1, error: 'before timeout' })),
+    ...[
+      ['repository', { head: { ...pr.head, repo: { full_name: 'foreign/repo' } } }],
+      ['readiness', { labels: [] }],
+      ['head', { head: { ...pr.head, sha: 'b'.repeat(40) } }],
+      ['branch', { head: { ...pr.head, ref: 'other' } }],
+      ['closed PR', { state: 'closed' }],
+    ].map(([name, patch]) => ({ name: `live ${name} drift`, runs: [page(old)], prs: [pr, { ...pr, ...patch }], error: 'Exact Full request is stale' })),
+    { name: 'final live head drift', runs: [page(fresh)], prs: [pr, pr, { ...pr, head: { ...pr.head, sha: 'b'.repeat(40) } }], error: 'head SHA moved' },
+  ]
+  for (const row of cases) {
+    await t.test(row.name, () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'aerolink-readiness-dispatch-'))
+    try {
+      row.runs.forEach((response, index) => writeFileSync(join(scratch, `runs-${index + 1}.json`), JSON.stringify(response)))
+      const prs = row.prs ?? [pr]
+      prs.forEach((response, index) => writeFileSync(join(scratch, `pr-${index + 1}.json`), JSON.stringify(response)))
+      writeFileSync(join(scratch, 'jobs.json'), JSON.stringify(row.jobs ?? jobs))
+      const script = `set -euo pipefail
+headers=()
+api=https://invalid.example
+read_api() {
+  [ "$2" = --output ]
+  case "$1" in
+    "$api/pulls/$PR_NUMBER") kind=pr; limit=${prs.length} ;;
+    "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100") kind=runs; limit=${row.runs.length} ;;
+    "$api/actions/runs/"*) printf '%s\\n' "$1" >> "$RUNNER_TEMP/jobs-reads"; cp "$RUNNER_TEMP/jobs.json" "$3"; return ;;
+    *) echo 'unexpected API read' >&2; return 99 ;;
+  esac
+  count=0
+  if [ -f "$RUNNER_TEMP/$kind-count" ]; then read -r count < "$RUNNER_TEMP/$kind-count"; fi
+  count=$((count + 1))
+  printf '%s\\n' "$count" > "$RUNNER_TEMP/$kind-count"
+  response=$count
+  if [ "$response" -gt "$limit" ]; then response=$limit; fi
+  cp "$RUNNER_TEMP/$kind-$response.json" "$3"
+}
+curl() { printf 'DISPATCH\\n' >> "$RUNNER_TEMP/dispatches"; return ${row.postStatus ?? 0}; }
+node() {
+  if [ "$1" = "$RUNNER_TEMP/verify-readiness-target.mjs" ]; then return 0; fi
+  command node "$@"
+}
+sleep() {
+  read -r count < "$RUNNER_TEMP/runs-count"
+  if [ "$count" -lt ${row.runs.length} ]; then SECONDS=$((SECONDS + 1)); else SECONDS=$((SECONDS + 4201)); fi
+}
+${shell}
+echo BOUND:$run_id
+`
+      const path = join(scratch, 'readiness.sh')
+      writeFileSync(path, script)
+      const result = spawnSync(bash, ['--noprofile', '--norc', path.replaceAll('\\', '/')], {
+        env: { ...process.env, RUNNER_TEMP: scratch.replaceAll('\\', '/'), HEAD_SHA: head, HEAD_REF: 'topic',
+          PR_NUMBER: '42', BASE_SHA: 'c'.repeat(40), GITHUB_REPOSITORY: 'owner/repo',
+          REQUEST_LABEL: row.label ?? 'ready-for-full-ci', GITHUB_STEP_SUMMARY: '/dev/null' },
         encoding: 'utf8', timeout: 10_000,
       })
       assert.ifError(result.error)
-      assert.equal(result.status, 0, `${label}: ${result.stderr}`)
-      assert.equal(result.stdout, label === 'ready-for-full-ci' ? 'DISPATCH\n' : '', label)
+      const detail = `${row.name}: ${result.stdout}\n${result.stderr}`
+      const dispatchPath = join(scratch, 'dispatches')
+      assert.equal(existsSync(dispatchPath) ? readFileSync(dispatchPath, 'utf8').trim().split('\n').length : 0, row.dispatches ?? 0, detail)
+      assert.equal(result.status, row.status ?? (row.bound ? 0 : 1), detail)
+      if (row.bound) {
+        assert.match(result.stdout, new RegExp(`^BOUND:${row.bound}$`, 'm'), detail)
+        assert.equal(readFileSync(join(scratch, 'jobs-reads'), 'utf8').trim(), `https://invalid.example/actions/runs/${row.bound}/jobs?filter=latest&per_page=100`, detail)
+      } else {
+        assert.match(result.stdout + result.stderr, new RegExp(row.error), detail)
+        assert.doesNotMatch(result.stdout, /^BOUND:/m, detail)
+      }
+      if (row.dispatches) assert.deepEqual(JSON.parse(readFileSync(join(scratch, 'full-ci-dispatch.json'), 'utf8')), {
+        ref: 'topic', inputs: { pull_request_number: '42', pull_request_base_sha: 'c'.repeat(40), pull_request_head_sha: head, full_diagnostics: 'false' },
+      }, detail)
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
     }
-  } finally {
-    rmSync(scratch, { recursive: true, force: true })
+    })
   }
-  // Already-running or completed trusted runs continue through the existing verifier, not dispatch.
-  assert.match(requester, /FOUND\*\) read -r _ run_id _ _ <<< "\$match" ;;/)
-  assert.match(requester, /PENDING\) run_id="" ;;/)
 })
 
 // #987: the bound step's actual script, so the tests below exercise the workflow's own shell rather than a copy.
