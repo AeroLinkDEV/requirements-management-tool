@@ -115,15 +115,30 @@ export function archiveW3ColdInput(input: string, dir: string, entries: readonly
   if(fileDigest(seed)!==cold.seedSha256 || fileDigest(closure)!==cold.closureSha256)throw new Error('W3 archived seed or writer closure bytes disagree with the sealed cold input')
   return {archive,seed}
 }
-/** The runs.jsonl row recorded for one child run (run-perf.ts run()). */
-export function runRow(entry: Record<string, any>, _resultFile: string, _dir: string) {
-  return entry
+/** The runs.jsonl row recorded for one child run (run-perf.ts run()). A W3 child result (raw observations, tens of MB)
+ * and its slot identity (dependency lists) already have one on-disk copy in runs/run-XXXX.json: the row binds that file by
+ * path, size and SHA-256, keeps the classification, and records the identity by digest. With no result file the identity
+ * stays inline. Other kinds keep the inline result that report() and the W2 capture readers consume. */
+export function runRow(entry: Record<string, any>, resultFile: string, dir: string) {
+  if (entry.kind !== 'browser-w3') return entry
+  const { result, identity, ...rest } = entry
+  const bound = existsSync(resultFile) && result !== null && result !== undefined && digest(result.identity) === digest(identity)
+  if (!bound) return { ...rest, identity, resultFile: null, resultSummary: null }
+  return { ...rest, identitySha256: digest(identity),
+    resultFile: { path: relative(dir, resultFile).replaceAll('\\', '/'), bytes: lstatSync(resultFile).size, sha256: fileDigest(resultFile) },
+    resultSummary: { refusal: result.refusal ?? null, accountingStatus: result.accounting?.status ?? null, routeId: result.route?.id ?? null, identitySha256: digest(result.identity) } }
 }
-/** The W3 session record (w3-session.json; w3-end.json repeats it). */
+/** The W3 session record (w3-session.json; w3-end.json repeats it). The admitted input manifest (with every arm's
+ * dependency and dist lists) is copied once into the output and referenced by path, size, SHA-256 and canonical digest. */
 export function w3SessionRecord(fields: { id: string; plan: unknown; sessionIndex: number; slots: unknown[]; manifest: unknown; manifestInput: string; dir: string;
   cold: unknown; harness: unknown; startedAt: string; monotonicStart: number; deadline: number }) {
-  const { id, plan, sessionIndex, slots, manifest, cold, harness, startedAt, monotonicStart, deadline } = fields
-  return {schema:'aerolink.fms-w3-paired-session.v1',id,plan,sessionIndex,slots,manifest,cold,harness,startedAt,monotonicStart,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
+  const { id, plan, sessionIndex, slots, manifest, manifestInput, dir, cold, harness, startedAt, monotonicStart, deadline } = fields
+  const copy = join(dir, 'w3-input-manifest.json')
+  if (digest(JSON.parse(readFileSync(manifestInput, 'utf8'))) !== digest(manifest)) throw new Error('W3 input manifest file is not the admitted manifest')
+  cpSync(manifestInput, copy, { errorOnExist: true, force: false })
+  if (fileDigest(copy) !== fileDigest(manifestInput)) throw new Error('W3 input manifest copy bytes disagree')
+  const manifestFile = { path: 'w3-input-manifest.json', sha256: fileDigest(copy), bytes: lstatSync(copy).size, digest: digest(manifest) }
+  return {schema:'aerolink.fms-w3-paired-session.v1',id,plan,sessionIndex,slots,manifestFile,cold,harness,startedAt,monotonicStart,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
 }
 /** The W3 session end record the executor writes to w3-end.json. The end re-admission outcome is recorded beside the
  * original stop reason and never replaces it or prevents the record; the caller decides what to throw after writing. */
