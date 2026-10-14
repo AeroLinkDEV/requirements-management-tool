@@ -454,6 +454,11 @@ backend-only token URLs, disabled Esri request logging and redirects, attributio
   with runway/FAF construction, validity gates, temperature MOD/EXEC and crew QNH/MDA. It commands no vertical
   autopilot mode. The default KBTV mission is LNAV with advisory VNAV and crew VS; coupled LPV and its fault missions
   explicitly select the representative later-CMA/CMA-5024 profile, whose exact OEM installed baseline remains unqualified.
+  In SYNC, its selected controller and both computers' monitoring consume the same completed qualified system GPS
+  approach output. Navigation election cannot bypass fixed 0.3-NM approach integrity, freshness, dwell, scaling or jump
+  checks. Only final selected both-axis physical consumption renews the shared comparison reference; observation,
+  paused refresh and ALT HOLD do not. Independent local choices, S300 advisory authority and loss/rearm policy remain
+  separate. This implements laboratory model guidance, not installed proprietary source-switch qualification.
   Established S300 finals retain steering for five minutes after integrity-only loss; invalid position or HDOP over 4
   withdraws it immediately. The applicability matrix identifies the temperature/QNH models and adapter validity limits.
 
