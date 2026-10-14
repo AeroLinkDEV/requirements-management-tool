@@ -99,6 +99,7 @@ export function captureDisposition(plan: ReturnType<typeof browserCapturePlan>, 
     if (end.closure.sessionId !== session?.id || end.closure.sourceCommit !== cohort?.harness?.commit || Date.parse(end.closure.closedAt) < Date.parse(end?.endedAt)) throw new Error('wrong closure')
   } catch { reasons.push('whole-session native closure is unproven') }
   if (records.length !== 128) reasons.push('capture does not contain exactly 128 records')
+  let previousEnd = session?.monotonicStart
   for (let i = 0; i < records.length; i++) {
     const record = records[i], slot = plan.slots[i]
     if (!slot || !equal(record.lineage, { session: session?.id, manifest: digest(plan), ...slot })) reasons.push(`slot ${i} has missing, duplicate or wrong-order lineage`)
@@ -108,6 +109,9 @@ export function captureDisposition(plan: ReturnType<typeof browserCapturePlan>, 
       quiet.samples.at(-1)?.busyPercent > cohort?.protocol?.quietHost?.maxBusyPercent || !(quiet.waitedSeconds >= cohort?.protocol?.quietHost?.sampleSeconds) ||
       !Number.isFinite(record.host?.busyPercentDuringRun)) reasons.push(`slot ${i} host admission/load evidence is incomplete`)
     if (!Number.isFinite(Date.parse(record.startedAt)) || Date.parse(record.startedAt) < Date.parse(session?.startedAt) || Date.parse(record.startedAt) > Date.parse(end?.endedAt)) reasons.push(`slot ${i} is outside the session span`)
+    if (!Number.isFinite(record.monotonicStartedAt) || !Number.isFinite(record.monotonicEndedAt) || record.monotonicStartedAt < previousEnd ||
+      record.monotonicEndedAt <= record.monotonicStartedAt || record.monotonicEndedAt > end?.monotonicEnd) reasons.push(`slot ${i} has missing or overlapping monotonic execution`)
+    previousEnd = record.monotonicEndedAt
     if (!equal(record.cold, session?.cold) || record.copySha256 !== session?.cold?.payloadSha256 || !Array.isArray(record.copiedInputs) || digest(record.copiedInputs) !== record.copySha256) reasons.push(`slot ${i} cold copy disagrees`)
     if (!equal(record.cohort, session?.cohort) || !equal(record.armIdentity, session?.arms?.[slot?.arm]) || !equal(record.servedAtEnd, record.armIdentity)) reasons.push(`slot ${i} build/cohort changed`)
     try {
@@ -115,6 +119,7 @@ export function captureDisposition(plan: ReturnType<typeof browserCapturePlan>, 
       const accounting = browserWindowAccounting({ ...raw, rate: slot!.rate })
       const evidence = captureEvidence(raw, accounting)
       if (!equal(record.result.accounting, accounting) || evidence.boundaryStatus !== 'OBSERVED' || evidence.eventTimingStatus !== 'OBSERVED') throw new Error('incomplete')
+      if (record.monotonicEndedAt - record.monotonicStartedAt < (cohort.protocol.browser.warmupWallSeconds + accounting.wallSeconds) * 1000) throw new Error('insufficient fixed work interval')
       const target = slot?.rate === 1 ? 240 : 9600
       if (record.result.window?.targetFrames !== target || accounting.frames.completed < target || accounting.frames.discarded !== 0 || accounting.frames.unfinishedAttempts !== 0 ||
         record.result.window?.stalled !== false || record.result.scenarioFinishedInWindow !== false || record.result.refusal !== null ||

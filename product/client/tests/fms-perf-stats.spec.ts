@@ -680,9 +680,10 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
   const cold = { payloadSha256: digest(coldPayload(archive)), seedSha256: bytesHash('cold/seed.json'), closureSha256: bytesHash('cold/closure.json') }
   const session = { id: 'literal-session', plan, cohort, cold, arms: { A: arm, B: arm }, startedAt: '2026-10-14T00:00:00Z', monotonicStart: 100, deadline: 14_400_100 }
   const closure = { guardianSha256: CAPTURE_GUARDIAN, status: 'EXITED', exitCode: 0, jobCount: 0, handlesClosed: true, forced: false,
-    producerBirth100ns: '134360000000000000', producerImage: 'literal-node.exe', producerArgv: 'literal-capture-cli', closedAt: '2026-10-14T00:01:01Z',
+    producerBirth100ns: '134360000000000000', producerImage: 'literal-node.exe', producerArgv: 'literal-capture-cli', closedAt: '2026-10-14T02:40:01Z',
     sessionId: session.id, sourceCommit: cohort.harness.commit }
-  const end = { ...session, closure, stopped: null, endedAt: '2026-10-14T00:01:00Z', monotonicEnd: 60_100 }
+  const end = { ...session, closure, stopped: null, endedAt: '2026-10-14T02:40:00Z', monotonicEnd: 9_600_100 }
+  let nextMonotonic = 100
   const rows = plan.slots.map(slot => {
     // Independent fixed-work receipt fixture: 60 warmup batches, then 240 one-frame batches at1x or168
     // 64-frame batches at64x (42wallseconds/10,752frames, the seven6-second input steps' overshoot).
@@ -708,7 +709,10 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
       capture: { clocks, boundaries: [boundary('warmupEnd', begin), boundary('scoredStart', begin), boundary('scoredEnd', end)], inputs } }
     const accounting = browserWindowAccounting({ rate: slot.rate, ...rawObservation })
     expect(accounting.frames.completed).toBe(slot.rate === 1 ? 240 : 10_752)
-    return { status: 'passed', startedAt: '2026-10-14T00:00:30Z', lineage: { session: session.id, manifest: digest(plan), ...slot }, cohort, cold, copySha256: cold.payloadSha256, copiedInputs: coldPayload(archive),
+    const monotonicStartedAt = nextMonotonic + 5000
+    const monotonicEndedAt = monotonicStartedAt + (slot.rate === 1 ? 76_000 : 58_000)
+    nextMonotonic = monotonicEndedAt
+    return { status: 'passed', startedAt: new Date(Date.UTC(2026, 9, 14) + monotonicStartedAt - 100).toISOString(), monotonicStartedAt, monotonicEndedAt, lineage: { session: session.id, manifest: digest(plan), ...slot }, cohort, cold, copySha256: cold.payloadSha256, copiedInputs: coldPayload(archive),
       armIdentity: arm, servedAtEnd: arm, host: { quietBefore: { quiet: true, waitedSeconds: 5, samples: [{ utc: '2026-10-14T00:00:29Z', monotonicMs: 1000, busyPercent: 2 }] }, busyPercentDuringRun: 20 },
       result: { accounting, rawObservation, scenario: plan.scenario, rate: slot.rate, configuration: slot.configuration,
         window: { targetFrames: slot.rate === 1 ? 240 : 9600, stalled: false, steps }, interaction: { presses: steps * 2 }, refusal: null, scenarioFinishedInWindow: false,
@@ -717,6 +721,8 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
   expect(captureDisposition(plan, session, rows, end)).toMatchObject({ status: 'CAPTURE_COMPLETE', qualification: 'NOT_CALIBRATED', inference: 'DISABLED', reasons: [] })
   const reject = (mutate: (value: any) => void) => { const value = structuredClone({ session, rows, end }); mutate(value); expect(captureDisposition(plan, value.session, value.rows, value.end).qualification).toBe('NOT_QUALIFIED') }
   reject(value => value.rows.pop())
+  reject(value => value.rows[1].monotonicStartedAt = value.rows[0].monotonicStartedAt)
+  reject(value => value.rows[0].monotonicEndedAt = value.rows[0].monotonicStartedAt + 1000)
   reject(value => value.rows[1] = value.rows[0])
   reject(value => value.rows[0].copySha256 = 'c'.repeat(64))
   reject(value => value.end.closure.forced = true)

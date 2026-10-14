@@ -138,15 +138,17 @@ function run(dir: string, record: Record<string, unknown>, env: Record<string, s
   const resultPath = join(dir, 'runs', `${name}.json`)
   const quiet = quietHost(deadline - performance.now())
   const before = cpus(), started = Date.now(), startedAt = new Date(started).toISOString()
+  const monotonicStartedAt = performance.now()
   const child = spawnSync(process.execPath, [cli, 'test', '--config=perf/playwright.perf.config.ts'], {
     cwd: client, encoding: 'utf8', timeout: Math.max(1, Math.min(childCapMs, deadline - performance.now())), maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, ...env, AEROLINK_PERF_RESULT: resultPath, AEROLINK_PERF_OUTPUT_DIR: join(dir, 'logs', name) },
   })
   const wallSeconds = (Date.now() - started) / 1000
+  const monotonicEndedAt = performance.now()
   writeFileSync(join(dir, 'logs', `${name}.log`), `${child.stdout ?? ''}\n${child.stderr ?? ''}`)
   const result = existsSync(resultPath) ? JSON.parse(readFileSync(resultPath, 'utf8')) : null
   const entry: RunRecord = {
-    index, ...record, startedAt, wallSeconds, exitCode: child.status, status: child.status === 0 && result ? 'passed' : 'failed',
+    index, ...record, startedAt, wallSeconds, monotonicStartedAt, monotonicEndedAt, exitCode: child.status, status: child.status === 0 && result ? 'passed' : 'failed',
     host: { quietBefore: quiet, busyPercentDuringRun: busy(before, cpus()), powerPlan: powerPlan() }, result,
   }
   appendFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify(entry)}\n`)
