@@ -19,6 +19,60 @@ namespace AeroLink.Infrastructure.Tests;
 /// </summary>
 public sealed class SaveChangesContractTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task Unrelated_program_save_has_a_bounded_detection_workload()
+    {
+        var detections = 0;
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite(connection)
+            .LogTo(_ => detections++, [CoreEventId.DetectChangesCompleted])
+            .Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var now = new DateTimeOffset(2024, 1, 8, 14, 0, 0, TimeSpan.Zero);
+        var controlProgram = new ProgramRecord("Detection control", "DETC");
+        var project = new ProjectRecord(controlProgram.Id, "Detection project", "Detection product");
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        var request = new SystemChangeRequest("SRCR-00001", 0, project.Id, release.Id,
+            "Original title", "Problem", "Analysis", "Solution", "author", now);
+        db.AddRange(controlProgram, project, release, request);
+        await db.SaveChangesAsync();
+
+        // Independent probe control: a real public aggregate mutation must be detected and persisted.
+        request.UpdateDraft("author", "Changed title", "Problem", "Analysis", "Solution", [], now.AddMinutes(1));
+        detections = 0;
+        db.ChangeTracker.DetectChanges();
+        Assert.Equal(1, detections);
+        Assert.Equal(EntityState.Modified, db.Entry(request).State);
+        await db.SaveChangesAsync();
+        Assert.Equal("Changed title", await db.SystemChangeRequests.AsNoTracking()
+            .Where(x => x.Id == request.Id).Select(x => x.Title).SingleAsync());
+
+        var program = new ProgramRecord("Ordinary save work", "WORK");
+        db.Add(program);
+        Assert.True(db.ChangeTracker.AutoDetectChangesEnabled);
+        detections = 0;
+        var written = await db.SaveChangesAsync();
+        var saveDetections = detections;
+        output.WriteLine($"Unrelated program save full-graph detections: {saveDetections}");
+        Assert.True(saveDetections > 0, "The default save must retain observable EF change detection.");
+        // Maintained budget for this fixed tiny EF 10 save, excluding setup and the independent probe control.
+        // The measured pre-fix pipeline used 84 requests; 82 leaves one request above the expected 81 after removing
+        // unnecessary work. Lower work is welcome; legitimate pipeline/EF growth needs deliberate contract review.
+        Assert.True(saveDetections <= 82,
+            $"The unrelated program save exceeded its 82-detection work budget: {saveDetections} requests.");
+        Assert.True(db.ChangeTracker.AutoDetectChangesEnabled);
+        Assert.Equal(1, written);
+
+        await using var persisted = new AeroLinkDbContext(options);
+        var stored = await persisted.Programs.AsNoTracking().SingleAsync(x => x.Id == program.Id);
+        Assert.Equal(program.Id, stored.Id);
+        Assert.Equal("Ordinary save work", stored.Name);
+        Assert.Equal("WORK", stored.Code);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
