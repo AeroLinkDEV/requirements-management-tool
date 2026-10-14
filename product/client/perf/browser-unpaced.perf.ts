@@ -18,6 +18,12 @@ test('browser unpaced public composition', async ({ page, context }) => {
   const arm = process.env.AEROLINK_PERF_ARM, output = process.env.AEROLINK_PERF_RESULT
   const workload = process.env.AEROLINK_PERF_WORKLOAD, topology = process.env.AEROLINK_PERF_TOPOLOGY
   if (!arm || !output || !workload || !['single', 'dual'].includes(topology ?? '')) throw new Error('explicit ARM, RESULT, WORKLOAD and TOPOLOGY required')
+  const capability = JSON.parse(process.env.AEROLINK_PERF_ARM_CAPABILITY ?? 'null')
+  if (!capability || !['CURRENT_KERNEL', 'LEGACY_PUBLIC_ADVANCE_TICKS'].includes(capability.kind)) throw new Error('declared ARM capability required')
+  for (const module of capability.modules) {
+    const path = join(arm, 'src/fmsCdu', module.path)
+    if (createHash('sha256').update(readFileSync(path)).digest('hex') !== module.sha256) throw new Error('declared ARM module bytes changed')
+  }
   const family = protocol.routeContract.workloads.find((entry: any) => entry.id === workload)
   const declared = family?.routes['browser-unpaced']
   if (declared?.status !== 'IMPLEMENTED') throw new Error('unimplemented browser-unpaced route')
@@ -30,7 +36,7 @@ test('browser unpaced public composition', async ({ page, context }) => {
   const [profiles, gps] = await Promise.all(['profile.ts', 'gps.ts'].map(load))
   const profile = profiles.profileById(frozen.profile)
   if (!profile) throw new Error('frozen profile unavailable in ARM')
-  const input: UnpacedInput = { scenarioJson: JSON.stringify(frozen), topology: topology as 'single' | 'dual',
+  const input: UnpacedInput = { driverKind: capability.kind, scenarioJson: JSON.stringify(frozen), topology: topology as 'single' | 'dual',
     warmupFrames: declared.warmup.value, totalFrames: declared.scored.kind === 'fixed-total-after-warmup' ? declared.scored.maxTotalSimSeconds * 4 : null,
     maximumFrames: declared.scored.maxTotalSimSeconds * 4 + 2, profile: { id: profile.id, summary: profiles.profileSummary(profile) },
     seeds: { constellation: 1, receivers: [101, 202] }, gpsModel: gps.GPS_MODEL_VERSION }
@@ -45,11 +51,16 @@ test('browser unpaced public composition', async ({ page, context }) => {
     await page.route(`${origin}/__unpaced_measurement__`, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Unpaced public composition measurement</title>' }))
     await page.goto(`${origin}/__unpaced_measurement__`)
     const observed = await page.evaluate(async ({ origin, program, input }) => {
-      const [adapter, kernel, scenario, profiles, gps] = await Promise.all([
-        'kernel/legacyPlantAdapter.ts', 'kernel/kernel.ts', 'scenario.ts', 'profile.ts', 'gps.ts',
-      ].map(name => import(`${origin}/src/fmsCdu/${name}`)))
+      const load = (name: string) => import(`${origin}/src/fmsCdu/${name}`)
+      const [scenario, profiles, gps] = await Promise.all(['scenario.ts', 'profile.ts', 'gps.ts'].map(load))
+      const modules: Record<string, any> = { scenario, profiles, gps }
+      if (input.driverKind === 'CURRENT_KERNEL') {
+        ;[modules.adapter, modules.kernel] = await Promise.all(['kernel/legacyPlantAdapter.ts', 'kernel/kernel.ts'].map(load))
+      } else {
+        ;[modules.scripted, modules.flight, modules.dual] = await Promise.all(['scriptedFms.ts', 'flight.ts', 'dualFms.ts'].map(load))
+      }
       const execute = new Function(`return (${program})`)() as typeof runBrowserUnpaced
-      const result = execute({ adapter, kernel, scenario, profiles, gps }, input,
+      const result = execute(modules, input,
         { now: () => performance.now(), utcNow: () => Date.now(), timeOrigin: performance.timeOrigin })
       ;(window as any).__fmsUnpacedRetained = result
       return result.summary
@@ -61,13 +72,14 @@ test('browser unpaced public composition', async ({ page, context }) => {
       const run = (window as any).__fmsUnpacedRetained
       const memory = (performance as any).memory
       return { utcMs: Date.now(), monotonicMs: performance.now(), timeOrigin: performance.timeOrigin,
-        kernelTime: run.retained.kernel.now, unitClockMs: run.retained.kernel.unitClockMs,
+        ...run.retained.readClock(),
         completed: run.summary.work.completed, usedBytes: Number.isFinite(memory?.usedJSHeapSize) ? memory.usedJSHeapSize : null }
     })
-    const unchanged = heap.kernelTime === observed.boundaries.end.kernelTime && heap.unitClockMs === observed.boundaries.end.unitClockMs && heap.completed === observed.work.completed
+    const unchanged = heap.kernelTime === observed.boundaries.end.kernelTime && heap.unitClockMs === observed.boundaries.end.unitClockMs && heap.completed === observed.work.completed &&
+      heap.injectedClockMs === observed.boundaries.end.injectedClockMs && JSON.stringify(heap.unitClocksMs) === JSON.stringify(observed.boundaries.end.unitClocksMs)
     const route = { schema: protocol.routeContract.schema, id: `${workload}/browser-unpaced/${topology}/v1`, workload, scenario: family.scenario,
       topology, host: 'browser-unpaced', ...declared }
-    const summary = { ...observed, route, workload, scenario: family.scenario, input,
+    const summary = { ...observed, route, workload, scenario: family.scenario, input, capability,
       inputSha256: createHash('sha256').update(input.scenarioJson).digest('hex'),
       frames: observed.durations.length ? frameSummary(observed.durations) : null,
       heap: { status: gc === 'CDP_COLLECTED' && unchanged && heap.usedBytes !== null ? 'OBSERVED_RETAINED_STATE' : 'UNAVAILABLE', method: gc, unchanged, ...heap },

@@ -2,8 +2,9 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { singleComposition, dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
@@ -853,7 +854,7 @@ test('the route CLI declares the actual five mission extents, hosts and topology
   expect(ui.find((route: any) => route.workload === 'W3')).toMatchObject({ warmup: null, scored: null, terminal: null })
   const unpaced = plan.routes.filter((route: any) => route.host === 'browser-unpaced')
   expect(unpaced).toHaveLength(10)
-  expect(unpaced.every((route: any) => route.armCapability === 'CURRENT_KERNEL_ONLY' && JSON.stringify(route.requiredArmModules) === JSON.stringify(['kernel/legacyPlantAdapter.ts', 'kernel/kernel.ts']))).toBe(true)
+  expect(unpaced.every((route: any) => JSON.stringify(route.armCapabilities) === JSON.stringify(['CURRENT_KERNEL', 'LEGACY_PUBLIC_ADVANCE_TICKS']) && JSON.stringify(route.requiredCommonArmModules) === JSON.stringify(['scenario.ts', 'profile.ts', 'gps.ts']))).toBe(true)
   expect(unpaced.every((route: any) => route.status === 'IMPLEMENTED' && route.pacing === 'unpaced' && route.warmup.value === 240 && route.warmup.simSeconds === 60)).toBe(true)
   expect(unpaced.filter((route: any) => route.topology === 'single').map((route: any) => [route.workload, route.scored.kind, route.scored.maxTotalSimSeconds, route.scored.fixedMeasuredSimSeconds ?? null, route.scenarioStartUtc])).toEqual([
     ['W1', 'scenario-end-after-warmup', 900, null, '2026-09-27T14:00:00.000Z'],
@@ -1031,7 +1032,7 @@ test('finite admission binds the actual public report full profile identity sepa
 const unpacedModules = { adapter: { singleComposition, dualComposition }, kernel: { FmsKernel },
   scenario: { ScenarioRunner, reportMarkdown }, profiles: { profileById, profileSummary }, gps: { GPS_MODEL_VERSION } }
 function unpacedInput(topology: 'single' | 'dual', fixed = true): UnpacedInput {
-  return { scenarioJson: JSON.stringify({ id: 'unpaced-literal', title: 'Literal work', objective: '', maxSeconds: 3,
+  return { driverKind: 'CURRENT_KERNEL', scenarioJson: JSON.stringify({ id: 'unpaced-literal', title: 'Literal work', objective: '', maxSeconds: 3,
     startTime: '2026-09-27T14:00:00.000Z', profile: 'cma9000-s300-heli-civil',
     steps: [{ when: { kind: 'time', seconds: fixed ? 0 : 2 }, action: { kind: 'expectAircraft', minAltitude: 0 } }] }),
     topology, warmupFrames: 4, totalFrames: fixed ? 8 : null, maximumFrames: 14,
@@ -1054,6 +1055,8 @@ for (const topology of ['single', 'dual'] as const) test(`unpaced ${topology} ac
   expect(observed.summary.boundaries.warmup).toMatchObject({ kernelTime: 10000000, unitClockMs: pacingEpoch + 1000, completed: 4 })
   expect(observed.summary.boundaries.end).toMatchObject({ kernelTime: 20000000, unitClockMs: pacingEpoch + 2000, completed: 8 })
   expect(observed.summary.profile.summary).toBe(finiteProfileSummary)
+  expect(observed.summary.frameWitnesses).toHaveLength(8)
+  expect(observed.summary.frameWitnesses[0]).toMatchObject({ attempt: 1, returnedCompleted: 1, successfulReturn: true, acceptedCompletion: true, entry: { kernelTime: 0 }, exit: { kernelTime: 2500000 } })
   expect(observed.summary.gps.seeds).toHaveLength(topology === 'single' ? 1 : 2)
   expect(observed.summary.gps.seeds[0]).toMatchObject({ status: 'OBSERVED_PUBLIC_RECEIVERS', constellation: 1, receivers: [101, 202] })
   expect(observed.summary.dataset.status).toBe('OBSERVED_PUBLIC_CONTEXT')
@@ -1121,6 +1124,116 @@ test('unpaced missing kernel capability refuses before harness admission, output
   const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-unpaced', '--workloads', 'W3', '--topology', 'dual', '--arm', `A=${arm}`, '--out', output],
     { encoding: 'utf8', env: { ...process.env, AEROLINK_PERF_PORT: '5999' } })
   expect(child.status).not.toBe(0)
-  expect(child.stderr).toContain('browser-unpaced CURRENT_KERNEL_ONLY requires ARM kernel/legacyPlantAdapter.ts and kernel/kernel.ts; legacy public composition adapter is not yet implemented')
+  expect(child.stderr).toContain('unpaced ARM capability refuses incomplete public modules')
   expect(existsSync(output)).toBe(false)
+})
+
+
+test('actual permanent legacy ARM reaches the output sentinel before any child instead of kernel-only refusal', ({}, info) => {
+  const arm = process.env.AEROLINK_PERF_LEGACY_ARM
+  test.skip(!arm, 'Pinned permanent20b external ARM required; historical integration is not ordinary CI coverage')
+  expect(execFileSync('git', ['-C', arm!, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('20b9a04192c41214542a773aeb9e99ca2d1e8cb6')
+  const output = info.outputPath('output-sentinel')
+  writeFileSync(output, 'literal no-child sentinel')
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-unpaced', '--workloads', 'W3', '--topology', 'dual', '--arm', `A=${arm}`, '--out', output],
+    { encoding: 'utf8', env: { ...process.env, AEROLINK_PERF_PORT: '5999' } })
+  expect(child.status).not.toBe(0)
+  writeFileSync(info.outputPath('actual20b-admission.json'), JSON.stringify({ status: child.status, stdout: child.stdout, stderr: child.stderr }, null, 2))
+  expect(child.stderr).not.toContain('CURRENT_KERNEL_ONLY')
+  expect(child.stderr).toMatch(/EEXIST|requires a clean declared harness/)
+  expect(readFileSync(output, 'utf8')).toBe('literal no-child sentinel')
+})
+
+
+test('unpaced capability planning distinguishes tracked complete legacy, kernel, partial and missing module sets', () => {
+  const common = ['scenario.ts', 'profile.ts', 'gps.ts'], legacy = ['scriptedFms.ts', 'flight.ts', 'dualFms.ts']
+  for (const [files, expected] of [
+    [[...common, ...legacy], 'LEGACY_PUBLIC_ADVANCE_TICKS'],
+    [[...common, 'kernel/kernel.ts', 'kernel/legacyPlantAdapter.ts'], 'CURRENT_KERNEL'],
+    [[...common, 'kernel/kernel.ts'], 'partial kernel pair'],
+    [[...common, 'scriptedFms.ts'], 'incomplete legacy public modules'],
+    [['scenario.ts'], 'incomplete public modules'],
+  ] as [string[], string][]) {
+    const arm = mkdtempSync(join(process.env.TEMP!, 'unpaced-cap-'))
+    const paths = [...files.map(name => `product/client/src/fmsCdu/${name}`), 'product/client/package-lock.json', 'product/client/vite.config.ts']
+    for (const path of paths) { const at = join(arm, path); mkdirSync(join(at, '..'), { recursive: true }); writeFileSync(at, 'literal static capability fixture, never executed') }
+    execFileSync('git', ['init', '--quiet', arm])
+    execFileSync('git', ['-C', arm, 'add', '--', ...paths])
+    execFileSync('git', ['-C', arm, '-c', 'user.name=Capability control', '-c', 'user.email=capability@example.invalid', 'commit', '--quiet', '-m', 'literal capability files'])
+    const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'route-plan', '--host', 'browser-unpaced', '--arm', `A=${arm}`], { encoding: 'utf8' })
+    if (expected === 'CURRENT_KERNEL' || expected === 'LEGACY_PUBLIC_ADVANCE_TICKS') {
+      expect(child.status, child.stderr).toBe(0)
+      const capability = JSON.parse(child.stdout).armCapabilities[0]
+      expect(capability.kind).toBe(expected)
+      expect(capability.modules.map((entry: any) => entry.path).sort()).toEqual(files.slice().sort())
+      expect(capability.modules.every((entry: any) => /^[0-9a-f]{40}$/.test(entry.blob) && /^[0-9a-f]{64}$/.test(entry.sha256))).toBe(true)
+    } else { expect(child.status).not.toBe(0); expect(child.stderr).toContain(expected) }
+  }
+})
+
+async function actualLegacyModules() {
+  const arm = process.env.AEROLINK_PERF_LEGACY_ARM
+  test.skip(!arm, 'Pinned permanent20b external ARM required; historical integration is not ordinary CI coverage')
+  expect(execFileSync('git', ['-C', arm!, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('20b9a04192c41214542a773aeb9e99ca2d1e8cb6')
+  const files = execFileSync('git', ['-C', arm!, 'ls-tree', '-r', 'HEAD', '--', 'product/client/src', 'product/client/fixtures', 'product/client/package-lock.json', 'product/client/vite.config.ts'], { encoding: 'utf8' }).trim().split('\n')
+  const pins = files.map(line => {
+    const [metadata, path] = line.split('\t'), blob = metadata.split(' ')[2], bytes = readFileSync(join(arm!, path))
+    expect(createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex'), path).toBe(blob)
+    return { path, blob, sha256: createHash('sha256').update(bytes).digest('hex') }
+  })
+  writeFileSync(test.info().outputPath('actual20b-input-pins.json'), JSON.stringify(pins, null, 2))
+  const load = (name: string) => import(pathToFileURL(join(arm!, 'product/client/src/fmsCdu', name)).href)
+  const [scenario, profiles, gps, scripted, flight, dual] = await Promise.all(['scenario.ts', 'profile.ts', 'gps.ts', 'scriptedFms.ts', 'flight.ts', 'dualFms.ts'].map(load))
+  return { scenario, profiles, gps, scripted, flight, dual }
+}
+function legacyInput(modules: Awaited<ReturnType<typeof actualLegacyModules>>, topology: 'single' | 'dual', fixed = true): UnpacedInput {
+  const input = unpacedInput(topology, fixed)
+  return { ...input, driverKind: 'LEGACY_PUBLIC_ADVANCE_TICKS', profile: { id: input.profile.id, summary: modules.profiles.profileSummary(modules.profiles.profileById(input.profile.id)) }, gpsModel: modules.gps.GPS_MODEL_VERSION }
+}
+for (const topology of ['single', 'dual'] as const) test(`actual permanent20b legacy ${topology} completes8 frames with real void-call and clock witnesses`, async () => {
+  const modules = await actualLegacyModules(), input = legacyInput(modules, topology)
+  const observed = runBrowserUnpaced(modules, input, unpacedClock())
+  expect(observed.summary).toMatchObject({ status: 'OBSERVED', work: { attempted: 8, completed: 8, warmupFrames: 4, scoredFrames: 4, totalSimSeconds: 2, scoredSimSeconds: 1 },
+    driver: { kind: 'LEGACY_PUBLIC_ADVANCE_TICKS', witnessKind: 'SUCCESSFUL_PUBLIC_CALL_AND_CLOCK_DELTA', returnedCompleted: null },
+    setup: { outcome: 'passed', finished: true, endedAfter: 0 }, runner: { outcome: 'passed', endedAfter: 0 }, durations: [1, 1, 1, 1] })
+  expect(observed.summary.boundaries.end).toMatchObject({ kernelTime: null, injectedClockMs: pacingEpoch + 2000, unitClockMs: pacingEpoch + 2000, completed: 8 })
+  expect(observed.summary.boundaries.end.unitClocksMs).toEqual(topology === 'single' ? [pacingEpoch + 2000] : [pacingEpoch + 2000, pacingEpoch + 2000])
+  expect(observed.summary.gps.seeds.every((entry: any) => entry.constellation === 1 && JSON.stringify(entry.receivers) === '[101,202]')).toBe(true)
+  expect(observed.summary.frameWitnesses).toHaveLength(8)
+  expect(observed.summary.frameWitnesses![0]).toMatchObject({ attempt: 1, entry: { kernelTime: null, injectedClockMs: pacingEpoch, unitClockMs: pacingEpoch }, exit: { kernelTime: null, injectedClockMs: pacingEpoch + 250, unitClockMs: pacingEpoch + 250 }, returnedCompleted: null, successfulReturn: true, acceptedCompletion: true })
+  writeFileSync(test.info().outputPath('actual20b-run.json'), JSON.stringify(observed.summary, null, 2))
+  expect(observed.retained.kernel).toBeNull()
+  expect(observed.retained.readClock()).toMatchObject({ kernelTime: null, injectedClockMs: pacingEpoch + 2000, unitClockMs: pacingEpoch + 2000 })
+  if (topology === 'dual') expect(observed.summary.sync).toMatchObject({ totalFrames: 8, scoredFrames: 4, totalResidency: 1, scoredResidency: 1 })
+})
+test('actual permanent20b legacy respects finite END, rejects failed or late setup, wrong profile and seeds before work', async () => {
+  const modules = await actualLegacyModules(), input = legacyInput(modules, 'single')
+  const w3 = JSON.parse(readFileSync('perf/protocol.json', 'utf8')).headless.workloads.find((entry: any) => entry.id === 'W3').definition
+  const actualW3 = runBrowserUnpaced(modules, { ...legacyInput(modules, 'dual'), scenarioJson: JSON.stringify({ ...w3, startTime: '2026-09-29T15:00:00.000Z', profile: input.profile.id }) }, unpacedClock())
+  expect(actualW3.summary).toMatchObject({ status: 'OBSERVED', setup: { outcome: 'passed', finished: true, endedAfter: 0 }, work: { completed: 8, scoredFrames: 4 }, boundaries: { initial: { unitClockMs: 1790694000000 } } })
+  writeFileSync(test.info().outputPath('actual20b-original-w3-setup.json'), JSON.stringify(actualW3.summary, null, 2))
+  const finite = runBrowserUnpaced(modules, legacyInput(modules, 'single', false), unpacedClock())
+  expect(finite.summary).toMatchObject({ status: 'OBSERVED', work: { completed: 8, scoredFrames: 4 }, runner: { outcome: 'passed', endedAfter: 2 } })
+  for (const steps of [
+    [{ when: { kind: 'time', seconds: 0 }, action: { kind: 'expectScratchpad', text: 'LITERAL FAILED LEGACY SETUP' } }],
+    [{ when: { kind: 'time', seconds: 0 }, action: { kind: 'goAround' } }],
+    [{ when: { kind: 'time', seconds: 1 }, action: { kind: 'expectAircraft', minAltitude: 0 } }],
+  ]) {
+    const record = runBrowserUnpaced(modules, { ...input, scenarioJson: JSON.stringify({ ...JSON.parse(input.scenarioJson), steps }) }, unpacedClock())
+    expect(record.summary).toMatchObject({ status: 'FAILED', work: { attempted: 0, completed: 0 }, boundaries: { end: { kernelTime: null, injectedClockMs: pacingEpoch } } })
+  }
+  expect(runBrowserUnpaced(modules, { ...input, seeds: { constellation: 1, receivers: [101, 303] } }, unpacedClock()).summary).toMatchObject({ status: 'FAILED', work: { attempted: 0 } })
+  expect(() => runBrowserUnpaced(modules, { ...input, profile: { ...input.profile, summary: 'wrong actual ARM summary' } }, unpacedClock())).toThrow(/exact ARM identity/)
+})
+test('actual permanent20b legacy fault records moved clock but not a completed void call', async () => {
+  const modules = await actualLegacyModules(), input = legacyInput(modules, 'single'), original = modules.flight.FlightSimulator.prototype.step
+  let attempts = 0
+  modules.flight.FlightSimulator.prototype.step = function (...args: any[]) { if (++attempts === 2) throw new Error('literal legacy step failure'); return original.apply(this, args) }
+  try {
+    const record = runBrowserUnpaced(modules, input, unpacedClock())
+    expect(record.summary).toMatchObject({ status: 'FAILED', failure: 'actual legacy advance failed: literal legacy step failure', driver: { returnedCompleted: null },
+      work: { attempted: 2, completed: 1, scoredFrames: 0 }, boundaries: { end: { kernelTime: null, injectedClockMs: pacingEpoch + 500, unitClockMs: pacingEpoch + 500 } } })
+    expect(record.summary.frameWitnesses![1]).toMatchObject({ attempt: 2, successfulReturn: false, acceptedCompletion: false, entry: { injectedClockMs: pacingEpoch + 250 }, exit: { injectedClockMs: pacingEpoch + 500 } })
+    writeFileSync(test.info().outputPath('actual20b-fault.json'), JSON.stringify(record.summary, null, 2))
+  } finally { modules.flight.FlightSimulator.prototype.step = original }
 })

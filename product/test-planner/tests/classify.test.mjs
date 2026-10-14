@@ -733,6 +733,7 @@ const FMS_PATH_REFERENCES = {
   'product/client/perf/browser-unpaced.perf.ts': 'the unpaced browser performance host loads actual ARM FMS public modules without product API/UI; fms-perf-stats.spec.ts covers its shared one-frame producer in Fast logic; real browser execution remains a separate perf gate',
   'product/client/perf/browser.perf.ts': 'the performance harness (#1510, #1557) drives the bench in a built arm; run only by perf/run-perf.ts, never by a gate',
   'product/client/perf/headless.perf.ts': 'the performance harness (#1510) loads an arm checkout\'s bench modules; run only by perf/run-perf.ts, never by a gate',
+  'product/client/perf/run-perf.ts': 'the performance CLI statically binds ARM module capability and source identity before output/child launch; fms-perf-stats.spec.ts covers capability and unsupported dispatch in Fast logic; actual performance execution remains a separate gate',
   'product/client/perf/protocol.json': 'declared FMS workload module and extent routes consumed by the existing fms-perf-stats Fast logic owner and client validation',
   'product/client/playwright.logic.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
   'product/client/playwright.rendered.config.ts': 'reads the Fast manifest for the advisory Fast lane only',

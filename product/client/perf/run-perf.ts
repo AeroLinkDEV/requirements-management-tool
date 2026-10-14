@@ -88,7 +88,28 @@ function routePlan() {
     if (!owner) throw new Error(`unknown route host ${host}`)
     return (options.topology ? [options.topology] : owner.topologies).map((topology: string) => route(id, host, topology, false))
   }))
-  console.log(JSON.stringify({ schema: 'aerolink.fms-perf-route-plan.v1', inference: 'NOT_CALIBRATED', routes }, null, 2))
+  if (options.arm && hosts.some(host => host !== 'browser-unpaced')) throw new Error('ARM capability planning requires explicit browser-unpaced host')
+  const armCapabilities = options.arm ? Object.entries(pairs(options.arm)).map(([name, root]) => ({ name, ...unpacedCapability(resolve(root)) })) : undefined
+  console.log(JSON.stringify({ schema: 'aerolink.fms-perf-route-plan.v1', inference: 'NOT_CALIBRATED', routes, armCapabilities }, null, 2))
+}
+
+/** Static tracked-file admission, not proof that the declared ARM's browser modules execute. */
+function unpacedCapability(root: string) {
+  const prefix = 'product/client/src/fmsCdu/'
+  const tracked = new Set(git(root, 'ls-files', '--', prefix).split('\n'))
+  const has = (name: string) => tracked.has(prefix + name) && existsSync(join(root, prefix, name))
+  const common = ['scenario.ts', 'profile.ts', 'gps.ts']
+  const kernel = ['kernel/legacyPlantAdapter.ts', 'kernel/kernel.ts']
+  const legacy = ['scriptedFms.ts', 'flight.ts', 'dualFms.ts']
+  if (!common.every(has)) throw new Error('unpaced ARM capability refuses incomplete public modules')
+  const kernelCount = kernel.filter(has).length
+  if (kernelCount === 1) throw new Error('unpaced ARM capability refuses partial kernel pair')
+  const kind = kernelCount === 2 ? 'CURRENT_KERNEL' : 'LEGACY_PUBLIC_ADVANCE_TICKS'
+  const required = [...common, ...(kernelCount === 2 ? kernel : legacy)]
+  if (!required.every(has)) throw new Error('unpaced ARM capability refuses incomplete legacy public modules')
+  const identity = armIdentity(root)
+  return { kind, identity, modules: required.map(name => ({ path: name, blob: git(root, 'rev-parse', `HEAD:${prefix}${name}`),
+    sha256: createHash('sha256').update(readFileSync(join(root, prefix, name))).digest('hex') })) }
 }
 
 /** An arm's identity: commit and the tree hashes of what decides the client's behaviour. Refuses a dirty arm. */
@@ -296,20 +317,19 @@ function browserUnpaced() {
   if ((options.arm?.length ?? 0) !== 1) throw new Error('browser-unpaced takes exactly one declared arm')
   const port = Number(process.env.AEROLINK_PERF_PORT)
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('browser-unpaced requires an explicit private AEROLINK_PERF_PORT')
-  const armRoot = resolve(Object.values(pairs(options.arm))[0])
-  if (!['kernel/legacyPlantAdapter.ts', 'kernel/kernel.ts'].every(name => existsSync(join(armRoot, 'product/client/src/fmsCdu', name))))
-    throw new Error('browser-unpaced CURRENT_KERNEL_ONLY requires ARM kernel/legacyPlantAdapter.ts and kernel/kernel.ts; legacy public composition adapter is not yet implemented')
+  const capability = unpacedCapability(resolve(Object.values(pairs(options.arm))[0]))
   const root = git(client, 'rev-parse', '--show-toplevel')
   const harness = { commit: git(root, 'rev-parse', 'HEAD'), perfTree: git(root, 'rev-parse', 'HEAD:product/client/perf'),
     lockBlob: git(root, 'rev-parse', 'HEAD:product/client/package-lock.json'), dirtyEntries: git(root, 'status', '--porcelain').split('\n').filter(Boolean).length }
   if (harness.dirtyEntries) throw new Error('browser-unpaced requires a clean declared harness')
   const [arm] = arms(), dir = out()
-  const cohort = { harness, protocol, runtime: environment(), vite: JSON.parse(readFileSync(join(client, 'node_modules/vite/package.json'), 'utf8')).version }
+  const cohort = { harness, protocol, capability, runtime: environment(), vite: JSON.parse(readFileSync(join(client, 'node_modules/vite/package.json'), 'utf8')).version }
   writeFileSync(join(dir, 'unpaced-session.json'), JSON.stringify({ kind: 'browser-unpaced', route: selected, cohort, arm: arm.identity,
     startedAt: new Date().toISOString(), inference: 'DISABLED', qualification: 'NOT_CALIBRATED' }, null, 2), { flag: 'wx' })
   run(dir, { kind: 'browser-unpaced', route: selected, workload: selected.workload, topology: selected.topology, arm: arm.arm, armIdentity: arm.identity, cohort }, {
     AEROLINK_PERF_MODE: 'browser-unpaced', AEROLINK_PERF_ARM: join(arm.root, 'product/client'),
     AEROLINK_PERF_WORKLOAD: selected.workload, AEROLINK_PERF_TOPOLOGY: selected.topology,
+    AEROLINK_PERF_ARM_CAPABILITY: JSON.stringify(capability),
   })
   writeFileSync(join(dir, 'unpaced-end.json'), JSON.stringify({ endedAt: new Date().toISOString(), armIdentity: armIdentity(arm.root),
     harnessCommit: git(root, 'rev-parse', 'HEAD'), dirtyEntries: git(root, 'status', '--porcelain').split('\n').filter(Boolean).length,

@@ -131,9 +131,9 @@
       },
       "browser-unpaced": {
         "executionHost": "browser-composition-owner",
-        "armCapability": "CURRENT_KERNEL_ONLY",
-        "requiredArmModules": ["kernel/legacyPlantAdapter.ts", "kernel/kernel.ts"],
-        "legacyBase20b": "REQUIRED_NEXT_ADAPTER: public composition/advanceTicks is not yet implemented for this host",
+        "armCapabilities": ["CURRENT_KERNEL", "LEGACY_PUBLIC_ADVANCE_TICKS"],
+        "requiredCommonArmModules": ["scenario.ts", "profile.ts", "gps.ts"],
+        "legacyBase20b": "Actual legacy public composition/advanceTicks source adapter; browser execution and C1 qualification still required",
         "pacing": "unpaced",
         "topologies": [
           "single",
