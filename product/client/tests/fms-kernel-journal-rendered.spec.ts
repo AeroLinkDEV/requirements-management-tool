@@ -276,6 +276,31 @@ test('Verify recording owns only the latest file request and cancels it on Resta
   }
 })
 
+// The logic owner proves the factory's COLD path; only the bench can drop the Restart choice on its way there.
+test('Restart builds the next session with the chosen per-FMS start mode and the recording carries it', async ({ page }) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
+  await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await page.getByRole('tab', { name: 'Nav data', exact: true }).click()
+  const power = page.locator('.fmsBenchReadout').filter({ hasText: 'FMS power:' })
+  await expect(power).toContainText('FMS power: ON.')
+  await page.getByLabel('FMS 1 next-session start', { exact: true }).selectOption('COLD')
+  await expect(power, 'the choice applies to the NEXT session only').toContainText('FMS power: ON.')
+  await page.getByRole('button', { name: 'Restart the simulation', exact: true }).click()
+  await page.getByRole('tab', { name: 'Nav data', exact: true }).click()
+  // M300 12-24: a COLD power-on runs the power-up test before the FMS is ON; the paused clock holds it there.
+  await expect(power).toContainText('FMS power: TEST.')
+  await page.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const card = page.getByRole('region', { name: 'Kernel journal', exact: true })
+  const downloading = page.waitForEvent('download')
+  await card.getByRole('button', { name: 'Export recording', exact: true }).click()
+  await page.clock.runFor(250)
+  const record = JSON.parse(await readFile((await (await downloading).path())!, 'utf8')).recording
+  expect(record.initial.setup.startModes).toEqual(['COLD', 'WARM'])
+  expect(record.initial.setup.onGround).toBe(false)
+})
+
 // The scripted replay owner cannot prove that the actual rendered download represents the live session.
 // Observe public boundaries only; the frozen encoder samples at the existing instant-close hook, with no step.
 test('the real exported journal replays every live frame in a fresh same-context composition', async ({ page }) => {

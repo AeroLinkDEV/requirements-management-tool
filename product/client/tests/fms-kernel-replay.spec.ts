@@ -48,6 +48,13 @@ test('recording takes the first lawful S_k without changing the callback rate an
   expect(exported.snapshots).toEqual([]); expect(exported.capture.kind).toBe('boundary')
   expect(exported.journal[0]).toMatchObject({ frame: 0, payload: { kind: 'cdu.key', side: 2, fn: 'RTE', held: false }, source: { surface: 'popout' } })
   expect(session.kernel.frame).toBe(4)
+  // The same inputs with no export: the boundary capture must leave every live digest and journal entry unchanged.
+  const control = createSession(setup)
+  control.port.submit({ kind: 'cdu.key', side: 2, fn: 'RTE', held: false }, { kind: 'cdu', id: 'CDU 2', side: 2, surface: 'popout' })
+  expect(control.kernel.advance(4)).toBe(4)
+  expect(session.kernel.frameDigests).toHaveLength(4)
+  expect(session.kernel.frameDigests).toEqual(control.kernel.frameDigests)
+  expect(session.kernel.record()).toEqual(control.kernel.record())
   expect(await verifyRecording(exported, identity)).toEqual({ status: 'verified', frame: 1, exact: true })
   expect(session.kernel.frame).toBe(4)
   const bad = structuredClone(exported); (bad.digests as string[])[0] = '0000000000000000'
