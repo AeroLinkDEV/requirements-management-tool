@@ -16,7 +16,7 @@ import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
 import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, w3EndRecord, w3PairedPlan } from '../perf/browser-capture'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, archiveW3ColdInput, w3EndRecord, w3PairedPlan } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, runClassification, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
@@ -177,6 +177,21 @@ test('the W3 end record survives a manifest refused at session end: the original
   // Restored bytes are admitted again.
   writeFileSync(join(root,'A.caller.patch'),'A.caller.patch\n')
   expect(w3EndRecord(session,null,manifest,observed)).toEqual({...session,stopped:null,endAdmission:{status:'ADMITTED',error:null},...observed,closure:'UNPROVEN'})
+})
+test('a W3 session archives the sealed seed and writer closure beside the cold payload, and every slot reads the archived seed',()=>{
+  const root=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-cold-')),input=join(root,'input'),dir=join(root,'out')
+  mkdirSync(join(input,'payload','evidence'),{recursive:true});mkdirSync(dir)
+  writeFileSync(join(input,'payload','aerolink.db'),'literal database');writeFileSync(join(input,'seed.json'),'{"literal":"seed"}');writeFileSync(join(input,'closure.json'),'{"literal":"closure"}')
+  const sha=(path:string)=>createHash('sha256').update(readFileSync(path)).digest('hex'),entries=coldPayload(join(input,'payload'))
+  const cold={payloadSha256:digest(entries),seedSha256:sha(join(input,'seed.json')),closureSha256:sha(join(input,'closure.json'))}
+  const {archive,seed}=archiveW3ColdInput(input,dir,entries,cold)
+  expect(digest(coldPayload(archive))).toBe(cold.payloadSha256)
+  expect(seed).toBe(join(dir,'cold','seed.json'))
+  expect([sha(join(dir,'cold','seed.json')),sha(join(dir,'cold','closure.json'))]).toEqual([cold.seedSha256,cold.closureSha256])
+  // A seed or closure that no longer matches the validated hashes is refused, never archived as the sealed one.
+  const other=join(root,'other');mkdirSync(other)
+  writeFileSync(join(input,'seed.json'),'{"literal":"changed"}')
+  expect(()=>archiveW3ColdInput(input,other,entries,cold)).toThrow('W3 archived seed or writer closure bytes disagree with the sealed cold input')
 })
 
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
