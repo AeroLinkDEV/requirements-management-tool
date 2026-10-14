@@ -511,6 +511,8 @@ export class ScriptedFms implements CduBackend {
   private directBypassed: string[] = [];
 
   get groundSpeed() { return this.aircraft.groundSpeed; }
+  /** The raw plant observation for the recording digest (observer only); no computation or mutation authority. */
+  get aircraftObservation(): Readonly<typeof this.aircraft> { return this.aircraft; }
   /** Truth: the physical height above MSL (rev 3 B1.1). Only the flight simulation and engineering placement write it. */
   get physicalAltitude() { return this.aircraft.altitude; }
   /** Modelled physical TAS, including zero: the legacy plant seed, separate from air-data indication validity. */

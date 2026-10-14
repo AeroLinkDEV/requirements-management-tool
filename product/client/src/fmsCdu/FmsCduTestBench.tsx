@@ -25,13 +25,14 @@ import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { KBTV_SOURCE, START_STATES, type StartStateId } from "./kbtvDemo";
 import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
-import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, scenarioStart, type RunView, type Scenario } from "./scenario";
+import { ScenarioRecorder, TICK_SECONDS, scenarioStart, type RunView, type Scenario } from "./scenario";
 import type { ActionSource, KernelAction } from "./kernel/actions";
-import { FmsKernel, type OutcomeEvent } from "./kernel/kernel";
-import { dualComposition } from "./kernel/legacyPlantAdapter";
+import type { OutcomeEvent } from "./kernel/kernel";
+import { createSession, type StartMode } from "./kernel/session";
+import { currentRecordingIdentity, parseRecording, serializeRecording, SessionRecording, type VerificationResult } from "./kernel/recording";
 import { startKernelPacing } from "./benchPacing";
 import { BenchPresentation } from "./benchPresentation";
-import { SubmissionPort, kernelCdu, type Submit } from "./kernel/submission";
+import { kernelCdu, type ControlSource, type Submit } from "./kernel/submission";
 import type { DualFmsView } from "./dualFms";
 import type { FmsView } from "./scriptedFms";
 import type { FmsSide } from "./crossTalk";
@@ -144,7 +145,6 @@ const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.r
  * simulation and check the screen, can be recorded from the bench, and are written out as test procedure text.
  */
 /** A demonstration start state set up on the new session, and what came of its placement. */
-type Started = { id: StartStateId; outcome: { ready: true } | { refused: string } };
 
 export default function FmsCduTestBench({ terrain, imagery, userName }: { terrain?: TerrainSource; imagery?: ImagerySource; userName?: string } = {}) {
   const { layout, failed } = useCduLayout();
@@ -202,10 +202,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const pendingStart = useRef<StartStateId | null>(null);
   // Session construction reads the current play state; play/pause never reconstructs the composition.
   const [playing, setPlaying] = useState(false);
+  const [restartOnGround, setRestartOnGround] = useState(false);
+  const [startModes, setStartModes] = useState<[StartMode, StartMode]>(["WARM", "WARM"]);
   // Which window each surface is in, for the source of what it submits (D5 7.1: main or a pop-out).
   const surfaces = useRef({ cockpit: false, instructor: false });
   surfaces.current = { cockpit: cockpitAway, instructor: instructorAway };
-  const { system, kernel, port, runner, recorder, started, listenGps, gpsView } = useMemo(() => {
+  const { system, kernel, port, runner, recorder, started, listenGps, gpsView, reproduction } = useMemo(() => {
     // Simulated time is the kernel's (kernel/time.ts): it starts at the wall clock, or at a scenario's planned start
     // (which fixes the GPS sky), and moves only as the kernel advances.
     const utc0 = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
@@ -214,26 +216,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     // so its outcome does not depend on what a user has stored.
     const userDatabase = pendingScenario.current || !userName ? undefined
       : { store: browserUserDatabaseStore(window.localStorage), scope: { userId: userName, profileId: profile.id } };
-    const { system, plant, settleStart } = dualComposition(utc0, { profile, secondaryProfile: profileById(secondaryProfileChoice.current) ?? profile, ...(userDatabase ? { userDatabase } : {}) });
-    const fms = system.computers[0], flight = system.flights[0];
-    // The kernel rests in the open ACTION at F_0. A session starts paused or flying as the bench is; paused with no run
-    // is a flight freeze (initial state). Everything below that changes the simulation is submitted to it (#1517 I1b).
-    const kernel = new FmsKernel(plant, null, { flightFreeze: !playing && !pendingScenario.current });
-    const port = new SubmissionPort(kernel);
-    const start = pendingStart.current;
-    // A start state's placement and its copy to FMS 2 are one action in ACTION at F_0 (ios.place).
-    let started = null as Started | null;
-    if (start) {
-      port.submit({ kind: "ios.place", startState: start }, { kind: "ios", id: "navdata.startState", surface: surfaces.current.instructor ? "popout" : "main" },
-        event => { started = { id: start, outcome: event.outcome.status === "refused" ? { refused: event.outcome.reason } : { ready: true } }; });
-    }
-    // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards. Its
-    // surface, start state and t = 0 poll are the rest of ACTION at F_0, journaled as translated v1 steps.
-    const chosen = variantById(variantId);
-    const runner = pendingScenario.current
-      ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id }, flight, settleStart)
-      : null;
-    if (runner) kernel.run(runner);
+    const constructed = createSession({ composition: "dual", utc0Ms: utc0, profileId: profile.id,
+      secondaryProfileId: secondaryProfileChoice.current || profile.id, variantId, initialFreeze: !playing && !pendingScenario.current,
+      startModes: [...startModes], onGround: restartOnGround, startState: pendingStart.current,
+      startSource: { kind: "ios", id: "navdata.startState", surface: surfaces.current.instructor ? "popout" : "main" }, scenario: pendingScenario.current },
+      userDatabase ? { userDatabase } : {});
+    const { kernel, port, runner, started, plant, fms } = constructed;
+    const system = constructed.system!;
+    const reproduction = new SessionRecording(constructed, currentRecordingIdentity());
     const recorder = pendingRecording.current ? new ScenarioRecorder(plant.clock.now) : null;
     // The GPS sensors tab's record is the sensor owner's; the recorder listens to what it applies.
     const gps = stimulusFor(fms);
@@ -243,15 +233,32 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
     // From here the bench holds only read-only views of the units: it changes them by submitting to the kernel.
     const view: DualFmsView = system;
     const runView: RunView | null = runner;
-    return { system: view, kernel, port, runner: runView, recorder, started,
+    return { system: view, kernel, port, runner: runView, recorder, started, reproduction,
       listenGps: (listener: typeof gps.listener) => { gps.listener = listener; },
       gpsView: (side: FmsSide) => fmsGpsView(system.computers[side - 1], fms),
     };
   }, [session, userName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const liveRecording = useRef(reproduction);
+  liveRecording.current = reproduction;
+  const verificationWorker = useRef<Worker | null>(null);
+  const verificationRequest = useRef(0);
+  const cancelVerification = () => {
+    verificationRequest.current += 1;
+    verificationWorker.current?.terminate(); verificationWorker.current = null;
+  };
+  const [recordingStatus, setRecordingStatus] = useState<string | null>(null);
+  useEffect(() => () => {
+    reproduction.dispose(); verificationRequest.current += 1;
+    verificationWorker.current?.terminate(); verificationWorker.current = null;
+  }, [reproduction]);
   /** Submits from a surface: the source is completed with the window the control is in. */
   const submitFrom = (surface: "cockpit" | "instructor"): Submit => (action, source, then) =>
     port.submit(action, { ...source, surface: surfaces.current[surface] ? "popout" : "main" }, then);
   const submit = submitFrom("cockpit"), submitIos = submitFrom("instructor");
+  const submitImport = (action: KernelAction, bytes: Uint8Array, source: ControlSource, then?: (event: OutcomeEvent) => void) => {
+    const receipt = port.submit(action, { ...source, surface: surfaces.current.instructor ? "popout" : "main" }, then);
+    reproduction.retainImport(receipt.submissionSeq, bytes);
+  };
   // The CDUs' keys go to the kernel as cdu.key (D5 7.3), from whichever window shows them.
   const cdus = useMemo(() => ([1, 2] as const).map(side => kernelCdu(system.computers[side - 1], side,
     (action: KernelAction, source: ActionSource) => port.submit(action, source), () => (surfaces.current.cockpit ? "popout" : "main"))), [system, port]);
@@ -290,7 +297,6 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const [navAirports, setNavAirports] = useState("");
   const [userDbStatus, setUserDbStatus] = useState<string | null>(null);
   const [headingInput, setHeadingInput] = useState("090");
-  const [restartOnGround, setRestartOnGround] = useState(false);
   const [magvarLoad, setMagvarLoad] = useState<string | null>(null);
   // The crew's autopilot selections under the helicopter profile: preselected altitude, vertical speed and speed.
   const [altInput, setAltInput] = useState("");
@@ -387,7 +393,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   };
   const chooseRate = (value: number) => { if (value !== rate) { stopPacing.current?.(); achieved.publish(null); kernel.control({ kind: "rate", rate: value }); setRate(value); } };
   /** Every new session ends this one's kernel with a reset record (control plane). */
-  const newSession = () => { stopPacing.current?.(); achieved.publish(null); kernel.control({ kind: "reset" }); setSession(value => value + 1); };
+  const newSession = () => { cancelVerification(); stopPacing.current?.(); achieved.publish(null); kernel.control({ kind: "reset" }); setRecordingStatus(null); setSession(value => value + 1); };
   /** Jump (Fly-to-next-waypoint) on the guidance computer: an engineering action, journaled as ios.jump. */
   const jump = (from: Submit) => from({ kind: "ios.jump", unit: "guidance", op: "sequence" }, { kind: "ios", id: "flight.jump" },
     event => setJumpNote(event.outcome.status === "refused" && event.outcome.reason === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null));
@@ -400,6 +406,43 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const exportJournal = () => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(kernel.record(), null, 2)], { type: "application/json" }));
     const link = document.createElement("a"); link.href = url; link.download = `fms-kernel-journal-session-${session}.json`; link.click(); URL.revokeObjectURL(url);
+  };
+  const exportRecording = async () => {
+    setRecordingStatus(kernel.halted || kernel.runFinished || kernel.faulted ? "Exporting labelled open ACTION record…" : "Waiting for the next simulation boundary…");
+    try {
+      const record = await reproduction.requestExport();
+      if (liveRecording.current !== reproduction) return;
+      const url = URL.createObjectURL(new Blob([serializeRecording(record)], { type: "application/json" }));
+      const link = document.createElement("a"); link.href = url; link.download = `fms-recording-session-${session}.json`; link.click(); URL.revokeObjectURL(url);
+      setRecordingStatus(`Exported ${record.capture.label}.${record.identity.qualified ? "" : ` Unqualified identity: ${record.identity.reason}.`}`);
+    } catch (error) { if (liveRecording.current === reproduction) setRecordingStatus(`Recording refused: ${error instanceof Error ? error.message : String(error)}`); }
+  };
+  const verifyFile = async (file: File) => {
+    cancelVerification();
+    const request = verificationRequest.current;
+    const current = () => verificationRequest.current === request && liveRecording.current === reproduction;
+    let ownedWorker: Worker | null = null;
+    const close = () => {
+      const worker = ownedWorker; ownedWorker = null;
+      worker?.terminate();
+      if (verificationWorker.current === worker) verificationWorker.current = null;
+    };
+    setRecordingStatus("Checking recording in a fresh memory-only session…");
+    try {
+      const text = await file.text();
+      if (!current()) return;
+      const recording = parseRecording(text);
+      const worker = new Worker(new URL("./kernel/verifyRecording.worker.ts", import.meta.url), { type: "module" });
+      ownedWorker = worker; verificationWorker.current = worker;
+      worker.onmessage = (event: MessageEvent<{ ok: boolean; result?: VerificationResult; error?: string }>) => {
+        if (!current()) { close(); return; }
+        const value = event.data;
+        setRecordingStatus(value.ok && value.result ? `Verified through S_${value.result.frame}${value.result.exact ? "." : "; open ACTION beyond that boundary is not verified."}` : `Verification refused: ${value.error}`);
+        close();
+      };
+      worker.onerror = event => { if (current()) setRecordingStatus(`Verification failed: ${event.message}`); close(); };
+      worker.postMessage(recording);
+    } catch (error) { if (current()) setRecordingStatus(`Verification refused: ${error instanceof Error ? error.message : String(error)}`); close(); }
   };
 
   /** A different aircraft profile restarts the simulation in it. */
@@ -881,6 +924,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </p>
             <p className="fmsBenchHint">Every control, key and scenario step that changes the simulation, in the order the kernel executed it, with its outcome (#1502 D5).</p>
             <button type="button" onClick={exportJournal}>Export journal</button>
+            <button type="button" onClick={() => { void exportRecording(); }}>Export recording</button>
+            <label>Verify recording <input type="file" accept=".json,application/json" aria-label="Verify recording" onChange={event => {
+              const file = event.target.files?.[0]; event.target.value = ""; if (file) void verifyFile(file);
+            }} /></label>
+            <p className="fmsBenchHint">Journal export is ordering evidence. A recording also includes initial context, content references and closed-frame digests. The snapshot slot is empty until I2; late starts are not exact.</p>
+            {recordingStatus ? <p role="status" aria-live="polite">{recordingStatus}</p> : null}
             {latestOutcome ? <p aria-live="polite" data-testid="fms-input-outcome">
               Last executed input: {latestOutcome.outcome.status === "accepted" ? "accepted" : `refused: ${latestOutcome.outcome.reason}`}.
             </p> : null}
@@ -957,6 +1006,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <h2>FMS initialization and preflight</h2>
             <p className="fmsBenchReadout">FMS power: {backend.powerState}. The GPS receivers are not powered from the bench: they keep running through an FMS power cycle.</p>
             <label><input type="checkbox" checked={restartOnGround} onChange={event => setRestartOnGround(event.target.checked)} /> On ground at power-up (bench input)</label>
+            {([1, 2] as const).map(side => <label key={side}>FMS {side} next-session start <select aria-label={`FMS ${side} next-session start`} value={startModes[side - 1]}
+              onChange={event => setStartModes(current => side === 1 ? [event.target.value as StartMode, current[1]] : [current[0], event.target.value as StartMode])}>
+              <option value="WARM">WARM</option><option value="COLD">COLD (FMS only; GPS remains WARM)</option>
+            </select></label>)}
             <div className="fmsBenchActions">
               <button type="button" onClick={() => submitIos({ kind: "ios.unitPower", unit: cduSide, mode: "OFF", onGround: restartOnGround }, { kind: "ios", id: "navdata.powerOff" })}>FMS power off</button>
               <button type="button" onClick={() => submitIos({ kind: "ios.unitPower", unit: cduSide, mode: "COLD", onGround: restartOnGround }, { kind: "ios", id: "navdata.coldStart" })}>Cold start FMS</button>
@@ -970,9 +1023,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <label>Load magnetic model package <input type="file" accept=".json" aria-label="Load magnetic model package" onChange={async event => {
               const file = event.target.files?.[0]; event.target.value = '';
               if (!file) return;
+              const bytes = new Uint8Array(await file.arrayBuffer());
               let candidate: unknown;
-              try { candidate = JSON.parse(await file.text()); } catch { setMagvarLoad('Refused: invalid JSON.'); return; }
-              submitIos({ kind: "config.magvar", unit: cduSide, op: "load", package: candidate }, { kind: "import", id: "navdata.magvarPackage" }, event =>
+              try { candidate = JSON.parse(new TextDecoder().decode(bytes)); } catch { setMagvarLoad('Refused: invalid JSON.'); return; }
+              submitImport({ kind: "config.magvar", unit: cduSide, op: "load", package: candidate }, bytes, { kind: "import", id: "navdata.magvarPackage" }, event =>
                 setMagvarLoad(event.outcome.status === "refused" ? 'Refused: unsupported model package.' : backend.magvar.valid ? `Loaded ${backend.magvar.database.name}.` : 'MAG VAR CRC FAILED: FMS navigation withdrawn.'));
             }} /></label>
             <button type="button" onClick={() => {
@@ -1043,7 +1097,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                     return;
                   }
                   const name = file.name, input = event.target;
-                  submitIos({ kind: "config.navdb", unit: cduSide, op: "loadArinc424", name, airports, text: await file.text() }, { kind: "import", id: "navdata.arinc424" }, applied => {
+                  const bytes = new Uint8Array(await file.arrayBuffer());
+                  submitImport({ kind: "config.navdb", unit: cduSide, op: "loadArinc424", name, airports, text: new TextDecoder().decode(bytes) }, bytes, { kind: "import", id: "navdata.arinc424" }, applied => {
                     const outcome = applied.outcome;
                     if (outcome.status === "refused") { setNavLoad(`Refused, nothing changed. ${outcome.reason}.`); return; }
                     const loaded = outcome.detail as { loaded: string; read: number; skipped: number; errors: string[] };
@@ -1119,7 +1174,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                   const file = event.target.files?.[0];
                   if (!file) return;
                   const name = file.name, input = event.target;
-                  submitIos({ kind: "config.userdb", unit: cduSide, text: await file.text() }, { kind: "import", id: "navdata.userDatabase" }, applied => {
+                  const bytes = new Uint8Array(await file.arrayBuffer());
+                  submitImport({ kind: "config.userdb", unit: cduSide, text: new TextDecoder().decode(bytes) }, bytes, { kind: "import", id: "navdata.userDatabase" }, applied => {
                     const outcome = applied.outcome;
                     if (outcome.status === "refused") { setUserDbStatus(`Refused, nothing changed: ${outcome.reason}.`); return; }
                     const imported = outcome.detail as { waypoints: number; routes: number };

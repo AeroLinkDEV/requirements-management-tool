@@ -103,7 +103,9 @@
     "fms-kernel-legacy-equivalence.spec.ts",
     "fms-dual-selected-integrity.spec.ts",
     "fms-bench-pacing.spec.ts",
-    "fms-kernel-submission.spec.ts"
+    "fms-kernel-submission.spec.ts",
+    "fms-kernel-content-start.spec.ts",
+    "fms-kernel-replay.spec.ts"
   ],
   "rendered": [
     "client-truth-rendered.spec.ts",

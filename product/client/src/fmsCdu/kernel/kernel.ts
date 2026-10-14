@@ -2,6 +2,7 @@ import type { ScenarioRunner, Translation } from "../scenario";
 import { executeAction, type ActionContext, type ActionSource, type ActionTarget, type KernelAction, type KernelOutcome } from "./actions";
 import type { LegacyPlant } from "./legacyPlantAdapter";
 import { FRAME_UNITS, type KernelTime } from "./time";
+import { CanonicalWriter, frameBytes, frameDigest } from "./stateDigest";
 
 /**
  * The phases at one instant, in their authoritative order (#1502 D1 3.2). Within a phase, events are ordered by class:
@@ -23,6 +24,8 @@ export type AdvanceOptions = {
   readonly flightFreeze?: boolean;
   /** Called as each instant F_j closes, immediately before its INTEGRATE: where the frame digest D_j is taken. */
   readonly onInstantClose?: () => void;
+  /** First S_k reached by this call: after prior INTEGRATE, before ANY event at F_k; the call then finishes. */
+  readonly atNextBoundary?: () => void;
 };
 
 /** The receipt `submit()` returns at once (D5 7.1). It carries no outcome: that is published on the event stream. */
@@ -98,11 +101,15 @@ export type KernelRecord = {
 export type KernelOptions = {
   /** The run's initial flight freeze (the bench starting paused): INTEGRATE holds the aircraft until it is released. */
   readonly flightFreeze?: boolean;
+  /** Only the production verifier constructs this private composition; it is never exposed as the live kernel. */
+  readonly verification?: boolean;
 };
 
 const EMPTY_LIVE_QUEUE: LiveQueueState = Object.freeze({ v: 1, entries: Object.freeze([]) as readonly never[] });
 
 type Pending = { readonly submissionSeq: number; readonly action: KernelAction; readonly source: ActionSource };
+/** Existing submit() inputs awaiting ACTION; NOT the deferred bounded live queue or an I2 snapshot. */
+export type PendingSubmission = Pending;
 
 /**
  * The simulation kernel (#1517 I1a, I1b). It owns kernel time, the order of events, the submission boundary and the
@@ -145,6 +152,13 @@ export class FmsKernel {
   private readonly listeners = new Set<(event: KernelEvent) => void>();
   private lastOutcome: OutcomeEvent | null = null;
   private readonly context: ActionContext;
+  private readonly digestWriter = new CanonicalWriter();
+  private readonly digests: string[] = [];
+  private successfulBoundary = 0;
+  private readonly boundaryHooks = new Set<() => void>();
+  private atBoundary = false;
+  private verificationTarget: number | null = null;
+  private readonly verification: boolean;
 
   /**
    * Starts at the plant's present instant with ACTION open. A runner given here was constructed in ACTION at F_0: its
@@ -156,6 +170,7 @@ export class FmsKernel {
     this.plant = plant;
     this.time = plant.clock.time;
     this.frozen = options.flightFreeze === true;
+    this.verification = options.verification === true;
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const kernel = this;
     this.context = {
@@ -191,6 +206,48 @@ export class FmsKernel {
   get controlRecords(): readonly ControlRecord[] { return this.controls; }
   /** The most recent published outcome, for the bench's event-stream subscription. */
   get latestOutcome(): OutcomeEvent | null { return this.lastOutcome; }
+  /** D_j observes the closed ACTION, immediately before its composite INTEGRATE. */
+  get frameDigests(): readonly string[] { return this.digests; }
+  /** Failed INTEGRATE reaches no S_k, even though the adapter's unit clock has already moved. */
+  get lastSuccessfulBoundary() { return this.successfulBoundary; }
+
+  /** A one-shot export observer. It does not create a live S_k rest or advance the clock. */
+  onNextBoundary(hook: () => void): () => void {
+    this.boundaryHooks.add(hook);
+    return () => { this.boundaryHooks.delete(hook); };
+  }
+
+  /** Called only inside the synchronous boundary hook or on the private verifier's terminal S_k. */
+  boundaryRecord(): KernelRecord {
+    if (this.failed) throw new Error("FAULTED");
+    if (!this.atBoundary) throw new Error("NOT_AT_BOUNDARY");
+    return this.record();
+  }
+
+  /** Exact input-recording context at S_k, before these submissions execute or resolve toggles. */
+  boundaryPendingInputs(): readonly PendingSubmission[] {
+    if (this.failed) throw new Error("FAULTED");
+    if (!this.atBoundary) throw new Error("NOT_AT_BOUNDARY");
+    return structuredClone(this.pending);
+  }
+
+  /** Stops ONLY a fresh private replay composition at S_frame; no current-frame ACTION or poll runs there. */
+  verifyTo(frame: number, options: Pick<AdvanceOptions, "onInstantClose" | "atNextBoundary"> = {}): void {
+    if (!this.verification) throw new Error("verification requires a private replay kernel");
+    if (this.failed) throw new Error("FAULTED");
+    if (!Number.isSafeInteger(frame) || frame < this.frame) throw new RangeError("invalid verification boundary");
+    if (frame === this.frame) {
+      if (this.advanced || this.records.length || this.controls.length) throw new Error("NOT_AT_BOUNDARY");
+      this.atBoundary = true;
+      this.open = false;
+      return;
+    }
+    this.verificationTarget = frame;
+    while (this.frame < frame) {
+      if (!this.advance(1, { onInstantClose: options.onInstantClose,
+        ...(this.frame + 1 === frame ? { atNextBoundary: options.atNextBoundary } : {}) })) throw new Error("verification boundary is halted");
+    }
+  }
 
   /** The ordering record as plain data: journal, control records, live queue and counters (the bench exports it). */
   record(): KernelRecord {
@@ -262,11 +319,13 @@ export class FmsKernel {
     const hold = this.plant.hold;
     if (options.flightFreeze && !hold) throw new Error("this composition has no flight freeze");
     if (this.executing) throw new Error("advance() called by an executing action");
+    if (this.atBoundary) throw new Error("a verification kernel cannot resume its terminal boundary");
     const running = this.runner !== null && !this.runner.finished;
     if (this.stopped && running) return 0;
     if ((this.frozen || this.stopped || options.flightFreeze) && !this.plant.hold) throw new Error("this composition has no flight freeze");
     // Input left pending at an open ACTION (one made while the last INTEGRATE ran, before it threw) goes first.
     if (this.open) this.executePending();
+    let hookCalled = false;
     for (let done = 0; done < frames; done += 1) {
       this.advanced = true;
       for (const phase of PHASES) {
@@ -274,6 +333,8 @@ export class FmsKernel {
           case "ACTION":
             // F_j's ACTION ran when the instant opened; it closes here, before any later phase begins.
             this.open = false;
+            this.digestWriter.length = 0;
+            this.digests.push(frameDigest(frameBytes(this.plant.units, this.digestWriter)));
             options.onInstantClose?.();
             break;
           case "INTEGRATE":
@@ -297,6 +358,14 @@ export class FmsKernel {
         }
       }
       this.time += FRAME_UNITS;
+      // S_{j+1}: the unit clock is F_{j+1}; no pending input or runner poll at that instant has run.
+      this.successfulBoundary = this.frame;
+      this.atBoundary = true;
+      if (!hookCalled) { options.atNextBoundary?.(); hookCalled = true; }
+      const hooks = [...this.boundaryHooks];
+      for (const hook of hooks) { this.boundaryHooks.delete(hook); hook(); }
+      if (this.verificationTarget === this.frame) return done + 1;
+      this.atBoundary = false;
       // ACTION at F_{j+1}: what was submitted while F_j's later phases ran, then the translated v1 steps and checks due.
       this.open = true;
       this.executePending();

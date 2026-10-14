@@ -132,6 +132,150 @@ const retainPublicJson = async (name: string, value: unknown) => {
   await test.info().attach(name, { path, contentType: 'application/json' })
 }
 
+// Pure controlled-identity replay cannot prove served asset identity, the compiled worker or public file routing.
+// The same primary owner has a declared development refusal and a real built-component positive plus refusals.
+test('the public recording file verifies in its declared environment without changing the live session', async ({ page, context }) => {
+  const built = test.info().project.metadata.recordingEnvironment === 'built-component'
+  test.info().annotations.push({ type: 'evidence-scope', description: built ? 'built component fixture, not production distribution' : 'development is unqualified' })
+  const initial = { utc0: '2026-09-29T15:00:00Z', profile: 'cma9000-s300-heli-civil', variant: '002/003/005/102/103/302/303/502/503' }
+  const epoch = new Date(initial.utc0)
+  await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
+  await page.addInitScript(variant => { localStorage.clear(); localStorage.setItem('aerolink.fmsCdu.variant', variant) }, initial.variant)
+  await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await page.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  const card = page.getByRole('region', { name: 'Kernel journal', exact: true })
+  const storage = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage).sort().map(key => [key, localStorage.getItem(key)])))
+  const beforeStorage = await storage(), before = await exportFrom(page, card)
+  expect(before.frame).toBe(0); expect(before.journal).toEqual([])
+  const downloading = page.waitForEvent('download')
+  await card.getByRole('button', { name: 'Export recording', exact: true }).click()
+  await expect(card.getByRole('status')).toHaveText('Waiting for the next simulation boundary…')
+  await page.clock.runFor(250) // one real paused/idle callback; no model getter or private stepping
+  const download = await downloading, path = test.info().outputPath('actual-recording.json')
+  await download.saveAs(path)
+  await test.info().attach('actual-recording', { path, contentType: 'application/json' })
+  const bytes = await readFile(path), envelope = JSON.parse(bytes.toString('utf8')), record = envelope.recording
+  expect(envelope.schema).toBe('aerolink.fms-recording-file.v1')
+  expect(record.schema).toBe('aerolink.fms-recording.v1'); expect(record.initial.version).toBe(1)
+  expect(record.initial.setup).toEqual({ composition: 'dual', utc0Ms: epoch.getTime(), profileId: initial.profile, secondaryProfileId: initial.profile,
+    variantId: initial.variant, initialFreeze: true, startModes: ['WARM', 'WARM'], onGround: false, startState: null,
+    startSource: { kind: 'ios', id: 'navdata.startState', surface: 'main' }, scenario: null })
+  expect(record.initial.userScope).toBeNull()
+  expect(record.initial.users).toEqual([1, 2].map(() => ({ scope: { userId: 'local', profileId: initial.profile }, content: null })))
+  expect(record.capture).toMatchObject({ kind: 'boundary', exact: true })
+  expect(record.snapshots).toEqual([]); expect(record.pendingInputs).toEqual([])
+  expect(record.frame).toBe(1); expect(record.lastBoundary).toBe(1); expect(record.digests).toHaveLength(1)
+  expect(record.identity.qualified).toBe(built)
+  const afterExport = await exportFrom(page, card)
+  expect(afterExport.frame).toBe(1); expect(afterExport.journal).toEqual([])
+  const manifestText = await page.evaluate(async () => (await fetch('/fms-recording-build.json')).text())
+  const manifestPath = test.info().outputPath('actual-build-manifest.json')
+  await writeFile(manifestPath, manifestText, 'utf8'); await test.info().attach('actual-build-manifest', { path: manifestPath, contentType: 'application/json' })
+  const verify = async (expected: string) => {
+    await card.getByLabel('Verify recording', { exact: true }).setInputFiles(path)
+    await expect(card.getByRole('status')).toHaveText(expected)
+  }
+  await verify(built ? 'Verified through S_1.' : 'Verification refused: unqualified environment: development build: unqualified')
+  if (built) {
+    const actualManifest = JSON.parse(manifestText)
+    expect(actualManifest.kind).toBe('built'); expect(actualManifest.assets.length).toBeGreaterThan(0)
+    expect(record.identity.build).toEqual(actualManifest)
+    for (const failure of ['missing', 'corrupt'] as const) {
+      let requests = 0
+      const handler = async (route: import('@playwright/test').Route) => {
+        requests += 1
+        await route.fulfill(failure === 'missing' ? { status: 404, body: 'missing identity control' }
+          : { status: 200, contentType: 'application/json', body: JSON.stringify({ ...actualManifest, bundleHash: '0'.repeat(64) }) })
+      }
+      await context.route('**/fms-recording-build.json', handler)
+      try {
+        await verify(`Verification refused: unqualified environment: ${failure === 'missing' ? 'missing' : 'corrupt'} build identity`)
+        expect(requests, 'the fresh real worker must reach the current manifest boundary').toBeGreaterThan(0)
+      } finally { await context.unroute('**/fms-recording-build.json', handler) }
+    }
+  } else expect(record.identity.reason).toBe('development build: unqualified')
+  expect(await exportFrom(page, card)).toEqual(afterExport)
+  expect(await storage()).toEqual(beforeStorage)
+  await retainPublicJson('public-recording-context', { initial, declaredEnvironment: built ? 'built-component' : 'development',
+    downloadBytes: bytes.length, downloadSHA256: createHash('sha256').update(bytes).digest('hex'), before, afterExport, beforeStorage })
+})
+
+// Platform delays expose request ordering; every delivered worker payload is the real module worker's result.
+// This owns cancellation only, not qualified built-recording reproduction.
+test('Verify recording owns only the latest file request and cancels it on Restart', async ({ page }) => {
+  const epoch = new Date('2026-09-29T15:00:00Z')
+  await page.clock.setFixedTime(epoch); await page.clock.pauseAt(epoch)
+  await page.goto('/tests/fixtures/fms-cdu.html?terrain=off&imagery=off')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  await page.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+  type Probe = { release(name: string): Promise<void>; reject(name: string): void; deliver(): void; restore(): void;
+    snapshot(): { workers: { terminated: boolean; results: unknown[] }[]; reads: string[] } }
+  await page.evaluate(() => {
+    const originalWorker = Object.getOwnPropertyDescriptor(window, 'Worker')!
+    const originalText = Object.getOwnPropertyDescriptor(File.prototype, 'text')
+    const text = File.prototype.text, NativeWorker = window.Worker
+    const reads = new Map<string, { release(): Promise<void>; reject(): void }>()
+    const workers: { worker: Worker; terminated: boolean; results: unknown[] }[] = []
+    const deliveries: (() => void)[] = []
+    Object.defineProperty(File.prototype, 'text', { configurable: true, value: function (this: File) {
+      return new Promise<string>((resolve, reject) => reads.set(this.name, {
+        release: async () => { resolve(await text.call(this)) }, reject: () => reject(new Error(`stale read ${this.name}`)),
+      }))
+    } })
+    class ObservedWorker extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options)
+        const row = { worker: this as Worker, terminated: false, results: [] as unknown[] }; workers.push(row)
+        this.addEventListener('message', event => {
+          event.stopImmediatePropagation(); row.results.push(event.data)
+          deliveries.push(() => this.onmessage?.call(this, event))
+        })
+      }
+      override terminate() { workers.find(row => row.worker === this)!.terminated = true; super.terminate() }
+    }
+    Object.defineProperty(window, 'Worker', { ...originalWorker, value: ObservedWorker })
+    const probe: Probe = {
+      release: name => reads.get(name)!.release(), reject: name => reads.get(name)!.reject(),
+      deliver: () => { for (const deliver of deliveries.splice(0)) deliver() },
+      snapshot: () => ({ workers: workers.map(({ terminated, results }) => ({ terminated, results })), reads: [...reads.keys()] }),
+      restore: () => {
+        for (const row of workers) row.worker.terminate()
+        Object.defineProperty(window, 'Worker', originalWorker)
+        if (originalText) Object.defineProperty(File.prototype, 'text', originalText); else delete (File.prototype as Partial<File>).text
+      },
+    }
+    ;(window as typeof window & { verifyProbe: Probe }).verifyProbe = probe
+  })
+  const snapshot = () => page.evaluate(() => (window as typeof window & { verifyProbe: Probe }).verifyProbe.snapshot())
+  const input = page.getByLabel('Verify recording', { exact: true })
+  const card = page.getByRole('region', { name: 'Kernel journal', exact: true })
+  // Intentionally unqualified control: real worker refusal is retained, never replaced with a synthetic success.
+  const file = (name: string) => fixtureFile(name, { schema: 'aerolink.fms-recording-file.v1', numbers: [],
+    recording: { schema: 'aerolink.fms-recording.v1', v: 1, initial: { version: 1 }, identity: { qualified: false } } })
+  try {
+    await input.setInputFiles(file('A.json')); await input.setInputFiles(file('B.json'))
+    await page.evaluate(() => (window as typeof window & { verifyProbe: Probe }).verifyProbe.release('B.json'))
+    await expect.poll(async () => (await snapshot()).workers[0]?.results.length).toBe(1)
+    await page.evaluate(() => (window as typeof window & { verifyProbe: Probe }).verifyProbe.release('A.json'))
+    expect((await snapshot()).workers, 'older completed read must not replace the current real worker').toHaveLength(1)
+    await page.evaluate(() => (window as typeof window & { verifyProbe: Probe }).verifyProbe.deliver())
+    await expect(card.getByRole('status')).toHaveText('Verification refused: unqualified environment: development build: unqualified')
+    expect((await snapshot()).workers[0].terminated).toBe(true)
+    await input.setInputFiles(file('C.json')); await input.setInputFiles(file('D.json'))
+    await page.evaluate(() => (window as typeof window & { verifyProbe: Probe }).verifyProbe.release('D.json'))
+    await expect.poll(async () => (await snapshot()).workers[1]?.results.length).toBe(1)
+    await page.getByRole('button', { name: 'Restart the simulation', exact: true }).click()
+    await page.getByRole('tab', { name: 'Scenarios', exact: true }).click()
+    expect((await snapshot()).workers[1].terminated).toBe(true)
+    await page.evaluate(() => { const probe = (window as typeof window & { verifyProbe: Probe }).verifyProbe; probe.reject('C.json'); probe.deliver() })
+    await expect(card.getByRole('status')).toHaveCount(0)
+  } finally {
+    try { await retainPublicJson('verify-request-lifecycle', await snapshot()) }
+    finally { await page.evaluate(() => (window as typeof window & { verifyProbe: Probe }).verifyProbe.restore()) }
+  }
+})
+
 // The scripted replay owner cannot prove that the actual rendered download represents the live session.
 // Observe public boundaries only; the frozen encoder samples at the existing instant-close hook, with no step.
 test('the real exported journal replays every live frame in a fresh same-context composition', async ({ page }) => {

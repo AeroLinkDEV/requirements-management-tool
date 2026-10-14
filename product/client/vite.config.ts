@@ -1,8 +1,41 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { cpSync, createReadStream, statSync } from 'node:fs'
+import { cpSync, createReadStream, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+
+/** A separate sidecar binds the actual emitted JS bytes; it is not hashed into itself or the JS it identifies. */
+function fmsRecordingIdentity(): Plugin {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: fileURLToPath(new URL('../..', import.meta.url)), encoding: 'utf8' }).trim()
+  const commit = git('rev-parse', 'HEAD'), dirty = git('status', '--porcelain=v1') !== ''
+  const schema = 'aerolink.fms-build.v1'
+  const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+  let outDir = ''
+  return {
+    name: 'aerolink-fms-recording-identity',
+    configResolved(config) { outDir = resolve(config.root, config.build.outDir) },
+    configureServer(server) {
+      server.middlewares.use('/fms-recording-build.json', (_request, response) => {
+        response.setHeader('Content-Type', 'application/json')
+        // A development module graph is deliberately not called a built bundle or a qualified identity.
+        response.end(JSON.stringify({ schema, kind: 'development', commit, dirty, assets: [], bundleHash: null }))
+      })
+    },
+    writeBundle(_options, bundle) {
+      // Vite can finalize JS after generateBundle. Bind the actual written bytes, including worker assets.
+      const assets = Object.keys(bundle).filter(path => path.endsWith('.js')).map(path => {
+        const file = resolve(outDir, path)
+        if (!file.startsWith(outDir + sep)) throw new Error(`Emitted recording asset escapes output directory: ${path}`)
+        const bytes = readFileSync(file)
+        return { path, sha256: hash(bytes), bytes: bytes.byteLength }
+      }).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+      const identity = { schema, kind: 'built', commit, dirty, assets }
+      writeFileSync(join(outDir, 'fms-recording-build.json'), JSON.stringify({ ...identity, bundleHash: hash(JSON.stringify(identity)) }) + '\n')
+    },
+  }
+}
 
 /**
  * The CesiumJS engine (the FMS Test Bench's out-the-window view) loads its web workers and some data files at run
@@ -51,7 +84,7 @@ function cesiumRuntimeFiles(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), cesiumRuntimeFiles()],
+  plugins: [react(), cesiumRuntimeFiles(), fmsRecordingIdentity()],
   resolve: {
     // Only the Cesium engine imports meshoptimizer, and its WebAssembly cannot compile under the document's policy
     // (see the stub for why the view does not need it).
