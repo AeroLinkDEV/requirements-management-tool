@@ -40,19 +40,21 @@ test('all browser lanes retain actual reports and failure traces after retry suc
   }
 })
 
-test('scheduled proof uses bounded duration packing and cannot be cancelled by a main push', () => {
+test('Full browser families retain bounded six-shard packing during #1630 stage 1', () => {
   const workflow = workflowLines().join('\n')
   const group = workflow.split('\n').find((line) => line.startsWith('  group: quality-'))
   assert.ok(group.includes("github.event_name == 'schedule' && 'scheduled'"))
   assert.ok(group.includes("github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)"))
   assert.ok(group.includes('inputs.pull_request_number || github.event.pull_request.number || github.ref'))
-  const full = jobBodies(workflowLines())['browser-full'].join('\n')
-  assert.match(full, /timeout-minutes: 30/)
-  // Six shards since #1340: three needed about 29 minutes of tests each by 2026-10-05.
-  assert.match(full, /shard: \[1, 2, 3, 4, 5, 6\]/)
-  assert.match(full, /scripts\/plan-journey-shard\.mjs listed\.txt/)
-  assert.match(full, /\[ "\$actual" != "\$expected" \]/)
-  assert.doesNotMatch(full, /playwright test --shard/)
+  for (const job of ['browser-pr', 'browser-full']) {
+    const full = jobBodies(workflowLines())[job].join('\n')
+    assert.match(full, /^    timeout-minutes: 40$/m, job)
+    // The installed-main verifier gains eight-shard acceptance before either matrix moves.
+    assert.match(full, /shard: \[1, 2, 3, 4, 5, 6\]/, job)
+    assert.match(full, /scripts\/plan-journey-shard\.mjs listed\.txt/, job)
+    assert.match(full, /\[ "\$actual" != "\$expected" \]/, job)
+    assert.doesNotMatch(full, /playwright test --shard/, job)
+  }
 })
 
 test('run metadata receives dispatch mode and PR identity inputs used by browser topology', () => {

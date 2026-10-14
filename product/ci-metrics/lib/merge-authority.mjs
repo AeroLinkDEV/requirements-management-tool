@@ -71,11 +71,11 @@ export const REQUIRED_JOBS = [
 // self-consistent i/N set at an accepted size rather than fixed names. `expectedShards` is the size ci.yml
 // configures, which the test suite pins against the workflow so drift on either side is caught before it can
 // matter. `acceptedShards` are the sizes a run may have. They differ only while a group changes size: the
-// binder runs main's verifier, so it must accept the new size before the workflow moves to it (#1358: browser
-// journeys, 4 then 6 shards, in two maintenance steps).
+// binder runs main's verifier, so it must accept the new size before the workflow moves to it (#1630 stage 1:
+// accept six or eight browser shards while both workflow matrices still run six; stage 2 moves to eight).
 export const SHARDED_JOB_GROUPS = [
   { name: 'API test suite', pattern: /^API test suite \((\d+)\/(\d+)\)$/, expectedShards: 3, acceptedShards: [3] },
-  { name: 'Browser journeys', pattern: /^Browser journeys \((\d+)\/(\d+)\)$/, expectedShards: 6, acceptedShards: [6] },
+  { name: 'Browser journeys', pattern: /^Browser journeys \((\d+)\/(\d+)\)$/, expectedShards: 6, acceptedShards: [6, 8] },
 ]
 
 const JOB_CONCLUSION_SUCCESS = 'success'
