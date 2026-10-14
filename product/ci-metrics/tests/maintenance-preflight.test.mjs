@@ -47,22 +47,30 @@ test('a complete maintenance packet still grants no publishing or merging permis
   assert.match(result.ordinaryDecision.reasons[0], /^trusted-surface-modified:/)
 })
 
-test('a maintenance packet from a 6-shard browser run is reviewable; 4 and other sizes, and gaps, refuse (#1358 step 2)', () => {
-  for (const shards of [6]) {
+test('complete 6/8 maintenance evidence is reviewable without authority; other sizes and gaps refuse (#1630)', () => {
+  for (const shards of [6, 8]) {
     const result = evaluateMaintenancePreflight(fixture(shards))
     assert.equal(result.disposition, 'REVIEW_REQUIRED', `${shards} shards`)
     assert.deepEqual(result.reasons, [], `${shards} shards`)
+    assert.equal(result.canPublishAuthority, false, `${shards} shards`)
+    assert.equal(result.canMerge, false, `${shards} shards`)
+    assert.equal(result.ordinaryDecision.decision, 'REFUSE', `${shards} shards still change protected machinery`)
   }
   for (const [name, evidence, reason] of [
     ['4 shards', fixture(4), 'shard-count-drift:'],
     ['5 shards', fixture(5), 'shard-count-drift:'],
-    ['8 shards', fixture(8), 'shard-count-drift:'],
+    ['7 shards', fixture(7), 'shard-count-drift:'],
+    ['9 shards', fixture(9), 'shard-count-drift:'],
     ['6 shards, one missing', (e => { e.jobs = e.jobs.filter(j => j.name !== 'Browser journeys (6/6)'); return e })(fixture(6)), 'shard-set-incomplete:'],
     ['6 shards, one failed', (e => { e.jobs.find(j => j.name === 'Browser journeys (5/6)').conclusion = 'failure'; return e })(fixture(6)), 'job-not-success:'],
+    ['8 shards, one missing', (e => { e.jobs = e.jobs.filter(j => j.name !== 'Browser journeys (8/8)'); return e })(fixture(8)), 'shard-set-incomplete:'],
+    ['8 shards, one failed', (e => { e.jobs.find(j => j.name === 'Browser journeys (8/8)').conclusion = 'failure'; return e })(fixture(8)), 'job-not-success:'],
   ]) {
     const result = evaluateMaintenancePreflight(evidence)
     assert.equal(result.disposition, 'REFUSE', name)
     assert.ok(result.reasons.some(r => r.startsWith(reason)), `${name}: ${result.reasons.join('; ')}`)
+    assert.equal(result.canPublishAuthority, false, name)
+    assert.equal(result.canMerge, false, name)
   }
 })
 

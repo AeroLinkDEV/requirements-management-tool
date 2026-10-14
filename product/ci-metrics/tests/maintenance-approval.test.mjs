@@ -83,15 +83,20 @@ test('exact authenticated owner environment approval permits only the current re
   assert.equal(review.packet.assessment.ordinaryDecision.decision, 'REFUSE')
 })
 
-test('a review of a 6-shard browser run is approvable; a 4- or 5-shard run is not reviewable (#1358 step 2)', () => {
-  for (const shards of [6]) {
+test('complete 6/8 browser evidence requires its own exact maintenance approval (#1630)', () => {
+  for (const shards of [6, 8]) {
     const review = createMaintenanceReview(fixture(shards))
     assert.deepEqual(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals: approval(review) }), { decision: 'PASS', reasons: [] }, `${shards} shards`)
+    assert.equal(review.packet.assessment.canPublishAuthority, false, `${shards} shards`)
+    assert.equal(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals: [] }).decision, 'REFUSE', `${shards} shards without approval`)
+    const other = createMaintenanceReview(fixture(shards === 6 ? 8 : 6))
+    assert.equal(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals: approval(other) }).decision, 'REFUSE', `${shards} shards cannot reuse another topology's digest approval`)
   }
-  assert.throws(() => createMaintenanceReview(fixture(4)), /maintenance-preflight-not-reviewable/)
-  const drifted = fixture(5)
-  assert.ok(drifted.packet.assessment.reasons.some(reason => reason.startsWith('shard-count-drift: Browser journeys')))
-  assert.throws(() => createMaintenanceReview(drifted), /maintenance-preflight-not-reviewable/)
+  for (const shards of [4, 5, 7, 9]) {
+    const drifted = fixture(shards)
+    assert.ok(drifted.packet.assessment.reasons.some(reason => reason.startsWith('shard-count-drift: Browser journeys')))
+    assert.throws(() => createMaintenanceReview(drifted), /maintenance-preflight-not-reviewable/, `${shards} shards`)
+  }
 })
 
 for (const [name, mutate] of [
@@ -107,10 +112,12 @@ for (const [name, mutate] of [
   ['different environment name', a => { a[0].environments[0].name = 'merge-authority' }],
   ['mixed environment approval', a => { a[0].environments.push({ id: 999, name: 'other' }) }],
 ]) test(`refuses ${name}`, () => {
-  const review = createMaintenanceReview(fixture())
-  const approvals = approval(review)
-  mutate(approvals)
-  assert.equal(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals }).decision, 'REFUSE')
+  for (const shards of [6, 8]) {
+    const review = createMaintenanceReview(fixture(shards))
+    const approvals = approval(review)
+    mutate(approvals)
+    assert.equal(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals }).decision, 'REFUSE', `${shards} shards`)
+  }
 })
 
 for (const [name, mutate] of [
@@ -136,11 +143,13 @@ for (const [name, mutate] of [
   ['native publisher changed', f => { f.packet.evidence.checks[0].app.id = 1 }],
   ['machinery change under a stale assessment', f => { f.packet.evidence.changes[0].path = 'product/ci-metrics/lib/maintenance-runtime.mjs' }],
 ]) test(`cannot prepare ${name}`, () => {
-  const input = fixture()
-  mutate(input)
-  const { digest, ...payload } = input.packet
-  input.packet.digest = evidenceDigest(payload)
-  assert.throws(() => createMaintenanceReview(input))
+  for (const shards of [6, 8]) {
+    const input = fixture(shards)
+    mutate(input)
+    const { digest, ...payload } = input.packet
+    input.packet.digest = evidenceDigest(payload)
+    assert.throws(() => createMaintenanceReview(input), undefined, `${shards} shards`)
+  }
 })
 
 test('an approval-machinery change is prepared for delegated review and named in the summary (DEC-142)', () => {
