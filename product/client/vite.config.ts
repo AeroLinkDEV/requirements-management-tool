@@ -6,10 +6,21 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 
-/** A separate sidecar binds the actual emitted JS bytes; it is not hashed into itself or the JS it identifies. */
+/**
+ * A separate sidecar binds the actual emitted JS bytes; it is not hashed into itself or the JS it identifies.
+ * The source revision is read from git only when the sidecar is first served or written. Outside a git checkout (a
+ * source archive, no git on PATH) the build still succeeds and records commit null, which the bench's recording
+ * identity refuses ("build commit unknown"): only recording verification fails closed, nothing else.
+ */
 function fmsRecordingIdentity(): Plugin {
-  const git = (...args: string[]) => execFileSync('git', args, { cwd: fileURLToPath(new URL('../..', import.meta.url)), encoding: 'utf8' }).trim()
-  const commit = git('rev-parse', 'HEAD'), dirty = git('status', '--porcelain=v1') !== ''
+  let source: { commit: string | null; dirty: boolean | null } | null = null
+  const revision = () => {
+    if (source) return source
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: fileURLToPath(new URL('../..', import.meta.url)), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    try { source = { commit: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain=v1') !== '' } }
+    catch { source = { commit: null, dirty: null } }
+    return source
+  }
   const schema = 'aerolink.fms-build.v1'
   const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
   let outDir = ''
@@ -20,7 +31,7 @@ function fmsRecordingIdentity(): Plugin {
       server.middlewares.use('/fms-recording-build.json', (_request, response) => {
         response.setHeader('Content-Type', 'application/json')
         // A development module graph is deliberately not called a built bundle or a qualified identity.
-        response.end(JSON.stringify({ schema, kind: 'development', commit, dirty, assets: [], bundleHash: null }))
+        response.end(JSON.stringify({ schema, kind: 'development', ...revision(), assets: [], bundleHash: null }))
       })
     },
     writeBundle(_options, bundle) {
@@ -31,6 +42,7 @@ function fmsRecordingIdentity(): Plugin {
         const bytes = readFileSync(file)
         return { path, sha256: hash(bytes), bytes: bytes.byteLength }
       }).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+      const { commit, dirty } = revision()
       const identity = { schema, kind: 'built', commit, dirty, assets }
       writeFileSync(join(outDir, 'fms-recording-build.json'), JSON.stringify({ ...identity, bundleHash: hash(JSON.stringify(identity)) }) + '\n')
     },

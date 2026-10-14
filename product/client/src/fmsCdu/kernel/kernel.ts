@@ -2,7 +2,7 @@ import type { ScenarioRunner, Translation } from "../scenario";
 import { executeAction, type ActionContext, type ActionSource, type ActionTarget, type KernelAction, type KernelOutcome } from "./actions";
 import type { LegacyPlant } from "./legacyPlantAdapter";
 import { FRAME_UNITS, type KernelTime } from "./time";
-import { CanonicalWriter, frameBytes, frameDigest } from "./stateDigest";
+import { CanonicalWriter, DigestLog, frameBytes, xxh64 } from "./stateDigest";
 
 /**
  * The phases at one instant, in their authoritative order (#1502 D1 3.2). Within a phase, events are ordered by class:
@@ -48,7 +48,7 @@ export type JournalRecord = {
   /** As executed: a toggle or a "guidance" target resolved, so replay needs nothing but the record. */
   readonly payload: unknown;
   readonly outcome: KernelOutcome;
-  /** The digest of the action's effects: the kernel digests no state before I1c, so it is null in I1b. */
+  /** The digest of the action's effects. I1c digests whole frames (D_j), not single actions, so it stays null. */
   readonly effectsDigest: null;
 };
 
@@ -112,8 +112,8 @@ type Pending = { readonly submissionSeq: number; readonly action: KernelAction; 
 export type PendingSubmission = Pending;
 
 /**
- * The simulation kernel (#1517 I1a, I1b). It owns kernel time, the order of events, the submission boundary and the
- * journal. The plant and both computers are still inside the legacy plant adapter (T17), so of the phases only ACTION
+ * The simulation kernel (#1517 I1a-I1c). It owns kernel time, the order of events, the submission boundary, the
+ * journal, the per-frame digests D_j and the S_k boundary hooks. The plant and both computers are still inside the legacy plant adapter (T17), so of the phases only ACTION
  * and INTEGRATE have events in I1:
  *
  * - **ACTION at F_j** (the ACTION rule, D1 3.8a): pending submissions due at F_j in submissionSeq order, then the
@@ -153,7 +153,7 @@ export class FmsKernel {
   private lastOutcome: OutcomeEvent | null = null;
   private readonly context: ActionContext;
   private readonly digestWriter = new CanonicalWriter();
-  private readonly digests: string[] = [];
+  private readonly digests = new DigestLog();
   private successfulBoundary = 0;
   private readonly boundaryHooks = new Set<() => void>();
   private atBoundary = false;
@@ -206,8 +206,14 @@ export class FmsKernel {
   get controlRecords(): readonly ControlRecord[] { return this.controls; }
   /** The most recent published outcome, for the bench's event-stream subscription. */
   get latestOutcome(): OutcomeEvent | null { return this.lastOutcome; }
-  /** D_j observes the closed ACTION, immediately before its composite INTEGRATE. */
-  get frameDigests(): readonly string[] { return this.digests; }
+  /** D_j observes the closed ACTION, immediately before its composite INTEGRATE. A fresh hex copy of every D_j. */
+  get frameDigests(): readonly string[] { return this.digests.hex(); }
+  /** The number of frames digested so far. */
+  get frameDigestCount() { return this.digests.length; }
+  /** D_frame as 16 hex digits, or undefined if that frame has not closed. */
+  frameDigest(frame: number): string | undefined { return this.digests.hexAt(frame); }
+  /** D_0 .. D_(end-1) as hex. The log is append-only, so a prefix read later equals the prefix at its boundary. */
+  frameDigestsTo(end: number): string[] { return this.digests.hex(end); }
   /** Failed INTEGRATE reaches no S_k, even though the adapter's unit clock has already moved. */
   get lastSuccessfulBoundary() { return this.successfulBoundary; }
 
@@ -334,7 +340,7 @@ export class FmsKernel {
             // F_j's ACTION ran when the instant opened; it closes here, before any later phase begins.
             this.open = false;
             this.digestWriter.length = 0;
-            this.digests.push(frameDigest(frameBytes(this.plant.units, this.digestWriter)));
+            this.digests.push(xxh64(frameBytes(this.plant.units, this.digestWriter)));
             options.onInstantClose?.();
             break;
           case "INTEGRATE":
@@ -361,15 +367,26 @@ export class FmsKernel {
       // S_{j+1}: the unit clock is F_{j+1}; no pending input or runner poll at that instant has run.
       this.successfulBoundary = this.frame;
       this.atBoundary = true;
-      if (!hookCalled) { options.atNextBoundary?.(); hookCalled = true; }
-      const hooks = [...this.boundaryHooks];
-      for (const hook of hooks) { this.boundaryHooks.delete(hook); hook(); }
-      if (this.verificationTarget === this.frame) return done + 1;
-      this.atBoundary = false;
+      // A one-shot observer that throws is its own failure: the others still run, this boundary still ends and
+      // F_{j+1}'s ACTION still opens, then the error is reported. The caller's atNextBoundary propagates at once.
+      let observerFailed = false, observerError: unknown = null;
+      try {
+        if (!hookCalled) { hookCalled = true; options.atNextBoundary?.(); }
+        const hooks = [...this.boundaryHooks];
+        for (const hook of hooks) {
+          this.boundaryHooks.delete(hook);
+          try { hook(); } catch (error) { if (!observerFailed) { observerFailed = true; observerError = error; } }
+        }
+        if (this.verificationTarget === this.frame) return done + 1;
+      } finally {
+        // Only a private verifier's terminal S_k stays a boundary; nothing else may leave the kernel resting at one.
+        if (this.verificationTarget !== this.frame) this.atBoundary = false;
+      }
       // ACTION at F_{j+1}: what was submitted while F_j's later phases ran, then the translated v1 steps and checks due.
       this.open = true;
       this.executePending();
       if (this.runner) { this.runner.poll(); this.journalTranslations(); }
+      if (observerFailed) throw observerError;
       if (running && this.runner!.finished) return done + 1;
     }
     return frames;

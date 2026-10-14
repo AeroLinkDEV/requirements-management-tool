@@ -29,7 +29,7 @@ import { ScenarioRecorder, TICK_SECONDS, scenarioStart, type RunView, type Scena
 import type { ActionSource, KernelAction } from "./kernel/actions";
 import type { OutcomeEvent } from "./kernel/kernel";
 import { createSession, type StartMode } from "./kernel/session";
-import { currentRecordingIdentity, parseRecording, serializeRecording, SessionRecording, type VerificationResult } from "./kernel/recording";
+import { pageRecordingIdentity, parseRecording, serializeRecording, SessionRecording, type VerificationResult } from "./kernel/recording";
 import { startKernelPacing } from "./benchPacing";
 import { BenchPresentation } from "./benchPresentation";
 import { kernelCdu, type ControlSource, type Submit } from "./kernel/submission";
@@ -223,7 +223,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
       userDatabase ? { userDatabase } : {});
     const { kernel, port, runner, started, plant, fms } = constructed;
     const system = constructed.system!;
-    const reproduction = new SessionRecording(constructed, currentRecordingIdentity());
+    // The build identity (a fetch and hash of every emitted asset) is resolved on the first export, then kept for the page.
+    const reproduction = new SessionRecording(constructed, pageRecordingIdentity);
     const recorder = pendingRecording.current ? new ScenarioRecorder(plant.clock.now) : null;
     // The GPS sensors tab's record is the sensor owner's; the recorder listens to what it applies.
     const gps = stimulusFor(fms);

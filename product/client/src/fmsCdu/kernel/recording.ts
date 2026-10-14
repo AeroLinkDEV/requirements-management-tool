@@ -7,7 +7,7 @@ import { FRAME_UNITS } from "./time";
 
 type Asset = { readonly path: string; readonly sha256: string; readonly bytes: number };
 type BuildIdentity = { readonly schema: "aerolink.fms-build.v1"; readonly kind: "built" | "development";
-  readonly commit: string; readonly dirty: boolean; readonly assets: readonly Asset[]; readonly bundleHash: string | null };
+  readonly commit: string | null; readonly dirty: boolean | null; readonly assets: readonly Asset[]; readonly bundleHash: string | null };
 export type RecordingIdentity = {
   readonly build: BuildIdentity | null;
   readonly engine: { readonly userAgent: string; readonly platform: string; readonly fullVersionList: unknown; readonly architecture: unknown; readonly platformVersion: unknown };
@@ -45,6 +45,8 @@ export async function currentRecordingIdentity(): Promise<RecordingIdentity> {
     build = await response.json() as BuildIdentity;
     if (build.schema !== "aerolink.fms-build.v1") throw new Error("unsupported build identity");
     if (build.kind !== "built") return { build, engine, qualified: false, reason: "development build: unqualified" };
+    // A build made outside a git checkout records no commit; it still runs, but it cannot qualify a recording.
+    if (typeof build.commit !== "string" || !build.commit) return { build, engine, qualified: false, reason: "build commit unknown" };
     const { schema, kind, commit, dirty, assets, bundleHash } = build;
     if (!Array.isArray(assets) || !assets.length || !/^[0-9a-f]{64}$/.test(bundleHash ?? "")) throw new Error("invalid build identity");
     if (await sha256(new TextEncoder().encode(JSON.stringify({ schema, kind, commit, dirty, assets }))) !== bundleHash) throw new Error("corrupt build identity");
@@ -62,6 +64,16 @@ export async function currentRecordingIdentity(): Promise<RecordingIdentity> {
     if (!Array.isArray(engine.fullVersionList) || !engine.fullVersionList.length) return { build, engine, qualified: false, reason: "full engine version unavailable" };
     return { build, engine, qualified: true, reason: null };
   } catch (error) { return { build, engine, qualified: false, reason: error instanceof Error ? error.message : String(error) }; }
+}
+
+let pageIdentity: Promise<RecordingIdentity> | null = null;
+/**
+ * This page's identity, resolved on the first export that needs it and then kept: the served bytes cannot change under
+ * a loaded page. Session construction, Restart and profile or scenario changes do no fetch or hashing.
+ */
+export function pageRecordingIdentity(): Promise<RecordingIdentity> {
+  pageIdentity ??= currentRecordingIdentity();
+  return pageIdentity;
 }
 
 type ContentPayload = { readonly kind: string; readonly unit: number; readonly op?: string; readonly name?: string; readonly airports?: readonly string[]; readonly content: ContentRef };
@@ -114,38 +126,45 @@ export function parseRecording(text: string): Reproduction {
 export class SessionRecording {
   private readonly store = new ContentStore();
   private readonly imports = new Map<number, Uint8Array>();
-  private readonly identity: Promise<RecordingIdentity>;
+  private readonly identity: () => Promise<RecordingIdentity>;
+  private resolvedIdentity: Promise<RecordingIdentity> | null = null;
   private readonly session: RecordingSession;
   private readonly cancellations = new Set<() => void>();
   private generation = 0;
-  constructor(session: RecordingSession, identity: Promise<RecordingIdentity>) { this.session = session; this.identity = identity; }
+  /** `identity` is asked for only when an export is encoded, never at session construction. */
+  constructor(session: RecordingSession, identity: () => Promise<RecordingIdentity>) { this.session = session; this.identity = identity; }
 
   retainImport(submissionSeq: number, bytes: Uint8Array) { this.imports.set(submissionSeq, new Uint8Array(bytes)); }
   dispose() { this.generation += 1; for (const cancel of this.cancellations) cancel(); this.cancellations.clear(); }
 
-  /** The callback observes S_k synchronously and returns; hashing and JSON IO run later, off the frame path. */
+  /**
+   * The callback observes S_k synchronously and returns; digest text, hashing and JSON IO run later, off the frame path.
+   * Only a halt or a fault passes no S_k, so only they export at once (labelled). A finished run's bench still passes S_k.
+   */
   requestExport(): Promise<Reproduction> {
     const kernel = this.session.kernel;
     const generation = this.generation;
-    if (kernel.halted || kernel.runFinished || kernel.faulted) return this.encode(kernel.record(), kernel.frameDigests.slice(), kernel.lastSuccessfulBoundary, kernel.faulted ? "faulted" : "halted-open-action", generation, null);
+    if (kernel.halted || kernel.faulted) return this.encode(kernel.record(), kernel.lastSuccessfulBoundary, kernel.faulted ? "faulted" : "halted-open-action", generation, null);
     return new Promise((resolve, reject) => {
       const cancel = () => { unsubscribe(); reject(new Error("recording session ended")); };
       const unsubscribe = kernel.onNextBoundary(() => {
         this.cancellations.delete(cancel);
         try {
-          const record = kernel.boundaryRecord(), digests = kernel.frameDigests.slice();
+          const record = kernel.boundaryRecord();
           const pending = kernel.boundaryPendingInputs();
           // Defer even the first asynchronous hashing call until the enclosing advance() has finished its frames.
-          queueMicrotask(() => { void this.encode(record, digests, record.frame, "boundary", generation, pending).then(resolve, reject); });
+          queueMicrotask(() => { void this.encode(record, record.frame, "boundary", generation, pending).then(resolve, reject); });
         } catch (error) { reject(error); }
       });
       this.cancellations.add(cancel);
     });
   }
 
-  private async encode(record: KernelRecord, digests: readonly string[], lastBoundary: number, kind: Reproduction["capture"]["kind"], generation: number,
+  private async encode(record: KernelRecord, lastBoundary: number, kind: Reproduction["capture"]["kind"], generation: number,
     pending: readonly PendingSubmission[] | null): Promise<Reproduction> {
     const initial = this.session;
+    // The kernel's digest log is append-only: D_0..D_(lastBoundary-1) read now equal what they were at the boundary.
+    const digests = initial.kernel.frameDigestsTo(lastBoundary);
     const users = await Promise.all(initial.users.map(async user => ({ scope: user.scope,
       content: user.text === null ? null : await this.store.putText(user.text) })));
     const encodeAction = async (action: KernelAction, submissionSeq: number): Promise<unknown> => {
@@ -161,13 +180,14 @@ export class SessionRecording {
     };
     const journal = await Promise.all(record.journal.map(async entry => ({ ...entry, payload: await encodeAction(entry.payload as KernelAction, entry.submissionSeq) })));
     const pendingInputs = pending ? await Promise.all(pending.map(async entry => ({ ...entry, action: await encodeAction(entry.action, entry.submissionSeq) }))) : null;
-    const identity = await this.identity;
+    this.resolvedIdentity ??= this.identity();
+    const identity = await this.resolvedIdentity;
     if (generation !== this.generation) throw new Error("recording session ended");
     const boundary = kind === "boundary";
     return { ...record, journal, schema: "aerolink.fms-recording.v1", initial: { version: 1, setup: initial.setup,
       observations: initial.initial, userScope: initial.persistentUserScope, users }, identity,
       builtins: identity.build?.bundleHash ? identity.build.assets.map(asset => ({ bundleHash: identity.build!.bundleHash!, ...asset })) : [],
-      contents: this.store.export(), digests: digests.slice(0, lastBoundary), lastBoundary,
+      contents: this.store.export(), digests, lastBoundary,
       capture: { kind, exact: boundary, label: boundary ? "S_k; empty snapshot slot (I2 required for restore)" : "Open ACTION export; only the prior closed prefix can be verified, not exact current state" }, snapshots: [], pendingInputs };
   }
 }
@@ -221,12 +241,17 @@ export async function verifyRecording(record: Reproduction, current: RecordingId
     consumed.add(entry.recordOrdinal);
   };
   const at = (entry: (typeof entries)[number]) => "frame" in entry ? entry.frame : entry.instant / FRAME_UNITS;
+  // Indexed by frame once, in recordOrdinal order, so a long recording costs O(entries), not O(frames x entries).
+  const byFrame = new Map<number, (typeof entries)[number][]>();
+  for (const entry of entries) { const list = byFrame.get(at(entry)); if (list) list.push(entry); else byFrame.set(at(entry), [entry]); }
+  const firstTranslated = new Map<number, number>();
+  for (const entry of journal) if (entry.origin === "v1-translated" && !firstTranslated.has(entry.frame)) firstTranslated.set(entry.frame, entry.recordOrdinal);
   const leading = (frame: number) => {
-    const translated = journal.find(entry => entry.frame === frame && entry.origin === "v1-translated");
-    if (translated) for (const entry of entries) if (at(entry) === frame && entry.recordOrdinal < translated.recordOrdinal) apply(entry);
+    const translated = firstTranslated.get(frame);
+    if (translated !== undefined) for (const entry of byFrame.get(frame) ?? []) if (entry.recordOrdinal < translated) apply(entry);
   };
   while (kernel.frame < target) {
-    for (const entry of entries) if (at(entry) === kernel.frame) apply(entry);
+    for (const entry of byFrame.get(kernel.frame) ?? []) apply(entry);
     const before = kernel.frame;
     try {
       if (kernel.frame + 1 === target) kernel.verifyTo(target, { atNextBoundary: () => {
@@ -243,7 +268,7 @@ export async function verifyRecording(record: Reproduction, current: RecordingId
       if (!kernel.faulted || !expected || !same(observed, expected)) throw error;
     }
     const frame = kernel.frame - 1;
-    if (kernel.frameDigests[frame] !== record.digests[frame]) throw new Error(`digest mismatch at frame ${frame}`);
+    if (kernel.frameDigest(frame) !== record.digests[frame]) throw new Error(`digest mismatch at frame ${frame}`);
   }
   if (target === 0) kernel.verifyTo(0);
   const expectedJournal = journal.filter(entry => entry.frame < target), expectedControl = record.control.filter(entry => entry.instant < target * FRAME_UNITS);

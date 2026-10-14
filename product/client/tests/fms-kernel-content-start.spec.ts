@@ -32,7 +32,7 @@ const identity: RecordingIdentity = { build: { schema: 'aerolink.fms-build.v1', 
   assets: [{ path: 'assets/a.js', sha256: ABC, bytes: 3 }, { path: 'assets/b.js', sha256: EMPTY, bytes: 0 }] },
   engine: { userAgent: 'literal-engine', platform: 'literal-platform', fullVersionList: [{ brand: 'literal', version: '1.2.3.4' }], architecture: null, platformVersion: null }, qualified: true, reason: null }
 const exportAtFirstBoundary = async () => {
-  const session = createSession(setup), pending = new SessionRecording(session, Promise.resolve(identity)).requestExport()
+  const session = createSession(setup), pending = new SessionRecording(session, () => Promise.resolve(identity)).requestExport()
   session.kernel.advance(1)
   return pending
 }
@@ -70,7 +70,7 @@ test('the shared session factory captures both exact initial user stores without
 
 // Start orchestration, not another power-law matrix: WARM matches actual pre-factory construction; COLD calls the
 // established native path for FMS1 only. Frozen independent bytes include observable GPS/clock/aircraft state.
-test('WARM construction is unchanged and per-FMS COLD uses the actual five-second boot path with shared GPS preserved', () => {
+test('WARM construction is unchanged and per-FMS COLD uses the actual five-second boot path and KALMAN re-initialisation', () => {
   for (const cold of [false, true]) {
     const session = createSession({ ...setup, startModes: [cold ? 'COLD' : 'WARM', 'WARM'] })
     const direct = dualComposition(setup.utc0Ms)

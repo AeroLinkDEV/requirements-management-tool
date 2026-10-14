@@ -243,3 +243,37 @@ export function frameBytes(units: DigestUnits, w = new CanonicalWriter()) {
 
 /** One frame's digest: xxHash64, seed 0, as 16 hex digits. */
 export const frameDigest = (bytes: Uint8Array) => hex64(xxh64(bytes))
+
+const DIGEST_CHUNK = 4096
+
+/**
+ * Every frame's digest D_j, kept as the unsigned 64-bit hash value in fixed-size typed-array chunks: 8 bytes a frame
+ * and no per-frame object. Append-only, so a prefix read later equals the prefix at any earlier boundary. The 16-digit
+ * hex form (frameDigest) is produced only on read, for export and comparison.
+ */
+export class DigestLog {
+  private readonly chunks: BigUint64Array[] = []
+  private count = 0
+
+  get length() { return this.count }
+
+  push(value: bigint) {
+    const offset = this.count % DIGEST_CHUNK
+    if (offset === 0) this.chunks.push(new BigUint64Array(DIGEST_CHUNK))
+    this.chunks[this.chunks.length - 1][offset] = value
+    this.count += 1
+  }
+
+  /** D_index as 16 hex digits, or undefined beyond the frames taken. */
+  hexAt(index: number): string | undefined {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= this.count) return undefined
+    return hex64(this.chunks[Math.floor(index / DIGEST_CHUNK)][index % DIGEST_CHUNK])
+  }
+
+  /** D_0 .. D_(end-1) as hex strings (a fresh array). */
+  hex(end = this.count): string[] {
+    const last = Math.min(Math.max(0, end), this.count), out = new Array<string>(last)
+    for (let index = 0; index < last; index += 1) out[index] = hex64(this.chunks[Math.floor(index / DIGEST_CHUNK)][index % DIGEST_CHUNK])
+    return out
+  }
+}
