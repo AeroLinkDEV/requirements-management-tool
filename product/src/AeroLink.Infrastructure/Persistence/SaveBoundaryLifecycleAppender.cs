@@ -85,11 +85,14 @@ internal sealed class SaveBoundaryLifecycleAppender(AeroLinkDbContext db)
                     ?? "aerolink.lifecycle"));
         }
 
+        Dictionary<Guid, Guid>? trackedArtifactProjects = null;
         foreach (var entry in db.ChangeTracker.Entries<RequirementRevision>()
                      .Where(x => x.State == EntityState.Added))
         {
-            var projectId = db.ChangeTracker.Entries<RequirementArtifact>()
-                .FirstOrDefault(x => x.Entity.Id == entry.Entity.ArtifactId)?.Entity.ProjectId;
+            trackedArtifactProjects ??= db.ChangeTracker.Entries<RequirementArtifact>()
+                .ToDictionary(x => x.Entity.Id, x => x.Entity.ProjectId);
+            Guid? projectId = trackedArtifactProjects.TryGetValue(entry.Entity.ArtifactId, out var trackedProjectId)
+                ? trackedProjectId : null;
             projectId ??= await db.Requirements.AsNoTracking()
                 .Where(x => x.Id == entry.Entity.ArtifactId)
                 .Select(x => (Guid?)x.ProjectId)
