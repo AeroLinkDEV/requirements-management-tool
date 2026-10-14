@@ -171,12 +171,23 @@
             ]
           },
           "browser-paced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 900,
-            "missing": "Public finite mission window and terminal accounting"
+            "status": "IMPLEMENTED",
+            "version": 2,
+            "executor": "single-arm-browser",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 256,
+              "simMilliseconds": 64000
+            },
+            "scored": {
+              "kind": "successful-scenario-end-after-warmup",
+              "maxTotalSimSeconds": 900
+            },
+            "terminal": "driver-run-end-plus-exact-public-PASS-report",
+            "scenarioStartUtc": "2026-09-27T14:00:00.000Z",
+            "inputOverlay": "public-scenario-file-fixed-UTC",
+            "closeTimeline": "aerolink.fms-bench.pacing-close",
+            "scope": "Diagnostic mission-to-END only; NOT_CALIBRATED/inference DISABLED; no fixed-reference C1 extent or paired capture capability."
           },
           "browser-unpaced": {
             "status": "NOT_IMPLEMENTED",
@@ -310,12 +321,23 @@
             ]
           },
           "browser-paced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 3600,
-            "missing": "Public finite mission window and terminal accounting"
+            "status": "IMPLEMENTED",
+            "version": 2,
+            "executor": "single-arm-browser",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 256,
+              "simMilliseconds": 64000
+            },
+            "scored": {
+              "kind": "successful-scenario-end-after-warmup",
+              "maxTotalSimSeconds": 3600
+            },
+            "terminal": "driver-run-end-plus-exact-public-PASS-report",
+            "scenarioStartUtc": "2026-09-27T14:00:00.000Z",
+            "inputOverlay": "public-scenario-file-fixed-UTC",
+            "closeTimeline": "aerolink.fms-bench.pacing-close",
+            "scope": "Diagnostic mission-to-END only; NOT_CALIBRATED/inference DISABLED; no fixed-reference C1 extent or paired capture capability."
           },
           "browser-unpaced": {
             "status": "NOT_IMPLEMENTED",
@@ -352,12 +374,23 @@
             ]
           },
           "browser-paced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 900,
-            "missing": "Public finite mission window and terminal accounting"
+            "status": "IMPLEMENTED",
+            "version": 2,
+            "executor": "single-arm-browser",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 256,
+              "simMilliseconds": 64000
+            },
+            "scored": {
+              "kind": "successful-scenario-end-after-warmup",
+              "maxTotalSimSeconds": 900
+            },
+            "terminal": "driver-run-end-plus-exact-public-PASS-report",
+            "scenarioStartUtc": "2026-09-27T14:00:00.000Z",
+            "inputOverlay": "public-scenario-file-fixed-UTC",
+            "closeTimeline": "aerolink.fms-bench.pacing-close",
+            "scope": "Diagnostic mission-to-END only; NOT_CALIBRATED/inference DISABLED; no fixed-reference C1 extent or paired capture capability."
           },
           "browser-unpaced": {
             "status": "NOT_IMPLEMENTED",

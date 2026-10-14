@@ -14,7 +14,7 @@ export type TickSlice = { readonly batch: number; readonly admitted: number; rea
   readonly began: number; readonly ended: number };
 /** Admitted frames that will never be attempted: the batch was cancelled, the run ended or a frame faulted. */
 export type TickDiscard = { readonly batch: number; readonly discarded: number; readonly at: number };
-export type TickTrace = { readonly entry?: () => void; readonly slice: (slice: TickSlice) => void; readonly discard: (discard: TickDiscard) => void };
+export type TickTrace = { readonly entry?: () => void; readonly slice: (slice: TickSlice) => void; readonly discard: (discard: TickDiscard) => void; readonly close?: (batch: number) => void };
 
 /**
  * One finite rate-sized batch, admitted at monotonic deadlines. Slow hosts expire old wall-time admissions rather
@@ -29,18 +29,22 @@ export function startTickPacing(rate: number, advance: () => boolean, host: Tick
   let deadline = host.performance.now() + period;
   let remaining = 0, stopped = false, batch = 0;
   // A stop inside a slice is traced after that slice, so each trace entry leaves the outstanding debt it reports.
-  let waking = false, discarded = 0;
+  let waking = false, discarded = 0, closed = false;
   let timer: number | null = null;
   const discard = () => {
     if (discarded > 0) trace?.discard({ batch, discarded, at: host.performance.now() });
     discarded = 0;
+  };
+  const close = () => {
+    discard();
+    if (stopped && !closed) { closed = true; trace?.close?.(batch); }
   };
   const stop = () => {
     discarded += remaining;
     stopped = true; remaining = 0;
     if (timer !== null) host.clearTimeout(timer);
     timer = null;
-    if (!waking) discard();
+    if (!waking) close();
   };
   const schedule = (delay: number) => { timer = host.setTimeout(wake, delay); };
   const wake = () => {
@@ -72,7 +76,7 @@ export function startTickPacing(rate: number, advance: () => boolean, host: Tick
     } finally {
       waking = false;
       trace?.slice({ batch, admitted, attempted, remaining: remaining + discarded, began, ended: host.performance.now() });
-      discard();
+      close();
     }
     // A task yield services input/painting without depending on visible-window animation frames.
     schedule(remaining ? 0 : Math.max(0, deadline - host.performance.now()));
@@ -103,6 +107,7 @@ export type KernelPacingOptions = {
  */
 export const PACING_TIMELINE = { schema: 1, slice: "aerolink.fms-bench.pacing-slice", discard: "aerolink.fms-bench.pacing-discard" } as const;
 /** Read-only profiling overlay: sampled at the actual slice boundary, never inferred from selected rate. */
+export const PACING_CLOSE = "aerolink.fms-bench.pacing-close";
 export const PACING_CLOCK = "aerolink.fms-bench.pacing-clock";
 export type PacingClockSample = { readonly utcMs: number; readonly monotonicMs: number; readonly timeOrigin: number | null;
   readonly kernelTime: number; readonly unitClockMs: number; readonly completed: number };
@@ -111,11 +116,13 @@ export type PacingSliceDetail = { readonly schema: 1; readonly epoch: number; re
 export type PacingDiscardDetail = { readonly schema: 1; readonly epoch: number; readonly rate: number; readonly batch: number; readonly discarded: number };
 let pacingEpochs = 0;
 
-function pacingTimeline(rate: number, host: TickSchedulingHost, completedSinceLastSlice: () => number, sample: () => PacingClockSample): TickTrace | undefined {
+function pacingTimeline(rate: number, host: TickSchedulingHost, completedSinceLastSlice: () => number, sample: () => PacingClockSample, stopKind: () => string): TickTrace | undefined {
   const { measure, clearMeasures } = host.performance;
   if (!measure || !clearMeasures) return undefined;
   const epoch = ++pacingEpochs;
   let entry: PacingClockSample, sequence = 0;
+  let admittedTotal = 0, attemptedTotal = 0, completedTotal = 0, discardedTotal = 0, debt = 0;
+  let lastClock: Record<string, unknown> | null = null;
   const emit = (name: string, start: number, end: number, detail: PacingSliceDetail | PacingDiscardDetail | Record<string, unknown>) => {
     // Observation must never fault the simulation; a lost entry breaks the reader's conservation instead.
     try { measure.call(host.performance, name, { start, end, detail }); clearMeasures.call(host.performance, name); } catch { /* reader refuses */ }
@@ -124,12 +131,24 @@ function pacingTimeline(rate: number, host: TickSchedulingHost, completedSinceLa
     entry: () => { entry = sample(); },
     slice: ({ batch, admitted, attempted, remaining, began, ended }) => {
       const exit = sample();
+      const completed = completedSinceLastSlice();
+      admittedTotal += admitted; attemptedTotal += attempted; completedTotal += completed; debt = remaining;
       emit(PACING_TIMELINE.slice, began, ended,
-        { schema: PACING_TIMELINE.schema, epoch, rate, batch, admitted, attempted, completed: completedSinceLastSlice(), remaining });
-      emit(PACING_CLOCK, entry.monotonicMs, exit.monotonicMs, { schema: 1, epoch, sequence: ++sequence, rate, batch, entry, exit });
+        { schema: PACING_TIMELINE.schema, epoch, rate, batch, admitted, attempted, completed, remaining });
+      lastClock = { schema: 1, epoch, sequence: ++sequence, rate, batch, entry, exit };
+      emit(PACING_CLOCK, entry.monotonicMs, exit.monotonicMs, lastClock);
     },
-    discard: ({ batch, discarded, at }) => emit(PACING_TIMELINE.discard, at, at,
-      { schema: PACING_TIMELINE.schema, epoch, rate, batch, discarded }),
+    discard: ({ batch, discarded, at }) => {
+      discardedTotal += discarded; debt -= discarded;
+      emit(PACING_TIMELINE.discard, at, at, { schema: PACING_TIMELINE.schema, epoch, rate, batch, discarded });
+    },
+    close: batch => {
+      // This is an observation after the final slice/discard, not another kernel sample or a PASS verdict.
+      const at = host.performance.now();
+      emit(PACING_CLOSE, at, at, { schema: 1, epoch, rate, sequence, batch, kind: stopKind(),
+        admitted: admittedTotal, attempted: attemptedTotal, completed: completedTotal, discarded: discardedTotal, debt,
+        utcMs: Date.now(), monotonicMs: at, timeOrigin: host.performance.timeOrigin ?? null, lastClock });
+    },
   };
 }
 
@@ -138,6 +157,7 @@ export function startKernelPacing(rate: number, kernel: FmsKernel, host: TickSch
   const began = host.performance.now();
   const haltOnRunEnd = options.haltOnRunEnd ?? true;
   let completedFrames = 0, traced = 0, lastReport = began;
+  let stopKind = "cancelled";
   // Completion instants belong to this Fly epoch. They count successful whole frames only, not admitted debt.
   const completions: number[] = [];
   let progressTimer: number | null = null, stopped = false;
@@ -171,14 +191,15 @@ export function startKernelPacing(rate: number, kernel: FmsKernel, host: TickSch
     completedFrames += done;
     for (let i = 0; i < done; i++) completions.push(host.performance.now());
     const ended = haltOnRunEnd && kernel.runFinished;
-    if (ended) report(true);
+    if (ended) { stopKind = "run-end"; report(true); }
+    else if (done === 0) stopKind = "no-work";
     if (done === 0 || ended) cancelProgress();
     if (ended) options.onStopped?.();
     return done > 0 && !ended;
-  }, host, error => { cancelProgress(); report(true); options.onFault(error); }, () => report(), pacingTimeline(rate, host, () => {
+  }, host, error => { stopKind = "fault"; cancelProgress(); report(true); options.onFault(error); }, () => report(), pacingTimeline(rate, host, () => {
     const done = completedFrames - traced; traced = completedFrames; return done;
   }, () => ({ utcMs: Date.now(), monotonicMs: host.performance.now(), timeOrigin: host.performance.timeOrigin ?? null,
-    kernelTime: kernel.now, unitClockMs: kernel.unitClockMs, completed: completedFrames })));
+    kernelTime: kernel.now, unitClockMs: kernel.unitClockMs, completed: completedFrames }), () => stopKind));
   if (options.onProgress) progressTimer = host.setTimeout(progressWake, 250);
   return () => { cancelProgress(); stopFrames(); };
 }

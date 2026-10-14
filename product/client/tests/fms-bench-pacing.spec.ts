@@ -35,6 +35,7 @@ test('profiling observes direct kernel and unit clocks at slice entry and exit, 
   expect([entry.utcMs, exit.utcMs].every(Number.isFinite)).toBe(true) // UTC observations are retained, not assumed monotonic.
   expect(entry.timeOrigin).toBeNull() // This deterministic host has no browser timeOrigin.
   expect(kernel.faulted).toBe(true)
+  expect(host.measures.at(-1)?.detail).toMatchObject({ kind: 'fault', admitted: 64, attempted: 2, completed: 1, discarded: 62, debt: 0 })
 })
 
 for (const rate of [1, 4, 16, 64]) test(`${rate}x retains every real whole kernel frame across slices`, () => {
@@ -362,6 +363,7 @@ test('the pacing timeline reports admitted, completed and discarded frames of a 
     `slice@250-290 ${slice(e, 8, 1, 8, 1, 1, 7)}`, `slice@290-330 ${slice(e, 8, 1, 0, 1, 1, 6)}`, `slice@330-370 ${slice(e, 8, 1, 0, 1, 1, 5)}`,
     `slice@370-410 ${slice(e, 8, 1, 0, 1, 1, 4)}`, `slice@410-450 ${slice(e, 8, 1, 0, 1, 1, 3)}`, `discard@450-450 ${discard(e, 8, 1, 3)}`])
   expect(kernel.now).toBe(5 * FRAME_UNITS)
+  expect(host.measures.at(-1)?.detail).toMatchObject({ kind: 'cancelled', admitted: 8, attempted: 5, completed: 5, discarded: 3, debt: 0 })
   // Every measure is cleared from the performance entry buffer as it is made; observers still receive it.
   expect(host.cleared).toEqual(host.measures.map(measure => measure.name))
   // A later Fly is a new epoch whose batches number from 1 again.
@@ -390,4 +392,26 @@ test('the pacing timeline counts the terminal frame as completed and a faulted a
   faulted.runNext()
   const f = Number(faulted.measures[0].detail.epoch)
   expect(faulted.entries()).toEqual([`slice@250-270 ${slice(f, 64, 1, 64, 2, 1, 62)}`, `discard@270-270 ${discard(f, 64, 1, 62)}`])
+})
+
+for (const rate of [1, 64]) test(`finite ${rate}x terminal publishes an actual close after its final slice and real discard without another frame`, () => {
+  const host = new TimelineHost(), composed = singleComposition(epoch)
+  const runner = new ScenarioRunner(finishScenario, composed.fms, undefined, composed.sim)
+  const kernel = new FmsKernel(composed.plant, runner)
+  const stop = startKernelPacing(rate, kernel, host, { onFault: noFault })
+  while (host.runNext()) { /* actual public driver reaches the three-frame scenario END */ }
+  stop(); stop()
+  expect(kernel.now).toBe(3 * FRAME_UNITS)
+  expect(runner.outcome).toBe('passed')
+  const closes = host.measures.filter(entry => entry.name === 'aerolink.fms-bench.pacing-close')
+  expect(closes).toHaveLength(1)
+  const close = closes[0]
+  expect(host.measures.at(-1)).toBe(close)
+  expect(close.detail).toMatchObject({ schema: 1, epoch: host.measures[0].detail.epoch, rate,
+    sequence: rate === 1 ? 3 : 1, batch: rate === 1 ? 3 : 1, kind: 'run-end',
+    admitted: rate === 1 ? 3 : 64, attempted: 3, completed: 3, discarded: rate === 1 ? 0 : 61, debt: 0 })
+  const clocks = host.measures.filter(entry => entry.name === 'aerolink.fms-bench.pacing-clock')
+  expect(close.detail.lastClock).toEqual(clocks.at(-1)!.detail)
+  expect(close.start).toBeGreaterThanOrEqual(clocks.at(-1)!.end)
+  expect(host.tasks.size).toBe(0)
 })

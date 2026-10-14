@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
+import { scenarioDigest } from '../src/fmsCdu/scenario'
+import { ACTIVE_PROFILE } from '../src/fmsCdu/profile'
+import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { apiLogin, login, selectProgram } from '../tests/auth'
-import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, installBrowserRecorder, measureWindow, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
+import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
 import { frameSummary } from './stats.ts'
 
 // One browser run (#1510 I0a; accounting revision 2, #1557): the 87N offshore SAR mission from its planned start, at
@@ -27,10 +32,11 @@ const workload = process.env.AEROLINK_PERF_WORKLOAD
 const topology = process.env.AEROLINK_PERF_TOPOLOGY
 const family = protocol.routeContract.workloads.find((entry: { id: string }) => entry.id === workload)
 const declaredRoute = family?.routes['browser-paced']
-if (!family || declaredRoute.status !== 'IMPLEMENTED' || topology !== 'dual' || family.scenario !== protocol.browser.scenario)
+if (!family || declaredRoute?.status !== 'IMPLEMENTED' || topology !== 'dual')
   throw new Error(`unsupported product UI route ${workload}/browser-paced/${topology}`)
-const route = { schema: protocol.routeContract.schema, id: `${workload}/browser-paced/${topology}/v1`, workload, scenario: family.scenario, topology, ...declaredRoute }
-type Recorder = { __fmsPerf: { begin(): number; boundary(label: string): unknown; keyDispatch(): void; keyOutcome(): void; drain(): RecordedWindow['events']; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
+const route = { schema: protocol.routeContract.schema, id: `${workload}/browser-paced/${topology}/v${declaredRoute.version ?? 1}`, workload, scenario: family.scenario, topology, ...declaredRoute }
+const finite = declaredRoute.scored.kind === 'successful-scenario-end-after-warmup'
+type Recorder = { __fmsPerf: { armFinite(): void; finiteStatus: { started: boolean; ended: boolean; error: string | null }; begin(): number; boundary(label: string): unknown; keyDispatch(): void; keyOutcome(): void; drain(): RecordedWindow['events']; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
 // The protocol declares the run schema this owner writes; a mismatch is a protocol edit without a harness edit.
 if (protocol.browser.accounting.schema !== BROWSER_RUN_SCHEMA) throw new Error(`protocol.json declares ${protocol.browser.accounting.schema}; this owner writes ${BROWSER_RUN_SCHEMA}`)
 
@@ -44,9 +50,9 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
   test.setTimeout(15 * 60_000)
   if (!result || !configuration || !protocol.browser.rates.includes(rate)) throw new Error('AEROLINK_PERF_RATE, _CONFIGURATION and _RESULT are required')
   const windowSim: number = protocol.browser.windowSimSeconds[String(rate)]
-  const targetFrames = windowSim * 4
+  const targetFrames = finite ? null : windowSim * 4
   const { timeline } = protocol.browser.accounting
-  await context.addInitScript(installBrowserRecorder, { slice: timeline.slice, discard: timeline.discard, clock: protocol.browser.capture.clockTimeline })
+  await context.addInitScript(installBrowserRecorder, { slice: timeline.slice, discard: timeline.discard, clock: protocol.browser.capture.clockTimeline, ...(finite ? { close: declaredRoute.closeTimeline } : {}) })
 
   await apiLogin(request)
   await login(page)
@@ -69,10 +75,38 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
 
   await page.getByLabel('Simulation rate').selectOption(String(rate))
   const scenarios = page.getByRole('region', { name: 'Scenarios' })
-  await scenarios.getByLabel('Scenario', { exact: true }).selectOption(protocol.browser.scenario)
+  await scenarios.getByLabel('Scenario', { exact: true }).selectOption(family.scenario)
+  const sourceScenario = finite ? SCENARIO_LIBRARY.find(entry => entry.id === family.scenario) : null
+  if (finite && !sourceScenario) throw new Error('finite public scenario source is missing')
+  // Public import needs a distinct ID: the card deliberately resolves built-ins before custom scenarios.
+  const scenario = sourceScenario ? { ...sourceScenario, id: `${sourceScenario.id}-perf-finite-v2`,
+    startTime: declaredRoute.scenarioStartUtc, profile: sourceScenario.profile ?? ACTIVE_PROFILE.id } : null
+  const inputBytes = scenario ? JSON.stringify(scenario, null, 2) : null
+  const downloadText = async (name: string) => {
+    const pending = page.waitForEvent('download')
+    await scenarios.getByRole('button', { name, exact: true }).click()
+    const stream = await (await pending).createReadStream()
+    if (!stream) throw new Error('public download has no retained bytes')
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+    return Buffer.concat(chunks).toString('utf8')
+  }
+  if (inputBytes) {
+    writeFileSync(`${result}.scenario.json`, inputBytes)
+    await scenarios.getByLabel('Scenario file').setInputFiles({ name: 'perf-finite-v2.json', mimeType: 'application/json', buffer: Buffer.from(inputBytes) })
+    await expect(scenarios.getByLabel('Scenario', { exact: true })).toHaveValue(scenario!.id)
+    expect(await downloadText('Save as JSON'), 'the actual public selection is the exact frozen input').toBe(inputBytes)
+    await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.armFinite())
+  }
   await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
-  await page.waitForTimeout(protocol.browser.warmupWallSeconds * 1000)
-  await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.boundary('warmupEnd'))
+  if (finite) await page.waitForFunction(() => {
+    const status = (window as unknown as Recorder).__fmsPerf.finiteStatus
+    return status.started || status.ended
+  })
+  else {
+    await page.waitForTimeout(protocol.browser.warmupWallSeconds * 1000)
+    await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.boundary('warmupEnd'))
+  }
   const otw = async () => configuration.outsideView
     ? { frames: Number(await scene.getAttribute('data-frames') ?? 0), tilesLoaded: await scene.getAttribute('data-tiles-loaded'),
       tileQueue: await scene.getAttribute('data-tile-queue'), causes: await scene.getAttribute('data-frame-causes') }
@@ -86,10 +120,21 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     timeline: () => page.evaluate(() => (window as unknown as Recorder).__fmsPerf.timeline),
   }
   let presses = 0
-  const { recorded: measured, steps, stalled } = await measureWindow(probe, targetFrames, async () => {
+  const interaction = async () => {
     // BRT uses the unit's simulation clock. At 64x these two wall-separated presses need not dim back.
     const press = async () => {
-      await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.keyDispatch())
+      if (!finite) {
+        await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.keyDispatch())
+        await brt.click(); presses += 1
+        await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.keyOutcome())
+        return
+      }
+      const allowed = await page.evaluate(finite => {
+        const recorder = (window as unknown as Recorder).__fmsPerf
+        if (finite && recorder.finiteStatus.ended) return false
+        recorder.keyDispatch(); return true
+      }, finite)
+      if (!allowed) return
       await brt.click(); presses += 1
       await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.keyOutcome())
     }
@@ -97,7 +142,12 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     await page.waitForTimeout(1000)
     await press()
     await page.waitForTimeout(5000)
-  }, () => page.waitForTimeout(250))
+  }
+  let measured: RecordedWindow, steps = 0, stalled = false
+  if (finite) {
+    while (!(await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.finiteStatus)).ended) { await interaction(); steps++ }
+    measured = await probe.finish()
+  } else ({ recorded: measured, steps, stalled } = await measureWindow(probe, targetFrames!, interaction, () => page.waitForTimeout(250)))
   // Allow the last input's next paint, then drain the actual observer without extending the scored window.
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   measured.events = await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.drain())
@@ -105,9 +155,21 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
   const finished = await scenarios.locator('.fmsScenarioResult').count()
   // Refuses (fails the run) unless the timeline conserves every admitted frame of one epoch across the window.
   let accounting: WindowAccounting | null = null, refusal: string | null = null
-  try { accounting = browserWindowAccounting({ rate, begin: measured.begin, end: measured.end, timeline: measured.timeline, tasks: measured.tasks }) }
+  try { accounting = browserWindowAccounting({ rate, begin: measured.begin, end: measured.end, timeline: measured.timeline, tasks: measured.tasks, ...(finite ? { closure: measured.closes?.length === 1 ? measured.closes[0] : {} } : {}) }) }
   catch (error) { if (!(error instanceof AccountingRefusal)) throw error; refusal = error.message }
 
+  let mission: ReturnType<typeof finiteMissionEvidence> | null = null, report: string | null = null
+  if (finite) {
+    const publicReport = scenarios.getByRole('button', { name: 'Download run report', exact: true })
+    report = await publicReport.count() === 1 && await publicReport.isEnabled() ? await downloadText('Download run report') : ''
+    writeFileSync(`${result}.report.md`, report)
+    try {
+      if (!accounting) throw new AccountingRefusal('finite mission has no conserved window')
+      mission = finiteMissionEvidence(measured, accounting, report, { scenario: scenario!.id, digest: scenarioDigest(scenario!),
+        startUtc: scenario!.startTime!, profile: scenario!.profile!, steps: scenario!.steps.length, statuses: scenario!.steps.map(step => step.action.kind.startsWith('expect') ? 'PASS' : 'DONE'), maxSimSeconds: scenario!.maxSeconds,
+        gps: { model: GPS_MODEL_VERSION, constellation: 1, receivers: [101, 202] } })
+    } catch (error) { if (!(error instanceof AccountingRefusal)) throw error; refusal ??= error.message }
+  }
   const cdp = await context.newCDPSession(page)
   await cdp.send('HeapProfiler.collectGarbage')
   const heap = await page.evaluate(() => (performance as unknown as { memory: { usedJSHeapSize: number } }).memory.usedJSHeapSize)
@@ -124,6 +186,7 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     windowSimSeconds: accounting?.simSeconds ?? null, wallSeconds: accounting?.wallSeconds ?? null, throughput: accounting?.achievedRate ?? null,
     accounting, refusal, window: { begin: measured.begin, end: measured.end, steps, stalled, targetFrames },
     capture: captureEvidence(measured, accounting), rawObservation: measured,
+    ...(finite ? { finiteAccountingSchema: 'aerolink.fms-perf-finite-window.v1', executedScenario: scenario!.id, mission, report, inference: 'DISABLED', qualification: 'NOT_CALIBRATED', scenarioInput: { sourceScenario: family.scenario, bytes: inputBytes, sha256: createHash('sha256').update(inputBytes!).digest('hex') } } : {}),
     longTasks: { count: measured.longTasks.length, totalMs: measured.longTasks.reduce((a, b) => a + b, 0) },
     raf: measured.rafIntervals.length ? frameSummary(measured.rafIntervals) : null,
     longAnimationFrames: { count: measured.loaf.length, p95Ms: measured.loaf.length ? frameSummary(measured.loaf.map(entry => entry.duration)).p95 : null },
@@ -134,6 +197,7 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
   // Written before the end checks: a failed run keeps its numbers (the report scores passed runs only).
   writeFileSync(result, JSON.stringify(summary, null, 2))
   if (refusal) throw new Error(refusal)
+  if (finite) { expect(mission?.status).toBe('OBSERVED'); return }
   expect(stalled, 'every step of the window added completed frames').toBe(false)
   expect(finished, 'the mission is still running at the end of the window').toBe(0)
   expect(accounting!.frames.discarded, 'nothing stopped the pacing epoch inside the window').toBe(0)

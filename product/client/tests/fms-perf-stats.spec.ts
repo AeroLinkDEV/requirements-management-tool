@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
-import { BROWSER_RUN_SCHEMA, browserWindowAccounting, installBrowserRecorder, measureWindow, type WindowProbe } from '../perf/browser-accounting'
+import { ScenarioRunner } from '../src/fmsCdu/scenario'
+import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
 import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
@@ -812,10 +813,10 @@ test('the actual recorder drains queued EventTiming before sealing its scored wi
   expect(page.__fmsPerf.finish().events).toMatchObject([{ name: 'click', duration: 16, interaction: 2 }])
 })
 
-test('browser plan refuses an unimplemented workload instead of silently substituting 87N', () => {
+test('paired browser plan refuses finite single-arm routes instead of silently substituting 87N', () => {
   const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-plan', '--workloads', 'W1'], { encoding: 'utf8' })
   expect(child.status, child.stdout).not.toBe(0)
-  expect(child.stderr).toContain('route W1/browser-paced/dual is NOT_IMPLEMENTED')
+  expect(child.stderr).toContain('paired browser planning/capture supports W2 only')
 })
 
 test('the route CLI declares the actual five mission extents, hosts and topology limits', () => {
@@ -836,10 +837,16 @@ test('the route CLI declares the actual five mission extents, hosts and topology
   expect(headless.every((route: any) => route.status === 'IMPLEMENTED' && route.pacing === 'unpaced' && route.metrics.includes('frame-duration-percentiles'))).toBe(true)
   const ui = plan.routes.filter((route: any) => route.host === 'browser-paced')
   expect(ui.map((route: any) => [route.workload, route.topology, route.status])).toEqual([
-    ['W1', 'dual', 'NOT_IMPLEMENTED'], ['W2', 'dual', 'IMPLEMENTED'], ['W3', 'dual', 'NOT_IMPLEMENTED'], ['W4a', 'dual', 'NOT_IMPLEMENTED'], ['W4b', 'dual', 'NOT_IMPLEMENTED'],
+    ['W1', 'dual', 'IMPLEMENTED'], ['W2', 'dual', 'IMPLEMENTED'], ['W3', 'dual', 'NOT_IMPLEMENTED'], ['W4a', 'dual', 'IMPLEMENTED'], ['W4b', 'dual', 'IMPLEMENTED'],
   ])
   expect(ui[1]).toMatchObject({ warmup: { unit: 'wall-seconds', value: 15 }, scored: { kind: 'completed-work-by-rate', simSecondsByRate: { '1': 60, '64': 2400 } }, terminal: 'still-running-no-stall-no-discard' })
-  expect(ui.filter((route: any) => route.workload !== 'W2').every((route: any) => route.warmup === null && route.scored === null && route.terminal === null)).toBe(true)
+  expect(ui.filter((route: any) => ['W1', 'W4a', 'W4b'].includes(route.workload)).map((route: any) =>
+    [route.id, route.warmup, route.scored, route.scenarioStartUtc, route.executor])).toEqual([
+    ['W1/browser-paced/dual/v2', { unit: 'completed-frames', value: 256, simMilliseconds: 64000 }, { kind: 'successful-scenario-end-after-warmup', maxTotalSimSeconds: 900 }, '2026-09-27T14:00:00.000Z', 'single-arm-browser'],
+    ['W4a/browser-paced/dual/v2', { unit: 'completed-frames', value: 256, simMilliseconds: 64000 }, { kind: 'successful-scenario-end-after-warmup', maxTotalSimSeconds: 3600 }, '2026-09-27T14:00:00.000Z', 'single-arm-browser'],
+    ['W4b/browser-paced/dual/v2', { unit: 'completed-frames', value: 256, simMilliseconds: 64000 }, { kind: 'successful-scenario-end-after-warmup', maxTotalSimSeconds: 900 }, '2026-09-27T14:00:00.000Z', 'single-arm-browser'],
+  ])
+  expect(ui.find((route: any) => route.workload === 'W3')).toMatchObject({ warmup: null, scored: null, terminal: null })
   const unpaced = plan.routes.filter((route: any) => route.host === 'browser-unpaced')
   expect(unpaced).toHaveLength(10)
   expect(unpaced.every((route: any) => route.status === 'NOT_IMPLEMENTED' && route.pacing === 'unpaced' && route.warmup === null && route.scored === null)).toBe(true)
@@ -849,7 +856,7 @@ test('the route CLI declares the actual five mission extents, hosts and topology
 
 test('execution route refusal precedes output, arm and child setup', ({ browserName: _browserName }, info) => {
   for (const [command, workload, topology, message] of [
-    ['browser', 'W1', 'dual', 'route W1/browser-paced/dual is NOT_IMPLEMENTED'],
+    ['browser-capture', 'W1', 'dual', 'paired browser planning/capture supports W2 only'],
     ['browser-capture', 'W3', 'dual', 'route W3/browser-paced/dual is NOT_IMPLEMENTED'],
     ['browser', 'W2', 'single', 'topology single is not available for browser-paced'],
     ['headless', 'UNKNOWN', 'dual', 'unknown workload UNKNOWN'],
@@ -860,4 +867,128 @@ test('execution route refusal precedes output, arm and child setup', ({ browserN
     expect(child.stderr).toContain(message)
     expect(existsSync(output), 'unsupported work refuses before any output/seed/child launch').toBe(false)
   }
+})
+
+// Independent literal finite record: four complete 64-frame warmup batches, then three completed frames and
+// the actual remaining 61-frame discard. This is a reader control, not an authentic browser/native receipt.
+function finiteRecord() {
+  const timeline: any[] = [], clocks: any[] = [], tasks: any[] = []
+  const origin = Date.parse('2026-09-27T14:00:00.000Z')
+  let done = 0
+  for (const [index, count] of [64, 64, 64, 64, 3].entries()) {
+    const start = (index + 1) * 250, end = start + 2
+    const sample = (n: number, mono: number) => ({ utcMs: 10000 + mono, monotonicMs: mono, timeOrigin: 10000,
+      kernelTime: n * 2500000, unitClockMs: origin + n * 250, completed: n })
+    timeline.push({ kind: 'slice', start, end, detail: { schema: 1, epoch: 7, rate: 64, batch: index + 1,
+      admitted: 64, attempted: count, completed: count, remaining: 64 - count } })
+    clocks.push({ schema: 1, epoch: 7, rate: 64, sequence: index + 1, batch: index + 1, entry: sample(done, start), exit: sample(done + count, end) })
+    tasks.push({ start, end, tail: end + 1 }); done += count
+  }
+  timeline.push({ kind: 'discard', start: 1252, end: 1252, detail: { schema: 1, epoch: 7, rate: 64, batch: 5, discarded: 61 } })
+  const close = { schema: 1, epoch: 7, rate: 64, sequence: 5, batch: 5, kind: 'run-end', admitted: 320, attempted: 259,
+    completed: 259, discarded: 61, debt: 0, monotonicMs: 1252, utcMs: 11252, timeOrigin: 10000, lastClock: clocks[4] }
+  const boundary = (label: string, monotonicMs: number, trace: any) => ({ label, monotonicMs, utcMs: 10000 + monotonicMs, timeOrigin: 10000, trace })
+  return { begin: 1003, end: 1253, timeline, tasks, closes: [close], rafIntervals: [], longTasks: [], loaf: [], events: [],
+    capture: { clocks, boundaries: [boundary('warmupEnd', 1003, clocks[3]), boundary('scoredStart', 1003, clocks[3]), boundary('scoredEnd', 1253, clocks[4])], inputs: [] } }
+}
+const finiteExpected = { scenario: 'literal-perf-finite-v2', digest: 'fnv1a-12345678', startUtc: '2026-09-27T14:00:00.000Z',
+  profile: 'cma9000-s300-heli-civil', steps: 2, statuses: ['DONE', 'PASS'] as ('DONE' | 'PASS')[], maxSimSeconds: 900, gps: { model: 'literal-model/1', constellation: 1, receivers: [101, 202] } }
+const finiteReport = `# FMS Test Bench run: Independent literal
+**Result: PASS**
+- Scenario: literal-perf-finite-v2, fnv1a-12345678
+- Started: 2026-09-27T14:00:00.000Z; ended after 1 min 4.75 s of simulated time
+- Aircraft profile: cma9000-s300-heli-civil
+- GPS: model literal-model/1; constellation seed 1; receiver seeds 101 and 202; retained sky
+| 1 | At start, action. | 0 s | DONE |  |
+| 2 | Then check. | 1 min 4.75 s | PASS | observed |
+`
+test('finite mission admission conserves actual closed work and requires the independent complete public PASS report', () => {
+  const record = finiteRecord()
+  const account = (r = record) => browserWindowAccounting({ rate: 64, ...r, closure: r.closes[0] })
+  expect(captureEvidence(record, account()).boundaryStatus).toBe('OBSERVED')
+  expect(finiteMissionEvidence(record, account(), finiteReport, finiteExpected)).toMatchObject({ status: 'OBSERVED', totalFrames: 259, scoredFrames: 3, endedSimSeconds: 64.75, qualification: 'NOT_CALIBRATED', inference: 'DISABLED' })
+  for (const changed of [
+    finiteReport.replace('Result: PASS', 'Result: FAIL'), `${finiteReport}**Result: FAIL**\n`, finiteReport.replace('| PASS |', '| NOT REACHED |'),
+    finiteReport.replace('4.75 s of', '4.5 s of'), finiteReport.replace('14:00:00.000Z', '14:00:01.000Z'),
+    finiteReport.replace('101 and 202', '101 and 303'), finiteReport.replace('literal-perf-finite-v2,', 'wrong-scenario,'),
+    finiteReport.replace('cma9000-s300-heli-civil', 'wrong-profile'),
+  ]) expect(() => finiteMissionEvidence(record, account(), changed, finiteExpected)).toThrow(/public finite mission report/)
+  for (const key of ['epoch', 'sequence', 'completed', 'batch', 'discarded']) {
+    const changed = structuredClone(record); (changed.closes[0] as any)[key]++
+    expect(() => account(changed), key).toThrow(/finite epoch close/)
+  }
+  const dropped = structuredClone(record); dropped.timeline.splice(4, 1)
+  expect(() => account(dropped)).toThrow(/discarded|finite epoch close/)
+  const straddled = structuredClone(record); straddled.begin = 1001
+  expect(() => account(straddled)).toThrow(/straddles/)
+  const early = structuredClone(record); early.capture.boundaries[0].trace.exit.completed = 255
+  expect(() => finiteMissionEvidence(early, account(), finiteReport, finiteExpected)).toThrow(/direct clock|warmup/)
+  const zero = structuredClone(record); zero.begin = zero.end
+  expect(() => account(zero)).toThrow(/no valid span/)
+  const stopped = structuredClone(record); stopped.closes[0].kind = 'cancelled'
+  expect(() => account(stopped)).toThrow(/finite epoch close/)
+  const missing = structuredClone(record); missing.closes = []
+  expect(() => finiteMissionEvidence(missing, account(), finiteReport, finiteExpected)).toThrow(/unique actual epoch close/)
+  const wrongLast = structuredClone(record); wrongLast.closes[0].lastClock.sequence++
+  expect(() => finiteMissionEvidence(wrongLast, account(), finiteReport, finiteExpected)).toThrow(/direct clock|last actual clock/)
+})
+
+test('a zero-debt 1x END needs its actual close; an END label alone cannot hide a lost final slice', () => {
+  const timeline = [1, 2, 3].map(batch => ({ kind: 'slice' as const, start: batch * 250, end: batch * 250 + 1,
+    detail: { schema: 1, epoch: 8, rate: 1, batch, admitted: 1, attempted: 1, completed: 1, remaining: 0 } }))
+  const tasks = timeline.map(slice => ({ start: slice.start, end: slice.end, tail: slice.end + 1 }))
+  const close = { schema: 1, epoch: 8, rate: 1, sequence: 3, batch: 3, kind: 'run-end', admitted: 3, attempted: 3, completed: 3, discarded: 0, debt: 0, monotonicMs: 751 }
+  const input = { rate: 1, begin: 0, end: 752, timeline, tasks }
+  expect(() => browserWindowAccounting(input)).toThrow(/no timeline entry/)
+  expect(browserWindowAccounting({ ...input, closure: close }).frames.completed).toBe(3)
+  expect(() => browserWindowAccounting({ ...input, timeline: timeline.slice(0, 2), closure: close })).toThrow(/finite epoch close/)
+  expect(() => browserWindowAccounting({ ...input, closure: { ...close, kind: 'fault' } })).toThrow(/finite epoch close/)
+})
+
+// Real producer -> actual serialized recorder on deterministic platform queues. No native latency/capture claim.
+function finiteRecorder(endSeconds: number, frameCost = 8, loseWarmupClock = false) {
+  const pending: Record<string, any>[] = [], microtasks: (() => void)[] = []
+  class Observer {
+    type = ''
+    constructor(_callback: unknown) {}
+    observe(options: { type: string }) { this.type = options.type }
+    takeRecords() { return this.type === 'measure' ? pending.splice(0) : [] }
+  }
+  const host = new TimelineHost()
+  host.performance = { ...host.performance, timeOrigin: 10000, measure: (name, options) => {
+    const { start, end, detail } = options as PerformanceMeasureOptions & { start: number; end: number }
+    if (!(loseWarmupClock && name === 'aerolink.fms-bench.pacing-clock' && (detail as any).exit.completed === 256))
+      pending.push({ name, startTime: start, duration: end - start, detail })
+    return undefined as unknown as PerformanceMeasure
+  } }
+  const schedule = host.setTimeout.bind(host)
+  const page: any = { setTimeout: schedule, requestAnimationFrame: () => 1 }; page.top = page
+  runInNewContext(`(${installBrowserRecorder.toString()})({slice:'aerolink.fms-bench.pacing-slice',discard:'aerolink.fms-bench.pacing-discard',clock:'aerolink.fms-bench.pacing-clock',close:'aerolink.fms-bench.pacing-close'})`, {
+    window: page, performance: host.performance, PerformanceObserver: Observer,
+    document: { addEventListener() {}, querySelectorAll: () => [] }, Element: class {}, Date,
+    queueMicrotask: (fn: () => void) => microtasks.push(fn),
+  })
+  host.setTimeout = (fn, ms) => page.setTimeout(fn, ms)
+  const composed = singleComposition(pacingEpoch)
+  const runner = new ScenarioRunner({ id: 'finite-recorder', title: 'Finite recorder', objective: '', maxSeconds: 100,
+    steps: [{ when: { kind: 'time', seconds: endSeconds }, action: { kind: 'expectAircraft', minAltitude: 0 } }] }, composed.fms, undefined, composed.sim)
+  const kernel = new FmsKernel(composed.plant, runner)
+  page.__fmsPerf.armFinite()
+  startKernelPacing(64, kernel, host, { onFault: error => { throw error }, onInstantClose: () => { host.wall += frameCost } })
+  while (host.runNext()) { while (microtasks.length) microtasks.shift()!() }
+  return { recorder: page.__fmsPerf, kernel, runner }
+}
+test('the real recorder latches exactly256 completed warmup frames at a task tail and refuses overshoot or early END', () => {
+  const valid = finiteRecorder(64.75)
+  expect(valid.runner.outcome).toBe('passed')
+  const record = valid.recorder.finish()
+  expect(valid.recorder.finiteStatus).toEqual({ started: true, ended: true, error: null })
+  expect(record.capture.boundaries.map((b: any) => [b.label, b.trace.exit.completed])).toEqual([
+    ['warmupEnd', 256], ['scoredStart', 256], ['scoredEnd', 259],
+  ])
+  expect(record.capture.boundaries[0].monotonicMs).toBe(record.capture.boundaries[1].monotonicMs)
+  expect(browserWindowAccounting({ rate: 64, ...record, closure: record.closes[0] }).frames.completed).toBe(3)
+  expect(finiteRecorder(63).recorder.finiteStatus).toMatchObject({ ended: true, error: 'epoch ended before the scored window' })
+  // Losing the actual frame256 clock must not let a later261-frame observation stand in for the exact boundary.
+  expect(finiteRecorder(80, 7, true).recorder.finiteStatus).toMatchObject({ ended: true, error: 'warmup overshot its exact completed-frame boundary' })
 })

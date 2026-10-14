@@ -65,18 +65,19 @@ function route(workload: string, host: string, topology: string, implemented = t
   if (host === 'headless' && (owner.warmup.value !== protocol.warmupSimSeconds ||
     (source.windowSimSeconds ?? null) !== (declared.scored.kind === 'fixed-total-after-warmup' ? declared.scored.maxTotalSimSeconds : null)))
     throw new Error(`route extent disagrees with executable workload ${workload}`)
-  if (host === 'browser-paced' && declared.status === 'IMPLEMENTED' && (family.scenario !== protocol.browser.scenario ||
+  if (host === 'browser-paced' && declared.status === 'IMPLEMENTED' && workload === 'W2' && (family.scenario !== protocol.browser.scenario ||
     declared.warmup.value !== protocol.browser.warmupWallSeconds || JSON.stringify(declared.scored.simSecondsByRate) !== JSON.stringify(protocol.browser.windowSimSeconds)))
     throw new Error(`route extent disagrees with executable browser workload ${workload}`)
-  return { schema: protocol.routeContract.schema, id: `${workload}/${host}/${topology}/v1`, workload,
+  return { schema: protocol.routeContract.schema, id: `${workload}/${host}/${topology}/v${declared.version ?? 1}`, workload,
     scenario: family.scenario, source: family.source, host, topology, ...owner, ...declared,
     metrics: declared.status === 'IMPLEMENTED' ? owner.metrics.filter((metric: string) => metric !== 'sync-residency-dual-only' || topology === 'dual') : [], role: declared.roleByTopology?.[topology] ?? null }
 }
-function browserRoute() {
+function browserRoute(paired = false) {
   const ids = workloadIds(['W2'])
   if (ids.length !== 1) throw new Error('one browser workload is required')
   const selected = route(ids[0], options.host ?? 'browser-paced', options.topology ?? 'dual')
   if (selected.host !== 'browser-paced') throw new Error('the product UI dispatcher requires browser-paced')
+  if (paired && selected.workload !== 'W2') throw new Error('paired browser planning/capture supports W2 only')
   return selected
 }
 function routePlan() {
@@ -348,12 +349,12 @@ function browser() {
 /** One fixed same-source instrument study. Actual execution still requires the separately reviewed 446d outer
  * owner and quiet-window admission. This process is not the independent deadline/closure authority. */
 function browserPlan() {
-  browserRoute()
+  browserRoute(true)
   const plan = browserCapturePlan()
   console.log(JSON.stringify({ ...plan, manifestSha256: digest(plan) }, null, 2))
 }
 function browserCapture() {
-  const selectedRoute = browserRoute()
+  const selectedRoute = browserRoute(true)
   const startedAt = new Date().toISOString(), began = performance.now(), deadline = began + protocol.browser.capture.bounds.measurementSeconds * 1000
   if (!options['cold-input'] || options['dirty-smoke'] || options.rounds || options.rates || options.configurations || options.hours)
     throw new Error('paired capture requires a sealed --cold-input; no dirty, order, subset or cap override')
@@ -617,7 +618,7 @@ function report() {
       if (!rows.length) continue
       const show = (measure: string, scale = 1) => {
         const level = medianLevel(rows.map(e => measures[measure](e.result!) / scale), stats)
-        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (Â±${width(level, 2)})`
+        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (±${width(level, 2)})`
       }
       const sync = rows[0].result!.sync as { residency: number; firstDrop: { simSeconds: number; reason: string | null } | null } | null
       const drops = [...new Set(rows.map(e => JSON.stringify((e.result!.sync as typeof sync)?.firstDrop ?? null)))]
@@ -661,7 +662,7 @@ function report() {
           `| Arm (commit/src/dist) | Configuration | Rate | runs | ${Object.keys(browserMeasures).join(' | ')} |`, `|---|---|---|---|${Object.keys(browserMeasures).map(() => '---').join('|')}|`)
         lines.push(`| ${arm} | ${configuration} | ${rate}x | ${cellRows.length} | ${Object.keys(browserMeasures).map(name => {
           const level = levels[name]; const scale = name === 'heap' ? 2 ** 20 : 1; const digits = name === 'achieved / selected' ? 3 : 1
-          return level ? `${fixed(level.estimate / scale, digits)} [${fixed(level.low / scale, digits)}, ${fixed(level.high / scale, digits)}] (Â±${width(level, 1)})` : 'n/a'
+          return level ? `${fixed(level.estimate / scale, digits)} [${fixed(level.low / scale, digits)}, ${fixed(level.high / scale, digits)}] (±${width(level, 1)})` : 'n/a'
         }).join(' | ')} |`, '')
       }
       const steps = [...new Set(rows.map(e => (e.result as Record<string, any>).interaction.resolutionStepMs))]

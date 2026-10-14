@@ -24,7 +24,7 @@ const EPSILON_MS = 1e-6
 
 export type TimelineEntry = { kind: 'slice' | 'discard'; start: number; end: number; detail: Record<string, unknown> }
 export type TimerTask = { start: number; end: number; tail: number | null }
-export type WindowInput = { rate: number; begin: number; end: number; timeline: readonly TimelineEntry[]; tasks: readonly TimerTask[] }
+export type WindowInput = { rate: number; begin: number; end: number; timeline: readonly TimelineEntry[]; tasks: readonly TimerTask[]; closure?: Record<string, any> }
 
 export class AccountingRefusal extends Error {
   constructor(reason: string) { super(`FMS_BROWSER_ACCOUNTING_REFUSED: ${reason}`) }
@@ -54,7 +54,7 @@ function parse(entry: TimelineEntry, rate: number): Event {
 }
 
 /** One measured window's accounting from the recorded pacing timeline and timer tasks. Throws AccountingRefusal. */
-export function browserWindowAccounting({ rate, begin, end, timeline, tasks }: WindowInput) {
+export function browserWindowAccounting({ rate, begin, end, timeline, tasks, closure }: WindowInput) {
   if (!(Number.isFinite(begin) && Number.isFinite(end) && end > begin)) throw new AccountingRefusal('the measured window has no valid span')
   const events = timeline.map(entry => parse(entry, rate))
   const across = (event: Event, instant: number) => event.start < instant - EPSILON_MS && event.end > instant + EPSILON_MS
@@ -98,7 +98,18 @@ export function browserWindowAccounting({ rate, begin, end, timeline, tasks }: W
   // Conservation sees a lost entry only through a later entry of the epoch. The window is closed when the epoch's
   // timeline continues past its end, or ends inside it with a discard (a stopped epoch emits nothing more).
   const later = after.filter(row => !before.includes(row) && !inside(row.event))
-  if (!later.length && after.at(-1)?.event.kind !== 'discard')
+  if (closure) {
+    const epochEvents = after.map(row => row.event), allSlices = epochEvents.filter((event): event is Slice => event.kind === 'slice')
+    const totals = { admitted: sum(allSlices, 'admitted'), attempted: sum(allSlices, 'attempted'), completed: sum(allSlices, 'completed'),
+      discarded: epochEvents.reduce((n, event) => n + (event.kind === 'discard' ? event.discarded : 0), 0) }
+    if (closure.schema !== 1 || closure.kind !== 'run-end' || closure.epoch !== epochs[0] || closure.rate !== rate ||
+        closure.sequence !== allSlices.length || closure.batch !== batch || closure.debt !== 0 || debt !== 0 ||
+        !Number.isFinite(closure.monotonicMs) || closure.monotonicMs < last || closure.monotonicMs > end + EPSILON_MS ||
+        later.length || Object.entries(totals).some(([key, value]) => closure[key] !== value) || totals.attempted !== totals.completed ||
+        totals.admitted !== totals.attempted + totals.discarded)
+      throw new AccountingRefusal('finite epoch close contradicts ordered conserved work or is not a successful-work run-end')
+  }
+  if (!closure && !later.length && after.at(-1)?.event.kind !== 'discard')
     throw new AccountingRefusal('no timeline entry of the epoch follows the window end, so entries lost before it cannot be detected')
 
   // Continuation cost. A yield gap is measured only between two slices of one batch, both inside the window; it is
@@ -232,10 +243,11 @@ export function browserQualification(_protocol: unknown, records: readonly Brows
  * needs every entry from the epoch's first admission) and, while measuring, every timer task with the end of the
  * microtask queued after it (the tail), rAF intervals, long tasks, Long Animation Frames and Event Timing entries.
  */
-export function installBrowserRecorder(names: { slice: string; discard: string; clock?: string }) {
+export function installBrowserRecorder(names: { slice: string; discard: string; clock?: string; close?: string }) {
   if (window !== window.top) return
   type Entry = { kind: 'slice' | 'discard'; start: number; end: number; detail: Record<string, unknown> }
   const state = {
+    finite: null as null | { target: number; error: string | null; ended: boolean }, closes: [] as Record<string, any>[],
     measuring: false, begin: 0, end: 0, timeline: [] as Entry[], tasks: [] as { start: number; end: number; tail: number | null }[],
     lastFrame: -1, rafIntervals: [] as number[], longTasks: [] as { start: number; duration: number }[],
     loaf: [] as { start: number; duration: number; blocking: number }[],
@@ -246,6 +258,7 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
   const take = (entry: PerformanceEntry) => {
     const kind = entry.name === names.slice ? 'slice' : entry.name === names.discard ? 'discard' : null
     if (kind) state.timeline.push({ kind, start: entry.startTime, end: entry.startTime + entry.duration, detail: (entry as PerformanceMeasure).detail as Record<string, unknown> })
+    if (entry.name === names.close) state.closes.push((entry as PerformanceMeasure).detail)
     if (entry.name === names.clock) state.clocks.push((entry as PerformanceMeasure).detail)
   }
   const timeline = new PerformanceObserver(list => list.getEntries().forEach(take))
@@ -254,12 +267,12 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
   window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
     if (typeof handler !== 'function') return nativeTimeout(handler, timeout, ...args)
     return nativeTimeout((...callArgs: unknown[]) => {
-      if (!state.measuring) { (handler as (...a: unknown[]) => void)(...callArgs); return }
+      if (!state.measuring && !state.finite) { (handler as (...a: unknown[]) => void)(...callArgs); return }
       const task = { start: performance.now(), end: 0, tail: null as number | null }
-      state.tasks.push(task)
+      if (state.measuring) state.tasks.push(task)
       try { (handler as (...a: unknown[]) => void)(...callArgs) } finally {
         task.end = performance.now()
-        queueMicrotask(() => { task.tail = performance.now() })
+        queueMicrotask(() => { task.tail = performance.now(); if (state.finite) finiteBoundary() })
       }
     }, timeout, ...args)
   }) as typeof window.setTimeout
@@ -299,6 +312,29 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
     state.boundaries.push(receipt)
     return receipt
   }
+  const finiteBoundary = () => {
+    const finite = state.finite
+    if (!finite || finite.ended) return
+    flush()
+    const clock = state.clocks.at(-1), done = clock?.exit?.completed ?? 0
+    if (!state.measuring) {
+      if (state.closes.length) finite.error = 'epoch ended before the scored window'
+      else if (done > finite.target) finite.error = 'warmup overshot its exact completed-frame boundary'
+      else if (done === finite.target) {
+        if (!clock || clock.exit.unitClockMs - state.clocks[0].entry.unitClockMs !== 64000) finite.error = 'warmup direct clock does not span 64000ms'
+        else {
+          const warm = boundary('warmupEnd')
+          // Both labels name this one real between-task observation, not two asynchronously sampled instants.
+          state.boundaries.push({ ...warm, label: 'scoredStart' })
+          state.begin = warm.monotonicMs; state.measuring = true; state.tasks = []; state.rafIntervals = []; state.lastFrame = -1
+        }
+      }
+    }
+    if (state.closes.length && state.measuring) {
+      state.end = boundary('scoredEnd').monotonicMs; state.measuring = false; finite.ended = true
+    }
+    if (finite.error) finite.ended = true
+  }
   document.addEventListener('click', event => {
     const key = event.target instanceof Element ? event.target.closest('[data-fn]') : null
     if (key?.getAttribute('data-fn') !== 'BRT') return
@@ -310,6 +346,12 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
   }, true)
   ;(window as unknown as { __fmsPerf: unknown }).__fmsPerf = {
     boundary,
+    armFinite() {
+      // Called before the public Run action: retain only the fresh scenario's epoch, not an earlier Fly.
+      state.timeline = []; state.clocks = []; state.closes = []; state.boundaries = []; state.inputs = []
+      state.finite = { target: 256, error: null, ended: false }
+    },
+    get finiteStatus() { flush(); return { started: state.begin > 0, ended: state.finite?.ended ?? false, error: state.finite?.error ?? null } },
     keyDispatch() { state.inputs.push({ dispatchStart: performance.now() }) },
     begin() { const receipt = boundary('scoredStart'); state.measuring = true; state.begin = receipt.monotonicMs; state.tasks = []; state.rafIntervals = []; state.lastFrame = -1; return state.begin },
     keyOutcome() {
@@ -326,16 +368,22 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
     drain() { flush(); return state.events.filter(entry => entry.start >= state.begin && entry.start <= state.end) },
     finish() {
       // The window ends here, between tasks; every measure queued before it is taken now.
-      state.end = boundary('scoredEnd').monotonicMs; state.measuring = false; flush()
+      if (!state.finite) { state.end = boundary('scoredEnd').monotonicMs; state.measuring = false }
+      else if (state.finite.error || !state.finite.ended || !state.begin) {
+        state.finite.error ??= 'finite epoch has not closed'
+        if (!state.end) state.end = boundary('scoredEnd').monotonicMs
+        state.measuring = false
+      }
+      flush()
       const inside = <T extends { start: number }>(list: T[]) => list.filter(entry => entry.start >= state.begin && entry.start <= state.end)
       return { begin: state.begin, end: state.end, timeline: state.timeline, tasks: state.tasks, rafIntervals: state.rafIntervals,
         longTasks: inside(state.longTasks).map(entry => entry.duration), loaf: inside(state.loaf).map(({ duration, blocking }) => ({ duration, blocking })),
-        events: inside(state.events), capture: { boundaries: state.boundaries, clocks: state.clocks, inputs: state.inputs } }
+        events: inside(state.events), capture: { boundaries: state.boundaries, clocks: state.clocks, inputs: state.inputs }, ...(state.finite ? { closes: state.closes } : {}) }
     },
   }
 }
 /** What the recorder's finish() returns. */
-export type RecordedWindow = { begin: number; end: number; timeline: TimelineEntry[]; tasks: TimerTask[]; rafIntervals: number[]; longTasks: number[];
+export type RecordedWindow = { closes?: Record<string, any>[]; begin: number; end: number; timeline: TimelineEntry[]; tasks: TimerTask[]; rafIntervals: number[]; longTasks: number[];
   loaf: { duration: number; blocking: number }[]; events: { start?: number; targetKey?: string | null; targetIndex?: number; name: string; duration: number; processing: number; delay: number; interaction: number }[];
   capture?: { boundaries: Record<string, any>[]; clocks: Record<string, any>[]; inputs: Record<string, any>[] } }
 
@@ -391,4 +439,40 @@ export function captureEvidence(recorded: RecordedWindow, accounting: WindowAcco
     eventReasons.push('native key, observed display effect or attributable EventTiming entry is missing')
   return { boundaryStatus: reasons.length ? 'INCOMPLETE' : 'OBSERVED', eventTimingStatus: eventReasons.length ? 'INCOMPLETE' : 'OBSERVED',
     reasons: [...reasons, ...eventReasons], interactions, metric: 'EventTiming click-to-next-paint proxy; exact CDU pixel repaint unproven' }
+}
+
+
+export type FiniteMissionIdentity = { scenario: string; digest: string; startUtc: string; profile: string; steps: number; statuses: ('DONE' | 'PASS')[];
+  maxSimSeconds: number; gps: { model: string; constellation: number; receivers: number[] } }
+/** Admission of the public downloaded report, separately from the driver's non-PASS terminal observation. */
+export function finiteMissionEvidence(recorded: RecordedWindow, accounting: WindowAccounting, report: string, expected: FiniteMissionIdentity) {
+  const fail = (reason: string): never => { throw new AccountingRefusal(reason) }
+  const close = recorded.closes?.length === 1 ? recorded.closes[0] : fail('finite mission has no unique actual epoch close')
+  const clocks = recorded.capture?.clocks ?? [], first = clocks[0], last = clocks.at(-1)
+  const boundaries = recorded.capture?.boundaries ?? [], [warm, start, end] = boundaries
+  const observation = captureEvidence(recorded, accounting)
+  if (observation.boundaryStatus !== 'OBSERVED') fail('finite direct clock/boundary evidence is incomplete')
+  if (close.kind !== 'run-end' || !last || !same(close.lastClock, last) || close.sequence !== last.sequence ||
+      close.monotonicMs < last.exit.monotonicMs || close.monotonicMs > recorded.end || close.timeOrigin !== last.exit.timeOrigin ||
+      !Number.isFinite(close.utcMs) || close.completed !== last.exit.completed) fail('finite close does not bind the last actual clock')
+  if (!first || first.entry.completed !== 0 || first.entry.unitClockMs !== Date.parse(expected.startUtc) ||
+      accounting.beforeWindow.completed !== 256 || warm?.trace?.exit?.completed !== 256 ||
+      warm.monotonicMs !== start?.monotonicMs || start?.trace?.exit?.unitClockMs - first.entry.unitClockMs !== 64000 ||
+      end?.trace?.exit?.completed !== close.completed || accounting.frames.completed <= 0 || accounting.frames.unfinishedAttempts !== 0 ||
+      accounting.frames.carriedOut.debt !== 0 || close.completed !== 256 + accounting.frames.completed)
+    fail('finite warmup or scored work contradicts the actual frame boundary')
+  const started = report.match(/^- Started: (\S+); ended after (?:(\d+) min(?: (\d+(?:\.\d+)?) s)?|(\d+(?:\.\d+)?) s) of simulated time$/m)
+  const endedSeconds = started ? Number(started[2] ?? 0) * 60 + Number(started[3] ?? started[4] ?? 0) : NaN
+  const rows = [...report.matchAll(/^\| (\d+) \| .* \| ([^|]*) \| (DONE|PASS) \| .* \|$/gm)]
+  const lines = report.split('\n')
+  const unique = (prefix: string, value: string) => lines.filter(line => line.startsWith(prefix)).length === 1 && lines.includes(value)
+  const gps = `- GPS: model ${expected.gps.model}; constellation seed ${expected.gps.constellation}; receiver seeds ${expected.gps.receivers.join(' and ')};`
+  if (!unique('**Result: ', '**Result: PASS**') ||
+      !unique('- Scenario: ', `- Scenario: ${expected.scenario}, ${expected.digest}`) || started?.[1] !== expected.startUtc || lines.filter(line => line.startsWith('- Started: ')).length !== 1 ||
+      !unique('- Aircraft profile: ', `- Aircraft profile: ${expected.profile}`) || lines.filter(line => line.startsWith('- GPS: ')).length !== 1 || !lines.some(line => line.startsWith(gps)) ||
+      expected.statuses.length !== expected.steps || rows.length !== expected.steps || rows.some((row, index) => Number(row[1]) !== index + 1 || row[3] !== expected.statuses[index]) || !rows.some(row => row[3] === 'PASS') ||
+      !Number.isFinite(endedSeconds) || endedSeconds <= 64 || endedSeconds > expected.maxSimSeconds || endedSeconds * 4 !== close.completed)
+    fail('public finite mission report is not complete PASS with the exact input, UTC, profile, seeds and end frame')
+  return { status: 'OBSERVED', inference: 'DISABLED', qualification: 'NOT_CALIBRATED', totalFrames: close.completed,
+    scoredFrames: accounting.frames.completed, endedSimSeconds: endedSeconds, close, expected, report }
 }
