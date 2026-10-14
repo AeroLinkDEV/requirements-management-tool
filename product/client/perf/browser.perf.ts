@@ -8,7 +8,7 @@ import { scenarioDigest, type Scenario } from '../src/fmsCdu/scenario'
 import { ACTIVE_PROFILE } from '../src/fmsCdu/profile'
 import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { apiLogin, login, selectProgram } from '../tests/auth'
-import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3SetupEvidence, type W3Observation, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
+import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
 import { frameSummary } from './stats.ts'
 
 // One browser run (#1510 I0a; accounting revision 2, #1557): the 87N offshore SAR mission from its planned start, at
@@ -152,11 +152,11 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     const observation: W3Observation = { ...heap.observations, identity, setupReport }
     let accounting: ReturnType<typeof w3PrefixAccounting> | null = null
     try { accounting = w3PrefixAccounting(observation,expected,identity) } catch(error) { refusal ??= error instanceof Error ? error.message : String(error) }
-    const summary = { schema:protocol.browser.w3Recipe.schema,route,rate,configuration:configuration.id,identity,expected,rawObservation:observation,accounting,refusal,
-      qualification:'NOT_CALIBRATED',inference:'DISABLED',scenarioInput:{sourceScenario:family.scenario,bytes:inputBytes,sha256:createHash('sha256').update(inputBytes!).digest('hex')},
+    const summary = w3RunSummary({ schema:protocol.browser.w3Recipe.schema,route,rate,configuration:configuration.id,identity,expected,observation,accounting,refusal,
+      scenarioInput:{sourceScenario:family.scenario,bytes:inputBytes,sha256:createHash('sha256').update(inputBytes!).digest('hex')},
       heap:{status:gc==='CDP_COLLECTED'&&heap.usedBytes!==null?'CONTEXTUAL_OBSERVATION':'UNAVAILABLE',retainedF7200:'UNAVAILABLE',method:gc,utcMs:heap.utcMs,monotonicMs:heap.monotonicMs,usedBytes:heap.usedBytes,
         beforeFrozen:beforeHeap.frozen,afterFrozen:observation.frozen,frozenDuringCollection:observation.frozen.length-beforeHeap.frozen.length,flightClose:observation.closes},
-      browser:{version:context.browser()?.version()??null,headless,viewport:protocol.browser.viewport} }
+      browser:{version:context.browser()?.version()??null,headless,viewport:protocol.browser.viewport} })
     writeFileSync(result,JSON.stringify(summary,null,2))
     if(refusal) throw new Error(refusal)
     expect(accounting?.status).toBe('OBSERVED'); return

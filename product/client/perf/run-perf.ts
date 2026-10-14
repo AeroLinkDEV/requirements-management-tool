@@ -18,7 +18,7 @@ import { arch, cpus, platform, release, totalmem } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, scoredRuns, type Arm, type RunValue, type SessionEvidence } from './stats.ts'
+import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, runClassification, scoredRuns, type Arm, type DispatchedRoute, type RunValue, type SessionEvidence } from './stats.ts'
 import { browserQualification } from './browser-accounting.ts'
 import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest } from './browser-capture.ts'
 // @ts-expect-error a JavaScript module without declarations
@@ -216,12 +216,10 @@ function run(dir: string, record: Record<string, unknown>, env: Record<string, s
   const monotonicEndedAt = performance.now()
   writeFileSync(join(dir, 'logs', `${name}.log`), `${child.stdout ?? ''}\n${child.stderr ?? ''}`)
   const result = existsSync(resultPath) ? JSON.parse(readFileSync(resultPath, 'utf8')) : null
-  const declaredRoute = record.route as { id: string; workload: string; scenario: string; topology: string } | undefined
-  const routeMatches = !declaredRoute || (result?.scenario === declaredRoute.scenario && result?.topology === declaredRoute.topology &&
-    (record.kind === 'headless' ? result?.workload === declaredRoute.workload : result?.route?.id === declaredRoute.id))
+  const { status, routeIdentityRefusal } = runClassification(record as { kind?: unknown; route?: DispatchedRoute }, child.status, result)
   const entry: RunRecord = {
-    index, ...record, startedAt, wallSeconds, monotonicStartedAt, monotonicEndedAt, exitCode: child.status, status: child.status === 0 && result && routeMatches ? 'passed' : 'failed',
-    routeIdentityRefusal: routeMatches ? null : 'actual child workload/scenario/topology disagrees with dispatched route',
+    index, ...record, startedAt, wallSeconds, monotonicStartedAt, monotonicEndedAt, exitCode: child.status, status,
+    routeIdentityRefusal,
     host: { quietBefore: quiet, busyPercentDuringRun: busy(before, cpus()), powerPlan: powerPlan() }, result,
   }
   appendFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify(entry)}\n`)

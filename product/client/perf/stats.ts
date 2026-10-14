@@ -97,6 +97,24 @@ export function failedRunRule<T extends RecordedRun>(entries: readonly T[], unit
   return { rows: runs.filter(entry => entry.status === 'passed' && !broken.has(entry.block)), excludedBlocks: [...broken] }
 }
 
+/** The route a run was dispatched under (run-perf.ts route()), as its child result must restate it. */
+export type DispatchedRoute = { id: string; workload: string; scenario: string; topology: string }
+
+/**
+ * The orchestrator's acceptance of one child run: exit 0, a result file, and, when a route was dispatched, the child's
+ * own result naming that route's scenario and topology plus its workload (headless) or route ID (browser). A child
+ * that exits 0 under another identity is recorded failed with the refusal, never passed.
+ */
+export function runClassification(record: { kind?: unknown; route?: DispatchedRoute }, exitCode: number | null, result: Record<string, any> | null) {
+  const declaredRoute = record.route
+  const routeMatches = !declaredRoute || (result?.scenario === declaredRoute.scenario && result?.topology === declaredRoute.topology &&
+    (record.kind === 'headless' ? result?.workload === declaredRoute.workload : result?.route?.id === declaredRoute.id))
+  return {
+    status: (exitCode === 0 && result && routeMatches ? 'passed' : 'failed') as 'passed' | 'failed',
+    routeIdentityRefusal: routeMatches ? null : 'actual child workload/scenario/topology disagrees with dispatched route',
+  }
+}
+
 /**
  * Descriptive only, never a test: whether block 0 still stands apart (#1536). For each block holding both arms, d is
  * B/A - 1 of that block's arm medians. Returns block 0's d (null when block 0 is absent) and the root mean square of the

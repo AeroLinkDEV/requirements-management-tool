@@ -600,3 +600,17 @@ export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionId
     interactions,eventTiming:{thresholdMs:16,roundingMs:8,missing:'CENSORED_OR_UNAVAILABLE_NOT_ZERO',exactLatencyP95:'UNAVAILABLE_UNTIL_COMPLETE_CENSORING_ADMISSION'},
     heap:{retainedF7200:'UNAVAILABLE',laterPostGc:'CONTEXTUAL_ONLY',clockCoverage:'FROZEN_TIMELINE_ONLY_NO_TERMINAL_CLOCK_GETTER',reason:'ordinary Pause freezes flight but does not stop existing clock advances'},workerBacklog:'NOT_APPLICABLE_BEFORE_I3'}
 }
+
+/** The route the W3 child runs under, built from its dispatched workload/topology (browser.perf.ts). */
+export type W3RunRoute = { id: string; workload: string; scenario: string; topology: string } & Record<string, unknown>
+/**
+ * The W3 child's run record (browser.perf.ts writes it; run-perf.ts classifies it against the dispatched route). The
+ * imported scenario's own identity (expected, scenarioInput) is retained as given; it is not the route's identity.
+ */
+export function w3RunSummary(fields: { schema: string; route: W3RunRoute; rate: number; configuration: string; identity: Record<string, unknown>;
+  expected: FiniteMissionIdentity; observation: W3Observation; accounting: ReturnType<typeof w3PrefixAccounting> | null; refusal: string | null;
+  scenarioInput: { sourceScenario: string; bytes: string | null; sha256: string }; heap: Record<string, unknown>; browser: Record<string, unknown> }) {
+  const { schema, route, rate, configuration, identity, expected, observation, accounting, refusal, scenarioInput, heap, browser } = fields
+  return { schema, route, rate, configuration, identity, expected, rawObservation: observation, accounting, refusal,
+    qualification: 'NOT_CALIBRATED', inference: 'DISABLED', scenarioInput, heap, browser }
+}
