@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { tmpdir } from 'node:os'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
 import { singleComposition, dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
@@ -1140,7 +1141,7 @@ test('actual permanent legacy ARM reaches the output sentinel before any child i
   expect(child.status).not.toBe(0)
   writeFileSync(info.outputPath('actual20b-admission.json'), JSON.stringify({ status: child.status, stdout: child.stdout, stderr: child.stderr }, null, 2))
   expect(child.stderr).not.toContain('CURRENT_KERNEL_ONLY')
-  expect(child.stderr).toMatch(/EEXIST|requires a clean declared harness/)
+  expect(child.stderr).toMatch(/ENOTDIR|EEXIST/)
   expect(readFileSync(output, 'utf8')).toBe('literal no-child sentinel')
 })
 
@@ -1154,7 +1155,7 @@ test('unpaced capability planning distinguishes tracked complete legacy, kernel,
     [[...common, 'scriptedFms.ts'], 'incomplete legacy public modules'],
     [['scenario.ts'], 'incomplete public modules'],
   ] as [string[], string][]) {
-    const arm = mkdtempSync(join(process.env.TEMP!, 'unpaced-cap-'))
+    const arm = mkdtempSync(join(process.env.TEMP ?? tmpdir(), 'unpaced-cap-'))
     const paths = [...files.map(name => `product/client/src/fmsCdu/${name}`), 'product/client/package-lock.json', 'product/client/vite.config.ts']
     for (const path of paths) { const at = join(arm, path); mkdirSync(join(at, '..'), { recursive: true }); writeFileSync(at, 'literal static capability fixture, never executed') }
     execFileSync('git', ['init', '--quiet', arm])
