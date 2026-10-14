@@ -285,7 +285,7 @@ const openD5Instructor = async (page: Page, popped: boolean, options: { epoch?: 
 }
 
 // AFCS controls belong to the cockpit surface. Keep the instructor on main so the wrong adapter cannot pass.
-const openD5Cockpit = async (page: Page, popped: boolean) => {
+const openD5Cockpit = async (page: Page, popped: boolean, options: { hideOutsideView?: boolean } = {}) => {
   if (!popped) return { surface: page, close: async () => {} }
   await page.locator('.fmsStationDock > summary').click()
   const controls = page.getByRole('region', { name: 'Station arrangement', exact: true })
@@ -295,6 +295,11 @@ const openD5Cockpit = async (page: Page, popped: boolean) => {
   const outsideOpened = page.waitForEvent('popup')
   await controls.getByRole('button', { name: 'Open outside view in a window', exact: true }).click()
   const outside = await outsideOpened
+  if (options.hideOutsideView) {
+    // Keep the native station route without unrelated 3D rendering during the held-key clock advances.
+    await outside.getByRole('button', { name: 'Hide the view', exact: true }).click()
+    await expect(outside.getByRole('button', { name: 'Show the view', exact: true })).toHaveAttribute('aria-expanded', 'false')
+  }
   const cockpitOpened = page.waitForEvent('popup')
   await controls.getByRole('button', { name: 'Open cockpit in a window', exact: true }).click()
   const cockpit = await cockpitOpened
@@ -513,7 +518,7 @@ for (const popped of [false, true]) test(`D5 RTC UTC date and SETUP local offset
 // Brightness and variation laws stay in fms-cdu-engine; this owner detects the non-CLR hold branch and resolved native keys.
 for (const popped of [false, true]) test(`D5 BRT hold and hardware variation keys retain CDU2 cockpit ${popped ? 'popout' : 'main'} identity`, async ({ page }) => {
   const { ios } = await openD5Instructor(page, false)
-  const cockpit = await openD5Cockpit(page, popped)
+  const cockpit = await openD5Cockpit(page, popped, { hideOutsideView: true })
   const cdu = cockpit.surface.locator('.fmsBenchCduStation[data-side="2"]')
   const screen = cdu.locator('.fmsCduScreen')
   await ios.getByRole('tab', { name: 'Scenarios', exact: true }).click()
