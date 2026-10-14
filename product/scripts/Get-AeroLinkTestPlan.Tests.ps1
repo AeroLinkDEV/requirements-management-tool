@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 <#
     Deterministic contract coverage for the Windows #568 entry point. Every scenario supplies explicit paths or
-    asks for a dry run, so it does not build, start a service, fetch, rebase, touch PostgreSQL, or write evidence.
+    asks for a dry run or supplies a synthetic Preview at the operator boundary, so it does not build, start
+    a service, fetch, rebase, touch PostgreSQL, or write evidence.
 #>
 $ErrorActionPreference = 'Stop'
 $scriptPath = Join-Path $PSScriptRoot 'Get-AeroLinkTestPlan.ps1'
@@ -121,6 +122,64 @@ foreach ($area in @('backend', 'client', 'browser', 'postgresql')) {
 }
 
 $plannerSource = Get-Content -Raw -LiteralPath $scriptPath
+# Execute the real operator gate, substituting only its native Preview output and downstream suite runner.
+# The fixtures specify the contract independently of its regex: a console line break is whitespace, whereas
+# a longer numeric value or another option cannot satisfy the requested RetentionDays value of 15.
+$plannerTokens = $null
+$plannerErrors = $null
+$plannerAst = [Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$plannerTokens, [ref]$plannerErrors)
+if ($plannerErrors.Count -gt 0) { throw 'The planner could not be parsed for the operator Preview contract.' }
+$operatorGate = $plannerAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-ScriptContractSuite' }, $true)
+if (-not $operatorGate) { throw 'The operator script-contract entry point is missing.' }
+$previewFixture = @'
+Schedule         : Daily
+DailyAt          : 02:00
+RetentionDays    : 15
+Arguments        : -File "C:\fixture\Invoke-AeroLinkScheduledBackup.ps1" -RetentionDays 15
+'@
+$previewCases = @(
+    @{ Name = 'unwrapped arguments'; Text = $previewFixture; Pass = $true },
+    @{ Name = 'wrapped argument value'; Text = $previewFixture.Replace('-RetentionDays 15', "-RetentionDays`r`n                   15"); Pass = $true },
+    @{ Name = 'tab-separated argument value'; Text = $previewFixture.Replace('-RetentionDays 15', "-RetentionDays`t15"); Pass = $true },
+    @{ Name = 'argument value 150'; Text = $previewFixture.Replace('-RetentionDays 15', '-RetentionDays 150'); Pass = $false },
+    @{ Name = 'wrong argument option'; Text = $previewFixture.Replace('-RetentionDays 15', '-OtherRetentionDays 15'); Pass = $false },
+    @{ Name = 'longer argument option'; Text = $previewFixture.Replace('-RetentionDays 15', '-RetentionDaysExtra 15'); Pass = $false },
+    @{ Name = 'prefixed argument option'; Text = $previewFixture.Replace('-RetentionDays 15', '--RetentionDays 15'); Pass = $false },
+    @{ Name = 'scalar value 150'; Text = $previewFixture.Replace('RetentionDays    : 15', 'RetentionDays    : 150'); Pass = $false },
+    @{ Name = 'wrong schedule'; Text = $previewFixture.Replace('Schedule         : Daily', 'Schedule         : Weekly'); Pass = $false },
+    @{ Name = 'wrong daily time'; Text = $previewFixture.Replace('DailyAt          : 02:00', 'DailyAt          : 03:00'); Pass = $false },
+    @{ Name = 'wrong runner'; Text = $previewFixture.Replace('Invoke-AeroLinkScheduledBackup.ps1', 'OtherBackup.ps1'); Pass = $false }
+)
+foreach ($previewCase in $previewCases) {
+    $gateResult = & {
+        $repositoryRoot = $root
+        $suiteScripts = [System.Collections.Generic.List[string]]::new()
+        function Get-Command {
+            param([string]$Name, $ErrorAction)
+            return [pscustomobject]@{ Source = {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Arguments)
+                $global:LASTEXITCODE = 0
+                $previewCase.Text -split '\r?\n'
+            } }
+        }
+        function Invoke-CheckedPowerShellScript {
+            param([string]$ScriptPath)
+            $suiteScripts.Add($ScriptPath)
+        }
+        . ([scriptblock]::Create($operatorGate.Extent.Text))
+        $gateError = $null
+        try { Invoke-ScriptContractSuite } catch { $gateError = $_.Exception.Message }
+        [pscustomobject]@{ Passed = $null -eq $gateError; Error = $gateError; Scripts = @($suiteScripts.ToArray()) }
+    }
+    Assert-True ($gateResult.Passed -eq $previewCase.Pass) "Operator Preview '$($previewCase.Name)' should pass=$($previewCase.Pass): $($gateResult.Error)"
+    if ($previewCase.Pass) {
+        Assert-True ($gateResult.Scripts.Count -eq 21) "Operator Preview '$($previewCase.Name)' must retain all 21 downstream script checks."
+        Assert-True (@($gateResult.Scripts | ForEach-Object { Split-Path -Leaf $_ }) -contains 'Get-AeroLinkTestPlan.Tests.ps1') 'The operator family must retain its planner owner contract.'
+    }
+    else {
+        Assert-True ($gateResult.Scripts.Count -eq 0) "Invalid Preview '$($previewCase.Name)' must refuse before script execution."
+    }
+}
 Assert-True ($plannerSource.Contains("info --format '{{.OSType}}'")) 'Full PostgreSQL preflight must inspect the Docker server OS type before expensive gates.'
 Assert-True ($plannerSource.Contains("serverOsType -cne 'linux'")) 'Full PostgreSQL preflight must refuse a non-Linux Docker daemon.'
 Assert-True ($plannerSource.Contains('Switch Docker Desktop to Linux containers before Full mode')) 'Docker incompatibility must give the developer an actionable recovery message.'

@@ -299,7 +299,7 @@ function Invoke-ScriptContractSuite {
     $preview = & $previewShell.Source -NoProfile -ExecutionPolicy Bypass -File $previewScript -Action Preview -DailyAt 02:00 -RetentionDays 15 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Backup schedule preview contract failed.' }
     $previewText = $preview -join "`n"
-    foreach ($expected in @('Schedule\s*:\s*Daily', 'DailyAt\s*:\s*02:00', 'RetentionDays\s*:\s*15', 'Invoke-AeroLinkScheduledBackup\.ps1', '-RetentionDays 15')) {
+    foreach ($expected in @('Schedule\s*:\s*Daily', 'DailyAt\s*:\s*02:00', 'RetentionDays\s*:\s*15(?:\s|$)', 'Invoke-AeroLinkScheduledBackup\.ps1', '(?:^|\s)-RetentionDays\s+15(?:\s|$)')) {
         if ($previewText -notmatch $expected) { throw "Backup schedule preview did not contain '$expected'." }
     }
     foreach ($scriptName in @(
