@@ -853,6 +853,7 @@ test('the route CLI declares the actual five mission extents, hosts and topology
   expect(ui.find((route: any) => route.workload === 'W3')).toMatchObject({ warmup: null, scored: null, terminal: null })
   const unpaced = plan.routes.filter((route: any) => route.host === 'browser-unpaced')
   expect(unpaced).toHaveLength(10)
+  expect(unpaced.every((route: any) => route.armCapability === 'CURRENT_KERNEL_ONLY' && JSON.stringify(route.requiredArmModules) === JSON.stringify(['kernel/legacyPlantAdapter.ts', 'kernel/kernel.ts']))).toBe(true)
   expect(unpaced.every((route: any) => route.status === 'IMPLEMENTED' && route.pacing === 'unpaced' && route.warmup.value === 240 && route.warmup.simSeconds === 60)).toBe(true)
   expect(unpaced.filter((route: any) => route.topology === 'single').map((route: any) => [route.workload, route.scored.kind, route.scored.maxTotalSimSeconds, route.scored.fixedMeasuredSimSeconds ?? null, route.scenarioStartUtc])).toEqual([
     ['W1', 'scenario-end-after-warmup', 900, null, '2026-09-27T14:00:00.000Z'],
@@ -1062,6 +1063,27 @@ for (const topology of ['single', 'dual'] as const) test(`unpaced ${topology} ac
   expect(observed.retained.kernel.unitClockMs).toBe(pacingEpoch + 2000)
   expect(observed.retained.runner.endedAfter).toBe(0)
 })
+test('unpaced fixed continuation refuses real failed, error and unfinished setup before any model work', ({}, info) => {
+  const cases = [
+    { outcome: 'failed', finished: true, endedAfter: 0, steps: [{ when: { kind: 'time', seconds: 0 }, action: { kind: 'expectScratchpad', text: 'LITERAL FAILED SETUP' } }] },
+    { outcome: 'error', finished: true, endedAfter: 0, steps: [{ when: { kind: 'time', seconds: 0 }, action: { kind: 'goAround' } }] },
+    { outcome: 'running', finished: false, endedAfter: null, steps: [{ when: { kind: 'time', seconds: 1 }, action: { kind: 'expectAircraft', minAltitude: 0 } }] },
+  ]
+  const observed = cases.map(control => {
+    const input = unpacedInput('single')
+    const scenario = { ...JSON.parse(input.scenarioJson), steps: control.steps }
+    // Independent public runner antecedent, before passing the same frozen input to the actual work owner.
+    const composed = singleComposition(pacingEpoch, { profile: profileById(input.profile.id)! })
+    const runner = new ScenarioRunner(scenario, composed.fms, { variant: 'literal setup control' }, composed.sim, composed.settleStart)
+    expect({ outcome: runner.outcome, finished: runner.finished, endedAfter: runner.endedAfter })
+      .toEqual({ outcome: control.outcome, finished: control.finished, endedAfter: control.endedAfter })
+    const record = runBrowserUnpaced(unpacedModules, { ...input, scenarioJson: JSON.stringify(scenario) }, unpacedClock())
+    writeFileSync(info.outputPath(`setup-${control.outcome}.json`), JSON.stringify(record.summary, null, 2))
+    return { status: record.summary.status, attempted: record.summary.work.attempted, completed: record.summary.work.completed }
+  })
+  expect(observed).toEqual(Array(3).fill({ status: 'FAILED', attempted: 0, completed: 0 }))
+})
+
 test('unpaced mission END, early zero work and contradictory identity keep truthful outcomes instead of filling a fixed window', () => {
   const input = unpacedInput('single', false)
   const real = runBrowserUnpaced(unpacedModules, input, unpacedClock())
@@ -1090,4 +1112,15 @@ test('unpaced CLI rejects unsupported paired/rate/topology requests before any o
     expect(existsSync(out)).toBe(false)
     expect(child.stderr).toMatch(/overrides|not available|own host/)
   }
+})
+
+
+test('unpaced missing kernel capability refuses before harness admission, output and child launch', ({}, info) => {
+  const arm = info.outputPath('arm-without-kernel'), output = info.outputPath('unsupported-output')
+  mkdirSync(join(arm, 'product/client/src/fmsCdu'), { recursive: true })
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-unpaced', '--workloads', 'W3', '--topology', 'dual', '--arm', `A=${arm}`, '--out', output],
+    { encoding: 'utf8', env: { ...process.env, AEROLINK_PERF_PORT: '5999' } })
+  expect(child.status).not.toBe(0)
+  expect(child.stderr).toContain('browser-unpaced CURRENT_KERNEL_ONLY requires ARM kernel/legacyPlantAdapter.ts and kernel/kernel.ts; legacy public composition adapter is not yet implemented')
+  expect(existsSync(output)).toBe(false)
 })

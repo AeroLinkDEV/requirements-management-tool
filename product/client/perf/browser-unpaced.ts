@@ -43,6 +43,8 @@ export function runBrowserUnpaced(modules: Record<string, any>, input: UnpacedIn
       seedReceipts.some((r: any) => r.status !== 'OBSERVED_PUBLIC_RECEIVERS' || r.constellation !== input.seeds.constellation ||
         r.receiverConstellations.some((seed: number) => seed !== input.seeds.constellation) || JSON.stringify(r.receivers) !== JSON.stringify(input.seeds.receivers)))
     failure = 'unpaced profile, GPS model or actual public seed evidence disagrees or is unobserved'
+  if (!failure && input.totalFrames !== null && (!runner.finished || runner.outcome !== 'passed' || runner.endedAfter !== 0))
+    failure = 'fixed unpaced continuation requires actual successful t0 setup before any model work'
   let syncTotal = 0, syncScored = 0
   let firstDrop: { completed: number; simSeconds: number; mode: string } | null = null
   const limit = input.totalFrames ?? input.maximumFrames

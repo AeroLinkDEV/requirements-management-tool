@@ -296,6 +296,9 @@ function browserUnpaced() {
   if ((options.arm?.length ?? 0) !== 1) throw new Error('browser-unpaced takes exactly one declared arm')
   const port = Number(process.env.AEROLINK_PERF_PORT)
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('browser-unpaced requires an explicit private AEROLINK_PERF_PORT')
+  const armRoot = resolve(Object.values(pairs(options.arm))[0])
+  if (!['kernel/legacyPlantAdapter.ts', 'kernel/kernel.ts'].every(name => existsSync(join(armRoot, 'product/client/src/fmsCdu', name))))
+    throw new Error('browser-unpaced CURRENT_KERNEL_ONLY requires ARM kernel/legacyPlantAdapter.ts and kernel/kernel.ts; legacy public composition adapter is not yet implemented')
   const root = git(client, 'rev-parse', '--show-toplevel')
   const harness = { commit: git(root, 'rev-parse', 'HEAD'), perfTree: git(root, 'rev-parse', 'HEAD:product/client/perf'),
     lockBlob: git(root, 'rev-parse', 'HEAD:product/client/package-lock.json'), dirtyEntries: git(root, 'status', '--porcelain').split('\n').filter(Boolean).length }

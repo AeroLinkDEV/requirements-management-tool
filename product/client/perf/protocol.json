@@ -131,6 +131,9 @@
       },
       "browser-unpaced": {
         "executionHost": "browser-composition-owner",
+        "armCapability": "CURRENT_KERNEL_ONLY",
+        "requiredArmModules": ["kernel/legacyPlantAdapter.ts", "kernel/kernel.ts"],
+        "legacyBase20b": "REQUIRED_NEXT_ADAPTER: public composition/advanceTicks is not yet implemented for this host",
         "pacing": "unpaced",
         "topologies": [
           "single",
