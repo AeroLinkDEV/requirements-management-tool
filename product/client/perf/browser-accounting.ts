@@ -345,9 +345,21 @@ export function captureEvidence(recorded: RecordedWindow, accounting: WindowAcco
   const finite = (value: unknown) => typeof value === 'number' && Number.isFinite(value)
   if (!capture || !accounting) return { boundaryStatus: 'INCOMPLETE', eventTimingStatus: 'INCOMPLETE', reasons: ['no direct capture or conserved accounting'] }
   const { clocks, boundaries, inputs } = capture
+  const slices = recorded.timeline.filter(entry => entry.kind === 'slice' && entry.detail.epoch === accounting.window.epoch)
+  // finish() snapshots clocks before the later conservation-closing timeline entry is collected. Every slice
+  // through the scored end still needs its own direct observation; a later closing slice need not have one.
+  if (clocks.length > slices.length || clocks.filter(clock => clock.exit?.monotonicMs <= recorded.end + EPSILON_MS).length !==
+      slices.filter(slice => slice.end <= recorded.end + EPSILON_MS).length) reasons.push('direct observations do not cover the conserved pacing slices')
+  let completed = 0
   let prior: any = null
-  for (const clock of clocks) {
+  for (const [index, clock] of clocks.entries()) {
     const { entry, exit } = clock
+    const slice = slices[index]
+    if (!slice || !entry || !exit || clock.epoch !== accounting.window.epoch || clock.rate !== accounting.selectedRate || clock.batch !== slice.detail.batch ||
+        entry.completed !== completed || exit.completed - entry.completed !== slice.detail.completed ||
+        entry.monotonicMs < slice.start - EPSILON_MS || entry.monotonicMs > slice.end + EPSILON_MS || exit.monotonicMs < slice.end - EPSILON_MS)
+      reasons.push('direct clock identity or completed work contradicts its conserved pacing slice')
+    completed += Number(slice?.detail.completed ?? 0)
     if (clock.schema !== 1 || clock.sequence !== (prior?.sequence ?? 0) + 1 || (prior && clock.epoch !== prior.epoch) ||
       ![entry?.utcMs, entry?.monotonicMs, entry?.timeOrigin, entry?.kernelTime, entry?.unitClockMs, entry?.completed,
         exit?.utcMs, exit?.monotonicMs, exit?.timeOrigin, exit?.kernelTime, exit?.unitClockMs, exit?.completed].every(finite) ||

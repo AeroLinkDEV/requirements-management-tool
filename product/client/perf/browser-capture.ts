@@ -96,7 +96,17 @@ export function captureDisposition(plan: ReturnType<typeof browserCapturePlan>, 
   if (!['payloadSha256', 'seedSha256', 'closureSha256'].every(key => hash(session?.cold?.[key], 64)) || !equal(session.cold, end?.cold)) reasons.push('cold input provenance is missing or changed')
   try {
     requireClosure(end?.closure)
-    if (end.closure.sessionId !== session?.id || end.closure.sourceCommit !== cohort?.harness?.commit || Date.parse(end.closure.closedAt) < Date.parse(end?.endedAt)) throw new Error('wrong closure')
+    const closure = end.closure, owner = closure.wholeOwner
+    const ownerStart = Date.parse(owner?.startedAt), exited = Date.parse(closure.exitedAt), closed = Date.parse(closure.closedAt)
+    // Only compare this owner's monotonic readings with each other. The producer's performance.now() origin
+    // is unrelated; its end stamp alone cannot account for the final file write and actual process exit.
+    if (closure.sessionId !== session?.id || closure.sourceCommit !== cohort?.harness?.commit ||
+        ![ownerStart, exited, closed, owner?.monotonicStartMs, owner?.measurementDeadlineMs, owner?.cleanupDeadlineMs, owner?.producerExitedMs, owner?.closedMs].every(Number.isFinite) ||
+        owner.measurementDeadlineMs - owner.monotonicStartMs !== 14_400_000 || owner.cleanupDeadlineMs < owner.measurementDeadlineMs ||
+        owner.cleanupDeadlineMs - owner.measurementDeadlineMs > 300_000 || owner.producerExitedMs < owner.monotonicStartMs ||
+        owner.producerExitedMs > owner.measurementDeadlineMs || owner.closedMs < owner.producerExitedMs || owner.closedMs > owner.cleanupDeadlineMs ||
+        ownerStart > Date.parse(session.startedAt) || exited < Date.parse(end.endedAt) || closed < exited ||
+        exited - ownerStart > 14_400_000 || closed - ownerStart > owner.cleanupDeadlineMs - owner.monotonicStartMs) throw new Error('wrong or late closure')
   } catch { reasons.push('whole-session native closure is unproven') }
   if (records.length !== 128) reasons.push('capture does not contain exactly 128 records')
   let previousEnd = session?.monotonicStart

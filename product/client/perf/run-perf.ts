@@ -299,7 +299,7 @@ function browserPlan() {
   console.log(JSON.stringify({ ...plan, manifestSha256: digest(plan) }, null, 2))
 }
 function browserCapture() {
-  const began = performance.now(), deadline = began + protocol.browser.capture.bounds.measurementSeconds * 1000
+  const startedAt = new Date().toISOString(), began = performance.now(), deadline = began + protocol.browser.capture.bounds.measurementSeconds * 1000
   if (!options['cold-input'] || options['dirty-smoke'] || options.rounds || options.rates || options.configurations || options.hours)
     throw new Error('paired capture requires a sealed --cold-input; no dirty, order, subset or cap override')
   const dir = out(), list = arms(), plan = browserCapturePlan()
@@ -326,7 +326,7 @@ function browserCapture() {
   if (harness.dirtyEntries || !harness.apiAssemblySha256) throw new Error('paired capture needs a clean harness and exact built API provenance')
   if (closure.apiTree !== harness.apiTree || closure.apiAssemblySha256 !== harness.apiAssemblySha256) throw new Error('cold seed writer API identity disagrees with the harness')
   const cohort = { harness, runtime: environment(), protocol }
-  const session = { id: randomUUID(), plan, kind: 'browser-capture', startedAt: new Date().toISOString(),
+  const session = { id: randomUUID(), plan, kind: 'browser-capture', startedAt,
     monotonicStart: began, deadline, cohort, arms: servedArms, cold, closure: 'UNPROVEN' }
   writeFileSync(join(dir, 'paired-session.json'), JSON.stringify(session, null, 2), { flag: 'wx' })
   let stopped: string | null = null
@@ -351,9 +351,13 @@ function browserCapture() {
     }
   } catch (error) { stopped = error instanceof Error ? error.message : 'capture interrupted'; throw error }
   finally {
-    const end = { ...session, endedAt: new Date().toISOString(), monotonicEnd: performance.now(), stopped,
-      cohort: { ...cohort, harness: harnessIdentity() }, arms: Object.fromEntries(list.map(arm => [arm.arm, { ...armIdentity(arm.root), ...distIdentity(join(arm.root, 'product/client/dist')) }])),
-      cold: { ...cold, payloadSha256: digest(coldPayload(archive)) }, closure: 'UNPROVEN' }
+    const cohortAtEnd = { ...cohort, harness: harnessIdentity() }
+    const armsAtEnd = Object.fromEntries(list.map(arm => [arm.arm, { ...armIdentity(arm.root), ...distIdentity(join(arm.root, 'product/client/dist')) }]))
+    const coldAtEnd = { ...cold, payloadSha256: digest(coldPayload(archive)) }
+    // These observations are measurement work. Stamp their actual completion, not their pre-hash start.
+    // The separately held whole owner must also bound the following file I/O and actual producer exit.
+    const end = { ...session, cohort: cohortAtEnd, arms: armsAtEnd, cold: coldAtEnd, closure: 'UNPROVEN', stopped,
+      endedAt: new Date().toISOString(), monotonicEnd: performance.now() }
     writeFileSync(join(dir, 'paired-end.json'), JSON.stringify(end, null, 2), { flag: 'wx' })
   }
 }

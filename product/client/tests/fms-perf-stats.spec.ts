@@ -683,6 +683,10 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
   const session = { id: 'literal-session', plan, cohort, cold, arms: { A: arm, B: arm }, startedAt: '2026-10-14T00:00:00Z', monotonicStart: 100, deadline: 14_400_100 }
   const closure = { guardianSha256: CAPTURE_GUARDIAN, status: 'EXITED', exitCode: 0, jobCount: 0, handlesClosed: true, forced: false,
     producerBirth100ns: '134360000000000000', producerImage: 'literal-node.exe', producerArgv: 'literal-capture-cli', closedAt: '2026-10-14T02:40:01Z',
+    exitedAt: '2026-10-14T02:40:00.500Z',
+    // The outer owner's monotonic origin deliberately differs from the producer's100ms origin.
+    wholeOwner: { startedAt: '2026-10-14T00:00:00Z', monotonicStartMs: 1000, measurementDeadlineMs: 14_401_000,
+      cleanupDeadlineMs: 14_701_000, producerExitedMs: 9_601_500, closedMs: 9_602_000 },
     sessionId: session.id, sourceCommit: cohort.harness.commit }
   const end = { ...session, closure, stopped: null, endedAt: '2026-10-14T02:40:00Z', monotonicEnd: 9_600_100 }
   let nextMonotonic = 100
@@ -721,7 +725,41 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
         browser: { version: 'literal-chromium', renderer: 'literal-renderer', headless: true, viewport: protocol.browser.viewport } } }
   })
   expect(captureDisposition(plan, session, rows, end)).toMatchObject({ status: 'CAPTURE_COMPLETE', qualification: 'NOT_CALIBRATED', inference: 'DISABLED', reasons: [] })
-  const reject = (mutate: (value: any) => void) => { const value = structuredClone({ session, rows, end }); mutate(value); expect(captureDisposition(plan, value.session, value.rows, value.end).qualification).toBe('NOT_QUALIFIED') }
+  const orderedSamples = structuredClone(rows)
+  orderedSamples[0].result.rawObservation.capture.clocks[60].entry.monotonicMs += 0.25
+  orderedSamples[0].result.rawObservation.capture.clocks[60].exit.monotonicMs += 0.25
+  // Actual ENTRY follows slice start and EXIT follows the recorded slice end; equality is not required.
+  expect(captureDisposition(plan, session, orderedSamples, end).qualification).toBe('NOT_CALIBRATED')
+  const reject = (mutate: (value: any) => void, label = 'contradictory capture') => {
+    const value = structuredClone({ session, rows, end }); mutate(value)
+    expect.soft(captureDisposition(plan, value.session, value.rows, value.end).qualification, label).toBe('NOT_QUALIFIED')
+  }
+  const changeClocks = (value: any, change: (clocks: any[]) => void) => {
+    const capture = value.rows[0].result.rawObservation.capture
+    change(capture.clocks)
+    // Keep page receipts coherent with the changed direct stream: rejection must come from pacing attribution.
+    for (const boundary of capture.boundaries) boundary.trace = structuredClone(capture.clocks.filter((clock: any) => clock.exit.monotonicMs <= boundary.monotonicMs).at(-1))
+  }
+  reject(value => changeClocks(value, clocks => clocks.forEach(clock => clock.epoch = 2)), 'coherent wrong epoch must refuse')
+  reject(value => changeClocks(value, clocks => clocks.forEach(clock => clock.rate = 64)), 'coherent wrong rate must refuse')
+  reject(value => changeClocks(value, clocks => clocks.forEach(clock => clock.batch += 10)), 'coherent wrong batch must refuse')
+  reject(value => changeClocks(value, clocks => {
+    // Move one successful frame from the second scored slice into the first. Totals, continuity and clock deltas
+    // still agree, but the independently declared one-frame timeline slices do not.
+    for (const sample of [clocks[60].exit, clocks[61].entry]) {
+      sample.completed += 1; sample.kernelTime += 2_500_000; sample.unitClockMs += 250
+    }
+  }), 'coherent wrong per-slice completed work must refuse')
+  const capEdge = structuredClone(end)
+  Object.assign(capEdge.closure.wholeOwner, { producerExitedMs: 14_401_000, closedMs: 14_701_000 })
+  Object.assign(capEdge.closure, { exitedAt: '2026-10-14T04:00:00Z', closedAt: '2026-10-14T04:05:00Z' })
+  expect(captureDisposition(plan, session, rows, capEdge)).toMatchObject({ status: 'CAPTURE_COMPLETE', qualification: 'NOT_CALIBRATED' })
+  reject(value => value.end.closure.closedAt = '2026-10-15T00:00:00Z', 'late UTC closure must refuse')
+  reject(value => value.end.closure.wholeOwner.closedMs = 14_701_001, 'one millisecond beyond cleanup must refuse')
+  reject(value => delete value.end.closure.wholeOwner, 'missing original owner budget must refuse')
+  reject(value => value.end.closure.wholeOwner.cleanupDeadlineMs = 14_701_001, 'supplied budget cannot extend cleanup')
+  reject(value => value.end.closure.wholeOwner.measurementDeadlineMs = 14_401_001, 'supplied budget cannot extend measurement')
+  reject(value => value.end.closure.wholeOwner.producerExitedMs = 14_401_001, 'early end marker cannot hide final observations or I/O after deadline')
   reject(value => value.rows.pop())
   reject(value => value.rows[1].monotonicStartedAt = value.rows[0].monotonicStartedAt)
   reject(value => value.rows[0].monotonicEndedAt = value.rows[0].monotonicStartedAt + 1000)
@@ -744,6 +782,11 @@ test('complete paired capture stays uncalibrated; contradictory direct clocks, l
     return JSON.parse(readFileSync(join(out, 'paired-report.json'), 'utf8'))
   }
   expect(report()).toMatchObject({ status: 'CAPTURE_COMPLETE', qualification: 'NOT_CALIBRATED' })
+  const lateEnd = structuredClone(end)
+  lateEnd.closure.wholeOwner.producerExitedMs = 14_401_001
+  writeFileSync(join(out, 'paired-end.json'), JSON.stringify(lateEnd))
+  expect.soft(report().qualification, 'actual report CLI refuses late final work despite an in-bound producer end marker').toBe('NOT_QUALIFIED')
+  writeFileSync(join(out, 'paired-end.json'), JSON.stringify(end))
   writeFileSync(join(archive, 'aerolink.db'), 'mutated cold payload fixture')
   expect(report()).toMatchObject({ status: 'CAPTURE_PARTIAL', qualification: 'NOT_QUALIFIED', reasons: ['retained cold archive, seed or writer-closure bytes are missing or changed'] })
 })
