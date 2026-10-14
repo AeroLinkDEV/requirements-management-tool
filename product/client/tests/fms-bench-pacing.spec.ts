@@ -47,10 +47,11 @@ test('successful-frame profiling is after real completion, keeps slice order and
       ...(observe?{observeFrame:(ordinal:number)=>{if(ordinal===2)throw new Error('lost observation');return {sync:'SYNC'}}}:{})})
     for(let i=0;i<16;i++)host.runNext()
     stop()
-    return {host,kernel,instants}
+    return {host,kernel,instants,aircraft:JSON.stringify(composed.fms.aircraft)}
   }
   const off=run(false),on=run(true)
   expect(on.instants).toEqual(off.instants)
+  expect(on.aircraft).toBe(off.aircraft)
   expect(on.kernel.now).toBe(160_000_000)
   expect(on.kernel.unitClockMs).toBe(epoch+16000)
   const work = (host: TimelineHost) => host.timeline().map(({detail,...row})=>{const {epoch:_epoch,...counts}=detail;return {...row,detail:counts}})

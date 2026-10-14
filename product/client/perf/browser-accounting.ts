@@ -522,6 +522,8 @@ export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionId
   const setup = w3SetupEvidence(raw.setupReport, expected), frames = raw.frames, close = raw.closes.length === 1 ? raw.closes[0] : refuse('unique epoch close missing')
   if (frames.length < 7200) refuse('successful prefix is incomplete')
   const initial = frames[0].entry, epoch = frames[0].epoch, rate = frames[0].rate
+  const configuration=typeof id.configuration==='string'?id.configuration.match(/^view-(on|off)-svs-(on|off)$/):null
+  if(id.rate!==rate || !configuration)refuse('actual rate/configuration disagrees with the selected paired cell')
   if (!initial || ![initial.utcMs,initial.monotonicMs,initial.timeOrigin].every(Number.isFinite) || initial.completed !== 0 || initial.kernelTime !== 0 || initial.unitClockMs !== Date.parse(expected.startUtc)) refuse('first actual Fly ENTRY is not F0 at the fixed UTC')
   const events = raw.timeline.map(row => parse(row, rate)); let debt = 0, batch = 0, completed = 0, admitted = 0, attempted = 0, discarded = 0, sequence = 0, previousEnd = -Infinity
   const slices: { event: Slice; first: number; last: number }[] = []
@@ -558,6 +560,7 @@ export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionId
       !Number.isFinite(close.monotonicMs) || close.monotonicMs < previousEnd || !same(close.lastClock, raw.clocks.at(-1))) refuse('final Pause close does not bind all real work, including zero-debt final slices')
   const begin = frames[239].frame.monotonicMs, end = frames[7199].frame.monotonicMs
   if (!(end > begin) || !frames[239].state.boundary || !frames[7199].state.boundary) refuse('actual F240/F7200 boundary observations missing')
+  for(const boundary of [frames[239].state.boundary,frames[7199].state.boundary])if(boundary.outsideView!==(configuration![1]==='on'?'ready':'off') || boundary.svs!==configuration![2])refuse('actual boundary view/SVS disagrees with the selected paired cell')
   let frozenKernel=close.lastClock.exit.kernelTime,frozenClock=close.lastClock.exit.unitClockMs,frozenAt=close.monotonicMs
   for(const row of raw.frozen) {
     if(row.schema!==1 || row.completed!==1 || !Number.isFinite(row.utcMs) || !Number.isFinite(row.monotonicMs) || row.monotonicMs<frozenAt ||

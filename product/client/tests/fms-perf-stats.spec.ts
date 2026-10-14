@@ -28,13 +28,13 @@ function literalW3(rate=64,total=7232,sliceFrames=rate) {
     const last=Math.min(total,first+sliceFrames-1),entry={utcMs:10000+first-1,monotonicMs:first-1,timeOrigin:10000,kernelTime:(first-1)*2_500_000,unitClockMs:initialUtc+(first-1)*250,completed:first-1}
     for(let ordinal=first;ordinal<=last;ordinal++)frames.push({schema:1,epoch:7,rate,batch,sequence,ordinal,entry,
       frame:{utcMs:10000+ordinal,monotonicMs:ordinal,timeOrigin:10000,kernelTime:ordinal*2_500_000,unitClockMs:initialUtc+ordinal*250,completed:ordinal},
-      state:{sync:'SYNC',unitClocksMs:[initialUtc+ordinal*250,initialUtc+ordinal*250],boundary:ordinal===240||ordinal===7200?{frames:ordinal,causes:'literal'}:null}})
+      state:{sync:'SYNC',unitClocksMs:[initialUtc+ordinal*250,initialUtc+ordinal*250],boundary:ordinal===240||ordinal===7200?{frames:ordinal,causes:'literal',outsideView:'off',svs:'off'}:null}})
     const exit=frames.at(-1).frame
     timeline.push({kind:'slice',start:first-.1,end:last,detail:{schema:1,epoch:7,rate,batch,admitted:(first-1)%rate===0?rate:0,attempted:sliceFrames,completed:sliceFrames,remaining:batch*rate-last}})
     clocks.push({schema:1,epoch:7,rate,batch,sequence,entry,exit})
     tasks.push({start:first-.5,end:last+.5,tail:last+.8})
   }
-  const identity={original:{commit:'a'.repeat(40)},effectiveSourceSha256:'b'.repeat(64),overlaySha256:'c'.repeat(64),harness:{commit:'d'.repeat(40)},manifestSha256:'e'.repeat(64),
+  const identity={rate,configuration:'view-off-svs-off',original:{commit:'a'.repeat(40)},effectiveSourceSha256:'b'.repeat(64),overlaySha256:'c'.repeat(64),harness:{commit:'d'.repeat(40)},manifestSha256:'e'.repeat(64),
     build:{sourceSha256:'b'.repeat(64),harnessCommit:'d'.repeat(40),dist:[{path:'index.html',sha256:'f'.repeat(64)}]}}
   const expected={...finiteExpected,scenario:'literal-w3-prefix',maxSimSeconds:1800}
   const setupReport=`# FMS Test Bench run: Independent W3 setup
@@ -95,6 +95,8 @@ test('W3 refuses missing finalzero-debt success, moved faultclock, transientSYNC
     (r:W3Observation)=>{r.frames[239].state.boundary=null},
     (r:W3Observation)=>{r.clocks[1].entry={...r.clocks[1].entry,kernelTime:999}},
     (r:W3Observation)=>{r.frames[240].frame.monotonicMs=0},
+    (r:W3Observation)=>{r.identity={...r.identity,rate:1}},
+    (r:W3Observation)=>{r.frames[239].state.boundary.outsideView='ready'},
   ]){const {raw,expected,identity}=literalW3();change(raw);expect(()=>w3PrefixAccounting(raw,expected,identity)).toThrow(/W3/)}
   const valid=literalW3();expect(w3SetupEvidence(valid.raw.setupReport,valid.expected).endedAfter).toBe(0)
 })
@@ -120,7 +122,7 @@ test('real dual setup and success-frame producer feed the W3 reader without anot
   expect([runner.finished,runner.outcome,runner.endedAfter]).toEqual([true,'passed',0])
   const setupReport=reportMarkdown(runner),kernel=new FmsKernel(composed.plant,runner)
   const stop=startKernelPacing(64,kernel,host,{haltOnRunEnd:false,onFault:error=>{throw error},onInstantClose:()=>{host.wall+=.1},
-    observeFrame:ordinal=>({sync:composed.system.mode,unitClocksMs:[kernel.unitClockMs,kernel.unitClockMs],boundary:ordinal===240||ordinal===7200?{outsideView:'off',frames:null}:null})})
+    observeFrame:ordinal=>({sync:composed.system.mode,unitClocksMs:[kernel.unitClockMs,kernel.unitClockMs],boundary:ordinal===240||ordinal===7200?{outsideView:'off',svs:'off',frames:null}:null})})
   while(kernel.now<18_000_000_000)host.runNext()
   const beforeStop=kernel.now;stop();expect(kernel.now).toBe(beforeStop)
   const base=literalW3(),raw:W3Observation={...base.raw,setupReport,timeline:host.timeline(),tasks:host.timerTasks,
