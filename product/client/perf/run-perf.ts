@@ -517,6 +517,8 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   finally {
     const end=w3EndRecord(session,stopped,manifest,{harnessAtEnd:harnessIdentity(),coldAtEnd:digest(coldPayload(archive)),endedAt:new Date().toISOString(),monotonicEnd:performance.now()})
     writeFileSync(join(dir,'w3-end.json'),JSON.stringify(end,null,2),{flag:'wx'})
+    // An original error is already propagating; a refused end re-admission only fails an otherwise complete session.
+    if(stopped===null && end.endAdmission.status!=='ADMITTED')throw new Error(`W3 manifest refused at session end: ${end.endAdmission.error}`)
   }
 }
 function browserCaptureReport() {

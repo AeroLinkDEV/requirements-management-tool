@@ -106,10 +106,13 @@ export function admitW3Manifest(manifest: any, requireBuild: boolean) {
   }
   return plan
 }
-/** The W3 session end record the executor writes to w3-end.json, after re-admitting the manifest. */
+/** The W3 session end record the executor writes to w3-end.json. The end re-admission outcome is recorded beside the
+ * original stop reason and never replaces it or prevents the record; the caller decides what to throw after writing. */
 export function w3EndRecord(session: Record<string, unknown>, stopped: string | null, manifest: any, observed: Record<string, unknown>) {
-  admitW3Manifest(manifest,true)
-  return {...session,stopped,...observed,closure:'UNPROVEN'}
+  let endAdmission: { status: 'ADMITTED' | 'REFUSED'; error: string | null }
+  try { admitW3Manifest(manifest,true); endAdmission={status:'ADMITTED',error:null} }
+  catch(error) { endAdmission={status:'REFUSED',error:error instanceof Error?error.message:String(error)} }
+  return {...session,stopped,endAdmission,...observed,closure:'UNPROVEN'}
 }
 function sameFiles(a: unknown,b: unknown){return JSON.stringify(a)===JSON.stringify(b)}
 
