@@ -114,20 +114,36 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     expect(await downloadText('Save as JSON'), 'the actual public selection is the exact frozen input').toBe(inputBytes)
     if (finite) await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.armFinite())
   }
+  // W3 recipe amendment 1 (Fly at F0 by construction): once the t=0 setup has finished, the bench pauses and its 250 ms
+  // frozen-clock interval runs (clock and computers advance). A Fly that arrives after the first tick is refused as late,
+  // so any child work between Run and Fly made F0 a race. The public Fly button is therefore clicked in the same page task
+  // that commits the finished setup (a MutationObserver armed by the public Run click's own dispatch), before any timer
+  // task can run. The setup report is downloaded and verified after Pause instead: its bytes are fixed once produced.
+  if (w3) await page.evaluate(() => {
+    const w = window as unknown as Recorder & { __w3Fly: { dispatchMs: number | null; clickMs: number | null; error: string | null } }
+    w.__w3Fly = { dispatchMs: null, clickMs: null, error: null }
+    const onRun = (event: Event) => { if ((event.target as Element | null)?.closest?.('button')?.textContent?.trim() === 'Run the scenario') w.__w3Fly.dispatchMs = performance.now() }
+    document.addEventListener('click', onRun, true)
+    const observer = new MutationObserver(() => {
+      if (w.__w3Fly.dispatchMs === null || !document.querySelector('.fmsScenarioResult')) return
+      observer.disconnect(); document.removeEventListener('click', onRun, true)
+      const fly = [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Fly')
+      if (!fly) { w.__w3Fly.error = 'no public Fly control after the finished setup'; return }
+      w.__fmsPerf.armW3(); w.__w3Fly.clickMs = performance.now(); fly.click()
+    })
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true })
+  })
   await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
   if (w3) {
     const identity = JSON.parse(process.env.AEROLINK_PERF_W3_IDENTITY ?? 'null')
     if (!identity) throw new Error('W3 requires its exact original/effective/overlay/build/dependency identity')
-    const setupReport = await downloadText('Download run report')
     const expected = { scenario: scenario!.id, digest: scenarioDigest(scenario!), startUtc: scenario!.startTime!, profile: scenario!.profile!, profileSummary: expectedProfileSummary!,
       steps: scenario!.steps.length, statuses: ['DONE', 'PASS'] as ('DONE' | 'PASS')[], maxSimSeconds: 1800,
       gps: { model: expectedGpsModel, constellation: 1, receivers: [101,202] } }
-    w3SetupEvidence(setupReport, expected)
-    writeFileSync(`${result}.setup.md`, setupReport)
-    await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.armW3())
-    await page.getByRole('button', { name: 'Fly', exact: true }).click()
-    let raw: Omit<W3Observation, 'identity' | 'setupReport'>, refusal: string | null = null, key = 0
-    try { do {
+    await page.waitForFunction(() => { const fly = (window as unknown as { __w3Fly: { clickMs: number | null; error: string | null } }).__w3Fly; return fly.clickMs !== null || fly.error !== null }, null, { timeout: 60_000 })
+    const fly = await page.evaluate(() => (window as unknown as { __w3Fly: { dispatchMs: number | null; clickMs: number | null; error: string | null } }).__w3Fly)
+    let raw: Omit<W3Observation, 'identity' | 'setupReport'>, refusal: string | null = fly.error, key = 0
+    if (!refusal) try { do {
       raw = await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.w3Snapshot())
       const first = raw.frames[0]
       if (first && (first.entry.kernelTime !== 0 || first.entry.unitClockMs !== Date.parse(expected.startUtc))) { refusal = 'first actual Fly ENTRY was late; no rewind or retry'; break }
@@ -149,6 +165,10 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     try { await cdp.send('HeapProfiler.collectGarbage'); gc = 'CDP_COLLECTED' } catch { /* retain availability */ }
     const heap = await page.evaluate(() => ({ utcMs:Date.now(),monotonicMs:performance.now(),usedBytes:(performance as any).memory?.usedJSHeapSize ?? null,
       observations:(window as unknown as Recorder).__fmsPerf.w3Snapshot() }))
+    // The finished setup's report, taken now: its bytes were fixed when the setup finished; a mismatch still refuses.
+    let setupReport = ''
+    try { setupReport = await downloadText('Download run report'); writeFileSync(`${result}.setup.md`, setupReport); w3SetupEvidence(setupReport, expected) }
+    catch(error) { refusal ??= error instanceof Error ? error.message : String(error) }
     const observation: W3Observation = { ...heap.observations, identity, setupReport }
     let accounting: ReturnType<typeof w3PrefixAccounting> | null = null
     try { accounting = w3PrefixAccounting(observation,expected,identity) } catch(error) { refusal ??= error instanceof Error ? error.message : String(error) }
@@ -156,7 +176,8 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
       scenarioInput:{sourceScenario:family.scenario,bytes:inputBytes,sha256:createHash('sha256').update(inputBytes!).digest('hex')},
       heap:{status:gc==='CDP_COLLECTED'&&heap.usedBytes!==null?'CONTEXTUAL_OBSERVATION':'UNAVAILABLE',retainedF7200:'UNAVAILABLE',method:gc,utcMs:heap.utcMs,monotonicMs:heap.monotonicMs,usedBytes:heap.usedBytes,
         beforeFrozen:beforeHeap.frozen,afterFrozen:observation.frozen,frozenDuringCollection:observation.frozen.length-beforeHeap.frozen.length,flightClose:observation.closes},
-      browser:{version:context.browser()?.version()??null,headless,viewport:protocol.browser.viewport} })
+      browser:{version:context.browser()?.version()??null,headless,viewport:protocol.browser.viewport,
+        fly:{control:'public Fly button, same task as the finished-setup commit',runDispatchMs:fly.dispatchMs,flyClickMs:fly.clickMs,setupReport:'downloaded after Pause'}} })
     writeFileSync(result,JSON.stringify(summary,null,2))
     if(refusal) throw new Error(refusal)
     expect(accounting?.status).toBe('OBSERVED'); return
