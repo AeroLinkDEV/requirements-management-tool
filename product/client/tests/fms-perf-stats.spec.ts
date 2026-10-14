@@ -16,7 +16,7 @@ import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
 import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, w3PairedPlan } from '../perf/browser-capture'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, w3EndRecord, w3PairedPlan } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, runClassification, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
@@ -152,6 +152,31 @@ test('a successful W3 child result names its dispatched route: run classificatio
   for(const changed of [{...written,scenario:'perf-87n-offshore-sar'},{...written,topology:'single'},{...written,route:{...written.route,id:'W3/browser-paced/dual/v2'}}])
     expect(runClassification(record,0,changed)).toEqual({status:'failed',routeIdentityRefusal:'actual child workload/scenario/topology disagrees with dispatched route'})
   expect(runClassification(record,1,written)).toEqual({status:'failed',routeIdentityRefusal:null})
+})
+test('the W3 end record survives a manifest refused at session end: the original stop reason stays and the refusal is recorded beside it',()=>{
+  // A literal two-arm overlay on disk, admitted by the production admitW3Manifest with requireBuild=true.
+  const root=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-end-')),sha=(path:string)=>createHash('sha256').update(readFileSync(path)).digest('hex')
+  for(const name of ['observation.patch','A.caller.patch','B.caller.patch'])writeFileSync(join(root,name),`${name}\n`)
+  const closure={guardianSha256:CAPTURE_GUARDIAN,status:'EXITED',exitCode:0,jobCount:0,handlesClosed:true,forced:false,producerBirth100ns:'1',producerImage:'node.exe',producerArgv:'npm run build',closedAt:'2026-10-14T00:00:00.000Z'}
+  const arms:Record<string,any>={},builds:Record<string,any>={}
+  for(const [arm,commit] of [['A','7f2b53aec7f567089455c7c6b69f05f518a8e563'],['B','5c7ec720845612271fb38a99880a341a6845f3ba']]) {
+    const client=join(root,arm,'product','client');mkdirSync(join(client,'dist'),{recursive:true})
+    writeFileSync(join(client,'package-lock.json'),`{"arm":"${arm}"}`);writeFileSync(join(client,'dist','index.html'),`<p>${arm}</p>`)
+    const effectiveFiles=[{path:'product/client/package-lock.json',sha256:sha(join(client,'package-lock.json'))}],dependencies=effectiveFiles
+    arms[arm]={root:join(root,arm),original:{commit},effectiveFiles,effectiveSourceSha256:digest(effectiveFiles)}
+    builds[arm]={sourceSha256:digest(effectiveFiles),harnessCommit:'h'.repeat(40),command:'npm run build',dependencies,dependenciesSha256:digest(dependencies),dist:[{path:'index.html',sha256:sha(join(client,'dist','index.html'))}],closure}
+  }
+  const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',harness:{commit:'h'.repeat(40)},arms,builds,
+    overlaySha256:digest({bench:sha(join(root,'observation.patch')),A:sha(join(root,'A.caller.patch')),B:sha(join(root,'B.caller.patch'))})}
+  const session={schema:'aerolink.fms-w3-paired-session.v1',id:'literal-session',closure:'UNPROVEN'},observed={harnessAtEnd:{dirtyEntries:0},coldAtEnd:'c'.repeat(64),endedAt:'2026-10-14T01:00:00.000Z',monotonicEnd:1}
+  // A declared observation patch changes during the session: the end re-admission is refused, the record is still produced.
+  writeFileSync(join(root,'A.caller.patch'),'changed\n')
+  expect(w3EndRecord(session,'W3 failed run retained; no retry or later favorable substitution',manifest,observed)).toEqual({...session,stopped:'W3 failed run retained; no retry or later favorable substitution',
+    endAdmission:{status:'REFUSED',error:'W3 declared observation patches changed'},...observed,closure:'UNPROVEN'})
+  expect(w3EndRecord(session,null,manifest,observed)).toMatchObject({stopped:null,endAdmission:{status:'REFUSED',error:'W3 declared observation patches changed'}})
+  // Restored bytes are admitted again.
+  writeFileSync(join(root,'A.caller.patch'),'A.caller.patch\n')
+  expect(w3EndRecord(session,null,manifest,observed)).toEqual({...session,stopped:null,endAdmission:{status:'ADMITTED',error:null},...observed,closure:'UNPROVEN'})
 })
 
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
