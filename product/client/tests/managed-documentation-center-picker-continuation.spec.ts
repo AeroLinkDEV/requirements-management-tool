@@ -15,6 +15,10 @@ import { createHash } from 'node:crypto'
 import { apiBase, apiLogin, login } from './auth'
 import { browserStoragePath } from '../scripts/browser-storage.mjs'
 
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 function browserDatabasePath(): string {
   const runId = process.env.AEROLINK_E2E_RUN_ID
   if (!runId) throw new Error('AEROLINK_E2E_RUN_ID is not set for this Playwright run.')
