@@ -143,7 +143,11 @@ export const record = (c: Composed, frames: number): RunRecord => ({
   frames, end: unitDigest(c), endSummary: endSummary(c),
 })
 
-export type SectionDivergence = { frame: number; seconds: number; single: string; dual: string }
+export type SectionDivergence = {
+  frame: number; seconds: number; single: string; dual: string
+  /** Divergent frames in all; the last one; how many separate runs of them, the longest, and the current run's length. */
+  frames: number; lastFrame: number; episodes: number; longestEpisode: number; episode: number
+}
 export type Lockstep = {
   readonly single: RunRecord
   readonly dual: RunRecord
@@ -152,7 +156,7 @@ export type Lockstep = {
   readonly firstFrame: number | null
   readonly divergentFrames: number
   readonly comparedFrames: number
-  /** Per section: where it first differs, with both values there. */
+  /** Per section: where it first differs, with both values there, and how often and how long it differs. */
   readonly sectionsFirst: Record<string, SectionDivergence>
   /** Sections that differ in the end state, with both values. */
   readonly endSections: Record<string, { single: string; dual: string }>
@@ -179,8 +183,17 @@ export function lockstep(scenario: Scenario, start = scenarioStart(scenario) ?? 
     firstFrame ??= at
     const sa = sections(a), sb = sections(b)
     for (const key of new Set([...sa.keys(), ...sb.keys()])) {
-      if (sectionsFirst[key]) continue
-      if (!sameBytes(encode(sa.get(key)), encode(sb.get(key)))) sectionsFirst[key] = { frame: at, seconds: at * TICK_SECONDS, single: snippet(sa.get(key)), dual: snippet(sb.get(key)) }
+      if (sameBytes(encode(sa.get(key)), encode(sb.get(key)))) continue
+      const seen = sectionsFirst[key]
+      if (!seen) {
+        sectionsFirst[key] = { frame: at, seconds: at * TICK_SECONDS, single: snippet(sa.get(key)), dual: snippet(sb.get(key)), frames: 1, lastFrame: at, episodes: 1, longestEpisode: 1, episode: 1 }
+        continue
+      }
+      // Episodes: maximal runs of consecutive divergent frames. A one-frame shift of an event shows as short episodes.
+      if (seen.lastFrame === at - 1) seen.episode += 1
+      else { seen.episodes += 1; seen.episode = 1 }
+      seen.longestEpisode = Math.max(seen.longestEpisode, seen.episode)
+      seen.frames += 1; seen.lastFrame = at
     }
   }
   // F_0 after construction: the t = 0 poll has run.
