@@ -730,6 +730,7 @@ const FMS_PATH_REFERENCES = {
   'product/client/journey-durations.json': 'recorded spec durations the journey shard planner weighs files by; an optimisation, never a correctness input, read by every shard whatever the topology',
   'product/client/journey-durations.provenance.json': 'audit metadata for advisory journey scheduling weights; not read by the shard planner or runtime, never a correctness input, and adds no FMS observer or journey',
   'product/client/perf/browser-accounting.ts': 'the capture-only browser performance helper (#1542) reads bench DOM; browser.perf.ts invokes it outside qualification gates, and fms-perf-stats.spec.ts covers its accounting in Fast logic',
+  'product/client/perf/browser-unpaced.perf.ts': 'the unpaced browser performance host loads actual ARM FMS public modules without product API/UI; fms-perf-stats.spec.ts covers its shared one-frame producer in Fast logic; real browser execution remains a separate perf gate',
   'product/client/perf/browser.perf.ts': 'the performance harness (#1510, #1557) drives the bench in a built arm; run only by perf/run-perf.ts, never by a gate',
   'product/client/perf/headless.perf.ts': 'the performance harness (#1510) loads an arm checkout\'s bench modules; run only by perf/run-perf.ts, never by a gate',
   'product/client/perf/protocol.json': 'declared FMS workload module and extent routes consumed by the existing fms-perf-stats Fast logic owner and client validation',

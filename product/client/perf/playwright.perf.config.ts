@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// @ts-expect-error the shared JavaScript storage owner has no declarations (as in run-perf.ts).
 import { createBrowserStorage } from '../scripts/browser-storage.mjs'
 
 /**
@@ -19,9 +20,9 @@ import { createBrowserStorage } from '../scripts/browser-storage.mjs'
  */
 const clientDir = fileURLToPath(new URL('..', import.meta.url))
 const mode = process.env.AEROLINK_PERF_MODE ?? 'headless'
-if (!['headless', 'browser', 'seed'].includes(mode)) throw new Error(`unknown AEROLINK_PERF_MODE ${mode}`)
+if (!['headless', 'browser', 'seed', 'browser-unpaced'].includes(mode)) throw new Error(`unknown AEROLINK_PERF_MODE ${mode}`)
 const outputDir = process.env.AEROLINK_PERF_OUTPUT_DIR ?? join(clientDir, 'test-results', 'perf')
-const browser = mode !== 'headless'
+const browser = mode === 'browser' || mode === 'seed'
 
 const windowsDotnet = process.env.USERPROFILE ? join(process.env.USERPROFILE, '.dotnet', 'dotnet.exe') : undefined
 const posixDotnet = join(homedir(), '.dotnet', 'dotnet')
@@ -74,6 +75,7 @@ export default defineConfig({
   retries: 0,
   fullyParallel: false,
   reporter: [['list']],
+  ...(mode === 'browser-unpaced' ? { use: { ...devices['Desktop Chrome'], trace: 'off' as const, screenshot: 'off' as const, video: 'off' as const } } : {}),
   ...(browser ? {
     // A browser run takes the seed the orchestrator recorded (AEROLINK_SHOWCASE_SEED); the seed run makes it.
     ...(mode === 'browser' ? { globalSetup: '../tests/global-setup.ts' } : {}),

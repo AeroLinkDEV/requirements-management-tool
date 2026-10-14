@@ -136,12 +136,14 @@
           "single",
           "dual"
         ],
-        "setup": "NOT_IMPLEMENTED: browser-hosted actual composition and one-frame owner required.",
-        "metrics": [],
-        "requiredMetrics": [
+        "setup": "Inert browser measurement shell; declared ARM public single/dual composition and kernel.advance(1), no API, seed or product UI.",
+        "metrics": [
           "frame-duration-percentiles",
           "unpaced-throughput",
-          "retained-heap-after-GC"
+          "retained-heap-after-GC",
+          "actual-work-and-clock-boundaries",
+          "runner-outcome",
+          "sync-residency-dual-only"
         ]
       }
     },
@@ -190,12 +192,20 @@
             "scope": "Diagnostic mission-to-END only; NOT_CALIBRATED/inference DISABLED; no fixed-reference C1 extent or paired capture capability."
           },
           "browser-unpaced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 900,
-            "missing": "Real browser-hosted composition/frame owner"
+            "status": "IMPLEMENTED",
+            "executor": "single-arm-browser-unpaced",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 240,
+              "simSeconds": 60
+            },
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 900
+            },
+            "terminal": "actual-successful-scenario-end",
+            "scenarioStartUtc": "2026-09-27T14:00:00.000Z",
+            "scope": "Source mechanism; no UI/pacing/paired qualification. NOT_CALIBRATED/inference DISABLED."
           }
         }
       },
@@ -240,12 +250,20 @@
             "scope": "Existing W2 mechanism capture only; inference DISABLED, not a full C1 result."
           },
           "browser-unpaced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 5400,
-            "missing": "Real browser-hosted composition/frame owner"
+            "status": "IMPLEMENTED",
+            "executor": "single-arm-browser-unpaced",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 240,
+              "simSeconds": 60
+            },
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 5400
+            },
+            "terminal": "actual-successful-scenario-end",
+            "scenarioStartUtc": "2026-09-29T15:00:00.000Z",
+            "scope": "Source mechanism; no UI/pacing/paired qualification. NOT_CALIBRATED/inference DISABLED."
           }
         }
       },
@@ -287,12 +305,25 @@
             "missing": "Public scenario import, setup, deliberate Fly continuation and actual SYNC residency"
           },
           "browser-unpaced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 1800,
-            "missing": "Real browser-hosted composition/frame owner"
+            "status": "IMPLEMENTED",
+            "executor": "single-arm-browser-unpaced",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 240,
+              "simSeconds": 60
+            },
+            "scored": {
+              "kind": "fixed-total-after-warmup",
+              "maxTotalSimSeconds": 1800,
+              "fixedMeasuredSimSeconds": 1740
+            },
+            "terminal": "fixed-total-work-with-separate-actual-setup-outcome",
+            "scenarioStartUtc": "2026-09-29T15:00:00.000Z",
+            "scope": "Source mechanism; no UI/pacing/paired qualification. NOT_CALIBRATED/inference DISABLED.",
+            "roleByTopology": {
+              "single": "topology-comparator",
+              "dual": "dual-SYNC-residency"
+            }
           }
         }
       },
@@ -340,12 +371,20 @@
             "scope": "Diagnostic mission-to-END only; NOT_CALIBRATED/inference DISABLED; no fixed-reference C1 extent or paired capture capability."
           },
           "browser-unpaced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 3600,
-            "missing": "Real browser-hosted composition/frame owner"
+            "status": "IMPLEMENTED",
+            "executor": "single-arm-browser-unpaced",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 240,
+              "simSeconds": 60
+            },
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 3600
+            },
+            "terminal": "actual-successful-scenario-end",
+            "scenarioStartUtc": "2026-09-27T14:00:00.000Z",
+            "scope": "Source mechanism; no UI/pacing/paired qualification. NOT_CALIBRATED/inference DISABLED."
           }
         }
       },
@@ -393,12 +432,20 @@
             "scope": "Diagnostic mission-to-END only; NOT_CALIBRATED/inference DISABLED; no fixed-reference C1 extent or paired capture capability."
           },
           "browser-unpaced": {
-            "status": "NOT_IMPLEMENTED",
-            "warmup": null,
-            "scored": null,
-            "terminal": null,
-            "requiredTotalSimLimit": 900,
-            "missing": "Real browser-hosted composition/frame owner"
+            "status": "IMPLEMENTED",
+            "executor": "single-arm-browser-unpaced",
+            "warmup": {
+              "unit": "completed-frames",
+              "value": 240,
+              "simSeconds": 60
+            },
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 900
+            },
+            "terminal": "actual-successful-scenario-end",
+            "scenarioStartUtc": "2026-09-27T14:00:00.000Z",
+            "scope": "Source mechanism; no UI/pacing/paired qualification. NOT_CALIBRATED/inference DISABLED."
           }
         }
       }

@@ -6,7 +6,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
-import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { singleComposition, dualComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import { profileById, profileSummary } from '../src/fmsCdu/profile'
+import { FlightSimulator } from '../src/fmsCdu/flight'
+import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
+import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
 import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
@@ -849,7 +853,14 @@ test('the route CLI declares the actual five mission extents, hosts and topology
   expect(ui.find((route: any) => route.workload === 'W3')).toMatchObject({ warmup: null, scored: null, terminal: null })
   const unpaced = plan.routes.filter((route: any) => route.host === 'browser-unpaced')
   expect(unpaced).toHaveLength(10)
-  expect(unpaced.every((route: any) => route.status === 'NOT_IMPLEMENTED' && route.pacing === 'unpaced' && route.warmup === null && route.scored === null)).toBe(true)
+  expect(unpaced.every((route: any) => route.status === 'IMPLEMENTED' && route.pacing === 'unpaced' && route.warmup.value === 240 && route.warmup.simSeconds === 60)).toBe(true)
+  expect(unpaced.filter((route: any) => route.topology === 'single').map((route: any) => [route.workload, route.scored.kind, route.scored.maxTotalSimSeconds, route.scored.fixedMeasuredSimSeconds ?? null, route.scenarioStartUtc])).toEqual([
+    ['W1', 'scenario-end-after-warmup', 900, null, '2026-09-27T14:00:00.000Z'],
+    ['W2', 'scenario-end-after-warmup', 5400, null, '2026-09-29T15:00:00.000Z'],
+    ['W3', 'fixed-total-after-warmup', 1800, 1740, '2026-09-29T15:00:00.000Z'],
+    ['W4a', 'scenario-end-after-warmup', 3600, null, '2026-09-27T14:00:00.000Z'],
+    ['W4b', 'scenario-end-after-warmup', 900, null, '2026-09-27T14:00:00.000Z'],
+  ])
   expect(plan.routes.find((route: any) => route.workload === 'W3' && route.host === 'headless' && route.topology === 'single').role).toBe('topology-comparator')
   expect(plan.routes.find((route: any) => route.workload === 'W3' && route.host === 'headless' && route.topology === 'dual').role).toBe('dual-SYNC-residency')
 })
@@ -1013,4 +1024,70 @@ test('finite admission binds the actual public report full profile identity sepa
   expect(() => finiteMissionEvidence(recorded, accounting, report, { ...expected, profileSummary: expected.profile })).toThrow(/public finite mission report/)
   for (const wrong of [report.replace(' v10 ', ' v11 '), report.replace('fnv1a-2bd6a2ac', 'fnv1a-deadbeef')])
     expect(() => finiteMissionEvidence(recorded, accounting, wrong, expected)).toThrow(/public finite mission report/)
+})
+
+
+const unpacedModules = { adapter: { singleComposition, dualComposition }, kernel: { FmsKernel },
+  scenario: { ScenarioRunner, reportMarkdown }, profiles: { profileById, profileSummary }, gps: { GPS_MODEL_VERSION } }
+function unpacedInput(topology: 'single' | 'dual', fixed = true): UnpacedInput {
+  return { scenarioJson: JSON.stringify({ id: 'unpaced-literal', title: 'Literal work', objective: '', maxSeconds: 3,
+    startTime: '2026-09-27T14:00:00.000Z', profile: 'cma9000-s300-heli-civil',
+    steps: [{ when: { kind: 'time', seconds: fixed ? 0 : 2 }, action: { kind: 'expectAircraft', minAltitude: 0 } }] }),
+    topology, warmupFrames: 4, totalFrames: fixed ? 8 : null, maximumFrames: 14,
+    profile: { id: 'cma9000-s300-heli-civil', summary: finiteProfileSummary },
+    seeds: { constellation: 1, receivers: [101, 202] }, gpsModel: 'aerolink-cma5024-sim/1' }
+}
+function unpacedClock() {
+  let milliseconds = 0
+  return { now: () => ++milliseconds, utcNow: () => 10000 + milliseconds, timeOrigin: 10000 }
+}
+for (const topology of ['single', 'dual'] as const) test(`unpaced ${topology} actual public composition completes fixed work while preserving the t0 setup outcome`, () => {
+  // The single case uses the actual browser caller's serialized function boundary, with real public modules.
+  const execute: typeof runBrowserUnpaced = topology === 'single'
+    ? runInNewContext('(' + runBrowserUnpaced.toString() + ')', { Date, JSON, Number, Error }) : runBrowserUnpaced
+  const observed = execute(unpacedModules, unpacedInput(topology), unpacedClock())
+  expect(observed.summary).toMatchObject({ status: 'OBSERVED', qualification: 'NOT_CALIBRATED', inference: 'DISABLED',
+    work: { attempted: 8, completed: 8, warmupFrames: 4, scoredFrames: 4, totalSimSeconds: 2, scoredSimSeconds: 1 },
+    runner: { outcome: 'passed', finished: true, endedAfter: 0 }, durations: [1, 1, 1, 1], scoredWallSeconds: 0.009 })
+  expect(observed.summary.boundaries.initial).toMatchObject({ kernelTime: 0, unitClockMs: pacingEpoch, completed: 0 })
+  expect(observed.summary.boundaries.warmup).toMatchObject({ kernelTime: 10000000, unitClockMs: pacingEpoch + 1000, completed: 4 })
+  expect(observed.summary.boundaries.end).toMatchObject({ kernelTime: 20000000, unitClockMs: pacingEpoch + 2000, completed: 8 })
+  expect(observed.summary.profile.summary).toBe(finiteProfileSummary)
+  expect(observed.summary.gps.seeds).toHaveLength(topology === 'single' ? 1 : 2)
+  expect(observed.summary.gps.seeds[0]).toMatchObject({ status: 'OBSERVED_PUBLIC_RECEIVERS', constellation: 1, receivers: [101, 202] })
+  expect(observed.summary.dataset.status).toBe('OBSERVED_PUBLIC_CONTEXT')
+  if (topology === 'dual') expect(observed.summary.sync).toMatchObject({ totalFrames: 8, scoredFrames: 4, totalResidency: 1, scoredResidency: 1, firstDrop: null })
+  else expect(observed.summary.sync).toBeNull()
+  // The exact returned live composition is retained; observing it does not execute another frame.
+  expect(observed.retained.kernel.unitClockMs).toBe(pacingEpoch + 2000)
+  expect(observed.retained.runner.endedAfter).toBe(0)
+})
+test('unpaced mission END, early zero work and contradictory identity keep truthful outcomes instead of filling a fixed window', () => {
+  const input = unpacedInput('single', false)
+  const real = runBrowserUnpaced(unpacedModules, input, unpacedClock())
+  expect(real.summary).toMatchObject({ status: 'OBSERVED', work: { completed: 8, scoredFrames: 4 }, runner: { outcome: 'passed', endedAfter: 2 } })
+  const early = unpacedInput('single'); early.totalFrames = null
+  expect(runBrowserUnpaced(unpacedModules, early, unpacedClock()).summary).toMatchObject({ status: 'FAILED', work: { completed: 0, scoredFrames: 0 } })
+  expect(runBrowserUnpaced(unpacedModules, { ...input, seeds: { constellation: 1, receivers: [101, 303] } }, unpacedClock()).summary)
+    .toMatchObject({ status: 'FAILED', work: { completed: 0 }, gps: { seeds: [{ receivers: [101, 202] }] } })
+  expect(() => runBrowserUnpaced(unpacedModules, { ...input, profile: { ...input.profile, summary: 'bare ID is not a full identity' } }, unpacedClock())).toThrow(/exact ARM identity/)
+})
+test('an actual unpaced public plant exception retains failed work and never counts the faulted attempt as completed', () => {
+  const original = FlightSimulator.prototype.step
+  let calls = 0
+  FlightSimulator.prototype.step = function (...args) { if (++calls === 2) throw new Error('literal public plant failure'); return original.apply(this, args) }
+  try {
+    const record = runBrowserUnpaced(unpacedModules, unpacedInput('single'), unpacedClock())
+    expect(record.summary).toMatchObject({ status: 'FAILED', failure: 'actual kernel advance failed: literal public plant failure', work: { attempted: 2, completed: 1, scoredFrames: 0 } })
+    expect(record.retained.kernel.faulted).toBe(true)
+  } finally { FlightSimulator.prototype.step = original }
+})
+test('unpaced CLI rejects unsupported paired/rate/topology requests before any output or arm setup', ({ browserName: _browserName }, info) => {
+  for (const extra of [['--rates', '64'], ['--rounds', '2'], ['--topology', 'triple'], ['--host', 'browser-paced']]) {
+    const out = info.outputPath(`unpaced-${extra[0].slice(2)}`)
+    const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-unpaced', '--workloads', 'W1', '--topology', 'single', ...extra, '--out', out], { encoding: 'utf8' })
+    expect(child.status, child.stdout).not.toBe(0)
+    expect(existsSync(out)).toBe(false)
+    expect(child.stderr).toMatch(/overrides|not available|own host/)
+  }
 })

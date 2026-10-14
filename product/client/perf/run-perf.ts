@@ -285,6 +285,34 @@ function distIdentity(dist: string) {
   return { distSha256: hash.digest('hex'), distFiles: files }
 }
 
+/** One diagnostic browser-engine run. No product API/seed, paired allocation or inherited statistical judge. */
+function browserUnpaced() {
+  const ids = workloadIds([])
+  if (ids.length !== 1 || !options.topology) throw new Error('browser-unpaced requires one workload and explicit single/dual topology')
+  const selected = route(ids[0], options.host ?? 'browser-unpaced', options.topology)
+  if (selected.host !== 'browser-unpaced') throw new Error('browser-unpaced requires its own host')
+  if (options.blocks || options.rounds || options.rates || options.configurations || options.hours || options['cold-input'] || options['dirty-smoke'] || options.pilot)
+    throw new Error('browser-unpaced has no paired, rate, view, subset, order or statistical overrides')
+  if ((options.arm?.length ?? 0) !== 1) throw new Error('browser-unpaced takes exactly one declared arm')
+  const port = Number(process.env.AEROLINK_PERF_PORT)
+  if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error('browser-unpaced requires an explicit private AEROLINK_PERF_PORT')
+  const root = git(client, 'rev-parse', '--show-toplevel')
+  const harness = { commit: git(root, 'rev-parse', 'HEAD'), perfTree: git(root, 'rev-parse', 'HEAD:product/client/perf'),
+    lockBlob: git(root, 'rev-parse', 'HEAD:product/client/package-lock.json'), dirtyEntries: git(root, 'status', '--porcelain').split('\n').filter(Boolean).length }
+  if (harness.dirtyEntries) throw new Error('browser-unpaced requires a clean declared harness')
+  const [arm] = arms(), dir = out()
+  const cohort = { harness, protocol, runtime: environment(), vite: JSON.parse(readFileSync(join(client, 'node_modules/vite/package.json'), 'utf8')).version }
+  writeFileSync(join(dir, 'unpaced-session.json'), JSON.stringify({ kind: 'browser-unpaced', route: selected, cohort, arm: arm.identity,
+    startedAt: new Date().toISOString(), inference: 'DISABLED', qualification: 'NOT_CALIBRATED' }, null, 2), { flag: 'wx' })
+  run(dir, { kind: 'browser-unpaced', route: selected, workload: selected.workload, topology: selected.topology, arm: arm.arm, armIdentity: arm.identity, cohort }, {
+    AEROLINK_PERF_MODE: 'browser-unpaced', AEROLINK_PERF_ARM: join(arm.root, 'product/client'),
+    AEROLINK_PERF_WORKLOAD: selected.workload, AEROLINK_PERF_TOPOLOGY: selected.topology,
+  })
+  writeFileSync(join(dir, 'unpaced-end.json'), JSON.stringify({ endedAt: new Date().toISOString(), armIdentity: armIdentity(arm.root),
+    harnessCommit: git(root, 'rev-parse', 'HEAD'), dirtyEntries: git(root, 'status', '--porcelain').split('\n').filter(Boolean).length,
+    inference: 'DISABLED', qualification: 'NOT_CALIBRATED', nativeClosure: 'UNPROVEN' }, null, 2), { flag: 'wx' })
+}
+
 function browser() {
   const selectedRoute = browserRoute()
   const dir = out(), list = arms()
@@ -683,7 +711,7 @@ function report() {
   console.log(lines.join('\n'))
 }
 
-const commands: Record<string, () => void> = { prepare, headless, browser, report, 'route-plan': routePlan, 'browser-plan': browserPlan, 'browser-capture': browserCapture, 'browser-capture-report': browserCaptureReport }
+const commands: Record<string, () => void> = { prepare, headless, browser, report, 'browser-unpaced': browserUnpaced, 'route-plan': routePlan, 'browser-plan': browserPlan, 'browser-capture': browserCapture, 'browser-capture-report': browserCaptureReport }
 const command = commands[positionals[0] ?? '']
 if (!command) throw new Error(`usage: node perf/run-perf.ts <${Object.keys(commands).join('|')}> ...`)
 command()
