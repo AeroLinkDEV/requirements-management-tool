@@ -732,6 +732,7 @@ const FMS_PATH_REFERENCES = {
   'product/client/perf/browser-accounting.ts': 'the capture-only browser performance helper (#1542) reads bench DOM; browser.perf.ts invokes it outside qualification gates, and fms-perf-stats.spec.ts covers its accounting in Fast logic',
   'product/client/perf/browser.perf.ts': 'the performance harness (#1510, #1557) drives the bench in a built arm; run only by perf/run-perf.ts, never by a gate',
   'product/client/perf/headless.perf.ts': 'the performance harness (#1510) loads an arm checkout\'s bench modules; run only by perf/run-perf.ts, never by a gate',
+  'product/client/perf/protocol.json': 'declared FMS workload module and extent routes consumed by the existing fms-perf-stats Fast logic owner and client validation',
   'product/client/playwright.logic.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
   'product/client/playwright.rendered.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
   'product/client/scripts/check-fast-client-routing.mjs': 'checks the Fast manifest in the advisory Fast lane only',

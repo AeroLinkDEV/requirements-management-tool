@@ -75,6 +75,302 @@
     },
     "chromiumArgs": ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--enable-precise-memory-info"]
   },
+  "routeContract": {
+    "schema": "aerolink.fms-perf-route.v1",
+    "inference": "NOT_CALIBRATED",
+    "hosts": {
+      "headless": {
+        "executionHost": "node",
+        "pacing": "unpaced",
+        "topologies": [
+          "single",
+          "dual"
+        ],
+        "setup": "ScenarioRunner starts the declared scenario on the actual single/dual composition; arm adapter advanceTicks(1) or kernel.advance(1).",
+        "warmup": {
+          "unit": "simulation-seconds",
+          "value": 60
+        },
+        "metrics": [
+          "frame-duration-percentiles",
+          "unpaced-throughput",
+          "retained-heap-after-GC",
+          "runner-outcome",
+          "sync-residency-dual-only"
+        ]
+      },
+      "browser-paced": {
+        "executionHost": "built-product-browser-ui",
+        "pacing": "paced",
+        "topologies": [
+          "dual"
+        ],
+        "setup": "Real seeded product bench; scenario selector then Run the scenario. CDU selection does not change topology.",
+        "rates": [
+          1,
+          64
+        ],
+        "configurations": [
+          "view-off-svs-off",
+          "view-on-svs-off",
+          "view-off-svs-on",
+          "view-on-svs-on"
+        ],
+        "metrics": [
+          "simulation-slice-duration-percentiles",
+          "paced-completed-throughput",
+          "continuation-yield-gap",
+          "task-tail",
+          "pacing-task-duration",
+          "long-tasks",
+          "long-animation-frames",
+          "rAF-intervals",
+          "retained-heap-after-GC",
+          "BRT-click-to-next-paint-proxy"
+        ]
+      },
+      "browser-unpaced": {
+        "executionHost": "browser-composition-owner",
+        "pacing": "unpaced",
+        "topologies": [
+          "single",
+          "dual"
+        ],
+        "setup": "NOT_IMPLEMENTED: browser-hosted actual composition and one-frame owner required.",
+        "metrics": [],
+        "requiredMetrics": [
+          "frame-duration-percentiles",
+          "unpaced-throughput",
+          "retained-heap-after-GC"
+        ]
+      }
+    },
+    "workloads": [
+      {
+        "id": "W1",
+        "scenario": "kbtv-rnav15-advisory",
+        "source": {
+          "kind": "scenario-library",
+          "module": "src/fmsCdu/scenarioLibrary.ts"
+        },
+        "scenarioMaxSimSeconds": 900,
+        "routes": {
+          "headless": {
+            "status": "IMPLEMENTED",
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 900
+            },
+            "terminal": "scenario-runner-finished-or-maxSeconds",
+            "retain": [
+              "runnerOutcome",
+              "gpsSeeds",
+              "simulatedSeconds",
+              "measuredSimSeconds",
+              "sync"
+            ]
+          },
+          "browser-paced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 900,
+            "missing": "Public finite mission window and terminal accounting"
+          },
+          "browser-unpaced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 900,
+            "missing": "Real browser-hosted composition/frame owner"
+          }
+        }
+      },
+      {
+        "id": "W2",
+        "scenario": "87n-offshore-sar",
+        "source": {
+          "kind": "heli-mission",
+          "module": "src/fmsCdu/heliDemo.ts"
+        },
+        "scenarioMaxSimSeconds": 5400,
+        "routes": {
+          "headless": {
+            "status": "IMPLEMENTED",
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 5400
+            },
+            "terminal": "scenario-runner-finished-or-maxSeconds",
+            "retain": [
+              "runnerOutcome",
+              "gpsSeeds",
+              "simulatedSeconds",
+              "measuredSimSeconds",
+              "sync"
+            ]
+          },
+          "browser-paced": {
+            "status": "IMPLEMENTED",
+            "warmup": {
+              "unit": "wall-seconds",
+              "value": 15
+            },
+            "scored": {
+              "kind": "completed-work-by-rate",
+              "simSecondsByRate": {
+                "1": 60,
+                "64": 2400
+              }
+            },
+            "terminal": "still-running-no-stall-no-discard",
+            "scope": "Existing W2 mechanism capture only; inference DISABLED, not a full C1 result."
+          },
+          "browser-unpaced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 5400,
+            "missing": "Real browser-hosted composition/frame owner"
+          }
+        }
+      },
+      {
+        "id": "W3",
+        "scenario": "perf-w3-dual-sync",
+        "source": {
+          "kind": "inline-definition",
+          "module": "perf/protocol.json#/headless/workloads/2/definition"
+        },
+        "scenarioMaxSimSeconds": 1800,
+        "routes": {
+          "headless": {
+            "status": "IMPLEMENTED",
+            "scored": {
+              "kind": "fixed-total-after-warmup",
+              "maxTotalSimSeconds": 1800,
+              "fixedMeasuredSimSeconds": 1740
+            },
+            "terminal": "fixed-total-1800-including-warmup",
+            "retain": [
+              "runnerOutcome",
+              "gpsSeeds",
+              "simulatedSeconds",
+              "measuredSimSeconds",
+              "sync"
+            ],
+            "roleByTopology": {
+              "single": "topology-comparator",
+              "dual": "dual-SYNC-residency"
+            }
+          },
+          "browser-paced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 1800,
+            "missing": "Public scenario import, setup, deliberate Fly continuation and actual SYNC residency"
+          },
+          "browser-unpaced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 1800,
+            "missing": "Real browser-hosted composition/frame owner"
+          }
+        }
+      },
+      {
+        "id": "W4a",
+        "scenario": "gps1-fde-then-gps2",
+        "source": {
+          "kind": "scenario-library",
+          "module": "src/fmsCdu/scenarioLibrary.ts"
+        },
+        "scenarioMaxSimSeconds": 3600,
+        "routes": {
+          "headless": {
+            "status": "IMPLEMENTED",
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 3600
+            },
+            "terminal": "scenario-runner-finished-or-maxSeconds",
+            "retain": [
+              "runnerOutcome",
+              "gpsSeeds",
+              "simulatedSeconds",
+              "measuredSimSeconds",
+              "sync"
+            ]
+          },
+          "browser-paced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 3600,
+            "missing": "Public finite mission window and terminal accounting"
+          },
+          "browser-unpaced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 3600,
+            "missing": "Real browser-hosted composition/frame owner"
+          }
+        }
+      },
+      {
+        "id": "W4b",
+        "scenario": "dead-reckoning",
+        "source": {
+          "kind": "scenario-library",
+          "module": "src/fmsCdu/scenarioLibrary.ts"
+        },
+        "scenarioMaxSimSeconds": 900,
+        "routes": {
+          "headless": {
+            "status": "IMPLEMENTED",
+            "scored": {
+              "kind": "scenario-end-after-warmup",
+              "maxTotalSimSeconds": 900
+            },
+            "terminal": "scenario-runner-finished-or-maxSeconds",
+            "retain": [
+              "runnerOutcome",
+              "gpsSeeds",
+              "simulatedSeconds",
+              "measuredSimSeconds",
+              "sync"
+            ]
+          },
+          "browser-paced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 900,
+            "missing": "Public finite mission window and terminal accounting"
+          },
+          "browser-unpaced": {
+            "status": "NOT_IMPLEMENTED",
+            "warmup": null,
+            "scored": null,
+            "terminal": null,
+            "requiredTotalSimLimit": 900,
+            "missing": "Real browser-hosted composition/frame owner"
+          }
+        }
+      }
+    ]
+  },
   "statistics": {
     "revision": 3,
     "revisionNote": "Revision 3 (#1536), declared before any run under it. A headless session now opens with a priming pass before block 0 (headless.priming): one unscored run per arm per workload x topology, arm A then arm B. Priming runs are recorded with primed: true and never analysed (no test, interval, comparison 5 or absolute level uses them), and they are outside the failed-run rule. A headless run set is judged only when it comes from exactly one session (blocks are numbered from 0 in each session) and that session recorded the declared priming pass with every priming run present and passed; otherwise it is not judged. Reason: every session opened on arm A, and in the revision-2 A/A the session's first three processes were cold, about 65 s in all: p50 +36.0% (W1 single), +38.8% (W1 dual) and +68.7% (W2 single) against the median of the same arm and cell. Every later first run of a cell, on either arm, was within -2.1% to +2.2%. In an A/B, A is the base, so B/A - 1 was biased toward B faster, which hides slowdowns. Nothing else in this block changed: the test, R, Holm over the same 40 comparisons, alpha and the failed-run rule are as in revision 2. Revision 2 (#1519 review) replaced revision 1's two-sided bootstrap p (0 far too often under the null: a 21% family fail rate over 150 ABBA-preserving relabellings of the real A/A data) with the within-block permutation test. Recorded verdicts stand under their own revisions: the revision-1 A/A FAILED, the revision-2 A/A PASSED (#1510, 6 Oct). Neither carries over: revision 3 applies only to runs taken after it was committed, and it needs its own quiet-host A/A before any A/B budget claim.",

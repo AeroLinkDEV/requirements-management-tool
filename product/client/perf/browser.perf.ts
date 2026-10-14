@@ -23,6 +23,13 @@ const protocol = JSON.parse(readFileSync(new URL('./protocol.json', import.meta.
 const rate = Number(process.env.AEROLINK_PERF_RATE)
 const configuration = protocol.browser.configurations.find((entry: { id: string }) => entry.id === process.env.AEROLINK_PERF_CONFIGURATION)
 const result = process.env.AEROLINK_PERF_RESULT
+const workload = process.env.AEROLINK_PERF_WORKLOAD
+const topology = process.env.AEROLINK_PERF_TOPOLOGY
+const family = protocol.routeContract.workloads.find((entry: { id: string }) => entry.id === workload)
+const declaredRoute = family?.routes['browser-paced']
+if (!family || declaredRoute.status !== 'IMPLEMENTED' || topology !== 'dual' || family.scenario !== protocol.browser.scenario)
+  throw new Error(`unsupported product UI route ${workload}/browser-paced/${topology}`)
+const route = { schema: protocol.routeContract.schema, id: `${workload}/browser-paced/${topology}/v1`, workload, scenario: family.scenario, topology, ...declaredRoute }
 type Recorder = { __fmsPerf: { begin(): number; boundary(label: string): unknown; keyDispatch(): void; keyOutcome(): void; drain(): RecordedWindow['events']; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
 // The protocol declares the run schema this owner writes; a mismatch is a protocol edit without a harness edit.
 if (protocol.browser.accounting.schema !== BROWSER_RUN_SCHEMA) throw new Error(`protocol.json declares ${protocol.browser.accounting.schema}; this owner writes ${BROWSER_RUN_SCHEMA}`)
@@ -113,7 +120,7 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
   const durations = measured.events.map(entry => entry.duration)
   const step = durations.length ? durations.reduce((g, d) => { let [a, b] = [g, d]; while (b) [a, b] = [b, a % b]; return a }) : null
   const summary = {
-    schema: BROWSER_RUN_SCHEMA, accountingRevision: protocol.browser.accounting.revision, scenario: protocol.browser.scenario, rate, configuration: configuration.id,
+    schema: BROWSER_RUN_SCHEMA, accountingRevision: protocol.browser.accounting.revision, route, workload, topology, scenario: family.scenario, rate, configuration: configuration.id,
     windowSimSeconds: accounting?.simSeconds ?? null, wallSeconds: accounting?.wallSeconds ?? null, throughput: accounting?.achievedRate ?? null,
     accounting, refusal, window: { begin: measured.begin, end: measured.end, steps, stalled, targetFrames },
     capture: captureEvidence(measured, accounting), rawObservation: measured,

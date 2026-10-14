@@ -34,7 +34,7 @@ const { values: options, positionals } = parseArgs({
     out: { type: 'string' }, work: { type: 'string' }, arm: { type: 'string', multiple: true }, sha: { type: 'string', multiple: true },
     blocks: { type: 'string' }, rounds: { type: 'string' }, workloads: { type: 'string' }, rates: { type: 'string' },
     configurations: { type: 'string' }, hours: { type: 'string' }, pilot: { type: 'boolean' }, 'dirty-smoke': { type: 'boolean' },
-    'cold-input': { type: 'string' },
+    'cold-input': { type: 'string' }, host: { type: 'string' }, topology: { type: 'string' },
   },
 })
 
@@ -44,6 +44,51 @@ const pairs = (list: string[] | undefined) => Object.fromEntries((list ?? []).ma
   if (at < 1) throw new Error(`expected NAME=value, got ${entry}`)
   return [entry.slice(0, at), entry.slice(at + 1)]
 })) as Record<string, string>
+
+/** Versioned work declarations used by planning and the actual child dispatcher, never a simulation adapter. */
+function workloadIds(defaults: string[]) {
+  const ids = options.workloads?.split(',') ?? defaults
+  if (!ids.length || new Set(ids).size !== ids.length) throw new Error('workloads must be nonempty and distinct')
+  for (const id of ids) if (!protocol.routeContract.workloads.some((entry: { id: string }) => entry.id === id)) throw new Error(`unknown workload ${id}`)
+  return ids
+}
+function route(workload: string, host: string, topology: string, implemented = true) {
+  const family = protocol.routeContract.workloads.find((entry: { id: string }) => entry.id === workload)
+  if (!family) throw new Error(`unknown workload ${workload}`)
+  const owner = protocol.routeContract.hosts[host]
+  if (!owner) throw new Error(`unknown route host ${host}`)
+  if (!owner.topologies.includes(topology)) throw new Error(`topology ${topology} is not available for ${host}`)
+  const declared = family.routes[host]
+  if (implemented && declared.status !== 'IMPLEMENTED') throw new Error(`route ${workload}/${host}/${topology} is NOT_IMPLEMENTED`)
+  const source = protocol.headless.workloads.find((entry: { id: string }) => entry.id === workload)
+  if (source?.scenario !== family.scenario) throw new Error(`route scenario disagrees with executable workload ${workload}`)
+  if (host === 'headless' && (owner.warmup.value !== protocol.warmupSimSeconds ||
+    (source.windowSimSeconds ?? null) !== (declared.scored.kind === 'fixed-total-after-warmup' ? declared.scored.maxTotalSimSeconds : null)))
+    throw new Error(`route extent disagrees with executable workload ${workload}`)
+  if (host === 'browser-paced' && declared.status === 'IMPLEMENTED' && (family.scenario !== protocol.browser.scenario ||
+    declared.warmup.value !== protocol.browser.warmupWallSeconds || JSON.stringify(declared.scored.simSecondsByRate) !== JSON.stringify(protocol.browser.windowSimSeconds)))
+    throw new Error(`route extent disagrees with executable browser workload ${workload}`)
+  return { schema: protocol.routeContract.schema, id: `${workload}/${host}/${topology}/v1`, workload,
+    scenario: family.scenario, source: family.source, host, topology, ...owner, ...declared,
+    metrics: declared.status === 'IMPLEMENTED' ? owner.metrics.filter((metric: string) => metric !== 'sync-residency-dual-only' || topology === 'dual') : [], role: declared.roleByTopology?.[topology] ?? null }
+}
+function browserRoute() {
+  const ids = workloadIds(['W2'])
+  if (ids.length !== 1) throw new Error('one browser workload is required')
+  const selected = route(ids[0], options.host ?? 'browser-paced', options.topology ?? 'dual')
+  if (selected.host !== 'browser-paced') throw new Error('the product UI dispatcher requires browser-paced')
+  return selected
+}
+function routePlan() {
+  const ids = workloadIds(protocol.routeContract.workloads.map((entry: { id: string }) => entry.id))
+  const hosts = options.host ? [options.host] : Object.keys(protocol.routeContract.hosts)
+  const routes = ids.flatMap(id => hosts.flatMap(host => {
+    const owner = protocol.routeContract.hosts[host]
+    if (!owner) throw new Error(`unknown route host ${host}`)
+    return (options.topology ? [options.topology] : owner.topologies).map((topology: string) => route(id, host, topology, false))
+  }))
+  console.log(JSON.stringify({ schema: 'aerolink.fms-perf-route-plan.v1', inference: 'NOT_CALIBRATED', routes }, null, 2))
+}
 
 /** An arm's identity: commit and the tree hashes of what decides the client's behaviour. Refuses a dirty arm. */
 function armIdentity(root: string) {
@@ -147,8 +192,12 @@ function run(dir: string, record: Record<string, unknown>, env: Record<string, s
   const monotonicEndedAt = performance.now()
   writeFileSync(join(dir, 'logs', `${name}.log`), `${child.stdout ?? ''}\n${child.stderr ?? ''}`)
   const result = existsSync(resultPath) ? JSON.parse(readFileSync(resultPath, 'utf8')) : null
+  const declaredRoute = record.route as { id: string; workload: string; scenario: string; topology: string } | undefined
+  const routeMatches = !declaredRoute || (result?.scenario === declaredRoute.scenario && result?.topology === declaredRoute.topology &&
+    (record.kind === 'headless' ? result?.workload === declaredRoute.workload : result?.route?.id === declaredRoute.id))
   const entry: RunRecord = {
-    index, ...record, startedAt, wallSeconds, monotonicStartedAt, monotonicEndedAt, exitCode: child.status, status: child.status === 0 && result ? 'passed' : 'failed',
+    index, ...record, startedAt, wallSeconds, monotonicStartedAt, monotonicEndedAt, exitCode: child.status, status: child.status === 0 && result && routeMatches ? 'passed' : 'failed',
+    routeIdentityRefusal: routeMatches ? null : 'actual child workload/scenario/topology disagrees with dispatched route',
     host: { quietBefore: quiet, busyPercentDuringRun: busy(before, cpus()), powerPlan: powerPlan() }, result,
   }
   appendFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify(entry)}\n`)
@@ -177,13 +226,15 @@ function begin(dir: string, kind: string, extra: Record<string, unknown>) {
 }
 
 function headless() {
+  const workloads = workloadIds(protocol.headless.workloads.map((w: { id: string }) => w.id))
+  if (options.topology || (options.host && options.host !== 'headless')) throw new Error('headless host/topologies are fixed by protocol; use route-plan to inspect them')
+  const routes = workloads.flatMap(workload => protocol.headless.topologies.map((topology: string) => route(workload, 'headless', topology)))
   const dir = out(), list = arms()
   if (list.length !== 2 || !list.some(a => a.arm === 'A') || !list.some(a => a.arm === 'B')) throw new Error('headless runs need --arm A=... and --arm B=...')
   const blocks = Number(options.blocks)
-  const workloads = (options.workloads?.split(',') ?? protocol.headless.workloads.map((w: { id: string }) => w.id))
   const schedule = headlessSchedule(blocks, workloads, protocol.headless.topologies)
   const priming = primingPlan(workloads, protocol.headless.topologies)
-  const session = begin(dir, 'headless', { arms: list.map(({ arm, identity }) => ({ arm, ...identity })), blocks, workloads, priming })
+  const session = begin(dir, 'headless', { arms: list.map(({ arm, identity }) => ({ arm, ...identity })), blocks, workloads, priming, routes })
   const started = Date.now(), blockSeconds: number[] = [], primedRuns: { index: number; status: string }[] = []
   let blockStart = started, stopped: string | null = null
   for (const { primed, block, slot, arm: name, runs } of schedule) {
@@ -206,7 +257,7 @@ function headless() {
     }
     const arm = list.find(a => a.arm === name)!
     for (const { position, workload, topology } of runs) {
-      const entry = run(dir, { kind: 'headless', primed, block, slot, position, arm: arm.arm, armIdentity: arm.identity, workload, topology }, {
+      const entry = run(dir, { kind: 'headless', primed, block, slot, position, arm: arm.arm, armIdentity: arm.identity, workload, topology, route: route(workload, 'headless', topology) }, {
         AEROLINK_PERF_MODE: 'headless', AEROLINK_PERF_ARM: join(arm.root, 'product', 'client'), AEROLINK_PERF_WORKLOAD: workload,
         AEROLINK_PERF_TOPOLOGY: topology, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --expose-gc`.trim(),
       })
@@ -234,6 +285,7 @@ function distIdentity(dist: string) {
 }
 
 function browser() {
+  const selectedRoute = browserRoute()
   const dir = out(), list = arms()
   if (list.length !== 1) throw new Error('browser runs take one arm (--arm B=<checkout>)')
   const [arm] = list
@@ -243,7 +295,7 @@ function browser() {
   const rates: number[] = options.rates?.split(',').map(Number) ?? protocol.browser.rates
   const configurations: string[] = options.configurations?.split(',') ?? protocol.browser.configurations.map((c: { id: string }) => c.id)
   const cells = configurations.flatMap(configuration => rates.map(rate => ({ configuration, rate })))
-  const session = begin(dir, 'browser', { arms: [{ arm: arm.arm, ...arm.identity, ...served }], rounds, cells })
+  const session = begin(dir, 'browser', { arms: [{ arm: arm.arm, ...arm.identity, ...served }], rounds, cells, route: selectedRoute })
 
   // One template database, seeded once per session; every run's fresh API process starts on its own copy of it. The
   // seed's files are named per session, so a reused --out keeps an earlier session's seed evidence, and its SHA-256 is
@@ -279,8 +331,9 @@ function browser() {
         cpSync(join(template, 'evidence'), storage.evidence, { recursive: true })
         try {
           // The served dist digest is part of the browser arm's identity: the report never pools two builds in a cell.
-          run(dir, { kind: 'browser', sessionStartedAt: session.startedAt, block: round, round, position, arm: arm.arm, armIdentity: { ...arm.identity, ...served }, seed: seedRecord, configuration, rate }, {
+          run(dir, { kind: 'browser', sessionStartedAt: session.startedAt, block: round, round, position, arm: arm.arm, armIdentity: { ...arm.identity, ...served }, seed: seedRecord, configuration, rate, route: selectedRoute }, {
             AEROLINK_PERF_MODE: 'browser', AEROLINK_PERF_DIST: dist, AEROLINK_E2E_RUN_ID: runId,
+            AEROLINK_PERF_WORKLOAD: selectedRoute.workload, AEROLINK_PERF_TOPOLOGY: selectedRoute.topology,
             AEROLINK_SHOWCASE_SEED: readFileSync(seedPath, 'utf8'), AEROLINK_PERF_RATE: String(rate), AEROLINK_PERF_CONFIGURATION: configuration,
           })
         } finally { removeBrowserStorage(runId) }
@@ -295,10 +348,12 @@ function browser() {
 /** One fixed same-source instrument study. Actual execution still requires the separately reviewed 446d outer
  * owner and quiet-window admission. This process is not the independent deadline/closure authority. */
 function browserPlan() {
+  browserRoute()
   const plan = browserCapturePlan()
   console.log(JSON.stringify({ ...plan, manifestSha256: digest(plan) }, null, 2))
 }
 function browserCapture() {
+  const selectedRoute = browserRoute()
   const startedAt = new Date().toISOString(), began = performance.now(), deadline = began + protocol.browser.capture.bounds.measurementSeconds * 1000
   if (!options['cold-input'] || options['dirty-smoke'] || options.rounds || options.rates || options.configurations || options.hours)
     throw new Error('paired capture requires a sealed --cold-input; no dirty, order, subset or cap override')
@@ -326,7 +381,7 @@ function browserCapture() {
   if (harness.dirtyEntries || !harness.apiAssemblySha256) throw new Error('paired capture needs a clean harness and exact built API provenance')
   if (closure.apiTree !== harness.apiTree || closure.apiAssemblySha256 !== harness.apiAssemblySha256) throw new Error('cold seed writer API identity disagrees with the harness')
   const cohort = { harness, runtime: environment(), protocol }
-  const session = { id: randomUUID(), plan, kind: 'browser-capture', startedAt,
+  const session = { id: randomUUID(), plan, route: selectedRoute, kind: 'browser-capture', startedAt,
     monotonicStart: began, deadline, cohort, arms: servedArms, cold, closure: 'UNPROVEN' }
   writeFileSync(join(dir, 'paired-session.json'), JSON.stringify(session, null, 2), { flag: 'wx' })
   let stopped: string | null = null
@@ -340,9 +395,10 @@ function browserCapture() {
       copyColdPayload(archive, storage.root, entries)
       const copiedInputs = coldPayload(storage.root), copySha256 = digest(copiedInputs)
       // Preserve every raw failed record and disposable run input. Outer owner closes all writers before cleanup.
-      const entry = run(dir, { kind: 'browser-capture', lineage: { session: session.id, manifest: digest(plan), ...slot },
+      const entry = run(dir, { kind: 'browser-capture', route: selectedRoute, lineage: { session: session.id, manifest: digest(plan), ...slot },
         arm: slot.arm, armIdentity: current, servedAtEnd: null, cold, copySha256, copiedInputs, cohort, storageRoot: storage.root }, {
         AEROLINK_PERF_MODE: 'browser', AEROLINK_PERF_DIST: join(arm.root, 'product/client/dist'), AEROLINK_E2E_RUN_ID: runId,
+        AEROLINK_PERF_WORKLOAD: selectedRoute.workload, AEROLINK_PERF_TOPOLOGY: selectedRoute.topology,
         AEROLINK_SHOWCASE_SEED: readFileSync(join(dir, 'cold/seed.json'), 'utf8'),
         AEROLINK_PERF_RATE: String(slot.rate), AEROLINK_PERF_CONFIGURATION: slot.configuration,
       }, deadline, 180_000)
@@ -561,7 +617,7 @@ function report() {
       if (!rows.length) continue
       const show = (measure: string, scale = 1) => {
         const level = medianLevel(rows.map(e => measures[measure](e.result!) / scale), stats)
-        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (±${width(level, 2)})`
+        return `${fixed(level.estimate)} [${fixed(level.low)}, ${fixed(level.high)}] (Â±${width(level, 2)})`
       }
       const sync = rows[0].result!.sync as { residency: number; firstDrop: { simSeconds: number; reason: string | null } | null } | null
       const drops = [...new Set(rows.map(e => JSON.stringify((e.result!.sync as typeof sync)?.firstDrop ?? null)))]
@@ -605,7 +661,7 @@ function report() {
           `| Arm (commit/src/dist) | Configuration | Rate | runs | ${Object.keys(browserMeasures).join(' | ')} |`, `|---|---|---|---|${Object.keys(browserMeasures).map(() => '---').join('|')}|`)
         lines.push(`| ${arm} | ${configuration} | ${rate}x | ${cellRows.length} | ${Object.keys(browserMeasures).map(name => {
           const level = levels[name]; const scale = name === 'heap' ? 2 ** 20 : 1; const digits = name === 'achieved / selected' ? 3 : 1
-          return level ? `${fixed(level.estimate / scale, digits)} [${fixed(level.low / scale, digits)}, ${fixed(level.high / scale, digits)}] (±${width(level, 1)})` : 'n/a'
+          return level ? `${fixed(level.estimate / scale, digits)} [${fixed(level.low / scale, digits)}, ${fixed(level.high / scale, digits)}] (Â±${width(level, 1)})` : 'n/a'
         }).join(' | ')} |`, '')
       }
       const steps = [...new Set(rows.map(e => (e.result as Record<string, any>).interaction.resolutionStepMs))]
@@ -625,7 +681,7 @@ function report() {
   console.log(lines.join('\n'))
 }
 
-const commands: Record<string, () => void> = { prepare, headless, browser, report, 'browser-plan': browserPlan, 'browser-capture': browserCapture, 'browser-capture-report': browserCaptureReport }
+const commands: Record<string, () => void> = { prepare, headless, browser, report, 'route-plan': routePlan, 'browser-plan': browserPlan, 'browser-capture': browserCapture, 'browser-capture-report': browserCaptureReport }
 const command = commands[positionals[0] ?? '']
 if (!command) throw new Error(`usage: node perf/run-perf.ts <${Object.keys(commands).join('|')}> ...`)
 command()

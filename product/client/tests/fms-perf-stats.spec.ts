@@ -2,7 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { runInNewContext } from 'node:vm'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { startKernelPacing } from '../src/fmsCdu/benchPacing'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
@@ -810,4 +810,54 @@ test('the actual recorder drains queued EventTiming before sealing its scored wi
   const begin = page.__fmsPerf.begin()
   observers.find(observer => observer.type === 'event')!.pending.push({ startTime: begin + 0.5, name: 'click', duration: 16, processingStart: begin + 0.5, processingEnd: begin + 1, interactionId: 2 })
   expect(page.__fmsPerf.finish().events).toMatchObject([{ name: 'click', duration: 16, interaction: 2 }])
+})
+
+test('browser plan refuses an unimplemented workload instead of silently substituting 87N', () => {
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'browser-plan', '--workloads', 'W1'], { encoding: 'utf8' })
+  expect(child.status, child.stdout).not.toBe(0)
+  expect(child.stderr).toContain('route W1/browser-paced/dual is NOT_IMPLEMENTED')
+})
+
+test('the route CLI declares the actual five mission extents, hosts and topology limits', () => {
+  const child = spawnSync(process.execPath, ['perf/run-perf.ts', 'route-plan'], { encoding: 'utf8' })
+  expect(child.status, child.stderr).toBe(0)
+  const plan = JSON.parse(child.stdout)
+  expect(plan.schema).toBe('aerolink.fms-perf-route-plan.v1')
+  expect(plan.inference).toBe('NOT_CALIBRATED')
+  expect(plan.routes).toHaveLength(25)
+  const headless = plan.routes.filter((route: any) => route.host === 'headless' && route.topology === 'single')
+  expect(headless.map((route: any) => [route.workload, route.scenario, route.source.kind, route.scored.maxTotalSimSeconds, route.warmup.unit, route.warmup.value, route.scored.kind, route.scored.fixedMeasuredSimSeconds ?? null])).toEqual([
+    ['W1', 'kbtv-rnav15-advisory', 'scenario-library', 900, 'simulation-seconds', 60, 'scenario-end-after-warmup', null],
+    ['W2', '87n-offshore-sar', 'heli-mission', 5400, 'simulation-seconds', 60, 'scenario-end-after-warmup', null],
+    ['W3', 'perf-w3-dual-sync', 'inline-definition', 1800, 'simulation-seconds', 60, 'fixed-total-after-warmup', 1740],
+    ['W4a', 'gps1-fde-then-gps2', 'scenario-library', 3600, 'simulation-seconds', 60, 'scenario-end-after-warmup', null],
+    ['W4b', 'dead-reckoning', 'scenario-library', 900, 'simulation-seconds', 60, 'scenario-end-after-warmup', null],
+  ])
+  expect(headless.every((route: any) => route.status === 'IMPLEMENTED' && route.pacing === 'unpaced' && route.metrics.includes('frame-duration-percentiles'))).toBe(true)
+  const ui = plan.routes.filter((route: any) => route.host === 'browser-paced')
+  expect(ui.map((route: any) => [route.workload, route.topology, route.status])).toEqual([
+    ['W1', 'dual', 'NOT_IMPLEMENTED'], ['W2', 'dual', 'IMPLEMENTED'], ['W3', 'dual', 'NOT_IMPLEMENTED'], ['W4a', 'dual', 'NOT_IMPLEMENTED'], ['W4b', 'dual', 'NOT_IMPLEMENTED'],
+  ])
+  expect(ui[1]).toMatchObject({ warmup: { unit: 'wall-seconds', value: 15 }, scored: { kind: 'completed-work-by-rate', simSecondsByRate: { '1': 60, '64': 2400 } }, terminal: 'still-running-no-stall-no-discard' })
+  expect(ui.filter((route: any) => route.workload !== 'W2').every((route: any) => route.warmup === null && route.scored === null && route.terminal === null)).toBe(true)
+  const unpaced = plan.routes.filter((route: any) => route.host === 'browser-unpaced')
+  expect(unpaced).toHaveLength(10)
+  expect(unpaced.every((route: any) => route.status === 'NOT_IMPLEMENTED' && route.pacing === 'unpaced' && route.warmup === null && route.scored === null)).toBe(true)
+  expect(plan.routes.find((route: any) => route.workload === 'W3' && route.host === 'headless' && route.topology === 'single').role).toBe('topology-comparator')
+  expect(plan.routes.find((route: any) => route.workload === 'W3' && route.host === 'headless' && route.topology === 'dual').role).toBe('dual-SYNC-residency')
+})
+
+test('execution route refusal precedes output, arm and child setup', ({ browserName: _browserName }, info) => {
+  for (const [command, workload, topology, message] of [
+    ['browser', 'W1', 'dual', 'route W1/browser-paced/dual is NOT_IMPLEMENTED'],
+    ['browser-capture', 'W3', 'dual', 'route W3/browser-paced/dual is NOT_IMPLEMENTED'],
+    ['browser', 'W2', 'single', 'topology single is not available for browser-paced'],
+    ['headless', 'UNKNOWN', 'dual', 'unknown workload UNKNOWN'],
+  ]) {
+    const output = info.outputPath(`${command}-${workload}-${topology}`)
+    const child = spawnSync(process.execPath, ['perf/run-perf.ts', command, '--workloads', workload, ...(command === 'headless' ? [] : ['--topology', topology]), '--out', output], { encoding: 'utf8' })
+    expect(child.status).not.toBe(0)
+    expect(child.stderr).toContain(message)
+    expect(existsSync(output), 'unsupported work refuses before any output/seed/child launch').toBe(false)
+  }
 })
