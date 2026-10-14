@@ -510,7 +510,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
       const identity={original:arm.original,effectiveSourceSha256:arm.effectiveSourceSha256,overlaySha256:manifest.overlaySha256,harness:manifest.harness,build,manifestSha256:digest(manifest),rate:slot.rate,configuration:slot.configuration}
       const entry=run(dir,{kind:'browser-w3',route:selectedRoute,lineage:{sessionId:session.id,manifest:digest(plan),...slot},identity,cold,copiedInputs:coldPayload(storage.root),storageRoot:storage.root},
         {AEROLINK_PERF_MODE:'browser',AEROLINK_PERF_DIST:join(arm.root,'product/client/dist'),AEROLINK_PERF_ARM:join(arm.root,'product/client'),AEROLINK_E2E_RUN_ID:runId,
-          AEROLINK_SHOWCASE_SEED:readFileSync(join(input,'seed.json'),'utf8'),AEROLINK_PERF_WORKLOAD:'W3',AEROLINK_PERF_TOPOLOGY:'dual',AEROLINK_PERF_RATE:String(slot.rate),AEROLINK_PERF_CONFIGURATION:slot.configuration,AEROLINK_PERF_W3_IDENTITY:JSON.stringify(identity)},deadline,protocol.browser.w3Recipe.executorLimitSeconds*1000)
+          AEROLINK_SHOWCASE_SEED:readFileSync(join(input,'seed.json'),'utf8'),AEROLINK_PERF_WORKLOAD:selectedRoute.workload,AEROLINK_PERF_TOPOLOGY:selectedRoute.topology,AEROLINK_PERF_RATE:String(slot.rate),AEROLINK_PERF_CONFIGURATION:slot.configuration,AEROLINK_PERF_W3_IDENTITY:JSON.stringify(identity)},deadline,protocol.browser.w3Recipe.executorLimitSeconds*1000)
       if(entry.status!=='passed')throw new Error('W3 failed run retained; no retry or later favorable substitution')
     }
   } catch(error){stopped=error instanceof Error?error.message:'interrupted';throw error}

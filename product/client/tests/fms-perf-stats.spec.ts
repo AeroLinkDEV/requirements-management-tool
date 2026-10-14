@@ -139,7 +139,7 @@ test('a successful W3 child result names its dispatched route: run classificatio
   expect(plan.status,plan.stderr).toBe(0)
   const dispatched=JSON.parse(plan.stdout).routes[0]
   expect([dispatched.id,dispatched.workload,dispatched.scenario,dispatched.topology]).toEqual(['W3/browser-paced/dual/v1','W3','perf-w3-dual-sync','dual'])
-  // The child's own route as browser.perf.ts builds it from AEROLINK_PERF_WORKLOAD=W3 and AEROLINK_PERF_TOPOLOGY=dual.
+  // A hand-written literal copy of the child's route for W3/dual; browser.perf.ts route construction is not executed here.
   const child={schema:'aerolink.fms-perf-route.v1',id:'W3/browser-paced/dual/v1',workload:'W3',scenario:'perf-w3-dual-sync',topology:'dual'}
   const {raw,expected,identity}=literalW3()
   const summary=w3RunSummary({schema:'aerolink.fms-perf-w3-prefix.v1',route:child,rate:64,configuration:'view-off-svs-off',identity,expected,observation:raw,
@@ -148,7 +148,7 @@ test('a successful W3 child result names its dispatched route: run classificatio
   const written=JSON.parse(JSON.stringify(summary)),record={kind:'browser-w3',route:dispatched}
   expect(runClassification(record,0,written)).toEqual({status:'passed',routeIdentityRefusal:null})
   // The imported scenario keeps its own identity beside the route's.
-  expect(written).toMatchObject({scenario:'perf-w3-dual-sync',topology:'dual',expected:{scenario:'literal-w3-prefix'},scenarioInput:{sourceScenario:'perf-w3-dual-sync',sha256:'a'.repeat(64)}})
+  expect(written).toMatchObject({workload:'W3',scenario:'perf-w3-dual-sync',topology:'dual',expected:{scenario:'literal-w3-prefix'},scenarioInput:{sourceScenario:'perf-w3-dual-sync',sha256:'a'.repeat(64)}})
   for(const changed of [{...written,scenario:'perf-87n-offshore-sar'},{...written,topology:'single'},{...written,route:{...written.route,id:'W3/browser-paced/dual/v2'}}])
     expect(runClassification(record,0,changed)).toEqual({status:'failed',routeIdentityRefusal:'actual child workload/scenario/topology disagrees with dispatched route'})
   expect(runClassification(record,1,written)).toEqual({status:'failed',routeIdentityRefusal:null})
