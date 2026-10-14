@@ -16,7 +16,7 @@ import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
 import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, archiveW3ColdInput, w3EndRecord, w3PairedPlan } from '../perf/browser-capture'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, archiveW3ColdInput, runRow, w3EndRecord, w3PairedPlan, w3SessionRecord } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, runClassification, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
@@ -192,6 +192,41 @@ test('a W3 session archives the sealed seed and writer closure beside the cold p
   const other=join(root,'other');mkdirSync(other)
   writeFileSync(join(input,'seed.json'),'{"literal":"changed"}')
   expect(()=>archiveW3ColdInput(input,other,entries,cold)).toThrow('W3 archived seed or writer closure bytes disagree with the sealed cold input')
+})
+test('a W3 runs.jsonl row binds its child result and slot identity by hash to their one on-disk copy; other kinds keep the inline result',()=>{
+  const dir=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-row-'));mkdirSync(join(dir,'runs'))
+  const sha=(path:string)=>createHash('sha256').update(readFileSync(path)).digest('hex')
+  const identity={build:{dependencies:Array.from({length:2000},(_,i)=>({path:`product/client/node_modules/p${i}/index.js`,sha256:'d'.repeat(64)}))},rate:1,configuration:'view-on-svs-off'}
+  const result={route:{id:'W3/browser-paced/dual/v1'},refusal:null,accounting:{status:'OBSERVED'},identity,rawObservation:{frames:'f'.repeat(200_000)}}
+  const resultPath=join(dir,'runs','run-0000.json');writeFileSync(resultPath,JSON.stringify(result,null,2))
+  const entry={index:0,kind:'browser-w3',route:{id:'W3/browser-paced/dual/v1'},lineage:{slot:12,arm:'B'},identity,startedAt:'2026-10-14T20:28:00.000Z',wallSeconds:1999.1,exitCode:0,status:'passed',routeIdentityRefusal:null,host:{quietBefore:{quiet:true}},result}
+  const row=runRow(entry,resultPath,dir)
+  expect(row).not.toHaveProperty('result');expect(row).not.toHaveProperty('identity')
+  expect(row).toMatchObject({index:0,kind:'browser-w3',lineage:{slot:12,arm:'B'},exitCode:0,status:'passed',routeIdentityRefusal:null,identitySha256:digest(identity),
+    resultFile:{path:'runs/run-0000.json',bytes:readFileSync(resultPath).length,sha256:sha(resultPath)},
+    resultSummary:{refusal:null,accountingStatus:'OBSERVED',routeId:'W3/browser-paced/dual/v1',identitySha256:digest(identity)}})
+  expect(JSON.stringify(row).length).toBeLessThan(4096)
+  // A failed child that wrote no result keeps its identity inline: nothing is lost when there is no file to bind.
+  const missing=runRow({...entry,index:1,status:'failed',exitCode:1,result:null},join(dir,'runs','run-0001.json'),dir)
+  expect(missing).toMatchObject({identity,resultFile:null,resultSummary:null})
+  // Rows the report and the W2 capture readers consume inline are unchanged.
+  const browser={index:2,kind:'browser',status:'passed',result:{throughput:1}}
+  expect(runRow(browser,join(dir,'runs','run-0002.json'),dir)).toBe(browser)
+})
+test('a W3 session record references one byte-identical copy of the admitted input manifest instead of embedding it',()=>{
+  const root=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-session-')),dir=join(root,'out');mkdirSync(dir)
+  const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',builds:{A:{dependencies:Array.from({length:2000},(_,i)=>({path:`n${i}`,sha256:'e'.repeat(64)}))}}}
+  const input=join(root,'source-manifest-built.json');writeFileSync(input,JSON.stringify(manifest,null,2))
+  const sha=(path:string)=>createHash('sha256').update(readFileSync(path)).digest('hex')
+  const session=w3SessionRecord({id:'literal',plan:{slots:[]},sessionIndex:3,slots:[],manifest,manifestInput:input,dir,cold:{payloadSha256:'c'.repeat(64)},harness:{commit:'h'.repeat(40)},startedAt:'2026-10-14T20:28:00.000Z',monotonicStart:1,deadline:2})
+  expect(session).not.toHaveProperty('manifest')
+  expect(session).toMatchObject({schema:'aerolink.fms-w3-paired-session.v1',sessionIndex:3,manifestFile:{path:'w3-input-manifest.json',sha256:sha(input),bytes:readFileSync(input).length,digest:digest(manifest)}})
+  expect(readFileSync(join(dir,'w3-input-manifest.json'))).toEqual(readFileSync(input))
+  expect(JSON.stringify(session).length).toBeLessThan(4096)
+  // An input file that is not the admitted manifest is refused, never referenced.
+  const other=join(root,'other');mkdirSync(other)
+  expect(()=>w3SessionRecord({id:'literal',plan:{},sessionIndex:3,slots:[],manifest:{...manifest,schema:'changed'},manifestInput:input,dir:other,cold:{},harness:{},startedAt:'x',monotonicStart:1,deadline:2}))
+    .toThrow('W3 input manifest file is not the admitted manifest')
 })
 
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
