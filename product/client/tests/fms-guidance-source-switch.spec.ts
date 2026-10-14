@@ -303,7 +303,7 @@ test('ATT after the feedback was lost stays ATT across a source change, on the s
 // D4 6.2a (R3-02) at the change: the new computer's feedback is judged once, against the AFCS's last sample.
 test('across receivers, feedback beyond the continuity limit is lost at the change: ATT, annunciated, never HOV first', () => {
   const { system, two, fly, annunciated } = hovering(1, true)
-  stimulusFor(system.computers[0]).setSpoof(1, { northM: 29.5, driftEastMps: 0 })
+  stimulusFor(system.computers[0]).apply(1, { op: 'spoof', northM: 29.5, driftEastMps: 0 })
   fly(0.25)
   expect(two.hoverFeedback?.source).toBe(2)
   system.selectGuidance(2)
@@ -330,7 +330,7 @@ test('a TD/H to MRK cancelled across receivers beyond the continuity limit goes 
   const { system, one, two, fly, flyUntil, annunciated } = hoverProcedure()
   flyUntil(() => system.simulator.axisModes.pitch === 'TD/H', 400)
   system.setLinkAvailable(false); one.selectGpsReceiver('GPS1'); two.selectGpsReceiver('GPS2')
-  stimulusFor(one).setSpoof(1, { northM: 29.5, driftEastMps: 0 })
+  stimulusFor(one).apply(1, { op: 'spoof', northM: 29.5, driftEastMps: 0 })
   fly(1)
   expect(system.simulator.axisModes.pitch).toBe('TD/H')
   expect(two.hoverFeedback?.source).toBe(2)
@@ -343,7 +343,7 @@ test('a TD/H to MRK cancelled across receivers beyond the continuity limit goes 
 test('TU with its lateral hold lost keeps LVL lost across a source change: no automatic re-engagement on the new feedback', () => {
   const { system, one, two, fly, flyUntil } = hovering(1, true)
   expect(system.simulator.engageTransitionUp()).toBe(true)
-  stimulusFor(one).setFault(0, 'receiver', true)
+  stimulusFor(one).apply(0, { op: 'fault', fault: 'RECEIVER', on: true })
   flyUntil(() => system.simulator.axisModes.roll === 'ATT', 5)
   expect(two.hoverFeedback).not.toBeNull()
   system.selectGuidance(2)
