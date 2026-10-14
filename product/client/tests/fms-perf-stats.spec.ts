@@ -14,10 +14,10 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
-import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
+import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
 import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, w3PairedPlan } from '../perf/browser-capture'
-import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, scoredRuns, type RunValue } from '../perf/stats'
+import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, runClassification, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
 
@@ -132,6 +132,26 @@ test('real dual setup and success-frame producer feed the W3 reader without anot
   const result=w3PrefixAccounting(raw,expected,base.identity)
   expect(result).toMatchObject({status:'OBSERVED',totalFrames:7200,scoredFrames:6960,sync:{total:7200,scored:6960},overrun:{completed:32}})
   expect(result.overrun.close.kind).toBe('cancelled')
+})
+test('a successful W3 child result names its dispatched route: run classification passes it and refuses another scenario, topology or route',()=>{
+  // The dispatched route is the orchestrator's own (route-plan uses run-perf.ts route()); the expected values are literals.
+  const plan=spawnSync(process.execPath,['perf/run-perf.ts','route-plan','--workloads','W3','--host','browser-paced','--topology','dual'],{encoding:'utf8'})
+  expect(plan.status,plan.stderr).toBe(0)
+  const dispatched=JSON.parse(plan.stdout).routes[0]
+  expect([dispatched.id,dispatched.workload,dispatched.scenario,dispatched.topology]).toEqual(['W3/browser-paced/dual/v1','W3','perf-w3-dual-sync','dual'])
+  // The child's own route as browser.perf.ts builds it from AEROLINK_PERF_WORKLOAD=W3 and AEROLINK_PERF_TOPOLOGY=dual.
+  const child={schema:'aerolink.fms-perf-route.v1',id:'W3/browser-paced/dual/v1',workload:'W3',scenario:'perf-w3-dual-sync',topology:'dual'}
+  const {raw,expected,identity}=literalW3()
+  const summary=w3RunSummary({schema:'aerolink.fms-perf-w3-prefix.v1',route:child,rate:64,configuration:'view-off-svs-off',identity,expected,observation:raw,
+    accounting:w3PrefixAccounting(raw,expected,identity),refusal:null,scenarioInput:{sourceScenario:'perf-w3-dual-sync',bytes:'{"id":"literal-w3-prefix"}',sha256:'a'.repeat(64)},
+    heap:{status:'UNAVAILABLE'},browser:{headless:true}})
+  const written=JSON.parse(JSON.stringify(summary)),record={kind:'browser-w3',route:dispatched}
+  expect(runClassification(record,0,written)).toEqual({status:'passed',routeIdentityRefusal:null})
+  // The imported scenario keeps its own identity beside the route's.
+  expect(written).toMatchObject({scenario:'perf-w3-dual-sync',topology:'dual',expected:{scenario:'literal-w3-prefix'},scenarioInput:{sourceScenario:'perf-w3-dual-sync',sha256:'a'.repeat(64)}})
+  for(const changed of [{...written,scenario:'perf-87n-offshore-sar'},{...written,topology:'single'},{...written,route:{...written.route,id:'W3/browser-paced/dual/v2'}}])
+    expect(runClassification(record,0,changed)).toEqual({status:'failed',routeIdentityRefusal:'actual child workload/scenario/topology disagrees with dispatched route'})
+  expect(runClassification(record,1,written)).toEqual({status:'failed',routeIdentityRefusal:null})
 })
 
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
