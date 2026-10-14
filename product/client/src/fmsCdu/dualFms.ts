@@ -5,6 +5,7 @@ import { RadioManagementSystem } from "./radioManagement";
 import { ScriptedFms } from "./scriptedFms";
 import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
 import type { GpsReceiver } from "./gps";
+import { approachTransferRefusal, type ApproachSensorOutput, type ApproachGuidanceReference, TRANSFER_REFERENCE_MS } from "./gpsSensors";
 import type { UserDatabaseStore, UserScope } from "./userDatabase";
 
 /** Two computers, one aircraft and receiver environment. This is a bench link, not an installed bus adapter. */
@@ -18,6 +19,12 @@ export class DualFmsSystem {
   private editor: FmsSide | null = null;
   private driver: FmsSide = 1;
   private navSide: FmsSide | null = null;
+  private approachIdentity: string | null = null;
+  private adoptedApproach: ApproachSensorOutput | null = null;
+  private approachQualified = true;
+  // One physical aircraft reference. Neither peer refresh nor local AUTO selection can renew it.
+  private approachFlown: (ApproachGuidanceReference & { approachKey: string; sample: NonNullable<ApproachSensorOutput["sample"]>;
+    computer: 1 | 2; sourceEpoch: number; receiver: number }) | null = null;
   private phaseDifferentSince: number | null = null;
   private disagreement = false;
   private refreshingNavigation = false;
@@ -36,13 +43,14 @@ export class DualFmsSystem {
       } } : {}) });
     // One system, one computation (#1518): a key, a step or a cross-talk exchange on either computer settles both, once.
     one.shareComputation(two);
-    this.computers = [one, two]; this.flights = [new FlightSimulator(one, undefined, () => this.prepareGuidance(1)), new FlightSimulator(two, undefined, () => this.prepareGuidance(2))];
+    this.computers = [one, two]; this.flights = [new FlightSimulator(one, undefined, () => this.prepareGuidance(1), { consumed: (output, at) => this.approachConsumed(1, output, at) }),
+      new FlightSimulator(two, undefined, () => this.prepareGuidance(2), { consumed: (output, at) => this.approachConsumed(2, output, at) })];
     const parameters = profile.parameters;
     this.rms = new RadioManagementSystem(() => clock().getTime(), () => this.link, () => this.notify(),
       parameters.rmsFeedbackDelay.value, parameters.rmsFeedbackTimeout.value);
     this.settings = this.computers.map(unit => JSON.stringify(unit.computerSettings));
     this.computers.forEach((unit, index) => unit.attachComputerPorts(this.port((index + 1) as FmsSide), this.rms.port((index + 1) as FmsSide)));
-    two.setReceiverCommandAuthority(false);
+    two.setReceiverCommandAuthority(false, () => one.receiverApproachCommand);
     // A mismatched persisted second computer starts independent; synchronization must be a conscious crew decision.
     if (this.compatibility(1, false)) this.operation = "INDEPENDENT";
     this.reconcile();
@@ -209,7 +217,7 @@ export class DualFmsSystem {
     const previous = this.unit(this.driver), next = this.unit(side);
     next.observeAircraft(previous);
     this.flights[side - 1].adoptAircraftMotion(this.flights[this.driver - 1]);
-    this.computers.forEach((unit, i) => unit.setReceiverCommandAuthority(i === side - 1));
+    this.computers.forEach((unit, i) => unit.setReceiverCommandAuthority(i === side - 1, i === side - 1 ? undefined : () => next.receiverApproachCommand));
     this.driver = side; this.reconcile(); this.notify();
   }
   crossfill(side: FmsSide, secondary = false): boolean { return this.compute(() => this.fill(side, secondary)); }
@@ -229,15 +237,76 @@ export class DualFmsSystem {
       this.settings[2 - side] = JSON.stringify(this.peer(side).computerSettings);
     }
   }
+  /** Receipt from the selected simulator's actual final 116+117 branches, never from choose/observe/refresh. */
+  private approachConsumed(side: FmsSide, output: ApproachSensorOutput, at: number) {
+    const current = this.operation === "SYNC" ? this.adoptedApproach : this.unit(side).approachGuidanceOutput;
+    const words = output.words;
+    if (side !== this.driver || !output.eligible || !output.authority.lateral || !output.authority.vertical
+      || !output.approachKey || output.approachKey !== this.unit(side).approachGuidanceIdentity
+      || !output.sample || output.sample.status !== "NORMAL" || output.receiver === null
+      || words.lateralFt === null || words.verticalFt === null || !words.scale || !current
+      || current.computer !== output.computer || current.sourceEpoch !== output.sourceEpoch || current.receiver !== output.receiver
+      || current.approachKey !== output.approachKey || current.sentKey !== output.sentKey || output.sentKey !== output.approachKey
+      || !current.sample || current.sample.at !== output.sample.at || current.sample.sequence !== output.sample.sequence || current.at !== output.at
+      || this.operation === "SYNC" && !this.approachQualified) return;
+    if (output.approachKey !== this.approachIdentity) {
+      this.approachIdentity = output.approachKey; this.approachQualified = true; this.adoptedApproach = null;
+    }
+    this.approachFlown = structuredClone({ at, lateralFt: words.lateralFt, verticalFt: words.verticalFt, scale: words.scale,
+      approachKey: output.approachKey, sample: output.sample, computer: output.computer, sourceEpoch: output.sourceEpoch, receiver: output.receiver });
+  }
+
+  /** Qualify the elected computed output against physical consumption, while navigation election stays independent. */
+  private systemApproach(selected: ApproachSensorOutput | null) {
+    const guiding = this.unit(this.driver), key = guiding.approachGuidanceIdentity;
+    const candidate = selected?.approachKey === key ? selected : null;
+    if (!candidate) {
+      this.adoptedApproach = null;
+      return { chosen: null, qualified: false, refused: "NO SYSTEM APPROACH SOURCE" };
+    }
+    const sameReceiver = candidate && this.adoptedApproach && candidate.receiver === this.adoptedApproach.receiver
+      && candidate.approachKey === this.adoptedApproach.approachKey;
+    let refused = "";
+    // A disarmed handover may display a new candidate but cannot pre-qualify its next real capture against a
+    // different recently consumed receiver. The shared reference survives handover/observation.
+    const differsFromFlown = candidate && this.approachFlown && candidate.receiver !== this.approachFlown.receiver;
+    if (candidate && (!sameReceiver || differsFromFlown) && guiding.approachArmed && key !== null) {
+      refused = candidate.receiver === null || !candidate.eligible ? "SYSTEM APPROACH SOURCE NOT ELIGIBLE"
+        : approachTransferRefusal(candidate.receiver, candidate.at, candidate.eligibleSince, candidate.receiversDisagree,
+          candidate.words, this.approachFlown);
+    }
+    let permitted = false;
+    if (candidate && !refused) { this.adoptedApproach = structuredClone(candidate); permitted = true; }
+    else {
+      // Previous adoption is not a retained command. It may continue only from that computer's CURRENT live output.
+      const prior = this.adoptedApproach, flown = this.approachFlown;
+      const live = this.computers.map(unit => unit.navigationOutput.approach).find(output => output
+        && output.approachKey === key && output.receiver === (flown?.receiver ?? prior?.receiver)
+        && output.authority.lateral && this.unit(output.computer).powerState === "ON" && !this.unit(output.computer).hasCondition("fmsFail"));
+      if (live) { this.adoptedApproach = structuredClone(live); permitted = true; }
+      else {
+        this.adoptedApproach = candidate ? structuredClone(candidate) : null;
+        if (guiding.approachArmed && flown && this.clock().getTime() - flown.at <= TRANSFER_REFERENCE_MS && candidate) this.approachQualified = false;
+      }
+    }
+    return { chosen: this.adoptedApproach?.receiver ?? null, qualified: this.approachQualified && permitted,
+      ...(this.adoptedApproach ? { output: this.adoptedApproach } : {}), refused };
+  }
+
   private reconcile() {
     const [one, two] = this.computers, parameters = one.aircraftProfile.parameters;
+    // Executed removal/replacement resets in both modes; copies/MOD/CLR/elected-side changes do not.
+    const key = this.unit(this.driver).approachGuidanceIdentity;
+    if (key !== this.approachIdentity) {
+      this.approachIdentity = key; this.approachFlown = null; this.adoptedApproach = null; this.approachQualified = true;
+    }
     this.rms.tick();
     if (this.operation === "SYNC") {
       if (!this.link || this.computers.some(unit => unit.hasCondition("fmsFail"))) this.independent("COMPUTER UNAVAILABLE");
     }
     if (this.operation === "SYNC") {
-      const solutions = this.computers.map(unit => unit.localNavigationSolution);
-      const usable = solutions.map((solution, index) => ({ solution, side: (index + 1) as FmsSide }))
+      const outputs = this.computers.map(unit => unit.navigationOutput);
+      const usable = outputs.map((output, index) => ({ solution: output.solution, output, side: (index + 1) as FmsSide }))
         .filter(({ solution, side }) => !this.unit(side).hasCondition("fmsFail") && solution.mode !== "DR" && !solution.uncertain
           && this.computers.every(unit => solution.mode !== "GPS" || unit.gpsNavSelected));
       let selected = usable.find(candidate => candidate.side === this.navSide) ?? usable[0];
@@ -247,19 +316,16 @@ export class DualFmsSystem {
           && (selected.solution.anp === null || (selected.solution.anp - candidate.solution.anp) * 1852 >= parameters.dualSensorHysteresis.value))) selected = candidate;
       if (selected) {
         this.navSide = selected.side;
-        const source = this.unit(selected.side);
-        this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, source.navigationWindEstimate));
+        this.computers.forEach(unit => unit.receiveSystemNavigation(selected.solution, selected.output.wind));
       }
-      // M300 3-24 synchronizes approach integrity. Until qualified approach guidance itself is shared (#1563), use
-      // the guiding computer's receiver AND transfer qualification for both computers' approach alerts/admission.
-      // Current/predicted RAIM still uses the best system navigation sensor (3-25); no usable adoption falls back
-      // to each computer's local approach authority instead of retaining a stale shared qualification.
+      // Navigation and approach adoption are distinct decisions. Monitoring and AFCS share one computed operand;
+      // a refused approach transfer may continue only a currently valid prior output, never stored flown words.
       const guiding = this.unit(this.driver);
       // The shared physical approach switch reaches the peer before SYNC approach monitoring (#1567).
       // Use the existing arm operation, including its procedure-speed refusal, rather than force its state.
       const peer = this.peer(this.driver);
       if (peer.approachArmed !== guiding.approachArmed) peer.armApproach(guiding.approachArmed);
-      const approachSource = selected ? { chosen: guiding.gpsStatus.chosen, qualified: guiding.gpsApproachSource.qualified } : null;
+      const approachSource = guiding.s300Advisory ? null : this.systemApproach(selected?.output.approach ?? null);
       this.computers.forEach(unit => unit.refreshSystemNavigationMonitoring(approachSource));
       const different = one.localFlightPhase !== two.localFlightPhase;
       this.phaseDifferentSince = different ? this.phaseDifferentSince ?? this.clock().getTime() : null;
