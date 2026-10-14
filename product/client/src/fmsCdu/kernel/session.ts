@@ -31,6 +31,8 @@ export type InitialObservations = {
   readonly rtcOffsetsMs: readonly number[];
   readonly seeds: readonly { receiver: number; constellation: number }[];
   readonly navigationCycles: readonly { active: string; inactive: string | null }[];
+  /** D5 7.2 magnetic database identity per unit: the model's own name, epoch and CRC, and whether its check passed. */
+  readonly magneticModels: readonly { name: string; epoch: number; crc: string; valid: boolean }[];
 };
 export type SessionFactoryOptions = {
   readonly userDatabase?: { readonly store: UserDatabaseStore; readonly scope: UserScope };
@@ -71,6 +73,10 @@ export function createSession(setup: SessionSetup, options: SessionFactoryOption
     rtcOffsetsMs: units.computers.map(unit => unit.utcTime.getTime() - setup.utc0Ms),
     seeds: units.computers[0].gps.map(receiver => ({ receiver: receiver.seed, constellation: receiver.constellationSeed })),
     navigationCycles: units.computers.map(unit => ({ active: unit.activeCycle.id, inactive: unit.inactiveCycle?.id ?? null })),
+    magneticModels: units.computers.map(unit => {
+      const { name, epoch, crc } = unit.magvar.database;
+      return { name, epoch, crc, valid: unit.magvar.valid };
+    }),
   };
   const kernel = new FmsKernel(plant, null, { flightFreeze: setup.initialFreeze, verification: options.verification });
   const port = new SubmissionPort(kernel), fms = units.computers[0], flight = units.flights[0];
