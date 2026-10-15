@@ -10,25 +10,26 @@
         installation; this launcher refuses everything that is not one.
 
         It does three things and nothing else:
-          1. reads the installation's declaration (instance.json, SiteProduction or SiteDevelopment) and its
-             non-secret site-server.json (public host name, bind address, port, HTTP/1.1-only, certificate);
+          1. reads the installation's declaration: instance.json (SiteProduction or SiteDevelopment, with the
+             site block Set-AeroLinkSiteDeclaration writes) and the non-secret site-server.json;
           2. composes the Production environment: no demonstration data or accounts, secure cookies, no insecure
-             webhooks, and the SiteServer settings the API needs to serve HTTPS itself;
+             webhooks, the installation-owned state of #1614 1.5 (key ring, evidence, connector key and id,
+             notification authority, instance id), and the SiteServer settings the API needs to serve HTTPS;
           3. runs the API in the foreground, in the API's own directory, and returns its exit code.
 
         Every rule is enforced again by the API, which refuses to start a site server that is not a secure
         Production server (SiteServerHosting.cs). This script is the supported way to compose that, not the
-        only guard.
+        only guard. It writes nothing: the declaration, including the instance id, is minted by
+        Set-AeroLinkSiteDeclaration, and the installation root is read-only to the service account.
 
-        Secrets are never written by this script. The connection string (ConnectionStrings__AeroLink) and, on
-        first install, the bootstrap secret (Identity__BootstrapSecret) are inherited from the environment the
-        supervisor gives it.
+        Secrets are never written by this script. The connection string (ConnectionStrings__AeroLink, with the
+        application password) and, on first install, the bootstrap secret (Identity__BootstrapSecret) are
+        inherited from the environment the supervisor gives it.
 
-        The API port is the installation's declared site.apiPort in instance.json (#1614 1.3), the single source
-        Stop, Restore and Diagnostics read too. site-server.json, beside instance.json, names everything else
-        about the HTTPS endpoint and must not name a port:
+        The API port and the public host name are the site declaration's ApiPort and PublicHostName, the single
+        source Stop, Restore and Diagnostics read too. site-server.json, beside instance.json, names the rest of
+        the HTTPS endpoint and must name neither:
           {
-            "publicHost":  "the full host name people type",
             "bindAddress": "0.0.0.0",
             "http1Only":   false,
             "certificate": { "thumbprint": "..." }      or { "subject": "..." [, "store": "My"] }
@@ -53,6 +54,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 if (-not [IO.Path]::IsPathRooted($InstallationRoot)) { throw "InstallationRoot must be an absolute path; it is '$InstallationRoot'." }
@@ -61,8 +63,18 @@ if (-not (Test-Path -LiteralPath $InstallationRoot -PathType Container)) {
     throw "The site installation root does not exist: $InstallationRoot. Nothing was started."
 }
 
-# Refuses anything that is not declared SiteProduction or SiteDevelopment.
-$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -InstallationRoot $InstallationRoot -Mode Site -EnsureInstanceId:(-not $ValidateOnly)
+# Refuses anything that is not declared SiteProduction or SiteDevelopment. Never mints: see the description.
+$instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -InstallationRoot $InstallationRoot -Mode Site
+if ([string]::IsNullOrWhiteSpace([string]$instance.InstanceId)) {
+    throw "The site installation at $InstallationRoot has no instanceId. Declare it with Set-AeroLinkSiteDeclaration, which mints one. Nothing was started."
+}
+$declaration = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+if (-not $declaration) {
+    throw "The site installation at $InstallationRoot has no site declaration (ports, service accounts, public host name). Declare it with Set-AeroLinkSiteDeclaration. Nothing was started."
+}
+if ([string]::IsNullOrWhiteSpace([string]$declaration.PublicHostName)) {
+    throw "The site declaration at $($declaration.ConfigPath) has no publicHostName. Set it with Set-AeroLinkSiteDeclaration -PublicHostName. Nothing was started."
+}
 
 $sitePath = Join-Path $InstallationRoot 'site-server.json'
 if (-not (Test-Path -LiteralPath $sitePath -PathType Leaf)) {
@@ -76,17 +88,10 @@ function Get-SiteValue([object]$Object, [string]$Name) {
     return ''
 }
 
-if ($site.PSObject.Properties['port'] -or $site.PSObject.Properties['apiPort']) {
-    throw "$sitePath names a port. The API port is declared once, as site.apiPort in instance.json; remove it here. Nothing was started."
-}
-
-# The single source of the API port: site.apiPort in instance.json, read the way Get-AeroLinkSiteDeclaration
-# (#1614 1.3-1.5) reads it. When that reader is on main this becomes a call to it.
-$instanceJson = Get-Content -LiteralPath $instance.ConfigPath -Raw | ConvertFrom-Json
-$rawApiPort = if ($instanceJson.PSObject.Properties['site'] -and $instanceJson.site -and $instanceJson.site.PSObject.Properties['apiPort']) { [string]$instanceJson.site.apiPort } else { '' }
-$apiPort = 0
-if (-not [int]::TryParse($rawApiPort, [ref]$apiPort) -or $apiPort -lt 1024 -or $apiPort -gt 65535) {
-    throw "The site declaration at $($instance.ConfigPath) must set site.apiPort to a port from 1024 to 65535; it is '$rawApiPort'. Nothing was started."
+foreach ($duplicate in @('port', 'apiPort', 'publicHost', 'publicHostName')) {
+    if ($site.PSObject.Properties[$duplicate]) {
+        throw "$sitePath names $duplicate. The API port and public host name are declared once, in the site declaration (Set-AeroLinkSiteDeclaration); remove it here. Nothing was started."
+    }
 }
 
 $certificate = if ($site.PSObject.Properties['certificate']) { $site.certificate } else { $null }
@@ -96,9 +101,9 @@ $settings = [ordered]@{
     # The API listens on its HTTPS endpoint only; an inherited URL list would only produce a warning.
     'ASPNETCORE_URLS'                           = $null
     'SiteServer__Enabled'                       = 'true'
-    'SiteServer__PublicHost'                    = (Get-SiteValue $site 'publicHost')
+    'SiteServer__PublicHost'                    = [string]$declaration.PublicHostName
     'SiteServer__BindAddress'                   = (Get-SiteValue $site 'bindAddress')
-    'SiteServer__Port'                          = [string]$apiPort
+    'SiteServer__Port'                          = [string]$declaration.ApiPort
     'SiteServer__Http1Only'                     = $(if ($http1Only) { $http1Only.ToLowerInvariant() } else { 'false' })
     'SiteServer__Certificate__Thumbprint'       = (Get-SiteValue $certificate 'thumbprint')
     'SiteServer__Certificate__Subject'          = (Get-SiteValue $certificate 'subject')
@@ -114,6 +119,14 @@ $settings = [ordered]@{
     'Instance__InstanceId'                      = $instance.InstanceId
     'Instance__Label'                           = $instance.Label
     'Instance__Classification'                  = $instance.Classification
+}
+
+# Installation-owned state (#1614 1.5): without it the key ring and evidence fall back to the service account's
+# profile. Its connection string carries no password and would replace the inherited one, so it is left out.
+$owned = Get-AeroLinkSiteRuntimeEnvironment -InstallationRoot $InstallationRoot
+foreach ($entry in $owned.GetEnumerator()) {
+    if ($entry.Key -eq 'ConnectionStrings__AeroLink') { continue }
+    $settings[$entry.Key] = $entry.Value
 }
 
 if ([string]::IsNullOrWhiteSpace($env:ConnectionStrings__AeroLink)) {

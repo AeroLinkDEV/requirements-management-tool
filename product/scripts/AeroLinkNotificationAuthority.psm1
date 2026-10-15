@@ -52,7 +52,9 @@ function Revoke-AeroLinkNotificationSendGeneration {
     param([Parameter(Mandatory)][string]$ProductRoot)
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
     $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
-    $instance = Get-AeroLinkInstanceConfig -ProductRoot $ProductRoot -Mode Development
+    # A site installation (#1614) is read in Site mode: it has its own authority root, and every other mode refuses it.
+    $mode = if (Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot) { 'Site' } else { 'Development' }
+    $instance = Get-AeroLinkInstanceConfig -ProductRoot $ProductRoot -InstallationRoot $installation.InstallationRoot -Mode $mode
     if ([string]::IsNullOrWhiteSpace([string]$instance.InstanceId)) {
         # A host without an instance identity cannot match any external send authority.
         return [pscustomobject]@{ State = 'DisabledWithoutInstallationIdentity'; SendGeneration = $null }

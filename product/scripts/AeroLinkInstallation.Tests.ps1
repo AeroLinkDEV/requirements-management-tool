@@ -194,31 +194,41 @@ try {
     New-Item -ItemType Directory -Path $siteInstallation -Force | Out-Null
     Set-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $siteInstallation -Label 'SITE PRODUCTION' -Classification 'SiteProduction' | Out-Null
     foreach ($mode in @('Development', 'HomeCanonical')) {
-        Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $siteInstallation -Mode $mode } 'Only the site launcher' `
+        Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $siteInstallation -Mode $mode } 'Only a site-aware caller' `
             "A $mode launch must refuse a SiteProduction installation."
     }
     Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $siteInstallation -Mode Site).Classification -eq 'SiteProduction') `
         'The site launcher must read a SiteProduction declaration.'
-    Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot $demo -Mode Site } 'runs only an installation declared Site' `
-        'The site launcher must refuse an installation that is not declared SiteProduction or SiteDevelopment.'
-    Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Site } 'runs only an installation declared Site' `
-        'The site launcher must refuse an undeclared installation rather than assume it is a site server.'
+    Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot $demo -Mode Site } 'accepts only an installation declared Site' `
+        'A Site read must refuse an installation that is not declared SiteProduction or SiteDevelopment.'
+    Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Site } 'accepts only an installation declared Site' `
+        'A Site read must refuse an undeclared installation rather than assume it is a site server.'
 
+    function Get-FreeLoopbackPortForLauncher {
+        $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $probe.Start()
+        try { return $probe.LocalEndpoint.Port } finally { $probe.Stop() }
+    }
     # The launcher composes Production and refuses to run without a database of its own. -ValidateOnly starts nothing.
     $developmentSite = Join-Path $sitePath 'AeroLink Development'
     New-Item -ItemType Directory -Path $developmentSite -Force | Out-Null
     Set-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $developmentSite -Label 'SITE DEVELOPMENT' -Classification 'SiteDevelopment' | Out-Null
     $siteServerJson = Join-Path $developmentSite 'site-server.json'
-    '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "http1Only": true, "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
-        Set-Content -LiteralPath $siteServerJson -Encoding UTF8
-    # The API port is declared once, as site.apiPort in instance.json (#1614 1.3).
-    $developmentInstance = Join-Path $developmentSite 'instance.json'
-    $declaredSite = Get-Content -LiteralPath $developmentInstance -Raw | ConvertFrom-Json
-    $declaredSite | Add-Member -NotePropertyName site -NotePropertyValue ([pscustomobject]@{ schemaVersion = '1'; apiPort = 5443 })
-    $declaredSite | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $developmentInstance -Encoding UTF8
+    $siteServerSettings = '{ "bindAddress": "0.0.0.0", "http1Only": true, "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }'
+    $siteServerSettings | Set-Content -LiteralPath $siteServerJson -Encoding UTF8
     $fakeApi = Join-Path $developmentSite 'AeroLink.Api.dll'
     Set-Content -LiteralPath $fakeApi -Value '' -Encoding ASCII
     $siteLauncher = Join-Path $PSScriptRoot 'Start-AeroLinkSite.ps1'
+    # Without a site declaration there is no port or public host name to serve: refused before anything else.
+    Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'no instanceId|no site declaration' `
+        'A site installation without a site declaration must refuse.'
+    # The API port and the public host name are declared once, in the site declaration (#1614 1.3).
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
+    $launcherApiPort = Get-FreeLoopbackPortForLauncher
+    $launcherPostgresPort = Get-FreeLoopbackPortForLauncher
+    while ($launcherPostgresPort -eq $launcherApiPort) { $launcherPostgresPort = Get-FreeLoopbackPortForLauncher }
+    $launcherAuthority = Join-Path $sitePath 'notification-authority'
+    $developmentDeclaration = Set-AeroLinkSiteDeclaration -InstallationRoot $developmentSite -ApiPort $launcherApiPort -PostgresPort $launcherPostgresPort `
+        -PublicHostName 'aerolink-site.example.test' -NotificationAuthorityRoot $launcherAuthority
     $previousConnection = $env:ConnectionStrings__AeroLink
     try {
         $env:ConnectionStrings__AeroLink = $null
@@ -229,22 +239,44 @@ try {
         $s = $plan.Settings
         Assert-True ($s['ASPNETCORE_ENVIRONMENT'] -eq 'Production' -and $s['Runtime__Mode'] -eq 'SITE-DEVELOPMENT' -and $s['Instance__Classification'] -eq 'SiteDevelopment') `
             'A SiteDevelopment installation runs the Production profile and says which installation it is.'
-        Assert-True ($s['SiteServer__Enabled'] -eq 'true' -and $s['SiteServer__Port'] -eq '5443' -and $s['SiteServer__Http1Only'] -eq 'true' -and $s['SiteServer__Certificate__Thumbprint'] -eq '00112233445566778899AABBCCDDEEFF00112233') `
-            'The site settings reach the API as the SiteServer section.'
+        Assert-True ($s['SiteServer__Enabled'] -eq 'true' -and $s['SiteServer__Port'] -eq [string]$launcherApiPort -and $s['SiteServer__PublicHost'] -eq 'aerolink-site.example.test' -and
+            $s['SiteServer__Http1Only'] -eq 'true' -and $s['SiteServer__Certificate__Thumbprint'] -eq '00112233445566778899AABBCCDDEEFF00112233') `
+            'The site settings reach the API as the SiteServer section, with the port and host name from the site declaration.'
         Assert-True ($s['DemoData__Enabled'] -eq 'false' -and $s['Identity__SeedDemoAccounts'] -eq 'false' -and $s['Identity__AllowDemoAccounts'] -eq 'false' -and $s['Identity__CookieSecure'] -eq 'true' -and $s['Integrations__AllowInsecureWebhookTargets'] -eq 'false') `
             'A site launch has no demonstration data or accounts, secure cookies and no insecure webhooks.'
-        Assert-Throws { & $siteLauncher -InstallationRoot $siteInstallation -ApiPath $fakeApi -ValidateOnly } 'site-server.json' `
+        # Installation-owned state (#1614 1.5) reaches the API; the password-less connection string does not.
+        Assert-True ($s['Evidence__Root'] -eq $developmentDeclaration.EvidenceRoot -and $s['DataProtection__KeyRingPath'] -eq $developmentDeclaration.KeyRingPath -and
+            $s['Connector__DeploymentId'] -eq $developmentDeclaration.ConnectorDeploymentId -and $s['AEROLINK_NOTIFICATION_AUTHORITY_ROOT'] -eq $developmentDeclaration.NotificationAuthorityRoot -and
+            -not $s.Contains('ConnectionStrings__AeroLink')) `
+            'The launcher must hand the API its installation-owned state and leave the inherited connection string alone.'
+        Assert-Throws { & $siteLauncher -InstallationRoot $siteInstallation -ApiPath $fakeApi -ValidateOnly } 'no instanceId|no site declaration' `
+            'A site installation without a site declaration must refuse.'
+        foreach ($duplicate in @('"port": 5444', '"publicHost": "other.example.test"')) {
+            ('{ ' + $duplicate + ', "bindAddress": "0.0.0.0", "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }') |
+                Set-Content -LiteralPath $siteServerJson -Encoding UTF8
+            Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'declared once' `
+                "site-server.json must not declare a second source beside the site declaration: $duplicate."
+        }
+        Remove-Item -LiteralPath $siteServerJson -Force
+        Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'site-server.json' `
             'A site installation without site-server.json has no HTTPS endpoint and must refuse.'
-        '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "port": 5444, "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
-            Set-Content -LiteralPath $siteServerJson -Encoding UTF8
-        Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'declared once' `
-            'site-server.json must not declare a second API port beside site.apiPort.'
-        '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
-            Set-Content -LiteralPath $siteServerJson -Encoding UTF8
-        $declaredSite.site = [pscustomobject]@{ schemaVersion = '1' }
-        $declaredSite | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $developmentInstance -Encoding UTF8
-        Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'site.apiPort' `
-            'A site installation without a declared site.apiPort has no port to listen on and must refuse.'
+        $siteServerSettings | Set-Content -LiteralPath $siteServerJson -Encoding UTF8
+
+        # Revoke reads a declared site in Site mode and resolves its authority under the site's own root.
+        $previousRoot = $env:AEROLINK_INSTALLATION_ROOT
+        try {
+            $env:AEROLINK_INSTALLATION_ROOT = $developmentSite
+            Import-Module (Join-Path $PSScriptRoot 'AeroLinkNotificationAuthority.psm1') -Force
+            Revoke-AeroLinkNotificationSendGeneration -ProductRoot $siteProduct | Out-Null
+            $instanceId = (Get-Content -LiteralPath (Join-Path $developmentSite 'instance.json') -Raw | ConvertFrom-Json).instanceId
+            Assert-True (Test-Path -LiteralPath (Join-Path $developmentDeclaration.NotificationAuthorityRoot "$instanceId.json") -PathType Leaf) `
+                'Revoking on a declared site must succeed and write under the site notification authority root.'
+        }
+        finally {
+            $env:AEROLINK_INSTALLATION_ROOT = $previousRoot
+            # Revoke force-imports the installation module into its own scope, which unloads this script's copy.
+            Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+        }
     }
     finally { $env:ConnectionStrings__AeroLink = $previousConnection }
 

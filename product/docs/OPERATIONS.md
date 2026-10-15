@@ -79,7 +79,7 @@ a running process instead of a commit SHA pretending nothing changed.
 A remote-demo browser session is a view of HOME. The work-laptop repository and work-laptop database are
 irrelevant to it, and it never writes to them.
 
-### Site server installation building blocks (#1614)
+### Site server installation (#1614)
 
 A site server installation is one of the two installations planned for the company host
 (`C:\AeroLink\AeroLink Production` and `C:\AeroLink\AeroLink Development`). It is not yet a supported operating
@@ -128,6 +128,97 @@ key ring and the trust-mode development cluster.
   data folder (evidence, key ring, connector key, logs, backups and restore space) by the API's account and
   Administrators only. Permissions are written and read by SID, never by parsing `icacls`, `schtasks` or `netsh`
   text. Creating and locking `C:\AeroLink` itself is the installer's job (#1614 1.7).
+
+#### Declaring and starting a site server
+
+Not yet live: production on the company host waits for Windows sign-in (#1615). The installer (#1614 1.7) will
+run these steps; until it exists, run them by hand, in this order. The HOME launchers and root `.bat` files are
+unchanged. They, and every other script that reads `instance.json` without a site-aware mode, refuse a site
+installation, and the site launcher refuses everything else.
+
+1. **Classify the installation:**
+
+   ```powershell
+   Import-Module .\product\scripts\AeroLinkInstallation.psm1
+   Set-AeroLinkInstanceConfig -ProductRoot .\product -InstallationRoot 'C:\AeroLink\AeroLink Production' `
+       -Label 'SITE PRODUCTION' -Classification SiteProduction
+   ```
+
+2. **Declare it.** `Set-AeroLinkSiteDeclaration` sets the ports, service accounts and ids described above, and
+   the full public host name. The site block is the single source of the API port and the public host name; the
+   launcher, Stop, Restore and Diagnostics all read it.
+
+   ```powershell
+   Import-Module .\product\scripts\AeroLinkSiteInstallation.psm1
+   Set-AeroLinkSiteDeclaration -InstallationRoot 'C:\AeroLink\AeroLink Production' -ApiPort <port> `
+       -PostgresPort <port> -PublicHostName '<full host name>'
+   ```
+
+3. **Name the rest of the HTTPS endpoint** in the non-secret `site-server.json`, beside `instance.json`. It
+   names no port and no host name; either one is refused as a second source.
+
+   ```json
+   { "bindAddress": "0.0.0.0", "http1Only": false,
+     "certificate": { "thumbprint": "<LocalMachine\\My thumbprint>" } }
+   ```
+
+   The certificate is one of these:
+   - `thumbprint`, or `subject` (the newest current match wins, so a renewal is picked up at restart), from
+     `LocalMachine\My`, or another store named by `store`;
+   - `path` plus `keyPath`, a PEM certificate and key, imported into a machine key set.
+
+   The certificate's private key must be readable by the installation's API account
+   (`NT SERVICE\AeroLink-Production` or `NT SERVICE\AeroLink-Development`). `http1Only` keeps HTTP/2 off, which
+   Windows sign-in will need.
+
+4. **Start it:**
+
+   ```powershell
+   $env:ConnectionStrings__AeroLink = '<this installation''s database, with the application password>'
+   $env:Identity__BootstrapSecret   = '<first install only; see Production first-install administrator>'
+   powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Start-AeroLinkSite.ps1 `
+       -InstallationRoot 'C:\AeroLink\AeroLink Production' -ApiPath '<publish folder>\AeroLink.Api.exe'
+   ```
+
+   `-ValidateOnly` returns the composed settings and starts nothing. The launcher writes nothing, and refuses a
+   declaration without an `instanceId` or a public host name.
+
+The launcher runs the API with these settings:
+- `Production`, with `SiteServer:Enabled`;
+- no demonstration data or accounts;
+- `Identity:CookieSecure=true`, and insecure webhooks off;
+- the installation-owned state from `Get-AeroLinkSiteRuntimeEnvironment`. The connection string is the one
+  inherited from the environment, never that function's password-less one.
+
+The API then does the following:
+
+- Listens only on `https://<bindAddress>:<apiPort>`. An inherited `ASPNETCORE_URLS` or `HTTP_PORTS` is
+  overridden; a configured `Kestrel:Endpoints` is refused, since Kestrel would bind it beside the HTTPS port.
+- Sends HSTS (one year, this host name only).
+- Sets `AllowedHosts` to the public name plus `localhost`, `127.0.0.1` and `[::1]`.
+- Derives `Notifications:BaseUrl` and `Connector:PublicOrigin` from the HTTPS origin, and refuses either when
+  it is set to anything else.
+- Names its cookies `__Host-aerolink_session` and `__Host-AeroLink.PreferenceConfirmation`. The prefix makes
+  the browser accept them only as Secure, `Path=/` and host-only. A plain-HTTP origin, a `Domain=` cookie
+  from a parent or sibling host, or a path-scoped cookie therefore cannot plant or shadow them. The distinct
+  names avoid accidental collisions. They do **not** isolate AeroLink from the other applications on the
+  shared host name. Cookies are not isolated by port, so those applications receive AeroLink's session cookie
+  and can overwrite it; `__Host-` blocks only subdomain and path tampering. The owner accepted this risk on
+  15 Oct 2026 (#1614 D3); a dedicated DNS alias for AeroLink removes it. HOME, the work laptop and other plain-HTTP launches
+  keep the old names. Any other launch with `Identity:CookieSecure=true` prefixes the session cookie too.
+
+The API refuses to start, naming every problem, when any of these holds:
+
+- the environment is not `Production`;
+- HTTPS is not configured, or the certificate is missing or expired, does not name the public host in its
+  subject alternative names, or has a private key the running account cannot open and sign with;
+- `Kestrel:Endpoints` is configured;
+- the public name is a short name, `localhost` or an address;
+- demonstration data or accounts are enabled, cookies are not secure, or insecure webhooks are allowed;
+- the database has no account and no bootstrap secret is set.
+
+In any other `Production` launch, plain HTTP is allowed only on loopback, whether it comes from `urls`,
+`HTTP_PORTS` (which binds every interface) or `Kestrel:Endpoints`.
 
 ### Dedicated HOME production source
 
@@ -563,82 +654,6 @@ Each installation also carries a stable `instanceId` — a bare GUID, minted onc
 machine or the network. It answers what a label cannot: two installations can both be labelled
 `WORK-LAPTOP LOCAL`, and a restored snapshot carries the source's label with it. It is minted by the
 launchers and by explicit setup, never by a read: `Preview` paths do not create it.
-
-### Site server installation (#1614)
-
-Not yet live: production on the company host waits for Windows sign-in (#1615). This section covers what
-exists so far, the launch path and HTTPS. Installer, supervision, ports, PostgreSQL hardening,
-installation-owned state and backups are separate #1614 items.
-
-The host carries two installations, `SiteProduction` and `SiteDevelopment`, each with its own root, port and
-database. The HOME launchers and root `.bat` files are unchanged. They, and every other script that reads
-`instance.json`, refuse a site installation; the site launcher refuses everything else. The installer will
-declare the installation. Until it exists, declare it by hand:
-
-```powershell
-Import-Module .\product\scripts\AeroLinkInstallation.psm1
-Set-AeroLinkInstanceConfig -ProductRoot .\product -InstallationRoot 'C:\AeroLink\AeroLink Production' `
-    -Label 'SITE PRODUCTION' -Classification SiteProduction
-```
-
-The API port comes only from the `site` block of `instance.json` (`site.apiPort`, #1614 1.3), the one
-source that Stop, Restore and Diagnostics also read. Beside `instance.json`, the non-secret `site-server.json`
-names the rest of the HTTPS endpoint. It must not name a port; a second port is refused.
-
-```json
-{ "publicHost": "<full host name>", "bindAddress": "0.0.0.0", "http1Only": false,
-  "certificate": { "thumbprint": "<LocalMachine\\My thumbprint>" } }
-```
-
-The certificate is one of these:
-
-- `thumbprint`, or `subject` (the newest current match wins, so a renewal is picked up at restart), from
-  `LocalMachine\My`, or another store named by `store`;
-- `path` plus `keyPath`, a PEM certificate and key, imported into a machine key set.
-
-Each installation runs as its own virtual service account, `NT SERVICE\AeroLink-Production` or
-`NT SERVICE\AeroLink-Development`. The certificate's private key must be readable by that account in the
-machine store.
-`http1Only` keeps HTTP/2 off, which Windows sign-in will need.
-
-```powershell
-$env:ConnectionStrings__AeroLink = '<this installation''s database>'
-$env:Identity__BootstrapSecret   = '<first install only; see Production first-install administrator>'
-powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Start-AeroLinkSite.ps1 `
-    -InstallationRoot 'C:\AeroLink\AeroLink Production' -ApiPath '<publish folder>\AeroLink.Api.exe'
-```
-
-`-ValidateOnly` prints the composed settings and starts nothing. The launcher runs the API as `Production`
-with `SiteServer:Enabled`, no demonstration data or accounts, `Identity:CookieSecure=true` and insecure
-webhooks off. The API then does the following:
-
-- Listens only on `https://<bindAddress>:<site.apiPort>`. An inherited `ASPNETCORE_URLS` or `HTTP_PORTS` is
-  overridden; a configured `Kestrel:Endpoints` is refused, since Kestrel would bind it beside the HTTPS port.
-- Sends HSTS (one year, this host name only).
-- Sets `AllowedHosts` to the public name plus `localhost`, `127.0.0.1` and `[::1]`.
-- Derives `Notifications:BaseUrl` and `Connector:PublicOrigin` from the HTTPS origin, and refuses either when
-  it is set to anything else.
-- Names its cookies `__Host-aerolink_session` and `__Host-AeroLink.PreferenceConfirmation`. The prefix makes
-  the browser accept them only as Secure, `Path=/` and host-only. A plain-HTTP origin, a `Domain=` cookie
-  from a parent or sibling host, or a path-scoped cookie therefore cannot plant or shadow them. The distinct
-  names avoid accidental collisions. They do **not** isolate AeroLink from the other applications on the
-  shared host name. Cookies are not isolated by port, so those applications receive AeroLink's session cookie
-  and can overwrite it; `__Host-` blocks only subdomain and path tampering. The owner accepted this risk on
-  15 Oct 2026 (#1614 D3); a dedicated DNS alias for AeroLink removes it. HOME, the work laptop and other plain-HTTP launches
-  keep the old names. Any other launch with `Identity:CookieSecure=true` prefixes the session cookie too.
-
-The API refuses to start, naming every problem, when any of these holds:
-
-- the environment is not `Production`;
-- HTTPS is not configured, or the certificate is missing or expired, does not name the public host in its
-  subject alternative names, or has a private key the running account cannot open and sign with;
-- `Kestrel:Endpoints` is configured;
-- the public name is a short name, `localhost` or an address;
-- demonstration data or accounts are enabled, cookies are not secure, or insecure webhooks are allowed;
-- the database has no account and no bootstrap secret is set.
-
-In any other `Production` launch, plain HTTP is allowed only on loopback, whether it comes from `urls`,
-`HTTP_PORTS` (which binds every interface) or `Kestrel:Endpoints`.
 
 ### Explicit HOME to work-laptop snapshot refresh
 
