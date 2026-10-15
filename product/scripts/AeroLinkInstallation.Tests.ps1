@@ -208,8 +208,14 @@ try {
     $developmentSite = Join-Path $sitePath 'AeroLink Development'
     New-Item -ItemType Directory -Path $developmentSite -Force | Out-Null
     Set-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $developmentSite -Label 'SITE DEVELOPMENT' -Classification 'SiteDevelopment' | Out-Null
-    '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "port": 5443, "http1Only": true, "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
-        Set-Content -LiteralPath (Join-Path $developmentSite 'site-server.json') -Encoding UTF8
+    $siteServerJson = Join-Path $developmentSite 'site-server.json'
+    '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "http1Only": true, "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
+        Set-Content -LiteralPath $siteServerJson -Encoding UTF8
+    # The API port is declared once, as site.apiPort in instance.json (#1614 1.3).
+    $developmentInstance = Join-Path $developmentSite 'instance.json'
+    $declaredSite = Get-Content -LiteralPath $developmentInstance -Raw | ConvertFrom-Json
+    $declaredSite | Add-Member -NotePropertyName site -NotePropertyValue ([pscustomobject]@{ schemaVersion = '1'; apiPort = 5443 })
+    $declaredSite | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $developmentInstance -Encoding UTF8
     $fakeApi = Join-Path $developmentSite 'AeroLink.Api.dll'
     Set-Content -LiteralPath $fakeApi -Value '' -Encoding ASCII
     $siteLauncher = Join-Path $PSScriptRoot 'Start-AeroLinkSite.ps1'
@@ -229,6 +235,16 @@ try {
             'A site launch has no demonstration data or accounts, secure cookies and no insecure webhooks.'
         Assert-Throws { & $siteLauncher -InstallationRoot $siteInstallation -ApiPath $fakeApi -ValidateOnly } 'site-server.json' `
             'A site installation without site-server.json has no HTTPS endpoint and must refuse.'
+        '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "port": 5444, "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
+            Set-Content -LiteralPath $siteServerJson -Encoding UTF8
+        Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'declared once' `
+            'site-server.json must not declare a second API port beside site.apiPort.'
+        '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
+            Set-Content -LiteralPath $siteServerJson -Encoding UTF8
+        $declaredSite.site = [pscustomobject]@{ schemaVersion = '1' }
+        $declaredSite | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $developmentInstance -Encoding UTF8
+        Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'site.apiPort' `
+            'A site installation without a declared site.apiPort has no port to listen on and must refuse.'
     }
     finally { $env:ConnectionStrings__AeroLink = $previousConnection }
 

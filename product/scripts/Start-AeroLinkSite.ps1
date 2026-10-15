@@ -24,11 +24,12 @@
         first install, the bootstrap secret (Identity__BootstrapSecret) are inherited from the environment the
         supervisor gives it.
 
-        site-server.json, beside instance.json in the installation root:
+        The API port is the installation's declared site.apiPort in instance.json (#1614 1.3), the single source
+        Stop, Restore and Diagnostics read too. site-server.json, beside instance.json, names everything else
+        about the HTTPS endpoint and must not name a port:
           {
             "publicHost":  "the full host name people type",
             "bindAddress": "0.0.0.0",
-            "port":        5443,
             "http1Only":   false,
             "certificate": { "thumbprint": "..." }      or { "subject": "..." [, "store": "My"] }
                                                          or { "path": "C:\\...\\site.crt", "keyPath": "C:\\...\\site.key" }
@@ -75,6 +76,19 @@ function Get-SiteValue([object]$Object, [string]$Name) {
     return ''
 }
 
+if ($site.PSObject.Properties['port'] -or $site.PSObject.Properties['apiPort']) {
+    throw "$sitePath names a port. The API port is declared once, as site.apiPort in instance.json; remove it here. Nothing was started."
+}
+
+# The single source of the API port: site.apiPort in instance.json, read the way Get-AeroLinkSiteDeclaration
+# (#1614 1.3-1.5) reads it. When that reader is on main this becomes a call to it.
+$instanceJson = Get-Content -LiteralPath $instance.ConfigPath -Raw | ConvertFrom-Json
+$rawApiPort = if ($instanceJson.PSObject.Properties['site'] -and $instanceJson.site -and $instanceJson.site.PSObject.Properties['apiPort']) { [string]$instanceJson.site.apiPort } else { '' }
+$apiPort = 0
+if (-not [int]::TryParse($rawApiPort, [ref]$apiPort) -or $apiPort -lt 1024 -or $apiPort -gt 65535) {
+    throw "The site declaration at $($instance.ConfigPath) must set site.apiPort to a port from 1024 to 65535; it is '$rawApiPort'. Nothing was started."
+}
+
 $certificate = if ($site.PSObject.Properties['certificate']) { $site.certificate } else { $null }
 $http1Only = (Get-SiteValue $site 'http1Only')
 $settings = [ordered]@{
@@ -84,7 +98,7 @@ $settings = [ordered]@{
     'SiteServer__Enabled'                       = 'true'
     'SiteServer__PublicHost'                    = (Get-SiteValue $site 'publicHost')
     'SiteServer__BindAddress'                   = (Get-SiteValue $site 'bindAddress')
-    'SiteServer__Port'                          = (Get-SiteValue $site 'port')
+    'SiteServer__Port'                          = [string]$apiPort
     'SiteServer__Http1Only'                     = $(if ($http1Only) { $http1Only.ToLowerInvariant() } else { 'false' })
     'SiteServer__Certificate__Thumbprint'       = (Get-SiteValue $certificate 'thumbprint')
     'SiteServer__Certificate__Subject'          = (Get-SiteValue $certificate 'subject')

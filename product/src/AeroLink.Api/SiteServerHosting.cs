@@ -213,7 +213,8 @@ public static class SiteServerHosting
         {
             using var pem = X509Certificate2.CreateFromPemFile(path, keyPath);
             // A PEM key is ephemeral, which Windows TLS (SChannel) cannot use. Re-import it into a machine key
-            // set: NETWORK SERVICE has no loaded user profile, so a user key set would fail at the handshake.
+            // set: the installation's virtual service account (NT SERVICE\AeroLink-...) runs without an interactive
+            // profile, and a key in a machine key set does not depend on one being loaded.
             var flags = OperatingSystem.IsWindows() ? X509KeyStorageFlags.MachineKeySet : X509KeyStorageFlags.DefaultKeySet;
             return X509CertificateLoader.LoadPkcs12(pem.Export(X509ContentType.Pkcs12), null, flags);
         }

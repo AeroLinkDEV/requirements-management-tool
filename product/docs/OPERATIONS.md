@@ -581,10 +581,12 @@ Set-AeroLinkInstanceConfig -ProductRoot .\product -InstallationRoot 'C:\AeroLink
     -Label 'SITE PRODUCTION' -Classification SiteProduction
 ```
 
-Beside `instance.json`, the non-secret `site-server.json` names the HTTPS endpoint:
+The API port comes only from the `site` block of `instance.json` (`site.apiPort`, #1614 1.3), the one
+source that Stop, Restore and Diagnostics also read. Beside `instance.json`, the non-secret `site-server.json`
+names the rest of the HTTPS endpoint. It must not name a port; a second port is refused.
 
 ```json
-{ "publicHost": "<full host name>", "bindAddress": "0.0.0.0", "port": 5443, "http1Only": false,
+{ "publicHost": "<full host name>", "bindAddress": "0.0.0.0", "http1Only": false,
   "certificate": { "thumbprint": "<LocalMachine\\My thumbprint>" } }
 ```
 
@@ -594,7 +596,9 @@ The certificate is one of these:
   `LocalMachine\My`, or another store named by `store`;
 - `path` plus `keyPath`, a PEM certificate and key, imported into a machine key set.
 
-NETWORK SERVICE has no loaded user profile, so the private key must be readable by it in the machine store.
+Each installation runs as its own virtual service account, `NT SERVICE\AeroLink-Production` or
+`NT SERVICE\AeroLink-Development`. The certificate's private key must be readable by that account in the
+machine store.
 `http1Only` keeps HTTP/2 off, which Windows sign-in will need.
 
 ```powershell
@@ -608,7 +612,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Start-AeroLi
 with `SiteServer:Enabled`, no demonstration data or accounts, `Identity:CookieSecure=true` and insecure
 webhooks off. The API then does the following:
 
-- Listens only on `https://<bindAddress>:<port>`. An inherited `ASPNETCORE_URLS` is overridden.
+- Listens only on `https://<bindAddress>:<site.apiPort>`. An inherited `ASPNETCORE_URLS` is overridden.
 - Sends HSTS (one year, this host name only).
 - Sets `AllowedHosts` to the public name plus `localhost`, `127.0.0.1` and `[::1]`.
 - Derives `Notifications:BaseUrl` and `Connector:PublicOrigin` from the HTTPS origin, and refuses either when
