@@ -1224,6 +1224,24 @@ export function AdministrationCenter({
       setBusy(false);
     }
   };
+  // #1639: global administration is a grant any account can hold. The server refuses removing the last
+  // active administrator and records each grant and revoke in the security audit log.
+  const setGlobalAdministrator = async (user: AdminUser) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`${api}/api/admin/users/${user.id}/global-administrator`, {
+        method: user.isGlobalAdministrator ? "DELETE" : "POST",
+      });
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.globalAdministrator", error);
+      setError(operationError(error, "Global administrator was not changed."));
+    } finally {
+      setBusy(false);
+    }
+  };
   const grant = async (role: string) => {
     if (!selected || busy) return;
     setBusy(true);
@@ -1405,6 +1423,14 @@ export function AdministrationCenter({
                   Unlink Windows
                 </button>
               )}
+              <button
+                className="quiet"
+                disabled={busy}
+                aria-label={`${user.isGlobalAdministrator ? "Revoke" : "Grant"} global administrator for ${user.displayName}`}
+                onClick={() => setGlobalAdministrator(user)}
+              >
+                {user.isGlobalAdministrator ? "Revoke admin" : "Make admin"}
+              </button>
             </div>
           </article>
         ))}

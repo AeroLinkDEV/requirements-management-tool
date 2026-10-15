@@ -64,7 +64,7 @@ internal static class ManagedDocumentReviewAuthority
         DateTimeOffset now, CancellationToken ct)
     {
         if (account.State != AccountState.Active) return null;
-        if (account.UserName == IdentityService.SystemAdministratorUserName)
+        if (account.IsGlobalAdministrator)
             return new(required, ProgramRole.Administrator, "AdministratorSubstitution", null);
 
         var direct = await db.ProgramMemberships.AsNoTracking()
@@ -128,7 +128,7 @@ internal static class ManagedDocumentReviewAuthority
         DateTimeOffset now, CancellationToken ct)
     {
         if (account.State != AccountState.Active) return null;
-        if (account.UserName == IdentityService.SystemAdministratorUserName)
+        if (account.IsGlobalAdministrator)
             return new(required, ProgramRole.Administrator, "AdministratorSubstitution", null);
 
         var direct = await db.ProgramMemberships.AsNoTracking()

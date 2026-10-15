@@ -64,7 +64,7 @@ public static class ApprovalConfigurationEndpoints
             delegations = delegations.Where(x => x.StartsAt <= now && x.EndsAt > now).ToList();
             var systemAdministratorIds = await db.UserAccounts.AsNoTracking()
                 .Where(x => x.State == AccountState.Active
-                            && x.UserName == IdentityService.SystemAdministratorUserName)
+                            && x.IsGlobalAdministrator)
                 .Select(x => x.Id).ToListAsync(ct);
             var accountIds = memberships.Select(x => x.UserId)
                 .Concat(backups.Select(x => x.BackupUserId))

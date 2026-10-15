@@ -201,7 +201,7 @@ const normalizeCheckedOutDraft = (value: string, item: Package): WorkingDraft =>
 }
 
 export default function TestChangeRequestPage({
-  api, releaseId, releases, packageId, discipline, currentUser, onBack,
+  api, releaseId, releases, packageId, discipline, currentUser, currentUserIsAdministrator = false, onBack,
   onOpenTestChangeRequest, initialProposalId,
 }: {
   api: string
@@ -210,6 +210,7 @@ export default function TestChangeRequestPage({
   packageId: string
   discipline: TestDiscipline
   currentUser: string
+  currentUserIsAdministrator?: boolean
   onBack: () => void
   onOpenRequirementRevision: (requirement: { id: string; revisionId: string; level: string }) => void
   onOpenTestChangeRequest: (id: string) => void
@@ -474,7 +475,7 @@ export default function TestChangeRequestPage({
   const canAuthor = Boolean(item.capabilities?.canProposeArtifactChange
     || item.capabilities?.canWithdrawArtifactChange || item.capabilities?.canProposeProcedureChange
     || item.capabilities?.canWithdrawProcedureChange || item.capabilities?.canRevise)
-  const isAuthor = !item.authorId || item.authorId.toLowerCase() === currentUser.toLowerCase() || currentUser.toLowerCase() === 'admin'
+  const isAuthor = !item.authorId || item.authorId.toLowerCase() === currentUser.toLowerCase() || currentUserIsAdministrator
   const editable = item.state === 'Draft'
   const raisedFrom = item.coveredChangeRequests.find(x => x.originating)
   const caseComplete = Boolean(draft?.title.trim() && toPlainText(draft.problemRich).trim()

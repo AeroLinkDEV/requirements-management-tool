@@ -1138,6 +1138,7 @@ function App() {
           ? (selectedArtifactKind?.toLowerCase().includes("lowlevel") ? "LowLevelSoftware" : "HighLevelSoftware")
           : "System"}
         currentUser={user.userName}
+        currentUserIsAdministrator={user.isAdministrator}
         onBack={() => navigate("testChangeRequests", discipline, undefined, selectedArtifactKind)}
         onOpenRequirementRevision={openRequirementRevision}
         onOpenTestChangeRequest={id => navigate("testChangeRequest", discipline, id, selectedArtifactKind)}

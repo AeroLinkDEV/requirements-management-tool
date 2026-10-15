@@ -17,6 +17,11 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     private const string ProtectedMfaPrefix = "dp:v1:";
     private const int NewPasswordIterations = 600_000;
     private readonly IDataProtector _mfaProtector = (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1");
+    /// <summary>
+    /// The bootstrap/break-glass account's name. Since #1639 it is only a name: global administration is the
+    /// persisted <see cref="UserAccount.IsGlobalAdministrator"/> grant, which this account receives when it is
+    /// created (first-install bootstrap, the demo seed, or the #1639 migration for an existing database).
+    /// </summary>
     public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
     {
@@ -246,7 +251,7 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     {
         var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId && x.State == AccountState.Active, ct);
         if (account is null) return false;
-        if (account.UserName == SystemAdministratorUserName) return true;
+        if (account.IsGlobalAdministrator) return true;
         // The same implication as the overload above. Two copies of this check exist and both are reached
         // from live authorization paths, so a rule applied to only one of them is a rule that holds by luck.
         var accepted = MembershipAnswerableRoles(role);
@@ -301,7 +306,7 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         // Ended memberships are retained as history and must never reach a session's authority set.
         var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id && x.EndedAt == null).ToListAsync(ct);
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
-        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs, user.MustChangePassword);
+        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.IsGlobalAdministrator, programs, user.MustChangePassword);
     }
     public static string? TokenDigest(string? token) => string.IsNullOrWhiteSpace(token)?null:Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
     public static string CreateMfaSecret()=>Base32Encode(RandomNumberGenerator.GetBytes(20));
@@ -409,6 +414,7 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
             if (!users.TryGetValue(person.User, out var user))
             {
                 user = new(person.User, person.Name, person.Email, demoPasswordHash, now);
+                if (person.User == IdentityService.SystemAdministratorUserName) user.GrantGlobalAdministrator("system.bootstrap", now);
                 db.UserAccounts.Add(user);
                 users[person.User] = user;
             }

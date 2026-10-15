@@ -26,10 +26,10 @@ public sealed class ControlledAttachmentStorageCoordinator(AeroLinkDbContext db,
     {
         var actor = await db.UserAccounts.AsNoTracking()
             .Where(x => x.UserName == userName && x.State == AccountState.Active)
-            .Select(x => new { x.Id, x.UserName })
+            .Select(x => new { x.Id, x.UserName, x.IsGlobalAdministrator })
             .SingleOrDefaultAsync(ct);
         if (actor is null) return false;
-        if (actor.UserName == IdentityService.SystemAdministratorUserName) return true;
+        if (actor.IsGlobalAdministrator) return true;
 
         var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
             .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);

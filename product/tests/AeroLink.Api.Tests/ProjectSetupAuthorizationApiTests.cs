@@ -164,17 +164,21 @@ public sealed class ProjectSetupAuthorizationApiTests
         var configuredSource = await configuredSourceResponse.Content.ReadFromJsonAsync<JsonElement>();
         var sourceAssertionHash = configuredSource.GetProperty("assertion").GetProperty("hash").GetString();
 
-        // This is the current identity model's administrator boundary: administrator authority is derived from
-        // the persisted reserved username. Rename the actual draft creator, preserve its source membership, and
-        // install a different current administrator so both sessions resolve authority from the database.
+        // Administrator authority is the persisted global-administrator grant (#1639). Rename the actual draft
+        // creator and revoke its grant, preserve its source membership, and install a different current
+        // administrator so both sessions resolve authority from the database.
         using (var demotion = factory.Services.CreateScope())
         {
             var db = demotion.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var original = await db.UserAccounts.SingleAsync(x => x.Id == originalAdministratorId);
+            original.RevokeGlobalAdministrator("test.setup", now);
             var updated = await db.UserAccounts.Where(x => x.Id == originalAdministratorId)
                 .ExecuteUpdateAsync(set => set.SetProperty(x => x.UserName, demotedName));
             Assert.Equal(1, updated);
-            db.UserAccounts.Add(new UserAccount("admin", "Replacement Administrator", "replacement.admin@example.test",
-                IdentityService.HashPassword(administratorPassword), now));
+            var replacement = new UserAccount("admin", "Replacement Administrator", "replacement.admin@example.test",
+                IdentityService.HashPassword(administratorPassword), now);
+            replacement.GrantGlobalAdministrator("test.setup", now);
+            db.UserAccounts.Add(replacement);
             await db.SaveChangesAsync();
         }
 

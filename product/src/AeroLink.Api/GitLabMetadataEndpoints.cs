@@ -121,7 +121,7 @@ public static class GitLabMetadataEndpoints
         var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
             .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null) return Results.Forbid();
-        var allowed = account.UserName == IdentityService.SystemAdministratorUserName
+        var allowed = account.IsGlobalAdministrator
             || await db.ProgramMemberships.AsNoTracking()
                 .AnyAsync(x => x.UserId == actorId && x.ProgramId == programId.Value && x.EndedAt == null, ct);
         return allowed ? null : Results.Forbid();

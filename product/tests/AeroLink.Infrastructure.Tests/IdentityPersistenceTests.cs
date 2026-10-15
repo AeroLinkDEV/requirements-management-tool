@@ -199,6 +199,7 @@ public sealed class IdentityPersistenceTests
         var now = DateTimeOffset.UtcNow; var program = new ProgramRecord("Scoped Program", "SCP");
         var scopedAdministrator = new UserAccount("program.admin", "Program Administrator", "program.admin@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
         var systemAdministrator = new UserAccount(IdentityService.SystemAdministratorUserName, "System Administrator", "admin@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
+        systemAdministrator.GrantGlobalAdministrator("test.setup", now);
         var delegateUser = new UserAccount("delegate.user", "Delegate User", "delegate@example.test", IdentityService.HashPassword("StrongPass!2026"), now);
         db.AddRange(program, scopedAdministrator, systemAdministrator, delegateUser); await db.SaveChangesAsync();
         db.ProgramMemberships.AddRange(

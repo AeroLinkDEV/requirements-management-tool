@@ -135,7 +135,7 @@ static class IdentityHttpExtensions
             .Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList()))
             .ToList();
         return new(user.Id, user.UserName, user.DisplayName, user.Email,
-            user.UserName == IdentityService.SystemAdministratorUserName, programs, user.MustChangePassword);
+            user.IsGlobalAdministrator, programs, user.MustChangePassword);
     }
 
     public static async Task<bool> HasFreshProjectRoleAsync(this HttpContext context, AeroLinkDbContext db,

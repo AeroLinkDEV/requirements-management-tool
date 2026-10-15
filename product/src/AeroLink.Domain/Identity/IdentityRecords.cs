@@ -502,6 +502,29 @@ public sealed class UserAccount
         var trimmed = Required(principal, nameof(principal));
         WindowsPrincipal = trimmed.Length > WindowsPrincipalMaxLength ? trimmed[..WindowsPrincipalMaxLength] : trimmed;
     }
+    /// <summary>
+    /// Global system administration (#1639). It used to be the account named <c>admin</c> and nothing else;
+    /// it is now a persisted grant any account can hold, attributable to whoever granted or revoked it.
+    /// The current grant's grantor and time stay on the row after a revoke, so the account still answers
+    /// "who made this person an administrator, and who took it away"; every earlier cycle is in the security
+    /// audit log (<c>GlobalAdministratorGranted</c> / <c>GlobalAdministratorRevoked</c>).
+    /// </summary>
+    public bool IsGlobalAdministrator { get; private set; }
+    public string? GlobalAdministratorGrantedBy { get; private set; }
+    public DateTimeOffset? GlobalAdministratorGrantedAt { get; private set; }
+    public string? GlobalAdministratorRevokedBy { get; private set; }
+    public DateTimeOffset? GlobalAdministratorRevokedAt { get; private set; }
+    public void GrantGlobalAdministrator(string grantedBy, DateTimeOffset now)
+    {
+        if (IsGlobalAdministrator) throw new InvalidOperationException("The account is already a global administrator.");
+        IsGlobalAdministrator = true; GlobalAdministratorGrantedBy = Required(grantedBy, nameof(grantedBy)); GlobalAdministratorGrantedAt = now;
+        GlobalAdministratorRevokedBy = null; GlobalAdministratorRevokedAt = null;
+    }
+    public void RevokeGlobalAdministrator(string revokedBy, DateTimeOffset now)
+    {
+        if (!IsGlobalAdministrator) throw new InvalidOperationException("The account is not a global administrator.");
+        IsGlobalAdministrator = false; GlobalAdministratorRevokedBy = Required(revokedBy, nameof(revokedBy)); GlobalAdministratorRevokedAt = now;
+    }
     public void LoginSucceeded(DateTimeOffset now) { FailedLoginCount = 0; LastLoginAt = now; }
     /// <summary>
     /// A sign-in that did not prove the AeroLink password (Windows sign-in). It must not clear the password's

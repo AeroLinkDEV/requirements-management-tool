@@ -234,7 +234,7 @@ public sealed class ProjectAssurancePolicyService(AeroLinkDbContext db)
 
         return new(approver.Id, approver.UserName, roles,
             delegations.Select(x => new AssuranceDelegationFact(x.Role, x.ProgramId, x.StartsAt, x.EndsAt, x.RevokedAt is not null)).ToList(),
-            approver.UserName == IdentityService.SystemAdministratorUserName || roles.Contains(ProgramRole.Administrator),
+            approver.IsGlobalAdministrator || roles.Contains(ProgramRole.Administrator),
             leadershipAuthorities);
     }
 

@@ -1673,6 +1673,7 @@ public sealed class AeroLinkDbContext : DbContext
             b.Property(x => x.WindowsSid).HasMaxLength(UserAccount.WindowsSidMaxLength);
             b.Property(x => x.WindowsPrincipal).HasMaxLength(UserAccount.WindowsPrincipalMaxLength);
             b.HasIndex(x => x.WindowsSid).IsUnique().HasFilter("\"WindowsSid\" IS NOT NULL");
+            b.Property(x => x.GlobalAdministratorGrantedBy).HasMaxLength(100); b.Property(x => x.GlobalAdministratorRevokedBy).HasMaxLength(100);
         });
         modelBuilder.Entity<ProgramMembership>(b =>
         {

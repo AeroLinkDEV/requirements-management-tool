@@ -175,15 +175,15 @@ public static class WorkflowEndpoints
                 .ToDictionary(x => x.Id, x => (x.UserName, x.DisplayName));
             var rolesByUser = programMembers.GroupBy(x => x.Id)
                 .ToDictionary(x => x.Key, x => x.Select(member => member.Role).ToList());
-            // The installation administrator is intentionally not required to hold a Program membership.
-            // ResolveHoldersAsync includes that substitution because the signing gate does; load the account
-            // alongside the scoped roster so the projection can actually name the holder it reports.
-            var systemAdministrator = await db.UserAccounts.AsNoTracking()
+            // A global administrator is intentionally not required to hold a Program membership.
+            // ResolveHoldersAsync includes that substitution because the signing gate does; load the accounts
+            // alongside the scoped roster so the projection can actually name the holders it reports.
+            var systemAdministrators = await db.UserAccounts.AsNoTracking()
                 .Where(x => x.State == AccountState.Active
-                            && x.UserName == IdentityService.SystemAdministratorUserName)
+                            && x.IsGlobalAdministrator)
                 .Select(x => new { x.Id, x.UserName, x.DisplayName })
-                .SingleOrDefaultAsync(ct);
-            if (systemAdministrator is not null)
+                .ToListAsync(ct);
+            foreach (var systemAdministrator in systemAdministrators)
                 accountById[systemAdministrator.Id] =
                     (systemAdministrator.UserName, systemAdministrator.DisplayName);
 

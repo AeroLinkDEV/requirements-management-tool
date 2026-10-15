@@ -19,7 +19,7 @@ public static class AdministrationEndpoints
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
             var users = await db.UserAccounts.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(ct); var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.EndedAt == null).ToListAsync(ct);
-            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.UserName == IdentityService.SystemAdministratorUserName, origin = x.Origin.ToString(), windowsPrincipal = x.WindowsSid != null ? x.WindowsPrincipal : null, windowsLinked = x.WindowsSid != null, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
+            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.IsGlobalAdministrator, origin = x.Origin.ToString(), windowsPrincipal = x.WindowsSid != null ? x.WindowsPrincipal : null, windowsLinked = x.WindowsSid != null, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
         });
 
         app.MapPost("/api/admin/users", async (CreateUserRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
@@ -92,6 +92,37 @@ public static class AdministrationEndpoints
                 revokedSessions = sessions.Count;
             }
             db.SecurityAuditEvents.Add(new(request.Enabled ? "AccountEnabled" : "AccountDisabled", actor.UserName, user.UserName, "Success", $"Account state set to {(request.Enabled ? "Active" : "Disabled")}; revoked {revokedSessions} outstanding session(s).", http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
+        });
+
+        // #1639: global administration is a persisted, attributable grant rather than the account named
+        // `admin`. Serializable so two administrators revoking each other at once cannot both pass the
+        // last-administrator check and leave the installation with nobody able to administer it.
+        app.MapPost("/api/admin/users/{id:guid}/global-administrator", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound();
+            if (user.IsGlobalAdministrator) return Results.Conflict(new { error = "This person is already a global administrator." });
+            var now = DateTimeOffset.UtcNow;
+            user.GrantGlobalAdministrator(actor.UserName, now);
+            db.SecurityAuditEvents.Add(new("GlobalAdministratorGranted", actor.UserName, user.UserName, "Success", $"Granted global administrator to {user.DisplayName}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
+        });
+
+        app.MapDelete("/api/admin/users/{id:guid}/global-administrator", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound();
+            if (!user.IsGlobalAdministrator) return Results.Conflict(new { error = "This person is not a global administrator." });
+            // The actor is an active administrator, so revoking somebody else always leaves one. The refusal is
+            // reached by revoking the last active administrator — in practice, yourself when nobody else is left.
+            if (user.State == AccountState.Active && !await db.UserAccounts.AnyAsync(x => x.Id != id && x.IsGlobalAdministrator && x.State == AccountState.Active, ct))
+                return Results.Conflict(new { error = "The last active global administrator cannot be revoked. Grant another person global administrator first.", code = "last_global_administrator" });
+            var now = DateTimeOffset.UtcNow;
+            user.RevokeGlobalAdministrator(actor.UserName, now);
+            db.SecurityAuditEvents.Add(new("GlobalAdministratorRevoked", actor.UserName, user.UserName, "Success", $"Revoked global administrator from {user.DisplayName}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
         });
 
         app.MapPost("/api/admin/users/{id:guid}/reset-password",async(Guid id,ResetPasswordRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
