@@ -312,7 +312,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Temporary recovery headroom for #1640: run 38822319865/API shard 2 completed all 418 selected cases
+    # (416 passed, 2 skipped) at 29m48s of job time, then hit the 30m cap during finalization; keep the 15m
+    # blame budget and 5m reserve while shard rebalance/four-shard measurement remains open.
+    timeout-minutes: 40
     env:
       METRICS_JOB_ID: backend-api
       METRICS_JOB_NAME: API test suite (${{ matrix.shard }}/${{ strategy.job-total }})
@@ -425,10 +428,10 @@ jobs:
           # ran for eight minutes and exited clean, and the guard read zero from nothing. A structured result
           # file has a schema; console output is a presentation detail that differs by SDK, verbosity and
           # whether anything is attached to stdout.
-          # Hang-budget arithmetic (#756): the outer job budget is 30 minutes and pre-test work (build,
-          # classifier, discovery, partition) is roughly 5 minutes, so even a test hanging at the very
-          # start of a shard still has ~10 minutes of runner time after the 15-minute blame budget fires —
-          # enough for the dump, the TRX, and the failure-time upload below. The static contract in
+          # Hang-budget arithmetic (#756): the outer job budget is 40 minutes and pre-test work (build,
+          # classifier, discovery, partition) is roughly 5 minutes. The static contract preserves at least
+          # five minutes beyond the 15-minute blame budget; a hang at test start therefore leaves roughly
+          # 20 minutes for the dump, TRX, and failure-time upload below. The static contract in
           # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin.
           dotnet test "$project" --configuration Release --no-build \
             --filter "$filter" --logger "console;verbosity=normal" \
