@@ -355,6 +355,15 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
       state.w3 = true; state.measuring = true; state.tasks = []; state.frames = []; state.frozen = []
       state.timeline = []; state.clocks = []; state.closes = []; state.inputs = []; state.events = []; state.boundaries = []
     },
+    /** The in-flight progress probe: constant-size, so polling it never copies the growing observation out of the page
+     * (night-1 audit P1-1: full snapshots stalled the paced page for up to ~1 s per poll late in a 1x flight). */
+    w3Progress() {
+      flush()
+      const first = state.frames[0]?.entry
+      return { frames: state.frames.length, lastOrdinal: state.frames.at(-1)?.ordinal ?? 0,
+        firstEntry: first ? { kernelTime: first.kernelTime, unitClockMs: first.unitClockMs } : null, closes: state.closes.length, inputs: state.inputs.length }
+    },
+    /** The whole observation. W3 takes it once, after the ordinary public Pause. */
     w3Snapshot() {
       flush()
       return { timeline: state.timeline, clocks: state.clocks, closes: state.closes, frames: state.frames, frozen: state.frozen,
