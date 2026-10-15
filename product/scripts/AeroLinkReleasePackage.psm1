@@ -122,6 +122,41 @@ function Get-AeroLinkReleaseSigningCertificate {
     return $certificate
 }
 
+function Assert-AeroLinkReleaseRuntime {
+    <#
+        .SYNOPSIS Reads the runtime a self-contained publish bundles, and refuses one that ships a known-vulnerable
+        System.Security.Cryptography.Pkcs.
+        .DESCRIPTION
+            A self-contained publish ships whichever Pkcs copy wins conflict resolution: the pinned 10.0.13 package
+            (#1637) or the shared framework's copy from the builder's SDK. Versions 10.0.0 to 10.0.12 are affected by
+            GHSA-846f-f764-76mx and GHSA-2fmv-rv2c-59x7, so a release is refused unless the file actually published
+            is 10.0.13 or later. The file version encodes the servicing patch as build / 100 (10.0.926.x is 10.0.9,
+            10.0.1326.x is 10.0.13). A missing file is a refusal too: the ASP.NET Core framework always carries it,
+            so its absence means the guard is no longer looking at what ships.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$AppRoot)
+    $AppRoot = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($AppRoot)
+    $pkcs = Join-Path $AppRoot 'System.Security.Cryptography.Pkcs.dll'
+    if (-not (Test-Path -LiteralPath $pkcs -PathType Leaf)) { throw "Release refused: $pkcs was not published, so the System.Security.Cryptography.Pkcs version cannot be checked." }
+    $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($pkcs)
+    $found = New-Object System.Version($info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+    $servicing = "$($info.FileMajorPart).$($info.FileMinorPart).$([Math]::Floor($info.FileBuildPart / 100))"
+    if ($found -lt [System.Version]'10.0.1300.0') {
+        throw "Release refused: the published System.Security.Cryptography.Pkcs.dll is file version $found (servicing $servicing). 10.0.13 or later is required (GHSA-846f-f764-76mx, GHSA-2fmv-rv2c-59x7)."
+    }
+
+    $frameworks = @()
+    $runtimeConfig = @(Get-ChildItem -LiteralPath $AppRoot -File -Filter '*.runtimeconfig.json')
+    if ($runtimeConfig.Count -ne 1) { throw "Release refused: expected one runtimeconfig.json in $AppRoot, found $($runtimeConfig.Count)." }
+    $options = ([System.IO.File]::ReadAllText($runtimeConfig[0].FullName) | ConvertFrom-Json).runtimeOptions
+    if ($options.PSObject.Properties['includedFrameworks']) {
+        $frameworks = @($options.includedFrameworks | ForEach-Object { "$($_.name) $($_.version)" })
+    }
+    if ($frameworks.Count -eq 0) { throw "Release refused: $($runtimeConfig[0].Name) lists no bundled frameworks; the publish is not self-contained." }
+    return [pscustomobject]@{ Frameworks = $frameworks; PkcsFileVersion = $found.ToString() }
+}
+
 function New-AeroLinkReleasePackage {
     <#
         .SYNOPSIS Writes manifest.json into a staged release tree, zips it, and writes the detached signature.
@@ -139,7 +174,10 @@ function New-AeroLinkReleasePackage {
         [Parameter(Mandatory)][System.Security.Cryptography.X509Certificates.X509Certificate2]$SigningCertificate,
         # Recorded, never inferred: 'origin-main' only when the builder proved HEAD equals the fetched origin/main
         # on a clean tree. A development build says so in its own signed manifest.
-        [ValidateSet('origin-main', 'unverified-development')][string]$SourcePosture = 'origin-main'
+        [ValidateSet('origin-main', 'unverified-development')][string]$SourcePosture = 'origin-main',
+        # The .NET frameworks a self-contained publish bundles, e.g. 'Microsoft.AspNetCore.App 10.0.9'
+        # (from Assert-AeroLinkReleaseRuntime), recorded so a host can see which runtime it is installing.
+        [string[]]$BundledRuntime = @()
     )
     if ($Version -notmatch $script:AeroLinkReleaseSemVer) { throw "Release version '$Version' is not semantic versioning (major.minor.patch[-prerelease])." }
     if ($SourceSha -notmatch '^[0-9a-f]{40}$') { throw "Source SHA '$SourceSha' is not a full lower-case commit SHA." }
@@ -162,7 +200,8 @@ function New-AeroLinkReleasePackage {
         sourceSha       = $SourceSha
         sourcePosture   = $SourcePosture
         latestMigration = $LatestMigration
-        builtAtUtc      = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        bundledRuntime  = @($BundledRuntime)
+        builtAtUtc     = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
         files           = @($entries)
     }
     [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
@@ -273,6 +312,7 @@ function Test-AeroLinkReleasePackage {
             SourceSha       = [string]$manifest.sourceSha
             SourcePosture   = [string]$manifest.sourcePosture
             LatestMigration = [string]$manifest.latestMigration
+            BundledRuntime  = if ($manifest.PSObject.Properties['bundledRuntime']) { @($manifest.bundledRuntime) } else { @() }
             FileCount       = $entries.Count
             Signer          = $certificate.Thumbprint
             Destination     = if ($temporary) { $null } else { $target }
@@ -286,6 +326,7 @@ function Test-AeroLinkReleasePackage {
 Export-ModuleMember -Function @(
     'New-AeroLinkReleaseSigningCertificate',
     'Get-AeroLinkReleaseSigningCertificate',
+    'Assert-AeroLinkReleaseRuntime',
     'New-AeroLinkReleasePackage',
     'Test-AeroLinkReleasePackage'
 )

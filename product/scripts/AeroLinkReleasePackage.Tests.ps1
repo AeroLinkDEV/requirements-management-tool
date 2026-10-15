@@ -107,6 +107,23 @@ try {
     $allowed = Test-AeroLinkReleasePackage -Package $development.Package -TrustedCertificate $trustedCer -AllowUnverifiedDevelopment
     Assert-True ($allowed.SourcePosture -eq 'unverified-development') 'A development installation may accept an unverified package only when it asks to.'
 
+    # The builder's runtime guard: a publish that ships the vulnerable Pkcs (10.0.9's 10.0.926.x) is refused by
+    # name, and a fixed one (10.0.13's 10.0.1326.x) passes with the bundled frameworks read for the manifest.
+    function New-PublishedApp([string]$Name, [string]$PkcsFileVersion) {
+        $app = Join-Path $root "$Name-app"
+        New-Item -ItemType Directory -Path $app | Out-Null
+        $type = 'PkcsStand' + [Guid]::NewGuid().ToString('N')
+        Add-Type -TypeDefinition "[assembly: System.Reflection.AssemblyFileVersion(`"$PkcsFileVersion`")] public class $type { }" `
+            -OutputAssembly (Join-Path $app 'System.Security.Cryptography.Pkcs.dll') -OutputType Library
+        [System.IO.File]::WriteAllText((Join-Path $app 'AeroLink.Api.runtimeconfig.json'),
+            '{ "runtimeOptions": { "tfm": "net10.0", "includedFrameworks": [ { "name": "Microsoft.NETCore.App", "version": "10.0.13" }, { "name": "Microsoft.AspNetCore.App", "version": "10.0.13" } ] } }')
+        return $app
+    }
+    Assert-Throws { Assert-AeroLinkReleaseRuntime -AppRoot (New-PublishedApp 'vulnerable' '10.0.926.27113') } 'Pkcs\.dll is file version 10\.0\.926\.27113 \(servicing 10\.0\.9\)\. 10\.0\.13 or later is required' `
+        'A publish that ships a vulnerable System.Security.Cryptography.Pkcs must be refused, naming the version found.'
+    $fixedRuntime = Assert-AeroLinkReleaseRuntime -AppRoot (New-PublishedApp 'fixed' '10.0.1326.50504')
+    Assert-True (($fixedRuntime.Frameworks -join ';') -eq 'Microsoft.NETCore.App 10.0.13;Microsoft.AspNetCore.App 10.0.13') "The bundled runtime is read from the publish (was '$($fixedRuntime.Frameworks -join ';')')."
+
     # No signature at all.
     Remove-Item -LiteralPath $good.Signature
     Assert-Throws { Test-AeroLinkReleasePackage -Package $good.Package -TrustedCertificate $trustedCer } 'no detached signature' `

@@ -789,9 +789,16 @@ checks that again after the build. It also refuses when a `VITE_*` environment v
 `product/client/.env*` file exists, because Git ignores those and Vite would build them into the client. Run it
 from a dedicated clone, because `npm ci` replaces the client's `node_modules`. It writes `AeroLink-<semver>+<sha>.zip` and a detached `.sig` beside it. The zip holds:
 
-- `manifest.json`: the version, source SHA, latest schema migration and the SHA-256 of every file;
+- `manifest.json`: the version, source SHA, latest schema migration, bundled .NET runtime and the SHA-256 of every
+  file;
 - `app\`: the self-contained `win-x64` publish of the API, with the built client in `app\wwwroot`;
 - `scripts\`: the server scripts.
+
+**Build prerequisite.** The package is self-contained, so it ships the .NET runtime of the builder's SDK. The build
+refuses a publish whose `System.Security.Cryptography.Pkcs.dll` is below 10.0.13, because 10.0.0 to 10.0.12 are
+affected by GHSA-846f-f764-76mx and GHSA-2fmv-rv2c-59x7. The pinned package normally satisfies this. Still, build
+releases with an SDK whose bundled runtime is 10.0.13 or later, so the rest of the shipped runtime carries the same
+servicing fixes. The manifest's `bundledRuntime` records which runtime went out.
 
 The version comes from `product/release/VERSION`. Any build not made by this script reports `0.0.0-dev` at
 `/health/identity`. A packaged build reports its release `version` there to every caller. It reads its source SHA
