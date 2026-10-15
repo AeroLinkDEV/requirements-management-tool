@@ -281,8 +281,9 @@ test('unclassified root properties refuse; configuration may not share with auth
   // A unit root is never serialized state.
   const peer = { name: 'peer' }
   expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { s: peer }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  // Configuration may hold a unit: the config walk stops at unit roots, whose state is the unit's own.
-  expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { config: { unit: peer }, s: 1 }, fields: { config: 'config', s: 'authoritative' } }])).toBe('accepted')
+  // Configuration may hold a unit: the config walk stops at unit roots, whose state (here `at`) is the unit's own.
+  const located = { at: { lat: 1 } }
+  expect(refusalOf([{ unitId: 'P', root: located, fields: { at: 'authoritative' } }, { unitId: 'U', root: { config: { unit: located }, s: 1 }, fields: { config: 'config', s: 'authoritative' } }])).toBe('accepted')
   // Config, observer, derived and link fields are not encoded.
   const encoded = encodeState([{ unitId: 'U', root: { config: { big: 1 }, seen: [2], cache: new Set([3]), read: () => 4, s: 'p' }, fields: { config: 'config', seen: 'observer', cache: 'derived', read: 'link', s: 'authoritative' } }], { utc0Ms: 0 })
   if (!encoded.ok) throw new Error(encoded.refusal.detail)
