@@ -612,26 +612,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Start-AeroLi
 with `SiteServer:Enabled`, no demonstration data or accounts, `Identity:CookieSecure=true` and insecure
 webhooks off. The API then does the following:
 
-- Listens only on `https://<bindAddress>:<site.apiPort>`. An inherited `ASPNETCORE_URLS` is overridden.
+- Listens only on `https://<bindAddress>:<site.apiPort>`. An inherited `ASPNETCORE_URLS` or `HTTP_PORTS` is
+  overridden; a configured `Kestrel:Endpoints` is refused, since Kestrel would bind it beside the HTTPS port.
 - Sends HSTS (one year, this host name only).
 - Sets `AllowedHosts` to the public name plus `localhost`, `127.0.0.1` and `[::1]`.
 - Derives `Notifications:BaseUrl` and `Connector:PublicOrigin` from the HTTPS origin, and refuses either when
   it is set to anything else.
-- Names its cookies `__Host-aerolink_session` and `__Host-AeroLink.PreferenceConfirmation`. The host name is
-  shared with the other applications, and the prefix keeps them from reading or shadowing AeroLink's
-  cookies. HOME, the work laptop and other plain-HTTP launches keep the old names. Any other launch with
-  `Identity:CookieSecure=true` prefixes the session cookie too.
+- Names its cookies `__Host-aerolink_session` and `__Host-AeroLink.PreferenceConfirmation`. The prefix makes
+  the browser accept them only as Secure, `Path=/` and host-only. A plain-HTTP origin, a `Domain=` cookie
+  from a parent or sibling host, or a path-scoped cookie therefore cannot plant or shadow them. The distinct
+  names avoid accidental collisions. They do **not** isolate AeroLink from the other applications on the
+  shared host name. Cookies are not isolated by port, so those applications receive AeroLink's session cookie
+  and can overwrite it; `__Host-` blocks only subdomain and path tampering. The owner accepted this risk on
+  15 Oct 2026 (#1614 D3); a dedicated DNS alias for AeroLink removes it. HOME, the work laptop and other plain-HTTP launches
+  keep the old names. Any other launch with `Identity:CookieSecure=true` prefixes the session cookie too.
 
 The API refuses to start, naming every problem, when any of these holds:
 
 - the environment is not `Production`;
-- HTTPS is not configured, or the certificate is missing, expired, has no usable key, or does not cover the
-  public name;
+- HTTPS is not configured, or the certificate is missing or expired, does not name the public host in its
+  subject alternative names, or has a private key the running account cannot open and sign with;
+- `Kestrel:Endpoints` is configured;
 - the public name is a short name, `localhost` or an address;
 - demonstration data or accounts are enabled, cookies are not secure, or insecure webhooks are allowed;
 - the database has no account and no bootstrap secret is set.
 
-In any other `Production` launch, plain HTTP is allowed only on loopback.
+In any other `Production` launch, plain HTTP is allowed only on loopback, whether it comes from `urls`,
+`HTTP_PORTS` (which binds every interface) or `Kestrel:Endpoints`.
 
 ### Explicit HOME to work-laptop snapshot refresh
 

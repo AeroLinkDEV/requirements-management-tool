@@ -74,6 +74,11 @@ public static class SiteServerHosting
         var port = configuration.GetValue<int?>($"{Section}:Port");
         if (port is null or < 1 or > 65535) problems.Add("SiteServer:Port must be set to a port from 1 to 65535");
 
+        // The explicit Listen below replaces urls, ASPNETCORE_URLS and HTTP_PORTS, but Kestrel binds configured
+        // endpoints beside it - an inherited Kestrel__Endpoints__Http__Url would serve plain HTTP next to HTTPS.
+        if (configuration.GetSection("Kestrel:Endpoints").GetChildren().Any())
+            problems.Add("a site server listens only on its HTTPS endpoint; remove Kestrel:Endpoints");
+
         X509Certificate2? certificate = null;
         if (publicHost.Length > 0)
         {
@@ -155,8 +160,13 @@ public static class SiteServerHosting
     private static void RefuseNetworkHttpInProduction(IHostEnvironment environment, IConfiguration configuration)
     {
         if (!environment.IsProduction()) return;
-        var urls = (configuration[WebHostDefaults.ServerUrlsKey] ?? "")
+        var configuredUrls = (configuration[WebHostDefaults.ServerUrlsKey] ?? "")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // With no URL list, ASPNETCORE_HTTP_PORTS / DOTNET_HTTP_PORTS bind http://*:<port>, every interface.
+        var httpPorts = configuredUrls.Length > 0 ? [] : (configuration[WebHostDefaults.HttpPortsKey] ?? "")
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => $"http://*:{x}");
+        var urls = configuredUrls.Concat(httpPorts)
             .Concat(configuration.GetSection("Kestrel:Endpoints").GetChildren().Select(x => x["Url"] ?? ""))
             .Where(x => x.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
         var exposed = urls.Where(x => !IsLoopbackUrl(x)).ToArray();
@@ -193,15 +203,47 @@ public static class SiteServerHosting
 
         var now = DateTime.Now;
         string? problem = null;
-        if (!certificate.HasPrivateKey) problem = $"certificate {certificate.Thumbprint} has no private key this process can use";
+        if (!certificate.HasPrivateKey) problem = $"certificate {certificate.Thumbprint} has no private key";
         else if (now < certificate.NotBefore || now > certificate.NotAfter)
             problem = $"certificate {certificate.Thumbprint} is valid only from {certificate.NotBefore:u} to {certificate.NotAfter:u}";
-        else if (!certificate.MatchesHostname(publicHost))
-            problem = $"certificate {certificate.Thumbprint} does not cover '{publicHost}'";
+        else if (!CoversHost(certificate, publicHost))
+            problem = $"certificate {certificate.Thumbprint} does not cover '{publicHost}' in its subject alternative names";
+        else problem = KeyProblem(certificate);
         if (problem is null) return certificate;
         certificate.Dispose();
         throw new InvalidOperationException(problem);
     }
+
+    /// <summary>
+    /// Browsers match the host against the subject alternative names only, never the subject's CN, so neither may this.
+    /// </summary>
+    private static bool CoversHost(X509Certificate2 certificate, string publicHost)
+        => certificate.MatchesHostname(publicHost, allowWildcards: true, allowCommonName: false);
+
+    /// <summary>
+    /// HasPrivateKey says a key is associated, not that this process may open it. A machine-store key readable only
+    /// by SYSTEM and Administrators passes every other check, the API logs that it is listening, and every TLS
+    /// handshake then fails at a log level nobody sees. So open the key and sign with it, now.
+    /// </summary>
+    private static string? KeyProblem(X509Certificate2 certificate)
+    {
+        try
+        {
+            var probe = RandomNumberGenerator.GetBytes(32);
+            using var rsa = certificate.GetRSAPrivateKey();
+            if (rsa is not null) { rsa.SignData(probe, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1); return null; }
+            using var ecdsa = certificate.GetECDsaPrivateKey();
+            if (ecdsa is not null) { ecdsa.SignData(probe, HashAlgorithmName.SHA256); return null; }
+            return $"certificate {certificate.Thumbprint} has a private key of a type a site server cannot use (RSA or ECDSA)";
+        }
+        catch (CryptographicException ex)
+        {
+            return $"the service account {RunningIdentity()} cannot open the private key of certificate {certificate.Thumbprint} ({ex.Message}); grant it read access to the key";
+        }
+    }
+
+    private static string RunningIdentity()
+        => OperatingSystem.IsWindows() ? System.Security.Principal.WindowsIdentity.GetCurrent().Name : Environment.UserName;
 
     private static X509Certificate2 LoadPem(string? path, string? keyPath)
     {
@@ -245,7 +287,7 @@ public static class SiteServerHosting
             // at the next restart without editing configuration.
             var found = store.Certificates.Find(X509FindType.FindBySubjectName, subject!, validOnly: false);
             var now = DateTime.Now;
-            chosen = found.Where(x => x.HasPrivateKey && x.NotBefore <= now && now <= x.NotAfter && x.MatchesHostname(publicHost))
+            chosen = found.Where(x => x.HasPrivateKey && x.NotBefore <= now && now <= x.NotAfter && CoversHost(x, publicHost))
                 .OrderByDescending(x => x.NotAfter).FirstOrDefault();
             foreach (var other in found.Where(x => !ReferenceEquals(x, chosen))) other.Dispose();
             if (chosen is null)

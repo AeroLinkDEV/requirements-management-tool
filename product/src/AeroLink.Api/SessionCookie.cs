@@ -4,10 +4,13 @@ namespace AeroLink.Api;
 /// The one place that knows what AeroLink's sign-in cookie is called and how it is written.
 ///
 /// A site server shares its full host name with other intranet applications and is told apart from them only by
-/// port (#1614 D3). Browsers scope cookies by host name, not port, so a cookie called <c>aerolink_session</c> would
-/// be sent to - and could be overwritten by - every other application on that name. A secure deployment therefore
-/// uses the <c>__Host-</c> prefix: the browser accepts such a cookie only when it is Secure, has Path=/ and names
-/// no Domain, so no neighbour on another port or a parent domain can plant or shadow it.
+/// port (#1614 D3). Browsers scope cookies by host name, not port (RFC 6265 section 8.5), so those applications
+/// receive this cookie with every request and, being HTTPS on the same host, can overwrite it; nothing a cookie
+/// name or prefix does changes that. The owner accepted this risk on 15 Oct 2026 (#1614 D3); a dedicated DNS
+/// alias for AeroLink would remove it. What a secure deployment's
+/// <c>__Host-</c> prefix does give: the browser accepts the cookie only when it is Secure, has Path=/ and names no
+/// Domain, so a plain-HTTP origin, a parent or sibling host's <c>Domain=</c> cookie, or a path-scoped cookie cannot
+/// plant or shadow it. The distinct name avoids accidental collisions with the neighbours' own cookies.
 ///
 /// A non-secure development launch (HOME, the work laptop, the API tests) keeps the historical name, because a
 /// browser refuses a <c>__Host-</c> cookie that is not Secure, which is every cookie on plain HTTP.

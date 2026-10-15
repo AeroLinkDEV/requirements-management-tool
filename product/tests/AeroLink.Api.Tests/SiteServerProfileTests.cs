@@ -61,6 +61,8 @@ public sealed class SiteServerProfileTests : IDisposable
         { "Connector:PublicOrigin", "http://aerolink-site.example.test:5443", "", "HTTPS origin" },
         { "Identity:BootstrapSecret", "", "", "no accounts and Identity__BootstrapSecret is not set" },
         { "SiteServer:Enabled", "true", "Development", "runs as Production" },
+        // Kestrel binds configured endpoints beside the explicit HTTPS Listen, so one would serve plain HTTP.
+        { "Kestrel:Endpoints:Http:Url", "http://127.0.0.1:5081", "", "remove Kestrel:Endpoints" },
     };
 
     [Theory]
@@ -76,10 +78,13 @@ public sealed class SiteServerProfileTests : IDisposable
         AssertRefused(factory, expected);
     }
 
-    [Fact]
-    public void A_site_server_refuses_a_certificate_for_another_name()
+    [Theory]
+    [InlineData("another-app.example.test", true)]
+    // Browsers ignore the CN; a certificate naming the host only there is rejected by every one of them.
+    [InlineData(PublicHost, false)]
+    public void A_site_server_refuses_a_certificate_whose_alternative_names_do_not_cover_it(string dnsName, bool withAlternativeName)
     {
-        var other = WritePem("another-app.example.test", "other");
+        var other = WritePem(dnsName, "other", withAlternativeName);
         var settings = ValidSite();
         settings["SiteServer:Certificate:Path"] = other.Cert;
         settings["SiteServer:Certificate:KeyPath"] = other.Key;
@@ -93,9 +98,11 @@ public sealed class SiteServerProfileTests : IDisposable
     [InlineData("http://127.0.0.1:5080;http://aerolink.example.test:5080", true)]
     [InlineData("http://127.0.0.1:5080", false)]
     [InlineData("http://[::1]:5080", false)]
-    public void Production_never_serves_the_network_over_plain_http(string urls, bool refused)
+    // ASPNETCORE_HTTP_PORTS with no URL list binds http://*:<port>.
+    [InlineData("5080", true, "http_ports")]
+    public void Production_never_serves_the_network_over_plain_http(string value, bool refused, string key = "urls")
     {
-        using var factory = Host(new() { ["urls"] = urls });
+        using var factory = Host(new() { [key] = value });
         if (refused) AssertRefused(factory, "plain HTTP only on loopback");
         else factory.CreateClient().Dispose();
     }
@@ -211,13 +218,16 @@ public sealed class SiteServerProfileTests : IDisposable
         }
     }
 
-    private (string Cert, string Key) WritePem(string dnsName, string name)
+    private (string Cert, string Key) WritePem(string dnsName, string name, bool withAlternativeName = true)
     {
         using var key = RSA.Create(2048);
         var request = new CertificateRequest($"CN={dnsName}", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        var san = new SubjectAlternativeNameBuilder();
-        san.AddDnsName(dnsName);
-        request.CertificateExtensions.Add(san.Build());
+        if (withAlternativeName)
+        {
+            var san = new SubjectAlternativeNameBuilder();
+            san.AddDnsName(dnsName);
+            request.CertificateExtensions.Add(san.Build());
+        }
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], false));
         using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
         var cert = Path.Combine(_directory, name + ".crt");

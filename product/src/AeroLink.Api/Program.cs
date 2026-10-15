@@ -58,8 +58,11 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.W
 // #1614: a site server is Production over HTTPS from Kestrel, or it does not start. Every other launch is left as
 // it was, except that Production may no longer listen on plain HTTP anywhere but loopback.
 var siteServer = SiteServerHosting.Configure(builder);
-// Cookie names are decided once. Secure cookies take the __Host- prefix so that another application on the same
-// host name (a site server shares one, #1614 D3) can neither read nor shadow them; see SessionCookie.
+// Secure cookies take the __Host- prefix, which stops plain-HTTP origins, Domain= cookies from other hosts and
+// path-scoped cookies from planting or shadowing them. It does not isolate them from another application on the
+// same host name (a site server shares one): cookies are not isolated by port, so that application receives and
+// can overwrite them. The owner accepted that risk on 15 Oct 2026 (#1614 D3); a dedicated DNS alias removes it.
+// See SessionCookie.
 // Resolved from the built configuration, the same as the sign-in endpoint always read it, so a source added after
 // this line (a host's own configuration callbacks run at Build) still decides it.
 builder.Services.AddSingleton(services => new SessionCookie(SessionCookie.SecureFrom(
