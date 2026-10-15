@@ -14,7 +14,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
-import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
+import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3DueKey, w3KeySchedule, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
 import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, archiveW3ColdInput, runRow, w3EndRecord, w3PairedPlan, w3SessionRecord, w3SessionSlots, w3SlotAdmission } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, runClassification, scoredRuns, type RunValue } from '../perf/stats'
@@ -76,13 +76,86 @@ test('W3 later frozen clocks and actual CDU outcome stay contextual; missing nat
   const {raw,expected,identity}=literalW3()
   raw.frozen=[{schema:1,completed:1,utcMs:20000,monotonicMs:7235,kernelTime:18_082_500_000,unitClockMs:Date.parse(expected.startUtc)+1_808_250}]
   raw.inputs=[{expectedKey:'PROG',key:'PROG',trusted:true,target:0,eventTime:500,before:'ACT RTE 1 LEGS\nold clock',after:'ACT PROGRESS\nnew clock',outcomeObservedAt:540,completedAtDispatch:300}]
-  raw.events=[{name:'click',targetKey:'PROG',targetIndex:0,start:500,duration:16,interaction:1,processing:2,delay:1}]
+  raw.events=[{name:'pointerdown',targetKey:'PROG',targetIndex:0,start:500,duration:16,interaction:1,processing:2,delay:1}]
   const result=w3PrefixAccounting(raw,expected,identity)
   expect(result.interactions[0]).toMatchObject({outcome:'CDU_OUTCOME_AFTER_PAINT_OBSERVED',eventTiming:'NATIVE_NEXT_PAINT_ENTRY_CORRELATED'})
   expect(result.heap.retainedF7200).toBe('UNAVAILABLE')
   raw.events=[];expect(w3PrefixAccounting(raw,expected,identity).interactions[0].eventTiming).toBe('CENSORED_OR_UNAVAILABLE')
   raw.inputs[0].after='ACT RTE 1 LEGS\nchanged clock only';expect(w3PrefixAccounting(raw,expected,identity).interactions[0].outcome).toBe('UNAVAILABLE')
   raw.frozen[0].unitClockMs+=250;expect(()=>w3PrefixAccounting(raw,expected,identity)).toThrow(/frozen-clock/)
+})
+// A real init-script W3 recorder in a VM page whose CDU key changes the screen on pointerdown, as the bench's keys do.
+function w3RecorderPage() {
+  const observers: { type: string; pending: unknown[] }[] = [], listeners: Record<string, ((event: unknown) => void)[]> = {}
+  class Observer { type = ''; pending: unknown[] = []; constructor(_callback: unknown) { observers.push(this) } observe(options: { type: string }) { this.type = options.type } takeRecords() { const records = this.pending; this.pending = []; return records } }
+  class Element { constructor(public fn: string) {} getAttribute(name: string) { return name === 'data-fn' ? this.fn : null } closest(selector: string) { return selector === '[data-fn]' ? this : selector === '.fmsCdu' ? cdu : null } }
+  const screen = { text: 'ACT RTE 1 LEGS\nold page' }
+  const cdu = { querySelector: () => ({ getAttribute: () => screen.text }) }
+  const keys = [new Element('PROG'), new Element('LEGS')]
+  const page: any = { setTimeout: () => 1, requestAnimationFrame: () => 1 }; page.top = page
+  let clock = 0
+  runInNewContext(`(${installBrowserRecorder.toString()})({slice:'s',discard:'d',clock:'c',close:'x',successFrame:'f',frozen:'z'})`, {
+    window: page, performance: { now: () => ++clock, timeOrigin: 1 }, PerformanceObserver: Observer, Element, Date, queueMicrotask,
+    document: { addEventListener(type: string, fn: (event: unknown) => void) { (listeners[type] ??= []).push(fn) },
+      querySelectorAll: (selector: string) => selector.includes('"PROG"') ? [keys[0]] : selector.includes('"LEGS"') ? [keys[1]] : keys },
+  })
+  const measures = observers.find(observer => observer.type === 'measure')!
+  // A trusted tap on a key: pointerdown changes the page (the product handler), then click.
+  const tap = (key: 'PROG' | 'LEGS', at: number) => {
+    const target = keys[key === 'PROG' ? 0 : 1]
+    for (const fn of listeners.pointerdown ?? []) fn({ target, timeStamp: at, isTrusted: true })
+    screen.text = key === 'PROG' ? 'ACT PROGRESS\nnew page' : 'ACT RTE 1 LEGS\nnew page'
+    for (const fn of listeners.click ?? []) fn({ target, timeStamp: at + 40, isTrusted: true })
+  }
+  return { recorder: page.__fmsPerf, measures, tap }
+}
+test('the W3 in-flight progress probe is constant-size whatever has been recorded, and carries the F0 entry',()=>{
+  const { recorder, measures } = w3RecorderPage()
+  recorder.armW3()
+  const frame = (ordinal: number) => ({ name: 'f', detail: { ordinal, entry: { kernelTime: ordinal === 1 ? 0 : (ordinal - 1) * 2_500_000, unitClockMs: 1000 + (ordinal - 1) * 250 }, frame: { ordinal } } })
+  for (let ordinal = 1; ordinal <= 10; ordinal++) measures.pending.push(frame(ordinal))
+  const early = recorder.w3Progress()
+  expect(early).toEqual({ frames: 10, lastOrdinal: 10, firstEntry: { kernelTime: 0, unitClockMs: 1000 }, closes: 0, inputs: 0 })
+  for (let ordinal = 11; ordinal <= 5000; ordinal++) measures.pending.push(frame(ordinal))
+  const late = recorder.w3Progress()
+  expect(late).toMatchObject({ frames: 5000, lastOrdinal: 5000, firstEntry: { kernelTime: 0, unitClockMs: 1000 } })
+  expect(JSON.stringify(late).length).toBeLessThanOrEqual(JSON.stringify(early).length + 4)
+})
+test('a W3 key records the CDU screen before its pointerdown changes the page, and the pointerdown time',()=>{
+  const { recorder, tap } = w3RecorderPage()
+  recorder.armW3()
+  recorder.keyDispatch('PROG')
+  tap('PROG', 500)
+  recorder.keyOutcome()
+  const [input] = recorder.w3Snapshot().inputs
+  expect(input).toMatchObject({ expectedKey: 'PROG', key: 'PROG', trusted: true, eventTime: 500, clickTime: 540, before: 'ACT RTE 1 LEGS\nold page', after: 'ACT PROGRESS\nnew page' })
+})
+test('W3 Event Timing correlates the key interaction by interactionId and takes its longest native entry',()=>{
+  const {raw,expected,identity}=literalW3()
+  raw.inputs=[{expectedKey:'PROG',key:'PROG',trusted:true,target:0,eventTime:500,clickTime:540,before:'ACT RTE 1 LEGS\nold',after:'ACT PROGRESS\nnew',outcomeObservedAt:560,completedAtDispatch:300}]
+  raw.events=[{name:'pointerdown',targetKey:'PROG',targetIndex:0,start:500,duration:24,interaction:7,processing:3,delay:1},{name:'click',targetKey:'PROG',targetIndex:0,start:540,duration:16,interaction:7,processing:1,delay:0},
+    {name:'pointerdown',targetKey:'LEGS',targetIndex:1,start:900,duration:40,interaction:8,processing:2,delay:1}]
+  const [interaction]=w3PrefixAccounting(raw,expected,identity).interactions
+  expect(interaction).toMatchObject({outcome:'CDU_OUTCOME_AFTER_PAINT_OBSERVED',eventTiming:'NATIVE_NEXT_PAINT_ENTRY_CORRELATED',interactionId:7,interactionDurationMs:24})
+  expect(interaction.entries.map((entry:any)=>entry.name)).toEqual(['pointerdown','click'])
+  // Below the 16 ms threshold no native entry exists: censored, never zero.
+  raw.events=[];expect(w3PrefixAccounting(raw,expected,identity).interactions[0]).toMatchObject({eventTiming:'CENSORED_OR_UNAVAILABLE',interactionDurationMs:null})
+})
+test('the W3 interaction schedule is declared on completed frames: PROG/LEGS alternating at fixed frames, never by harness timing',()=>{
+  const schedule=w3KeySchedule({firstFrame:120,everyFrames:120,count:59,keys:['PROG','LEGS']})
+  expect(schedule).toHaveLength(59)
+  expect(schedule.slice(0,3)).toEqual([{index:0,frame:120,key:'PROG'},{index:1,frame:240,key:'LEGS'},{index:2,frame:360,key:'PROG'}])
+  expect(schedule.at(-1)).toEqual({index:58,frame:7080,key:'PROG'})
+  expect(w3DueKey(schedule,0,119)).toBeNull();expect(w3DueKey(schedule,0,120)).toEqual(schedule[0]);expect(w3DueKey(schedule,1,239)).toBeNull()
+  expect(w3DueKey(schedule,59,7200)).toBeNull()
+  const protocolSchedule=JSON.parse(readFileSync('perf/protocol.json','utf8')).browser.w3Recipe.interactionSchedule
+  expect(protocolSchedule).toEqual({firstFrame:120,everyFrames:120,count:59,keys:['PROG','LEGS']})
+  // The accounting reports the dispatched schedule against the declared one.
+  const {raw,expected,identity}=literalW3()
+  raw.inputs=schedule.map(row=>({expectedKey:row.key,key:row.key,trusted:true,target:0,eventTime:row.frame,completedAtDispatch:row.frame,before:'x',after:'y'}))
+  expect(w3PrefixAccounting(raw,expected,identity).interactionSchedule).toMatchObject({status:'COMPLETE',declared:59,dispatched:59,maxLateFrames:0})
+  raw.inputs=raw.inputs.slice(0,58)
+  expect(w3PrefixAccounting(raw,expected,identity).interactionSchedule).toMatchObject({status:'INCOMPLETE',declared:59,dispatched:58})
 })
 test('W3 refuses missing finalzero-debt success, moved faultclock, transientSYNC, lateF0 and mismatched setup/profile/arm',()=>{
   for(const change of [
