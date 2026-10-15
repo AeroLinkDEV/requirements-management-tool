@@ -833,6 +833,13 @@ function Register-AeroLinkSiteBackupTask {
     <# .SYNOPSIS Registers (or replaces) the site backup task. Elevated; called by the installer (#1614 1.7). #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$InstallationRoot, [string]$ScriptRoot = $PSScriptRoot, [datetime]$At = ([datetime]::Today.AddHours(2)))
+    $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+    if (-not $site) { throw "$InstallationRoot has no site declaration; a site backup task is only registered for a site installation." }
+    # The task runs as NT SERVICE\<serviceName>. A runAsSid override (disposable qualification only) would make the
+    # declaration name an account the task does not run as, and the application password's reader with it.
+    if ($site.RunAsSid -ne (Get-AeroLinkServiceSid -ServiceName $site.ServiceName)) {
+        throw "The declared API SID $($site.RunAsSid) is an override, not NT SERVICE\$($site.ServiceName). Remove runAsSid from the site declaration before registering the backup task."
+    }
     if (-not (Test-AeroLinkElevatedAdministrator)) { throw 'Registering the site backup task requires an elevated administrator.' }
     $definition = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $InstallationRoot -ScriptRoot $ScriptRoot -At $At
     $task = New-ScheduledTask -Action $definition.Action -Trigger $definition.Trigger -Principal $definition.Principal `

@@ -264,6 +264,17 @@ try {
         $slashTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot ($siteRoot.TrimEnd('\') + '\') -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
         Assert-True ($slashTask.Action.Arguments -notmatch '\\"' -and $slashTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot).TrimEnd('\'))`" -RetentionDays")) `
             "A trailing backslash on the root must not reach the task's quoted argument: $($slashTask.Action.Arguments)"
+        # A runAsSid override (qualification only) names an account the task would not run as: refused before anything
+        # is registered, whether or not this run is elevated.
+        $overrideDocument = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+        $overrideDocument.site | Add-Member -NotePropertyName runAsSid -NotePropertyValue ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) -Force
+        $overrideDocument | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        try { Assert-Throws { Register-AeroLinkSiteBackupTask -InstallationRoot $siteRoot } 'is an override' 'Registering the backup task must refuse a runAsSid override.' }
+        finally {
+            $restored = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+            $restored.site.PSObject.Properties.Remove('runAsSid')
+            $restored | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        }
         Assert-Throws { Set-AeroLinkSiteDeclaration -InstallationRoot $siteRoot -ApiPort $siteApiPort -PostgresPort $sitePostgresPort -ConnectorDeploymentId 'aerolink-other' } 'orphan' `
             'A site declaration must refuse to replace an existing connector deployment id.'
 
