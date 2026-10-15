@@ -16,7 +16,7 @@ import { runBrowserUnpaced, type UnpacedInput } from '../perf/browser-unpaced'
 import { ScenarioRunner, reportMarkdown, scenarioDigest } from '../src/fmsCdu/scenario'
 import { BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type WindowProbe } from '../perf/browser-accounting'
 import { TimelineHost } from './fixtures/fms-pacing-host'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, archiveW3ColdInput, runRow, w3EndRecord, w3PairedPlan, w3SessionRecord } from '../perf/browser-capture'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, CAPTURE_GUARDIAN, archiveW3ColdInput, runRow, w3EndRecord, w3PairedPlan, w3SessionRecord, w3SessionSlots, w3SlotAdmission } from '../perf/browser-capture'
 import { abbaOrder, blockZeroCheck, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, median, medianLevel, mulberry32, nearestRank, permutationTest, plannedRuns, relativeEffect, runClassification, scoredRuns, type RunValue } from '../perf/stats'
 
 // The performance harness (product/client/perf, #1510) turns runs into the intervals every D10 budget decision rests
@@ -218,15 +218,59 @@ test('a W3 session record references one byte-identical copy of the admitted inp
   const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',builds:{A:{dependencies:Array.from({length:2000},(_,i)=>({path:`n${i}`,sha256:'e'.repeat(64)}))}}}
   const input=join(root,'source-manifest-built.json');writeFileSync(input,JSON.stringify(manifest,null,2))
   const sha=(path:string)=>createHash('sha256').update(readFileSync(path)).digest('hex')
-  const session=w3SessionRecord({id:'literal',plan:{slots:[]},sessionIndex:3,slots:[],manifest,manifestInput:input,dir,cold:{payloadSha256:'c'.repeat(64)},harness:{commit:'h'.repeat(40)},startedAt:'2026-10-14T20:28:00.000Z',monotonicStart:1,deadline:2})
+  const session=w3SessionRecord({id:'literal',plan:{slots:[]},sessionIndex:3,slots:[],manifest,manifestInput:input,manifestPinnedSha256:sha(input),dir,cold:{payloadSha256:'c'.repeat(64)},harness:{commit:'h'.repeat(40)},startedAt:'2026-10-14T20:28:00.000Z',monotonicStart:1,deadline:2})
   expect(session).not.toHaveProperty('manifest')
   expect(session).toMatchObject({schema:'aerolink.fms-w3-paired-session.v1',sessionIndex:3,manifestFile:{path:'w3-input-manifest.json',sha256:sha(input),bytes:readFileSync(input).length,digest:digest(manifest)}})
   expect(readFileSync(join(dir,'w3-input-manifest.json'))).toEqual(readFileSync(input))
   expect(JSON.stringify(session).length).toBeLessThan(4096)
   // An input file that is not the admitted manifest is refused, never referenced.
   const other=join(root,'other');mkdirSync(other)
-  expect(()=>w3SessionRecord({id:'literal',plan:{},sessionIndex:3,slots:[],manifest:{...manifest,schema:'changed'},manifestInput:input,dir:other,cold:{},harness:{},startedAt:'x',monotonicStart:1,deadline:2}))
+  expect(()=>w3SessionRecord({id:'literal',plan:{},sessionIndex:3,slots:[],manifest:{...manifest,schema:'changed'},manifestInput:input,manifestPinnedSha256:sha(input),dir:other,cold:{},harness:{},startedAt:'x',monotonicStart:1,deadline:2}))
     .toThrow('W3 input manifest file is not the admitted manifest')
+})
+test('a W3 result file whose identity differs from the dispatched slot is bound and fails the row',()=>{
+  const dir=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-row-mismatch-'));mkdirSync(join(dir,'runs'))
+  const sha=(path:string)=>createHash('sha256').update(readFileSync(path)).digest('hex')
+  const dispatched={rate:1,configuration:'view-on-svs-off',build:{sourceSha256:'a'.repeat(64)}},other={...dispatched,configuration:'view-off-svs-off'}
+  const result={route:{id:'W3/browser-paced/dual/v1'},refusal:null,accounting:{status:'OBSERVED'},identity:other}
+  const resultPath=join(dir,'runs','run-0000.json');writeFileSync(resultPath,JSON.stringify(result))
+  const row=runRow({index:0,kind:'browser-w3',identity:dispatched,exitCode:0,status:'passed',routeIdentityRefusal:null,result},resultPath,dir)
+  expect(row).toMatchObject({status:'failed',identityMatches:false,identityRefusal:'child result identity differs from the dispatched slot identity',identity:dispatched,
+    resultFile:{path:'runs/run-0000.json',sha256:sha(resultPath)},resultSummary:{accountingStatus:'OBSERVED',identitySha256:digest(other)}})
+})
+test('a W3 session record refuses an input manifest file that is not the pinned --w3-input-sha256',()=>{
+  const root=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-pin-')),dir=join(root,'out');mkdirSync(dir)
+  const manifest={schema:'aerolink.fms-w3-observation-overlay.v1'},input=join(root,'m.json');writeFileSync(input,JSON.stringify(manifest))
+  expect(()=>w3SessionRecord({id:'literal',plan:{},sessionIndex:0,slots:[],manifest,manifestInput:input,manifestPinnedSha256:'0'.repeat(64),dir,cold:{},harness:{},startedAt:'x',monotonicStart:1,deadline:2}))
+    .toThrow('W3 input manifest copy does not match the pinned --w3-input-sha256')
+})
+test('every W3 slot re-checks the harness identity before admission, and the end record flags a harness that changed',()=>{
+  const start={commit:'a'.repeat(40),apiTree:'b'.repeat(40),apiAssemblySha256:'c'.repeat(64),dirtyEntries:0}
+  // The harness check precedes manifest admission: a drifted harness is refused as such, whatever the manifest.
+  expect(()=>w3SlotAdmission({},{...start,apiAssemblySha256:'d'.repeat(64)},start)).toThrow('W3 harness identity changed during the session; no later slot runs on another harness')
+  expect(()=>w3SlotAdmission({},{...start},start)).toThrow('W3 requires the exact paired original/effective observation manifest before output or children')
+  const end=w3EndRecord({harness:start},null,{},{harnessAtEnd:{...start,commit:'e'.repeat(40)}})
+  expect(end).toMatchObject({harnessAtEndMatches:false})
+  expect(w3EndRecord({harness:start},null,{},{harnessAtEnd:{...start}})).toMatchObject({harnessAtEndMatches:true})
+})
+test('a W3 A/A session runs the planned order and cells with one arm in every slot, labelled AA; A/B is unchanged',()=>{
+  const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',overlaySha256:'o'.repeat(64),harness:{commit:'h'.repeat(40)},
+    arms:{A:{original:{commit:'7f2b53aec7f567089455c7c6b69f05f518a8e563'},effectiveSourceSha256:'a'.repeat(64)},B:{original:{commit:'5c7ec720845612271fb38a99880a341a6845f3ba'},effectiveSourceSha256:'b'.repeat(64)}}}
+  const plan=w3PairedPlan(manifest),planned=plan.slots.filter(slot=>slot.repeat===0&&slot.session===3)
+  expect(planned.map(slot=>slot.arm)).toEqual(['B','A','A','B'])
+  const ab=w3SessionSlots(plan,0,3)
+  expect(ab.map(slot=>[slot.slot,slot.arm,slot.plannedArm,slot.comparison])).toEqual([[12,'B','B','AB'],[13,'A','A','AB'],[14,'A','A','AB'],[15,'B','B','AB']])
+  for(const only of ['A','B'] as const) {
+    const aa=w3SessionSlots(plan,0,3,only)
+    expect(aa.map(slot=>[slot.slot,slot.arm,slot.plannedArm,slot.comparison,slot.cell,slot.rate,slot.configuration]))
+      .toEqual(planned.map(slot=>[slot.slot,only,slot.arm,'AA',slot.cell,slot.rate,slot.configuration]))
+  }
+  expect(()=>w3SessionSlots(plan,0,3,'C')).toThrow('W3 A/A arm must be A or B')
+  const root=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-aa-')),input=join(root,'m.json');writeFileSync(input,JSON.stringify(manifest))
+  const sha=createHash('sha256').update(readFileSync(input)).digest('hex'),record=(dir:string,comparison?:unknown)=>{mkdirSync(dir)
+    return w3SessionRecord({id:'literal',plan,sessionIndex:3,slots:[],manifest,manifestInput:input,manifestPinnedSha256:sha,dir,cold:{},harness:{},startedAt:'x',monotonicStart:1,deadline:2,comparison})}
+  expect(record(join(root,'aa'),{mode:'AA',arm:'A'})).toMatchObject({schema:'aerolink.fms-w3-aa-session.v1',comparison:{mode:'AA',arm:'A'}})
+  expect(record(join(root,'ab'))).toMatchObject({schema:'aerolink.fms-w3-paired-session.v1',comparison:{mode:'AB',arm:null}})
 })
 
 // on. These vectors are derived by hand from the definitions, not from the code: nearest-rank percentiles, the ABBA
