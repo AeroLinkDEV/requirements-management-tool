@@ -406,15 +406,16 @@ function Get-AeroLinkServiceSid {
 
 function Assert-AeroLinkNotSiteInstallation {
     <#
-        .SYNOPSIS Refuses, without prompting, an operation that does not yet support a site server installation.
+        .SYNOPSIS Refuses, without prompting, a HOME tool run against a site server installation.
         .DESCRIPTION
-            A site cluster requires SCRAM passwords; these HOME-shaped operations connect as postgres with none, so
-            psql would sit at a hidden password prompt. Fail fast and say which item will add site support.
+            A site cluster requires SCRAM passwords; these HOME tools (snapshot import, the clone-validated upgrade,
+            showcase pruning, the FMS history repair) connect as postgres with none, so psql would sit at a hidden
+            password prompt. Backup and restore are site-aware (#1614 1.9) and do not call this.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$InstallationRoot, [Parameter(Mandatory)][string]$Operation)
     if (Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot) {
-        throw "$Operation is not yet supported on a site server installation; it connects to PostgreSQL without the site's credentials (#1614 1.9). Nothing was changed."
+        throw "$Operation is a HOME tool and is not supported on a site server installation: it connects to PostgreSQL without the site's credentials. Nothing was changed."
     }
 }
 
@@ -628,7 +629,82 @@ function Assert-AeroLinkPortAvailable {
     }
 }
 
+function Get-AeroLinkProgramLayout {
+    <#
+        .SYNOPSIS Where this program's settings, source identity, schema id and API executable come from.
+        .DESCRIPTION
+            Two layouts run these scripts:
+              Package  a release package (#1614 1.6): <program>\manifest.json, app\ (the published API, its
+                       appsettings.json and release-identity.json) and scripts\. No source tree, no git, no
+                       appsettings.Development.json. This is what a site installation runs.
+              Source   a repository checkout: src\, git and the migrations folder. HOME, the laptop and qualification,
+                       exactly as before.
+            ProductRoot is the folder above the scripts folder in both.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ProductRoot)
+    $root = [IO.Path]::GetFullPath($ProductRoot)
+    $manifestPath = Join-Path $root 'manifest.json'
+    $app = Join-Path $root 'app'
+    if ((Test-Path -LiteralPath $manifestPath -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $app 'AeroLink.Api.exe') -PathType Leaf)) {
+        try { $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json }
+        catch { throw "The release manifest at $manifestPath is malformed: $($_.Exception.Message)" }
+        $sha = if ($manifest.PSObject.Properties['sourceSha']) { [string]$manifest.sourceSha } else { '' }
+        $identityPath = Join-Path $app 'release-identity.json'
+        if (-not $sha -and (Test-Path -LiteralPath $identityPath -PathType Leaf)) {
+            $identity = Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json
+            if ($identity.PSObject.Properties['Runtime'] -and $identity.Runtime.PSObject.Properties['SourceSha']) { $sha = [string]$identity.Runtime.SourceSha }
+        }
+        $migration = if ($manifest.PSObject.Properties['latestMigration']) { [string]$manifest.latestMigration } else { '' }
+        if (-not $sha -or -not $migration) { throw "The release manifest at $manifestPath names no source SHA or latest migration; refusing to record an archive whose application identity is unknown." }
+        return [pscustomobject]@{
+            Kind          = 'Package'
+            SettingsFiles = @(@('appsettings.json', 'appsettings.Production.json') | ForEach-Object { Join-Path $app $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+            SourceSha     = $sha
+            SchemaVersion = $migration
+            ApiExecutable = Join-Path $app 'AeroLink.Api.exe'
+        }
+    }
+    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $root '..'))
+    $sha = try { (& git -C $repositoryRoot rev-parse HEAD 2>$null).Trim() } catch { 'unknown' }
+    $schema = (Get-ChildItem -LiteralPath (Join-Path $root 'src\AeroLink.Infrastructure\Persistence\Migrations') -Filter '*.cs' -File | Where-Object Name -notmatch 'Designer|Snapshot' | Sort-Object Name | Select-Object -Last 1).BaseName
+    return [pscustomobject]@{
+        Kind          = 'Source'
+        SettingsFiles = @((Join-Path $root 'src\AeroLink.Api\appsettings.json'), (Join-Path $root 'src\AeroLink.Api\appsettings.Development.json'))
+        SourceSha     = $sha
+        SchemaVersion = $schema
+        ApiExecutable = Join-Path $root 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe'
+    }
+}
+
+function Invoke-AeroLinkWithPostgresAccess {
+    <#
+        .SYNOPSIS Runs a script block with PGPASSWORD set to one login's password, then restores the previous value.
+        .DESCRIPTION
+            A site installation's PostgreSQL requires SCRAM passwords (#1614 1.4). Every PostgreSQL tool started inside
+            the block inherits PGPASSWORD, never a command-line argument; the callers pass -w, which makes a missing
+            or wrong password a refusal instead of a hidden prompt. With no access object (HOME, trust over loopback)
+            the block runs exactly as before. The access object comes from Get-AeroLinkSitePostgresAccess.
+
+            The block runs in a child scope: return values from it, do not assign variables inside it.
+    #>
+    param([AllowNull()]$Access, [Parameter(Mandatory)][scriptblock]$Action)
+    if ($null -eq $Access) { return (& $Action) }
+    $previous = $env:PGPASSWORD
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Access.Password)
+    try {
+        $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        return (& $Action)
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        if ($null -eq $previous) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue } else { $env:PGPASSWORD = $previous }
+    }
+}
+
 Export-ModuleMember -Function @(
+    'Get-AeroLinkProgramLayout',
+    'Invoke-AeroLinkWithPostgresAccess',
     'Get-AeroLinkInstallationPointerPath',
     'Get-AeroLinkInstallationRoot',
     'Get-AeroLinkInstallationPaths',

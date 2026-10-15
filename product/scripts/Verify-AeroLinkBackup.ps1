@@ -1,10 +1,12 @@
 [CmdletBinding()]
-param([string]$BackupArchive,[string]$VerificationRoot)
+# -InstallationRoot names a site server installation (#1614 1.9); omitted, the installation resolves from this checkout as before.
+param([string]$BackupArchive,[string]$VerificationRoot,[string]$InstallationRoot)
 
 $ErrorActionPreference='Stop'
 $productRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
-$installationPaths=Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$installationPaths=Get-AeroLinkInstallationPaths -ProductRoot $productRoot -InstallationRoot $InstallationRoot
+if($InstallationRoot -and -not (Get-AeroLinkSiteDeclaration -InstallationRoot $installationPaths.InstallationRoot)){throw "-InstallationRoot names a site server installation; $($installationPaths.InstallationRoot) has no site declaration."}
 $backupRoot=$installationPaths.Backups
 if(-not $BackupArchive){$BackupArchive=(Get-ChildItem -LiteralPath $backupRoot -Filter 'aerolink-*.zip' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName}
 if(-not $BackupArchive -or -not (Test-Path -LiteralPath $BackupArchive)){throw 'No AeroLink backup archive was found.'}
