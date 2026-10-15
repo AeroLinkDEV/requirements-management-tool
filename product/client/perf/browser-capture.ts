@@ -141,13 +141,19 @@ export function w3SessionRecord(fields: { id: string; plan: unknown; sessionInde
   if (fileDigest(copy) !== fileDigest(manifestInput)) throw new Error('W3 input manifest copy bytes disagree')
   if (fileDigest(copy) !== String(manifestPinnedSha256).toLowerCase()) throw new Error('W3 input manifest copy does not match the pinned --w3-input-sha256')
   const manifestFile = { path: 'w3-input-manifest.json', sha256: fileDigest(copy), bytes: lstatSync(copy).size, digest: digest(manifest) }
-  return {schema:'aerolink.fms-w3-paired-session.v1',id,plan,sessionIndex,slots,manifestFile,cold,harness,startedAt,monotonicStart,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
+  // An A/A session has its own schema and label, so it can never be read as an A/B session.
+  const aa = (fields.comparison as { mode?: string; arm?: string } | undefined)?.mode === 'AA'
+  const comparison = aa ? { mode: 'AA', arm: (fields.comparison as { arm: string }).arm } : { mode: 'AB', arm: null }
+  return {schema:aa?'aerolink.fms-w3-aa-session.v1':'aerolink.fms-w3-paired-session.v1',id,comparison,plan,sessionIndex,slots,manifestFile,cold,harness,startedAt,monotonicStart,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
 }
-/** The four planned slots of one declared W3 cell-session, in plan order. */
-export function w3SessionSlots(plan: ReturnType<typeof w3PairedPlan>, repeat: number, session: number, _aa?: string) {
+/** The four planned slots of one declared W3 cell-session, in plan order. A/B runs each slot on its planned arm. A/A
+ * (aa = 'A' or 'B') keeps the same order, slot numbers, cells, rates and configurations and runs every slot on that one
+ * arm; each slot keeps its planned ABBA/BAAB position as plannedArm and is labelled comparison 'AA'. */
+export function w3SessionSlots(plan: ReturnType<typeof w3PairedPlan>, repeat: number, session: number, aa?: string) {
+  if(aa!==undefined && aa!=='A' && aa!=='B')throw new Error('W3 A/A arm must be A or B')
   const slots=plan.slots.filter(slot=>slot.repeat===repeat&&slot.session===session)
   if(slots.length!==4)throw new Error('W3 complete ABBA session missing')
-  return slots
+  return slots.map(slot=>({...slot,plannedArm:slot.arm,arm:aa ?? slot.arm,comparison:aa ? 'AA' as const : 'AB' as const}))
 }
 /** Per-slot admission before each W3 child, as the W2 capture does: the harness (commit, API tree and assembly, clean)
  * must still be the session's, then the manifest's source, build and dependency bytes. A drift refuses the slot. */

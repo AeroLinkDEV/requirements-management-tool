@@ -35,7 +35,7 @@ const { values: options, positionals } = parseArgs({
     blocks: { type: 'string' }, rounds: { type: 'string' }, workloads: { type: 'string' }, rates: { type: 'string' },
     configurations: { type: 'string' }, hours: { type: 'string' }, pilot: { type: 'boolean' }, 'dirty-smoke': { type: 'boolean' },
     'cold-input': { type: 'string' }, host: { type: 'string' }, topology: { type: 'string' },
-    'w3-input': { type: 'string' }, 'w3-input-sha256': { type: 'string' }, session: { type:'string' }, repeat:{type:'string'},
+    'w3-input': { type: 'string' }, 'w3-input-sha256': { type: 'string' }, session: { type:'string' }, repeat:{type:'string'}, 'w3-aa': { type: 'string' },
   },
 })
 
@@ -491,7 +491,8 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   const {manifest,plan}=w3Input(true), index=Number(options.session), repeat=Number(options.repeat)
   if(options.session===undefined || options.repeat===undefined || !Number.isSafeInteger(index) || index<0 || index>7 || !Number.isSafeInteger(repeat) || repeat<0 || repeat>15)throw new Error('W3 requires explicit planned repeat0..15 and complete cell-block session index0..7')
   if(!options['cold-input'] || options.arm || options.rounds || options.rates || options.configurations || options.hours || options['dirty-smoke'])throw new Error('W3 session requires sealed cold input and refuses allocation/budget/arm overrides')
-  const slots=w3SessionSlots(plan,repeat,index)
+  // --w3-aa A|B: an A/A session over the same planned order and cells, every slot on that one arm, labelled AA throughout.
+  const aa=options['w3-aa'], slots=w3SessionSlots(plan,repeat,index,aa)
   const input=resolve(options['cold-input']), payload=join(input,'payload'), cold=JSON.parse(readFileSync(join(input,'cold.json'),'utf8')), closure=JSON.parse(readFileSync(join(input,'closure.json'),'utf8'))
   requireClosure(closure);const entries=coldPayload(payload)
   if(digest(entries)!==cold.payloadSha256 || fileDigest(join(input,'seed.json'))!==cold.seedSha256 || fileDigest(join(input,'closure.json'))!==cold.closureSha256)throw new Error('W3 cold input changed')
@@ -500,7 +501,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   const began=performance.now(),deadline=began+14_400_000,dir=out()
   if(nextIndex(dir))throw new Error('W3 requires fresh run output')
   const {archive,seed}=archiveW3ColdInput(input,dir,entries,cold)
-  const session=w3SessionRecord({id:randomUUID(),plan,sessionIndex:index,slots,manifest,manifestInput:resolve(options['w3-input']!),manifestPinnedSha256:options['w3-input-sha256']!,dir,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline})
+  const session=w3SessionRecord({id:randomUUID(),plan,sessionIndex:index,slots,manifest,manifestInput:resolve(options['w3-input']!),manifestPinnedSha256:options['w3-input-sha256']!,dir,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline,comparison:aa?{mode:'AA',arm:aa}:undefined})
   writeFileSync(join(dir,'w3-session.json'),JSON.stringify(session,null,2),{flag:'wx'})
   let stopped:string|null=null,failure:{error:unknown}|null=null
   try {
@@ -508,8 +509,9 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
       w3SlotAdmission(manifest,harnessIdentity(),harness)
       const arm=manifest.arms[slot.arm],build=manifest.builds[slot.arm],runId=`w3-${session.id}-${slot.slot}`,storage=createBrowserStorage(runId)
       copyColdPayload(archive,storage.root,entries)
-      const identity={original:arm.original,effectiveSourceSha256:arm.effectiveSourceSha256,overlaySha256:manifest.overlaySha256,harness:manifest.harness,build,manifestSha256:digest(manifest),rate:slot.rate,configuration:slot.configuration}
-      const entry=run(dir,{kind:'browser-w3',route:selectedRoute,lineage:{sessionId:session.id,manifest:digest(plan),...slot},identity,cold,copiedInputs:coldPayload(storage.root),storageRoot:storage.root},
+      const identity={original:arm.original,effectiveSourceSha256:arm.effectiveSourceSha256,overlaySha256:manifest.overlaySha256,harness:manifest.harness,build,manifestSha256:digest(manifest),rate:slot.rate,configuration:slot.configuration,
+        comparison:slot.comparison,arm:slot.arm,plannedArm:slot.plannedArm}
+      const entry=run(dir,{kind:'browser-w3',comparison:slot.comparison,route:selectedRoute,lineage:{sessionId:session.id,manifest:digest(plan),...slot},identity,cold,copiedInputs:coldPayload(storage.root),storageRoot:storage.root},
         {AEROLINK_PERF_MODE:'browser',AEROLINK_PERF_DIST:join(arm.root,'product/client/dist'),AEROLINK_PERF_ARM:join(arm.root,'product/client'),AEROLINK_E2E_RUN_ID:runId,
           AEROLINK_SHOWCASE_SEED:readFileSync(seed,'utf8'),AEROLINK_PERF_WORKLOAD:selectedRoute.workload,AEROLINK_PERF_TOPOLOGY:selectedRoute.topology,AEROLINK_PERF_RATE:String(slot.rate),AEROLINK_PERF_CONFIGURATION:slot.configuration,AEROLINK_PERF_W3_IDENTITY:JSON.stringify(identity)},deadline,protocol.browser.w3Recipe.executorLimitSeconds*1000)
       if(entry.status!=='passed')throw new Error('W3 failed run retained; no retry or later favorable substitution')
