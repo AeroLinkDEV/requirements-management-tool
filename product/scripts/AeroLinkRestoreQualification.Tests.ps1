@@ -259,8 +259,19 @@ function Start-QualificationTlsRelay([string]$Directory) {
         processId=$null; processStartUtc=$null; identityError=$null; observedState='NotCreated'; exitCode=$null
         attemptBudget=100; sleepMilliseconds=100; expectedFirstLine="$smtpPort"; attempts=0; elapsedMilliseconds=0
         history=$null; stdout=$null; stderr=$null; error=$null
-        cleanup=[ordered]@{outcome='NotRequired'; waitMilliseconds=10000; error=$null} }
-    $process = $null
+        streamObservationPhase=$null; streamObservationCompletedMilliseconds=$null; streamObservationError=$null
+        cleanup=[ordered]@{outcome='NotRequired'; startedElapsedMilliseconds=$null; waitMilliseconds=10000
+            handleReleased=$false; handleReleaseError=$null; error=$null} }
+    $process = $null; $returningProcess = $false
+    $observeStreams = {
+        param([string]$Phase)
+        $receipt.streamObservationPhase = $Phase
+        foreach ($stream in @(@('stdout',$stdout),@('stderr',$stderr))) {
+            $file = Get-Item -LiteralPath $stream[1] -ErrorAction SilentlyContinue
+            $receipt[$stream[0]] = [ordered]@{bytes=$(if ($file) { $file.Length } else { $null }); tail=(Get-QualificationLogTail $stream[1])}
+        }
+        $receipt.streamObservationCompletedMilliseconds = $clock.ElapsedMilliseconds
+    }
     try {
         $python = if ($env:AEROLINK_TEST_PYTHON) { $env:AEROLINK_TEST_PYTHON } else { 'python.exe' }
         $python = (Get-Command $python -CommandType Application -ErrorAction Stop).Source
@@ -288,6 +299,7 @@ function Start-QualificationTlsRelay([string]$Directory) {
         if ($process.HasExited) { $receipt.exitCode = $process.ExitCode }
         $receipt.outcome = if ($ready) { 'Ready' } elseif ($process.HasExited) { 'ExitedBeforeReady' } else { 'ReadinessNotObserved' }
         if (-not $ready) { throw "Owned STARTTLS relay did not become ready. See $stderr." }
+        $returningProcess = $true
         return $process
     } catch {
         $receipt.error = $_.Exception.Message
@@ -298,6 +310,9 @@ function Start-QualificationTlsRelay([string]$Directory) {
                 $wasExited = $process.HasExited
                 $receipt.observedState = if ($wasExited) { 'Exited' } else { 'Running' }
                 if ($wasExited) { $receipt.exitCode = $process.ExitCode }
+                # Observe streams before Kill/Wait; cleanup can flush or change those files.
+                try { & $observeStreams 'BeforeCleanup' } catch { $receipt.streamObservationError=$_.Exception.Message }
+                $receipt.cleanup.startedElapsedMilliseconds = $clock.ElapsedMilliseconds
                 if (-not $wasExited) { $process.Kill() }
                 # This is cleanup after refusal, never additional readiness acceptance time.
                 if (-not $process.WaitForExit(10000)) { throw 'Owned relay termination was not confirmed within the cleanup bound.' }
@@ -306,13 +321,19 @@ function Start-QualificationTlsRelay([string]$Directory) {
         }
         throw
     } finally {
-        # Diagnostics are best effort and must not mask the original qualification failure.
+        if (-not $receipt.streamObservationPhase) {
+            try { & $observeStreams $(if ($returningProcess) { 'ReadyNoCleanup' } else { 'BeforeCleanup' }) }
+            catch { $receipt.streamObservationError=$_.Exception.Message }
+        }
+        $receipt.history = $history.ToArray()
+        # No failure-path Process reaches the caller. Release its retained handle after observation,
+        # even if diagnostic writing fails. A genuinely returned ready Process remains caller-owned.
+        if ($process -and -not $returningProcess) {
+            try { $process.Dispose(); $receipt.cleanup.handleReleased=$true }
+            catch { $receipt.cleanup.handleReleaseError=$_.Exception.Message }
+        }
+        # Diagnostics/disposal must not mask the original qualification failure.
         try {
-            $receipt.history = $history.ToArray()
-            foreach ($stream in @(@('stdout',$stdout),@('stderr',$stderr))) {
-                $file = Get-Item -LiteralPath $stream[1] -ErrorAction SilentlyContinue
-                $receipt[$stream[0]] = [ordered]@{bytes=$(if ($file) { $file.Length } else { $null }); tail=(Get-QualificationLogTail $stream[1])}
-            }
             $receipt | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $receiptPath -Encoding UTF8
         } catch { Write-Warning "Owned STARTTLS startup diagnostics could not be retained: $($_.Exception.Message)" -WarningAction Continue }
     }

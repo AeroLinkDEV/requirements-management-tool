@@ -209,19 +209,22 @@ $smtpPort = $Port
 $env:AEROLINK_TEST_PYTHON = (Get-Process -Id $PID).Path
 function Start-Process {
     param($FilePath, $ArgumentList, $RedirectStandardOutput, $RedirectStandardError, $WindowStyle, [switch]$PassThru)
-    Microsoft.PowerShell.Management\Start-Process -FilePath $FilePath -ArgumentList @('-NoProfile','-File',('"'+(Join-Path $PSScriptRoot 'child.ps1')+'"'),'-Directory',$ArgumentList[1],'-Port',$ArgumentList[3]) `
+    $launched = Microsoft.PowerShell.Management\Start-Process -FilePath $FilePath -ArgumentList @('-NoProfile','-File',('"'+(Join-Path $PSScriptRoot 'child.ps1')+'"'),'-Directory',$ArgumentList[1],'-Port',$ArgumentList[3]) `
         -RedirectStandardOutput $RedirectStandardOutput -RedirectStandardError $RedirectStandardError -WindowStyle $WindowStyle -PassThru
+    $script:launchedHandle = $launched.SafeHandle
+    return $launched
 }
 '@
     $runnerBody += "`n" + $tailDefinition.Extent.Text + "`n" + $relayDefinition.Extent.Text + "`n" + @'
 $ownedRelay = $null
 try {
     $ownedRelay = Start-QualificationTlsRelay $Directory
-    @{ ready=$true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Directory 'runner-result.json') -Encoding UTF8
+    @{ ready=$true; handleClosed=$script:launchedHandle.IsClosed } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Directory 'runner-result.json') -Encoding UTF8
 } catch {
-    @{ ready=$false; message=$_.Exception.Message } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Directory 'runner-result.json') -Encoding UTF8
+    @{ ready=$false; message=$_.Exception.Message; handleClosed=$script:launchedHandle.IsClosed } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Directory 'runner-result.json') -Encoding UTF8
 } finally {
     if ($ownedRelay -and -not $ownedRelay.HasExited) { $ownedRelay.Kill(); if (-not $ownedRelay.WaitForExit(10000)) { throw 'Ready control cleanup failed.' } }
+    if ($ownedRelay) { $ownedRelay.Dispose() }
 }
 '@
     Set-Content -LiteralPath $relayRunner -Value $runnerBody -Encoding UTF8
@@ -254,7 +257,7 @@ Start-Sleep -Seconds 60
             $survivor = Get-Process -Id $childIdentity.pid -ErrorAction SilentlyContinue
             if ($survivor -and $survivor.StartTime.ToUniversalTime().ToFileTimeUtc() -eq $childIdentity.creationFileTime) { throw "Relay $Mode left its exact owned child alive." }
             if ($BlockReceipt) {
-                if ($result.ready -or $result.message -notlike 'Owned STARTTLS relay did not become ready.*') { throw 'Diagnostic write failure replaced the relay readiness refusal.' }
+                if ($result.ready -or $result.message -notlike 'Owned STARTTLS relay did not become ready.*' -or -not $result.handleClosed) { throw 'Diagnostic write failure replaced the relay refusal or prevented failed-handle release.' }
                 return
             }
             if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
@@ -268,8 +271,10 @@ Start-Sleep -Seconds 60
             if ($receipt.helperPath -ne (Join-Path $relayRunnerRoot 'test-support\NotificationTlsRelay.py') -or -not [IO.Path]::IsPathRooted($receipt.pythonPath)) { throw "Relay $Mode receipt lacks resolved executable/helper paths." }
             if ($receipt.attemptBudget -ne 100 -or $receipt.sleepMilliseconds -ne 100 -or $receipt.expectedFirstLine -ne "$closedPort") { throw "Relay $Mode changed its readiness policy." }
             if ($Mode -eq 'ready') {
-                if (-not $result.ready -or $receipt.outcome -ne 'Ready' -or $receipt.observedState -ne 'Running' -or $receipt.cleanup.outcome -ne 'NotRequired') { throw 'The exact ready-line child was refused or misreported.' }
+                if (-not $result.ready -or $result.handleClosed -or $receipt.outcome -ne 'Ready' -or $receipt.observedState -ne 'Running' -or $receipt.cleanup.outcome -ne 'NotRequired' -or $receipt.streamObservationPhase -ne 'ReadyNoCleanup') { throw 'The ready child was refused, misreported, or its returned handle was disposed.' }
             } else {
+                if ($receipt.streamObservationPhase -ne 'BeforeCleanup' -or $receipt.streamObservationCompletedMilliseconds -gt $receipt.cleanup.startedElapsedMilliseconds) { throw "Relay $Mode lacks a pre-cleanup stream observation; actual failed handle closed=$($result.handleClosed)." }
+                if (-not $result.handleClosed -or -not $receipt.cleanup.handleReleased) { throw "Relay $Mode did not release its actual failed child handle." }
                 if ($result.ready -or $result.message -notlike 'Owned STARTTLS relay did not become ready.*' -or $receipt.cleanup.outcome -notin @('AlreadyExited','Terminated')) { throw "Relay $Mode lost refusal or confirmed owned cleanup." }
                 if ($Mode -eq 'exit') {
                     if ($receipt.outcome -ne 'ExitedBeforeReady' -or $receipt.observedState -ne 'Exited' -or $receipt.exitCode -ne 7 -or $receipt.stderr.tail -notlike '*controlled early exit 7*') { throw 'The early exit outcome/code/stderr was lost.' }
