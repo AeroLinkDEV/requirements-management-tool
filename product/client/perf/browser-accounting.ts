@@ -339,10 +339,20 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
     }
     if (finite.error) finite.ended = true
   }
+  // W3 CDU keys act on pointerdown (the bench's key handler), so the trusted input is the pointerdown; its "before"
+  // screen was read at dispatch, before any input event (night-1 audit P1-2). The click time is kept beside it.
+  document.addEventListener('pointerdown', event => {
+    const key = event.target instanceof Element ? event.target.closest('[data-fn]') : null
+    const pending = state.inputs.at(-1)
+    if (!state.w3 || !key || !pending || pending.eventTime !== undefined) return
+    Object.assign(pending, { utcMs: Date.now(), observedAt: performance.now(), eventTime: event.timeStamp, trusted: event.isTrusted, key: key.getAttribute('data-fn'),
+      target: Array.from(document.querySelectorAll('[data-fn]')).indexOf(key), completedAtDispatch: state.frames.at(-1)?.ordinal ?? 0 })
+  }, true)
   document.addEventListener('click', event => {
     const key = event.target instanceof Element ? event.target.closest('[data-fn]') : null
     if (!key || (!state.w3 && key.getAttribute('data-fn') !== 'BRT')) return
     const pending = state.inputs.at(-1)
+    if (state.w3) { if (pending && pending.eventTime !== undefined && pending.clickTime === undefined) pending.clickTime = event.timeStamp; return }
     if (!pending || pending.eventTime !== undefined) return
     Object.assign(pending, { utcMs: Date.now(), observedAt: performance.now(), eventTime: event.timeStamp,
       trusted: event.isTrusted, key: key.getAttribute('data-fn'), target: Array.from(document.querySelectorAll(state.w3 ? '[data-fn]' : '[data-fn="BRT"]')).indexOf(key),
@@ -375,7 +385,11 @@ export function installBrowserRecorder(names: { slice: string; discard: string; 
       state.finite = { target: 256, error: null, ended: false }
     },
     get finiteStatus() { flush(); return { started: state.begin > 0, ended: state.finite?.ended ?? false, error: state.finite?.error ?? null } },
-    keyDispatch(expectedKey?: string) { state.inputs.push({ dispatchStart: performance.now(), ...(state.w3 ? { expectedKey } : {}) }) },
+    keyDispatch(expectedKey?: string) {
+      // W3: the CDU screen of the key about to be pressed, read before its pointerdown can change it.
+      const before = state.w3 ? document.querySelectorAll(`.fmsCduKey[data-fn="${expectedKey}"]`)[0]?.closest('.fmsCdu')?.querySelector('.fmsCduScreen')?.getAttribute('aria-label') ?? null : undefined
+      state.inputs.push({ dispatchStart: performance.now(), ...(state.w3 ? { expectedKey, before } : {}) })
+    },
     begin() { const receipt = boundary('scoredStart'); state.measuring = true; state.begin = receipt.monotonicMs; state.tasks = []; state.rafIntervals = []; state.lastFrame = -1; return state.begin },
     keyOutcome() {
       const press = state.inputs.at(-1)
@@ -615,11 +629,19 @@ export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionId
     representedScoredFrames:contained.reduce((n,row)=>n+row.scoredFrameExposure,0),excludedScoredFrames:6960-contained.reduce((n,row)=>n+row.scoredFrameExposure,0)}}
   const interactions = raw.inputs.map(input => {
     const title=input.expectedKey==='PROG'?'PROGRESS':input.expectedKey==='LEGS'?'RTE 1 LEGS':null
-    const entries=raw.events.filter(event=>event.name==='click' && event.targetKey===input.key && event.targetIndex===input.target && Math.abs(event.start-input.eventTime)<=1)
+    // The trusted key interaction: its pointerdown entry (at the pointerdown time) or click entry (at the click time) on
+    // the pressed key names one interactionId; every native entry of that interaction is correlated, and its longest
+    // duration is the key-to-next-paint latency. Below the 16 ms threshold there is no entry: censored, never zero.
+    const onKey=(event:Record<string,any>)=>event.targetKey===input.key && event.targetIndex===input.target && event.interaction>0 &&
+      (event.name==='pointerdown' && Math.abs(event.start-input.eventTime)<=1 || event.name==='click' && Number.isFinite(input.clickTime) && Math.abs(event.start-input.clickTime)<=1)
+    const ids=[...new Set(raw.events.filter(onKey).map(event=>event.interaction))]
+    const entries=ids.length===1?raw.events.filter(event=>event.interaction===ids[0]).sort((a,b)=>a.start-b.start):[]
     const outcome=input.trusted===true && input.key===input.expectedKey && title && typeof input.before==='string' && typeof input.after==='string' &&
       input.after.split('\n')[0].includes(title) && !input.before.split('\n')[0].includes(title) && Number.isFinite(input.outcomeObservedAt) ? 'CDU_OUTCOME_AFTER_PAINT_OBSERVED':'UNAVAILABLE'
-    const entry=entries[0],native=entries.length===1&&entry.interaction>0&&Number.isFinite(entry.start)&&Number.isFinite(entry.duration)&&entry.duration>=16&&entry.duration%8===0&&entry.processing>=0&&entry.delay>=0
-    return {...input,entries,outcome,eventTiming:outcome!=='UNAVAILABLE'&&native?'NATIVE_NEXT_PAINT_ENTRY_CORRELATED':'CENSORED_OR_UNAVAILABLE'}
+    const native=entries.length>0&&entries.every(entry=>Number.isFinite(entry.start)&&Number.isFinite(entry.duration)&&entry.duration>=16&&entry.duration%8===0&&entry.processing>=0&&entry.delay>=0)
+    const correlated=outcome!=='UNAVAILABLE'&&native
+    return {...input,entries,outcome,interactionId:ids.length===1?ids[0]:null,interactionDurationMs:correlated?Math.max(...entries.map(entry=>entry.duration)):null,
+      eventTiming:correlated?'NATIVE_NEXT_PAINT_ENTRY_CORRELATED':'CENSORED_OR_UNAVAILABLE'}
   })
   return {schema:W3_SCHEMA,status:'OBSERVED',qualification:'NOT_CALIBRATED',inference:'DISABLED',setup,totalFrames:7200,warmupFrames:240,scoredFrames:6960,begin,end,
     primaryTimerHandlers:cohort(timerRows),simulationSlices:cohort(sliceRows),taskTails:tails,yieldGaps:gaps,
