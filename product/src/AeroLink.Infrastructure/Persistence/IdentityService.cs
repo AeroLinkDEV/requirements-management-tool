@@ -15,7 +15,6 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     private const string ProtectedMfaPrefix = "dp:v1:";
     private const int NewPasswordIterations = 600_000;
     private readonly IDataProtector _mfaProtector = (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1");
-    public const string CookieName = "aerolink_session";
     public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
     {

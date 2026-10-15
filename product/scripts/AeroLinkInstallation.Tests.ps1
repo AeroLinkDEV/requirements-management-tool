@@ -183,6 +183,55 @@ try {
     Assert-True ([DateTimeOffset]::Parse($withSnapshot.SnapshotCreatedAtUtc).UtcDateTime -eq ([datetime]'2026-09-01T10:00:00Z').ToUniversalTime()) `
         "Snapshot age must be inspectable as an exact instant on both PowerShell hosts; got '$($withSnapshot.SnapshotCreatedAtUtc)'."
 
+    # --- 8b. Site server installations (#1614): only the site launcher runs one, and it runs nothing else ---
+    # A HOME launcher runs Development with demonstration data. Pointed at a site installation's database it would
+    # seed demo accounts into production, so every non-site mode must refuse a site declaration, exactly as it
+    # refused one as an unknown classification before these existed.
+    $sitePath = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-site-' + [Guid]::NewGuid().ToString('N'))
+    $script:fixtures.Add($sitePath)
+    $siteProduct = New-FixtureProductRoot
+    $siteInstallation = Join-Path $sitePath 'AeroLink Production'
+    New-Item -ItemType Directory -Path $siteInstallation -Force | Out-Null
+    Set-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $siteInstallation -Label 'SITE PRODUCTION' -Classification 'SiteProduction' | Out-Null
+    foreach ($mode in @('Development', 'HomeCanonical')) {
+        Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $siteInstallation -Mode $mode } 'Only the site launcher' `
+            "A $mode launch must refuse a SiteProduction installation."
+    }
+    Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $siteInstallation -Mode Site).Classification -eq 'SiteProduction') `
+        'The site launcher must read a SiteProduction declaration.'
+    Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot $demo -Mode Site } 'runs only an installation declared Site' `
+        'The site launcher must refuse an installation that is not declared SiteProduction or SiteDevelopment.'
+    Assert-Throws { Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Site } 'runs only an installation declared Site' `
+        'The site launcher must refuse an undeclared installation rather than assume it is a site server.'
+
+    # The launcher composes Production and refuses to run without a database of its own. -ValidateOnly starts nothing.
+    $developmentSite = Join-Path $sitePath 'AeroLink Development'
+    New-Item -ItemType Directory -Path $developmentSite -Force | Out-Null
+    Set-AeroLinkInstanceConfig -ProductRoot $siteProduct -InstallationRoot $developmentSite -Label 'SITE DEVELOPMENT' -Classification 'SiteDevelopment' | Out-Null
+    '{ "publicHost": "aerolink-site.example.test", "bindAddress": "0.0.0.0", "port": 5443, "http1Only": true, "certificate": { "thumbprint": "00112233445566778899AABBCCDDEEFF00112233" } }' |
+        Set-Content -LiteralPath (Join-Path $developmentSite 'site-server.json') -Encoding UTF8
+    $fakeApi = Join-Path $developmentSite 'AeroLink.Api.dll'
+    Set-Content -LiteralPath $fakeApi -Value '' -Encoding ASCII
+    $siteLauncher = Join-Path $PSScriptRoot 'Start-AeroLinkSite.ps1'
+    $previousConnection = $env:ConnectionStrings__AeroLink
+    try {
+        $env:ConnectionStrings__AeroLink = $null
+        Assert-Throws { & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly } 'ConnectionStrings__AeroLink is not set' `
+            'The site launcher must never fall back to a default database.'
+        $env:ConnectionStrings__AeroLink = 'Host=127.0.0.1;Port=55432;Database=aerolink_site_dev;Username=aerolink'
+        $plan = & $siteLauncher -InstallationRoot $developmentSite -ApiPath $fakeApi -ValidateOnly
+        $s = $plan.Settings
+        Assert-True ($s['ASPNETCORE_ENVIRONMENT'] -eq 'Production' -and $s['Runtime__Mode'] -eq 'SITE-DEVELOPMENT' -and $s['Instance__Classification'] -eq 'SiteDevelopment') `
+            'A SiteDevelopment installation runs the Production profile and says which installation it is.'
+        Assert-True ($s['SiteServer__Enabled'] -eq 'true' -and $s['SiteServer__Port'] -eq '5443' -and $s['SiteServer__Http1Only'] -eq 'true' -and $s['SiteServer__Certificate__Thumbprint'] -eq '00112233445566778899AABBCCDDEEFF00112233') `
+            'The site settings reach the API as the SiteServer section.'
+        Assert-True ($s['DemoData__Enabled'] -eq 'false' -and $s['Identity__SeedDemoAccounts'] -eq 'false' -and $s['Identity__AllowDemoAccounts'] -eq 'false' -and $s['Identity__CookieSecure'] -eq 'true' -and $s['Integrations__AllowInsecureWebhookTargets'] -eq 'false') `
+            'A site launch has no demonstration data or accounts, secure cookies and no insecure webhooks.'
+        Assert-Throws { & $siteLauncher -InstallationRoot $siteInstallation -ApiPath $fakeApi -ValidateOnly } 'site-server.json' `
+            'A site installation without site-server.json has no HTTPS endpoint and must refuse.'
+    }
+    finally { $env:ConnectionStrings__AeroLink = $previousConnection }
+
     # --- 9. The environment override is absolute-and-must-exist, so qualification cannot point at nothing ---
     $env:AEROLINK_INSTALLATION_ROOT = 'not-absolute'
     Assert-Throws { Get-AeroLinkInstallationRoot -ProductRoot $productRoot } 'absolute' 'A relative AEROLINK_INSTALLATION_ROOT must refuse.'

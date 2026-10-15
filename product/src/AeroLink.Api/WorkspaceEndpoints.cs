@@ -599,7 +599,7 @@ public static class WorkspaceEndpoints
         // the workspace root, so probing cannot distinguish an artifact that exists from one that does not.
         app.MapGet("/open/{kind}/{id:guid}", async (string kind, Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
-            var user = await identity.ResolveAsync(http.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, ct);
+            var user = await identity.ResolveAsync(http.SessionToken(), DateTimeOffset.UtcNow, ct);
             if (user is null) return Results.Redirect("/");
             http.Items["AeroLink.User"] = user;
 

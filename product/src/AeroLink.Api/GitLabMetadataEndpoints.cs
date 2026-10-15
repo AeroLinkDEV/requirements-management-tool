@@ -110,7 +110,7 @@ public static class GitLabMetadataEndpoints
         AeroLinkDbContext db, CancellationToken ct)
     {
         var actorId = http.UserAccount().Id;
-        var tokenHash = IdentityService.TokenDigest(http.Request.Cookies[IdentityService.CookieName]);
+        var tokenHash = IdentityService.TokenDigest(http.SessionToken());
         if (tokenHash is null) return Results.Unauthorized();
         var session = await db.UserSessions.AsNoTracking()
             .SingleOrDefaultAsync(x => x.UserId == actorId && x.TokenHash == tokenHash, ct);

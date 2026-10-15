@@ -59,26 +59,25 @@ public static class AuthEndpoints
         {
             var result = await identity.LoginAsync(request.UserName, request.Password, http.Connection.RemoteIpAddress?.ToString() ?? "local", http.Request.Headers.UserAgent.ToString(), DateTimeOffset.UtcNow,request.MfaCode, ct);
             if (result is null) return Results.Json(new { error = "The credentials or second-factor code were not accepted." }, statusCode: 401);
-            var secureCookie = app.Configuration.GetValue<bool?>("Identity:CookieSecure") ?? !app.Environment.IsDevelopment();
-            http.Response.Cookies.Append(IdentityService.CookieName, result.Token, new CookieOptions { HttpOnly = true, Secure = secureCookie, SameSite = SameSiteMode.Lax, Expires = result.ExpiresAt, Path = "/" });
+            http.IssueSessionCookie(result.Token, result.ExpiresAt);
             return Results.Ok(result.User);
         }).RequireRateLimiting("authentication");
 
-        app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.Request.Cookies[IdentityService.CookieName], http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.Response.Cookies.Delete(IdentityService.CookieName); return Results.NoContent(); });
+        app.MapPost("/api/auth/logout", async (HttpContext http, IdentityService identity, CancellationToken ct) => { await identity.LogoutAsync(http.SessionToken(), http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct); http.ClearSessionCookie(); return Results.NoContent(); });
 
         app.MapGet("/api/auth/sessions", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
         {
-            var actor=http.UserAccount();var currentHash=IdentityService.TokenDigest(http.Request.Cookies[IdentityService.CookieName]);var sessions=await db.UserSessions.AsNoTracking().Where(x=>x.UserId==actor.Id).ToListAsync(ct);return Results.Ok(sessions.OrderByDescending(x=>x.LastSeenAt).Select(x=>new{x.Id,x.IpAddress,x.UserAgent,x.CreatedAt,x.LastSeenAt,x.ExpiresAt,x.RevokedAt,current=x.TokenHash==currentHash}));
+            var actor=http.UserAccount();var currentHash=IdentityService.TokenDigest(http.SessionToken());var sessions=await db.UserSessions.AsNoTracking().Where(x=>x.UserId==actor.Id).ToListAsync(ct);return Results.Ok(sessions.OrderByDescending(x=>x.LastSeenAt).Select(x=>new{x.Id,x.IpAddress,x.UserAgent,x.CreatedAt,x.LastSeenAt,x.ExpiresAt,x.RevokedAt,current=x.TokenHash==currentHash}));
         });
 
         app.MapPost("/api/auth/sessions/revoke-others", async (HttpContext http,AeroLinkDbContext db,CancellationToken ct) =>
         {
-            var actor=http.UserAccount();var currentHash=IdentityService.TokenDigest(http.Request.Cookies[IdentityService.CookieName]);var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null&&x.TokenHash!=currentHash).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("SessionsRevoked",actor.UserName,"session","Success",$"Revoked {sessions.Count} other active session(s).",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.Ok(new{revoked=sessions.Count});
+            var actor=http.UserAccount();var currentHash=IdentityService.TokenDigest(http.SessionToken());var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null&&x.TokenHash!=currentHash).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("SessionsRevoked",actor.UserName,"session","Success",$"Revoked {sessions.Count} other active session(s).",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.Ok(new{revoked=sessions.Count});
         });
 
         app.MapPost("/api/auth/password", async (ChangeOwnPasswordRequest request,HttpContext http,IdentityService identity,AeroLinkDbContext db,CancellationToken ct) =>
         {
-            var actor=http.UserAccount();if(!await identity.ConfirmPasswordAsync(actor.Id,request.CurrentPassword,ct))return Results.Json(new{error="Current password confirmation failed."},statusCode:401);try{var user=await db.UserAccounts.SingleAsync(x=>x.Id==actor.Id,ct);user.ChangePassword(IdentityService.HashPassword(request.NewPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("PasswordChanged",actor.UserName,user.UserName,"Success","Password changed and all sessions revoked.",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);http.Response.Cookies.Delete(IdentityService.CookieName);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+            var actor=http.UserAccount();if(!await identity.ConfirmPasswordAsync(actor.Id,request.CurrentPassword,ct))return Results.Json(new{error="Current password confirmation failed."},statusCode:401);try{var user=await db.UserAccounts.SingleAsync(x=>x.Id==actor.Id,ct);user.ChangePassword(IdentityService.HashPassword(request.NewPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==actor.Id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("PasswordChanged",actor.UserName,user.UserName,"Success","Password changed and all sessions revoked.",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);http.ClearSessionCookie();return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
         });
 
         app.MapPost("/api/auth/mfa/enroll",async(HttpContext http,AeroLinkDbContext db,IdentityService identity,CancellationToken ct)=>
@@ -99,11 +98,11 @@ public static class AuthEndpoints
 
         app.MapGet("/api/auth/csrf", (HttpContext http,BrowserMutationProtector protector) =>
         {
-            var session=http.Request.Cookies[IdentityService.CookieName];return Results.Ok(new{token=protector.Issue(session!),header="X-AeroLink-CSRF"});
+            var session=http.SessionToken();return Results.Ok(new{token=protector.Issue(session!),header="X-AeroLink-CSRF"});
         });
     }
 
-    static string? BootstrapSecret(IConfiguration configuration)
+    internal static string? BootstrapSecret(IConfiguration configuration)
     {
         var value = configuration["Identity:BootstrapSecret"]?.Trim();
         return value is { Length: >= 32 } ? value : null;

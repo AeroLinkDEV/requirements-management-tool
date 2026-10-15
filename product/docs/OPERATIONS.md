@@ -564,6 +564,70 @@ machine or the network. It answers what a label cannot: two installations can bo
 `WORK-LAPTOP LOCAL`, and a restored snapshot carries the source's label with it. It is minted by the
 launchers and by explicit setup, never by a read: `Preview` paths do not create it.
 
+### Site server installation (#1614)
+
+Not yet live: production on the company host waits for Windows sign-in (#1615). This section covers what
+exists so far, the launch path and HTTPS. Installer, supervision, ports, PostgreSQL hardening,
+installation-owned state and backups are separate #1614 items.
+
+The host carries two installations, `SiteProduction` and `SiteDevelopment`, each with its own root, port and
+database. The HOME launchers and root `.bat` files are unchanged. They, and every other script that reads
+`instance.json`, refuse a site installation; the site launcher refuses everything else. The installer will
+declare the installation. Until it exists, declare it by hand:
+
+```powershell
+Import-Module .\product\scripts\AeroLinkInstallation.psm1
+Set-AeroLinkInstanceConfig -ProductRoot .\product -InstallationRoot 'C:\AeroLink\AeroLink Production' `
+    -Label 'SITE PRODUCTION' -Classification SiteProduction
+```
+
+Beside `instance.json`, the non-secret `site-server.json` names the HTTPS endpoint:
+
+```json
+{ "publicHost": "<full host name>", "bindAddress": "0.0.0.0", "port": 5443, "http1Only": false,
+  "certificate": { "thumbprint": "<LocalMachine\\My thumbprint>" } }
+```
+
+The certificate is one of these:
+
+- `thumbprint`, or `subject` (the newest current match wins, so a renewal is picked up at restart), from
+  `LocalMachine\My`, or another store named by `store`;
+- `path` plus `keyPath`, a PEM certificate and key, imported into a machine key set.
+
+NETWORK SERVICE has no loaded user profile, so the private key must be readable by it in the machine store.
+`http1Only` keeps HTTP/2 off, which Windows sign-in will need.
+
+```powershell
+$env:ConnectionStrings__AeroLink = '<this installation''s database>'
+$env:Identity__BootstrapSecret   = '<first install only; see Production first-install administrator>'
+powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Start-AeroLinkSite.ps1 `
+    -InstallationRoot 'C:\AeroLink\AeroLink Production' -ApiPath '<publish folder>\AeroLink.Api.exe'
+```
+
+`-ValidateOnly` prints the composed settings and starts nothing. The launcher runs the API as `Production`
+with `SiteServer:Enabled`, no demonstration data or accounts, `Identity:CookieSecure=true` and insecure
+webhooks off. The API then does the following:
+
+- Listens only on `https://<bindAddress>:<port>`. An inherited `ASPNETCORE_URLS` is overridden.
+- Sends HSTS (one year, this host name only).
+- Sets `AllowedHosts` to the public name plus `localhost`, `127.0.0.1` and `[::1]`.
+- Derives `Notifications:BaseUrl` and `Connector:PublicOrigin` from the HTTPS origin, and refuses either when
+  it is set to anything else.
+- Names its cookies `__Host-aerolink_session` and `__Host-AeroLink.PreferenceConfirmation`. The host name is
+  shared with the other applications, and the prefix keeps them from reading or shadowing AeroLink's
+  cookies. Plain-HTTP launches keep the old names.
+
+The API refuses to start, naming every problem, when any of these holds:
+
+- the environment is not `Production`;
+- HTTPS is not configured, or the certificate is missing, expired, has no usable key, or does not cover the
+  public name;
+- the public name is a short name, `localhost` or an address;
+- demonstration data or accounts are enabled, cookies are not secure, or insecure webhooks are allowed;
+- the database has no account and no bootstrap secret is set.
+
+In any other `Production` launch, plain HTTP is allowed only on loopback.
+
 ### Explicit HOME to work-laptop snapshot refresh
 
 One-way, operator-initiated, and never part of startup. HOME being unreachable does not affect a work-laptop

@@ -55,11 +55,31 @@ if (restoreValidationReadOnly && restoreValidationToken.Length < 32)
     throw new InvalidOperationException("Read-only restore validation requires a one-use token of at least 32 characters.");
 // Capability-bearing URLs must not be copied into request-start diagnostic logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+// #1614: a site server is Production over HTTPS from Kestrel, or it does not start. Every other launch is left as
+// it was, except that Production may no longer listen on plain HTTP anywhere but loopback.
+var siteServer = SiteServerHosting.Configure(builder);
+// Cookie names are decided once. Secure cookies take the __Host- prefix so that another application on the same
+// host name (a site server shares one, #1614 D3) can neither read nor shadow them; see SessionCookie.
+var sessionCookie = new SessionCookie(SessionCookie.SecureFrom(builder.Configuration, builder.Environment));
+builder.Services.AddSingleton(sessionCookie);
 builder.Services.AddAntiforgery(options =>
 {
-    options.Cookie.Name = "AeroLink.PreferenceConfirmation";
+    options.Cookie.Name = sessionCookie.Secure ? SessionCookie.SecurePrefix + "AeroLink.PreferenceConfirmation" : "AeroLink.PreferenceConfirmation";
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.HttpOnly = true;
+    if (sessionCookie.Secure)
+    {
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.Path = "/";
+    }
+});
+// A year, this host name only: the other applications on a shared site host send their own HSTS, and their
+// subdomains are not AeroLink's to pin. Sent only on HTTPS and never for localhost or loopback addresses.
+builder.Services.AddHsts(options =>
+{
+    options.MaxAge = TimeSpan.FromDays(365);
+    options.IncludeSubDomains = false;
+    options.Preload = false;
 });
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
@@ -109,7 +129,10 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 }));
 
 var app = builder.Build();
+// The certificate's imported machine key is temporary; release it with the host rather than leave it behind.
+if (siteServer is not null) app.Lifetime.ApplicationStopped.Register(siteServer.Certificate.Dispose);
 app.UseExceptionHandler();
+if (app.Environment.IsProduction()) app.UseHsts();
 // #939 stall diagnostics, opt-in. First in the pipeline so a request is tracked from the moment it arrives,
 // including the session gate, which is where one of the hung requests was waiting.
 if (StallDiagnosticsSettings.StallReportAfter(builder.Configuration) is not null
@@ -152,6 +175,7 @@ await using (var scope = app.Services.CreateAsyncScope())
         await ReleasePickerSqliteGuard.EnsureInstalledAsync(db);
         await ProblemReportImportSqliteGuard.EnsureInstalledAsync(db);
     }
+    if (siteServer is not null) await SiteServerHosting.RequireAdministratorPathAsync(builder.Configuration, db);
     if (!restoreValidationReadOnly && db.Database.IsNpgsql())
     {
         await scope.ServiceProvider.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
@@ -266,7 +290,7 @@ app.Use(async (context, next) =>
         context.Items["AeroLink.ServiceIdentity"]=service;await next();return;
     }
     var identity = context.RequestServices.GetRequiredService<IdentityService>();
-    var user = await identity.ResolveAsync(context.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, context.RequestAborted);
+    var user = await identity.ResolveAsync(context.SessionToken(), DateTimeOffset.UtcNow, context.RequestAborted);
     if (user is null) { context.Response.StatusCode = StatusCodes.Status401Unauthorized; await context.Response.WriteAsJsonAsync(new { error = "Authentication required.", code = "authentication_required" }); return; }
     context.Items["AeroLink.User"] = user;
     if(user.MustChangePassword&&!path.Equals("/api/auth/password",StringComparison.OrdinalIgnoreCase)&&!path.Equals("/api/auth/logout",StringComparison.OrdinalIgnoreCase)&&!path.Equals("/api/auth/me",StringComparison.OrdinalIgnoreCase)&&!path.Equals("/api/auth/csrf",StringComparison.OrdinalIgnoreCase))
@@ -274,7 +298,7 @@ app.Use(async (context, next) =>
     var browserMutation=!string.IsNullOrWhiteSpace(context.Request.Headers.Origin)||!string.IsNullOrWhiteSpace(context.Request.Headers["Sec-Fetch-Site"]);
     if(browserMutation&&context.Request.Method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE"))
     {
-        var valid=context.RequestServices.GetRequiredService<BrowserMutationProtector>().Validate(context.Request.Cookies[IdentityService.CookieName],context.Request.Headers["X-AeroLink-CSRF"].ToString());
+        var valid=context.RequestServices.GetRequiredService<BrowserMutationProtector>().Validate(context.SessionToken(),context.Request.Headers["X-AeroLink-CSRF"].ToString());
         if(!valid){context.Response.StatusCode=StatusCodes.Status400BadRequest;await context.Response.WriteAsJsonAsync(new{error="The browser mutation token is missing or expired. Refresh and try again.",code="antiforgery_validation_failed"});return;}
     }
     var db=context.RequestServices.GetRequiredService<AeroLinkDbContext>();
@@ -374,7 +398,18 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
+// A 401 is an answer, never an error page. Windows sign-in (#1615) is a 401 challenge with an empty body and a
+// WWW-Authenticate header, and error-page middleware that rewrote it - with a body, a re-executed path or a
+// redirect - would break the handshake. None is wired today. This is the innermost middleware, so any
+// UseStatusCodePages added anywhere above it sees the exemption before it acts on an endpoint's empty 401; the
+// challenge handler below exempts the 401s authentication itself issues.
+app.Use(async (context, next) =>
+{
+    await next();
+    if (context.Response.StatusCode == StatusCodes.Status401Unauthorized) StatusCodePagesExemption.Apply(context);
+});
+
+app.MapGet("/health",() => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 // Who is listening, and what source is it running? Readiness cannot answer that, and #816 proved a launcher
 // needs the answer before it may reuse a healthy process. Non-secret by construction (RuntimeIdentity.cs).
@@ -490,11 +525,21 @@ public sealed class BrowserMutationProtector(Microsoft.AspNetCore.DataProtection
     }
 }
 
+/// <summary>Keeps status-code pages, if any are ever added, from rewriting a 401 (#1614, #1615).</summary>
+public static class StatusCodePagesExemption
+{
+    public static void Apply(HttpContext context)
+    {
+        if (context.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>() is { } statusCodePages)
+            statusCodePages.Enabled = false;
+    }
+}
+
 public sealed class AeroLinkAuthorizationHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "AeroLinkContext";
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() => Task.FromResult(AuthenticateResult.NoResult());
-    protected override Task HandleChallengeAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; }
+    protected override Task HandleChallengeAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status401Unauthorized; StatusCodePagesExemption.Apply(Context); return Task.CompletedTask; }
     protected override Task HandleForbiddenAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; }
 }
