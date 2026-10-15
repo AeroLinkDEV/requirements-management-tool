@@ -14,10 +14,12 @@ export type SnapshotRefusalCode =
   | "UNCLASSIFIED_VALUE"
   /** A unit root's own property that its schema does not classify (authoritative, link, config, observer, derived). */
   | "UNCLASSIFIED_PROPERTY"
-  /** Serialized state reaches an object that restore does not take from the snapshot: a unit root, or anything
-   *  reachable from a config, observer or derived field; or a link field holds an object that no declared owner
-   *  emits. Restoring it would silently split one object into two. */
+  /** One object would be restored as two: authoritative state reaches a unit root; a config field's graph reaches an
+   *  object authoritative state owns (configuration is rebuilt separately); or a link field's graph reaches an object
+   *  the holder itself emits, or another unit emits with no declared link for that field. */
   | "UNCLASSIFIED_ALIAS"
+  /** Two distinct objects share one content reference, so decode could not keep them distinct. */
+  | "CONTENT_AMBIGUOUS"
   /** An object reachable from two units without a declared owner, a link to a unit not in the snapshot, or a duplicate
    *  unit id. */
   | "OWNERSHIP_AMBIGUOUS"

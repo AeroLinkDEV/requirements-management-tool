@@ -36,10 +36,26 @@ import type { Accepted, Refused, RestoreRefusal, RestoreRefusalCode, SnapshotRef
  * The census. Every object is emitted once, at the first path where the encoder meets it (depth-first, units in the
  * given order, fields in own-key order); every later meeting is a reference to that path, so shared objects stay
  * shared and distinct objects stay distinct even when their values are equal. Nothing is ever emitted as a copy of
- * an object met elsewhere. Before encoding, the census walks the whole graph of every config, observer and derived
- * field: restore rebuilds those, so authoritative state that reaches anything in them refuses (`UNCLASSIFIED_ALIAS`).
- * Cross-unit sharing is allowed only under a declared link to an owner that precedes the holder, and a link field
- * must hold a unit root or an object its declared owner emits.
+ * an object met elsewhere. Authoritative ownership wins: authoritative state is encoded first, and every object it
+ * reaches is owned by it. Then:
+ * - Each config field's whole value graph is walked. Restore rebuilds configuration independently of state, so a
+ *   config graph that reaches an authoritative object refuses (`UNCLASSIFIED_ALIAS`), whichever side "had it first".
+ * - Observer and derived fields are not walked. They are re-read or recomputed against the restored state, so pointing
+ *   into authoritative objects is how they are meant to work. That a derived structure is genuinely recomputed, and
+ *   that authoritative state never holds an object only a recompute would create, is the unit schema's obligation:
+ *   by identity alone the two cases look the same.
+ * - Each link field's value graph is walked: objects no unit emitted are wiring that `link()` recreates; an object a
+ *   unit emitted must come from another unit under a declared link for that field.
+ * - Authoritative state that reaches a unit root refuses (`UNCLASSIFIED_ALIAS`).
+ * Cross-unit sharing is allowed only under a declared link to an owner that precedes the holder.
+ *
+ * Walk blind spots (the walks never run user code and cannot see everything): an object reachable only through an
+ * own accessor (getter), an object hung on a function's own property, WeakMap/WeakSet values, and an object used as
+ * another object's `[[Prototype]]`. Unit schema reviews must check for these.
+ *
+ * Known limit: an object *inside* registered content (for example a content entry's position record) that state
+ * holds directly is encoded as a value, so after decode it is a copy, not the content's own object. Whether I2c adds
+ * a registry `contains()` check or declares such value objects copyable per path is decided with the I2c schemas.
  *
  * Decoding accepts exactly the bytes this encoder can produce for the same class registry, links and content
  * registry, so decode-then-encode reproduces the input bytes.
@@ -47,7 +63,7 @@ import type { Accepted, Refused, RestoreRefusal, RestoreRefusalCode, SnapshotRef
 
 /**
  * - authoritative: serialized and restored exactly.
- * - link: re-bound by `link()` on restore; never serialized.
+ * - link: wiring re-bound by `link()` on restore; never serialized.
  * - config: rebuilt from the recorded configuration identity; never serialized.
  * - observer: listeners and UI counters; never serialized.
  * - derived: caches and indices recomputed silently on restore (D7 9.2); never serialized.
@@ -72,15 +88,24 @@ export type SnapshotUnit = {
 /**
  * A class whose instances are encoded as their own data properties and decoded with `Object.create(prototype)`,
  * without running the constructor. Registering a class asserts that its whole state is its own data properties: no
- * `#private` fields, no side tables keyed by the instance (such as a WeakMap), and no state held by constructor
- * closures. The codec cannot see any of those, so each registration must be reviewed against this.
+ * `#private` fields, no side tables keyed by the instance (such as a WeakMap), no state held by constructor
+ * closures, no state behind own accessors, and nothing hung on its methods' own properties. The codec cannot see any
+ * of those, so each registration must be reviewed against this. A class whose prototype chain contains a built-in
+ * other than `Object.prototype` (a Map or Error subclass, for example) cannot be registered: its internal slots would
+ * be lost.
  */
 export type ClassRegistration = { readonly name: string; readonly prototype: object };
 
 /** Where an object came from in registered content (a navigation database entry, for example). */
 export type ContentReference = { readonly contentHash: string; readonly ident: string; readonly index: number };
 
-/** Registered content: objects that are encoded as references to content, never as values. */
+/**
+ * Registered content: objects that are encoded as references to content, never as values. The registry must be a
+ * bijection between content objects and references: `resolve(referenceOf(x)) === x`, and `referenceOf` gives distinct
+ * objects distinct references. The codec checks both: encode refuses two objects with one reference
+ * (`CONTENT_AMBIGUOUS`), and decode resolves each reference once and refuses a resolution whose own reference differs
+ * (`CONTENT_MISSING`).
+ */
 export type ContentRegistry = {
   readonly referenceOf: (value: object) => ContentReference | undefined;
   readonly resolve: (reference: ContentReference) => object | undefined;
@@ -136,9 +161,14 @@ const VIEWS: readonly ViewConstructor[] = [
   Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array,
   BigInt64Array, BigUint64Array, DataView,
 ];
+/** Every built-in prototype a registered class's chain may not contain (Object.prototype may only end the chain). */
 const BUILT_IN_PROTOTYPES: ReadonlySet<object> = new Set<object>([
-  Object.prototype, Array.prototype, Date.prototype, Map.prototype, Set.prototype, ArrayBuffer.prototype, Function.prototype,
-  ...VIEWS.map(view => view.prototype),
+  Object.prototype, Object.getPrototypeOf(Int8Array.prototype) as object, ...VIEWS.map(view => view.prototype),
+  ...["Array", "Date", "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "FinalizationRegistry", "ArrayBuffer", "SharedArrayBuffer",
+    "Function", "Number", "Boolean", "String", "Symbol", "BigInt", "RegExp", "Promise", "Error", "EvalError", "RangeError",
+    "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"]
+    .map(name => (globalThis as unknown as Record<string, { prototype?: unknown } | undefined>)[name]?.prototype)
+    .filter((prototype): prototype is object => typeof prototype === "object" && prototype !== null),
 ]);
 /** The intrinsic accessors, so a subclass cannot run code while the census walks. */
 const typedArrayBuffer = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Int8Array.prototype) as object, "buffer")!.get!;
@@ -182,19 +212,51 @@ function linkCovers(links: readonly CrossOwnerLink[] | undefined, owner: string,
     }));
 }
 
-/** The class registry, refusing duplicate names, duplicate prototypes and built-in prototypes. */
+/** Whether `prototype` is, or inherits from, a built-in other than `Object.prototype` at the end of its chain. */
+function inheritsBuiltIn(prototype: object | null) {
+  if (prototype === null || prototype === Object.prototype) return true;
+  for (let link: object | null = prototype; link !== null && link !== Object.prototype; link = Object.getPrototypeOf(link) as object | null) {
+    if (BUILT_IN_PROTOTYPES.has(link)) return true;
+  }
+  return false;
+}
+
+/** The class registry, refusing duplicate names, duplicate prototypes and built-in prototypes or subclasses. */
 function classRegistry(classes: readonly ClassRegistration[]) {
   const byPrototype = new Map<object, string>();
   const byName = new Map<string, object>();
   for (const { name, prototype } of classes) {
     if (byName.has(name)) throw new Refusal("CLASS_REGISTRY_INVALID", `class name ${name} is registered twice`);
     if (byPrototype.has(prototype)) throw new Refusal("CLASS_REGISTRY_INVALID", `one prototype is registered as both ${byPrototype.get(prototype)} and ${name}`);
-    if (BUILT_IN_PROTOTYPES.has(prototype)) throw new Refusal("CLASS_REGISTRY_INVALID", `${name} registers a built-in prototype`);
+    if (inheritsBuiltIn(prototype)) throw new Refusal("CLASS_REGISTRY_INVALID", `${name} is a built-in prototype or inherits from one`);
     byPrototype.set(prototype, name);
     byName.set(name, prototype);
   }
   return { byPrototype, byName };
 }
+
+/**
+ * The objects a walk continues to from `value`: a view's buffer, Map keys and values, Set entries, and the values of
+ * own data properties (accessors are never called). Plain objects and arrays skip the Map/Set probes; any other
+ * prototype is probed through the intrinsic `forEach`, so a Map whose prototype was changed is still walked.
+ */
+function walkChildren(value: object, push: (child: unknown) => void) {
+  if (ArrayBuffer.isView(value)) {
+    push(value instanceof DataView ? dataViewBuffer.call(value) : typedArrayBuffer.call(value));
+    return;
+  }
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null && !Array.isArray(value)) {
+    try { Map.prototype.forEach.call(value, (item: unknown, key: unknown) => { push(key); push(item); }); } catch { /* not a Map */ }
+    try { Set.prototype.forEach.call(value, (item: unknown) => { push(item); }); } catch { /* not a Set */ }
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor !== undefined && "value" in descriptor) push(descriptor.value);
+  }
+}
+
+const contentKey = (reference: ContentReference) => JSON.stringify([reference.contentHash, reference.ident, reference.index]);
 
 // ------------------------------------------------------------------ bytes
 
@@ -240,10 +302,10 @@ const hasDefaultAttributes = (descriptor: PropertyDescriptor) =>
 class Encoder {
   private readonly w = new Writer();
   private readonly seen = new Map<object, ObjectLocation>();
-  /** Everything restore does not take from the snapshot: unit roots and every object reachable from a config,
-   *  observer or derived field. */
-  private readonly unserialized = new Map<object, string>();
-  private readonly roots = new Set<object>();
+  /** Unit roots, by unit id: never serialized state. */
+  private readonly roots = new Map<object, string>();
+  /** Content reference key -> the one object that has it. */
+  private readonly contentObjects = new Map<string, object>();
   private readonly classes: Map<object, string>;
   private readonly content: ContentRegistry | undefined;
   private readonly aliases: AliasRecord[] = [];
@@ -266,8 +328,7 @@ class Encoder {
     units.forEach((unit, i) => {
       if (order.has(unit.unitId)) throw new Refusal("OWNERSHIP_AMBIGUOUS", `duplicate unit id ${unit.unitId}`);
       order.set(unit.unitId, i);
-      this.roots.add(unit.root);
-      this.unserialized.set(unit.root, `the root of unit ${unit.unitId}`);
+      this.roots.set(unit.root, unit.unitId);
     });
     units.forEach((unit, i) => {
       for (const link of unit.links ?? []) {
@@ -276,69 +337,84 @@ class Encoder {
         if (owner > i) throw new Refusal("OWNER_AFTER_HOLDER", `unit ${unit.unitId} declares a link to ${link.owner}, which comes after it; owners must precede holders`);
       }
     });
-    for (const unit of units) {
+    const fields = units.map(unit => {
+      const classified: { readonly key: string; readonly fieldClass: FieldClass; readonly value: unknown }[] = [];
       for (const key of Reflect.ownKeys(unit.root)) {
         if (typeof key !== "string") throw new Refusal("UNCLASSIFIED_PROPERTY", `a symbol-keyed property on unit ${unit.unitId}`);
         const fieldClass = Object.hasOwn(unit.fields, key) ? unit.fields[key] : undefined;
         if (fieldClass === undefined) throw new Refusal("UNCLASSIFIED_PROPERTY", `unit ${unit.unitId} property ${key} is not classified`);
         const descriptor = Object.getOwnPropertyDescriptor(unit.root, key)!;
         if (!("value" in descriptor)) throw new Refusal("UNCLASSIFIED_PROPERTY", `unit ${unit.unitId} property ${key} is an accessor`);
-        if (fieldClass === "config" || fieldClass === "observer" || fieldClass === "derived") {
-          this.markUnserialized(descriptor.value, `the ${fieldClass} field ${unit.unitId}.${key}`);
-        }
+        classified.push({ key, fieldClass, value: descriptor.value });
       }
-    }
+      return classified;
+    });
+    // Authoritative state first: every object it reaches is owned by it.
     this.w.i64(this.utc0);
     this.w.u32(units.length);
-    for (const unit of units) {
+    units.forEach((unit, u) => {
       this.unit = unit;
       this.w.str(this.checkedString(unit.unitId));
-      const keys = Reflect.ownKeys(unit.root).filter((key): key is string => typeof key === "string" && unit.fields[key] === "authoritative");
-      this.w.u32(keys.length);
-      for (const key of keys) {
+      const authoritative = fields[u].filter(field => field.fieldClass === "authoritative");
+      this.w.u32(authoritative.length);
+      for (const { key, value } of authoritative) {
         this.w.str(this.checkedString(key));
-        this.at({ kind: "key", key }, Object.getOwnPropertyDescriptor(unit.root, key)!.value);
+        this.at({ kind: "key", key }, value);
       }
-    }
-    for (const unit of units) this.checkLinkFields(unit);
+    });
+    const configVisited = new Set<object>();
+    units.forEach((unit, u) => {
+      this.unit = unit;
+      for (const { key, fieldClass, value } of fields[u]) {
+        if (fieldClass === "config") this.checkConfigField(unit, key, value, configVisited);
+        else if (fieldClass === "link") this.checkLinkField(unit, key, value);
+      }
+    });
     return { bytes: this.w.result(), aliases: this.aliases };
   }
 
-  /** Marks everything reachable from `start` (own data properties, elements, entries, view buffers) as unserialized.
-   *  Iterative and refusing nothing; it stops at unit roots, functions and registered content. */
-  private markUnserialized(start: unknown, description: string) {
+  /** Walks the object graph from `start` (see `walkChildren`), skipping primitives and functions. `visit` says
+   *  whether to continue past an object. Iterative, and it never calls user code. */
+  private walk(start: unknown, visited: Set<object>, visit: (value: object) => boolean) {
     const stack: unknown[] = [start];
+    const push = (child: unknown) => { stack.push(child); };
     while (stack.length > 0) {
       const value = stack.pop();
-      if (typeof value !== "object" || value === null || this.unserialized.has(value)) continue;
-      if (this.content?.referenceOf(value) !== undefined) continue;
-      this.unserialized.set(value, description);
-      if (ArrayBuffer.isView(value)) {
-        stack.push(value instanceof DataView ? dataViewBuffer.call(value) : typedArrayBuffer.call(value));
-        continue;
-      }
-      try { Map.prototype.forEach.call(value, (item: unknown, key: unknown) => { stack.push(key, item); }); } catch { /* not a Map */ }
-      try { Set.prototype.forEach.call(value, (item: unknown) => { stack.push(item); }); } catch { /* not a Set */ }
-      for (const key of Reflect.ownKeys(value)) {
-        const descriptor = Object.getOwnPropertyDescriptor(value, key);
-        if (descriptor !== undefined && "value" in descriptor) stack.push(descriptor.value);
-      }
+      if (typeof value !== "object" || value === null || visited.has(value)) continue;
+      visited.add(value);
+      if (visit(value)) walkChildren(value, push);
     }
   }
 
-  /** A link field holds a unit root, registered content, or an object emitted by the owner its declared link names. */
-  private checkLinkFields(unit: SnapshotUnit) {
-    this.unit = unit;
-    for (const key of Reflect.ownKeys(unit.root)) {
-      if (typeof key !== "string" || unit.fields[key] !== "link") continue;
-      const value: unknown = Object.getOwnPropertyDescriptor(unit.root, key)!.value;
-      if (typeof value !== "object" || value === null || this.roots.has(value) || this.content?.referenceOf(value) !== undefined) continue;
-      const emitted = this.seen.get(value);
-      const step: PathStep[] = [{ kind: "key", key }];
-      if (emitted === undefined || emitted.unitId === unit.unitId || !linkCovers(unit.links, emitted.unitId, step)) {
-        throw new Refusal("UNCLASSIFIED_ALIAS", `the link field ${unit.unitId}.${key} holds an object that ${emitted ? `${describe(emitted)} emits` : "no unit emits"} with no declared link to its owner`);
+  private stopsWalk(value: object) {
+    return this.roots.has(value) || this.content?.referenceOf(value) !== undefined;
+  }
+
+  /** Configuration is rebuilt from its identity, independently of state: it may not reach an authoritative object. */
+  private checkConfigField(unit: SnapshotUnit, key: string, value: unknown, visited: Set<object>) {
+    this.walk(value, visited, object => {
+      if (this.stopsWalk(object)) return false;
+      const emitted = this.seen.get(object);
+      if (emitted !== undefined) {
+        throw new Refusal("UNCLASSIFIED_ALIAS", `the config field ${unit.unitId}.${key} reaches ${describe(emitted)}, which authoritative state owns; configuration is rebuilt separately`);
       }
-    }
+      return true;
+    });
+  }
+
+  /** A link field's graph is wiring that `link()` recreates. Objects no unit emitted are wiring; an emitted object must
+   *  come from another unit under a declared link for this field. Unit roots, content and functions end the walk. */
+  private checkLinkField(unit: SnapshotUnit, key: string, value: unknown) {
+    const step: PathStep[] = [{ kind: "key", key }];
+    this.walk(value, new Set<object>(), object => {
+      if (this.stopsWalk(object)) return false;
+      const emitted = this.seen.get(object);
+      if (emitted === undefined) return true;
+      if (emitted.unitId === unit.unitId || !linkCovers(unit.links, emitted.unitId, step)) {
+        throw new Refusal("UNCLASSIFIED_ALIAS", `the link field ${unit.unitId}.${key} reaches ${describe(emitted)} with no declared link to its owner`);
+      }
+      return false;
+    });
   }
 
   private checkedString(value: string) {
@@ -370,11 +446,15 @@ class Encoder {
     const w = this.w;
     const content = this.content?.referenceOf(value);
     if (content !== undefined) {
+      const key = contentKey(content);
+      const holder = this.contentObjects.get(key);
+      if (holder !== undefined && holder !== value) this.refuse("CONTENT_AMBIGUOUS", `two distinct objects share the content reference ${key}`);
+      this.contentObjects.set(key, value);
       w.u8(TAG.content); w.str(this.checkedString(content.contentHash)); w.str(this.checkedString(content.ident)); w.u32(content.index);
       return;
     }
-    const unserialized = this.unserialized.get(value);
-    if (unserialized !== undefined) this.refuse("UNCLASSIFIED_ALIAS", `serialized state reaches an object held by ${unserialized}`);
+    const root = this.roots.get(value);
+    if (root !== undefined) this.refuse("UNCLASSIFIED_ALIAS", `serialized state reaches the root of unit ${root}`);
     const prior = this.seen.get(value);
     if (prior) {
       if (prior.unitId !== this.unit.unitId && !linkCovers(this.unit.links, prior.unitId, this.path)) {
@@ -565,7 +645,10 @@ const HOLE: unique symbol = Symbol("hole");
 class Decoder {
   private readonly r: Reader;
   private readonly classes: Map<string, object>;
-  private readonly links: Readonly<Record<string, readonly CrossOwnerLink[]>>;
+  /** Own entries only, so a unit id such as `constructor` or `__proto__` never reads Object.prototype. */
+  private readonly links: ReadonlyMap<string, readonly CrossOwnerLink[]>;
+  /** Content reference key -> its resolved object, so one reference is one object for the whole decode. */
+  private readonly contentObjects = new Map<string, object>();
   private readonly content: ContentRegistry | undefined;
   private readonly objects = new Map<string, object>();
   private utc0 = 0n;
@@ -575,7 +658,8 @@ class Decoder {
   constructor(bytes: Uint8Array, options: DecodeOptions) {
     this.r = new Reader(bytes);
     this.classes = classRegistry(options.classes ?? []).byName;
-    this.links = options.links ?? {};
+    const links = options.links ?? {};
+    this.links = new Map(Object.keys(links).map(unitId => [unitId, links[unitId]]));
     this.content = options.content;
   }
 
@@ -700,7 +784,7 @@ class Decoder {
         if (count > MAX_NESTING) this.refuse("NON_CANONICAL", `a reference path deeper than ${MAX_NESTING} steps`);
         const steps: PathStep[] = [];
         for (let n = 0; n < count; n += 1) steps.push(this.step());
-        if (unitId !== this.unitId && !linkCovers(this.links[this.unitId], unitId, this.path)) {
+        if (unitId !== this.unitId && !linkCovers(this.links.get(this.unitId), unitId, this.path)) {
           this.refuse("OWNERSHIP_AMBIGUOUS", `a reference to ${describe({ unitId, path: steps })} with no declared link`);
         }
         const target = this.objects.get(locationKey(unitId, steps));
@@ -709,8 +793,14 @@ class Decoder {
       }
       case TAG.content: {
         const reference: ContentReference = { contentHash: r.str(), ident: r.str(), index: r.u32() };
+        const key = contentKey(reference);
+        const known = this.contentObjects.get(key);
+        if (known !== undefined) return known;
         const target = this.content?.resolve(reference);
-        if (target === undefined) this.refuse("CONTENT_MISSING", `content ${reference.contentHash} ${reference.ident} #${reference.index} is not registered`, reference.contentHash);
+        if (target === undefined) this.refuse("CONTENT_MISSING", `content ${key} is not registered`, reference.contentHash);
+        const own = this.content?.referenceOf(target);
+        if (own === undefined || contentKey(own) !== key) this.refuse("CONTENT_MISSING", `content ${key} resolves to an object whose own reference is ${own ? contentKey(own) : "none"}`, reference.contentHash);
+        this.contentObjects.set(key, target);
         return target;
       }
     }
