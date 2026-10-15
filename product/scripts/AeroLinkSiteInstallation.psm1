@@ -707,9 +707,12 @@ function Get-AeroLinkSitePostgresAccess {
             it, as the cluster created them. It is the only login the scheduled backup has: the password is
             readable by the API's service account, which is what the backup task runs as.
 
-            Superuser: postgres, only to create, rename or drop a database, which the application role may not do.
-            Its password is readable by Administrators (or the maintenance identity named at initialisation), so a
-            restore runs elevated.
+            Superuser: postgres. Its password is readable by Administrators (or the maintenance identity named at
+            initialisation). A restore logs in only as postgres and creates every object as the application role
+            through pg_restore --role; an operator's backup uses it too (Get-AeroLinkSiteBackupAccess).
+
+            The two passwords have different readers and no real process holds both (#1614 1.4), so nothing may
+            ever need both.
 
             The password is returned as a SecureString and reaches a PostgreSQL tool only through PGPASSWORD in
             that tool's environment (Invoke-AeroLinkWithPostgresAccess), never its command line.
@@ -737,6 +740,56 @@ function Get-AeroLinkSitePostgresAccess {
     }
 }
 
+function Test-AeroLinkTokenHoldsSid {
+    param([Parameter(Mandatory)][string]$Sid)
+    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $principal.IsInRole((New-Object Security.Principal.SecurityIdentifier($Sid)))
+}
+
+function Get-AeroLinkSiteBackupAccess {
+    <#
+        .SYNOPSIS The login a site backup uses, chosen by who is running it (#1614 1.9).
+        .DESCRIPTION
+            The installation's API service account (the scheduled task) holds only the application password, so it
+            backs up as the application role. Anyone else - an elevated administrator taking a manual, pre-restore or
+            updater backup - is the maintenance identity and backs up as postgres with the superuser password. A
+            process that is neither cannot read either secret and is refused, naming both routes.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InstallationRoot, [string]$ProtectedConfigRoot)
+    $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+    if (-not $site) { throw "$InstallationRoot has no site declaration; it has no site PostgreSQL credentials." }
+    $role = if (Test-AeroLinkTokenHoldsSid $site.RunAsSid) { 'Application' } else { 'Superuser' }
+    try { return Get-AeroLinkSitePostgresAccess -InstallationRoot $site.InstallationRoot -Role $role -ProtectedConfigRoot $ProtectedConfigRoot }
+    catch {
+        throw "A site backup runs as the installation's service account ($($site.RunAsAccount)), with the application password, or as its maintenance identity (an elevated administrator unless initialisation named another), with the superuser password. This process was taken for the $(if ($role -eq 'Application') { 'service account' } else { 'maintenance identity' }) and could not read that password: $($_.Exception.Message)"
+    }
+}
+
+function Set-AeroLinkSiteEvidenceAccess {
+    <#
+        .SYNOPSIS Re-applies the site evidence folder's permissions after a restore moved a new folder into place.
+        .DESCRIPTION
+            A restore builds the incoming evidence beside the target, inside the installation root, so the new folder
+            inherits the root's permissions - read-only to the API account - and a same-volume move keeps them. Left
+            alone, the API could not write an attachment after a production restore. This applies the evidence
+            entry of Get-AeroLinkSiteFolderPlan again (protected, inherited by every file below) and proves the API
+            account can write.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InstallationRoot, [Parameter(Mandatory)][string]$Path)
+    $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+    if (-not $site) { throw "$InstallationRoot has no site declaration." }
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $entry = @(Get-AeroLinkSiteFolderPlan -InstallationRoot $site.InstallationRoot | Where-Object { [string]::Equals(([IO.Path]::GetFullPath($_.Path)).TrimEnd('\'), $full, [StringComparison]::OrdinalIgnoreCase) })
+    if ($entry.Count -ne 1 -or $entry[0].Kind -ne 'Data') { throw "$full is not the site's evidence folder; refusing to change its permissions." }
+    Set-AeroLinkDirectoryAccessBySid -Path $full -Grants $entry[0].Grants
+    $access = Get-AeroLinkDirectoryAccessBySid -Path $full
+    $writable = @($access.Rules | Where-Object { $_.Sid -eq $site.RunAsSid -and $_.Allow -and $_.CanWrite })
+    if (-not $access.Protected -or $writable.Count -eq 0) { throw "The restored evidence folder $full is not writable by $($site.RunAsAccount) after its permissions were re-applied." }
+    return $access
+}
+
 function New-AeroLinkSiteBackupTaskDefinition {
     <#
         .SYNOPSIS The daily verified backup of a site installation, as a scheduled task definition (#1614 1.9, D7).
@@ -761,7 +814,10 @@ function New-AeroLinkSiteBackupTaskDefinition {
     if (-not $site) { throw "$InstallationRoot has no site declaration; a site backup task is only defined for a site installation." }
     $script = Join-Path ([IO.Path]::GetFullPath($ScriptRoot)) 'Invoke-AeroLinkScheduledBackup.ps1'
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`" -InstallationRoot `"$($site.InstallationRoot)`" -RetentionDays $RetentionDays"
+    # No trailing backslash inside the quotes: Windows PowerShell would read \" as an escaped quote and swallow the
+    # following arguments into the path.
+    $rootArgument = ([string]$site.InstallationRoot).TrimEnd('\')
+    $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`" -InstallationRoot `"$rootArgument`" -RetentionDays $RetentionDays"
     return [pscustomobject]@{
         TaskName    = "AeroLink backup ($($site.ServiceName))"
         TaskPath    = '\AeroLink\'
@@ -786,6 +842,8 @@ function Register-AeroLinkSiteBackupTask {
 
 Export-ModuleMember -Function @(
     'Get-AeroLinkSitePostgresAccess',
+    'Get-AeroLinkSiteBackupAccess',
+    'Set-AeroLinkSiteEvidenceAccess',
     'New-AeroLinkSiteBackupTaskDefinition',
     'Register-AeroLinkSiteBackupTask',
     'Set-AeroLinkSiteDeclaration',

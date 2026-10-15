@@ -1265,57 +1265,95 @@ Ordinary repository CSV exports expire after seven days; completed job metadata 
 ### Site server backup and restore (#1614 1.9)
 
 A site installation keeps its backups on the host, under `<root>\backups`, for DEC-130's 15 days. Under D7 there
-is no off-machine copy yet. Backup, verification and restore take `-InstallationRoot <root>`. Without it they
-resolve the installation from the checkout, exactly as on HOME.
+is no off-machine copy yet. Backup, verification and restore take `-InstallationRoot <root>`, and refuse it for a
+root that has no site declaration. Without it they resolve the installation from the program, exactly as on HOME.
 
-**Credentials.** The site cluster accepts only SCRAM passwords. Each step uses one of two logins, both read from the
-protected-config store:
-- **The application role** (`aerolink_app`) owns `aerolink`. It runs the backup's `pg_dump` and attachment
-  inventory, and the restore's `pg_restore` and checks. Its password is readable by the API's service account.
-- **The superuser** (`postgres`) is used only to terminate, create, rename and drop databases. Its password is
-  readable by Administrators, so a restore runs elevated.
+**Who runs what, and with which password.** The site cluster accepts only SCRAM passwords. Each password has one
+reader, and no process holds both (#1614 1.4):
+- the application password (`aerolink_app`) is readable by the API's service account;
+- the superuser password (`postgres`) is readable by the maintenance identity, Administrators unless
+  initialisation named another.
 
-A password reaches `pg_dump`, `pg_restore` and `psql` only through `PGPASSWORD`, never their command lines, and
-every tool runs with `-w`. A missing or wrong password is therefore a refusal, not a hidden prompt.
+So:
+- **The scheduled backup** runs as the API's service account, `NT SERVICE\AeroLink-<name>`. It backs up as
+  `aerolink_app`, which owns every object in `aerolink`.
+- **An operator's backup** is a backup taken by anyone else: manual, pre-restore or updater. It runs elevated and
+  backs up as `postgres`.
+- **Every restore** runs elevated and logs in only as `postgres`: the isolated drill, Phase 3 and a production
+  restore.
+
+A process that is neither the service account nor the maintenance identity is refused, and the message names both
+routes. A password reaches `pg_dump`, `pg_restore` and `psql` only through `PGPASSWORD`, never their command lines,
+and every tool runs with `-w`. A missing or wrong password is therefore a refusal, not a hidden prompt.
 
 **Ownership after a restore.** The target database is created `OWNER aerolink_app` and closed to `PUBLIC`, as
-`aerolink` is. The dump is then restored as that role with `--no-owner --no-privileges`, so every object belongs
-to the application role, even in a HOME archive whose objects `postgres` owned. The restore then checks that no
-relation belongs to another role and that the role can write, and refuses otherwise. `pg_trgm` is a trusted
-extension, so the owner role creates it.
+`aerolink` is. `pg_restore` logs in as `postgres` and runs with `--role=aerolink_app --no-owner --no-privileges`,
+so every object is created by, and belongs to, the application role. That includes a HOME archive whose objects
+`postgres` owned.
 
-**Isolated drill:**
+The restore then refuses if any relation, function, type or schema belongs to another role. PostgreSQL's own rules
+are allowed:
+- the members of a trusted extension such as `pg_trgm` belong to the bootstrap superuser;
+- `public` belongs to `pg_database_owner`.
+
+It also refuses if the role cannot create and write a table.
+
+**Evidence after a production restore.** The incoming evidence is built inside the installation root and moved into
+place, so it would keep the root's read-only permissions. The restore re-applies the evidence folder's own
+permissions, from `Get-AeroLinkSiteFolderPlan`, to the folder and everything in it, and proves the API account can
+write.
+
+**Isolated drill** (elevated):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Restore-AeroLink.ps1 `
+powershell -NoProfile -ExecutionPolicy Bypass -File <program>\scripts\Restore-AeroLink.ps1 `
     -InstallationRoot 'C:\AeroLink\AeroLink Production' -BackupArchive <zip> -TargetDatabase aerolink_restore_validation
 ```
 
 **Production restore, including Phase 3's HOME archive:**
-- run from that installation's own program;
-- stop the site's AeroLink service first; the restore refuses while the API port listens;
-- add `-TargetDatabase aerolink -AllowProductionRestore -Confirmation RESTORE-AEROLINK`.
+- **Run from that installation's own program.** The program must resolve to the installation: the installer
+  (#1614 1.7) writes `<program>\.local\installation.json` naming the root (`Set-AeroLinkInstallationPointer`).
+  Until then, an operator sets that pointer by hand. The restore refuses a program that resolves elsewhere.
+- **Stop the site's AeroLink service first.** The restore refuses while the API port listens, and checks again
+  immediately before it renames the live database.
+- **Add** `-TargetDatabase aerolink -AllowProductionRestore -Confirmation RESTORE-AEROLINK`.
+- **Match the classification.** The archive's recorded classification must match the site's (D8). Phase 3
+  restores HOME's archive into SiteProduction deliberately, with `-AllowArchiveFromOtherClassification`.
 
-It takes a pre-restore backup with the site credentials. It never starts or stops the site cluster or the API
-service, and it never runs a HOME launcher. Start the service afterwards. The notification revocation it performs
-needs the site-aware reader (#1642).
+The restore takes an operator's pre-restore backup. It never starts or stops the site cluster or the API service,
+and it never runs a HOME launcher; start the service afterwards. The notification revocation it performs needs the
+site-aware reader from #1642.
+
+**From the release package.** A site runs the scripts from its release package (#1614 1.6): `app\`, `scripts\` and
+`manifest.json`, with no source tree or git. From there:
+- a backup records `app\appsettings.json` and the manifest's source SHA and latest migration;
+- the restore's validation API is the package's own `app\AeroLink.Api.exe`.
+
+From a source checkout, as on HOME, nothing changes.
 
 **Daily backup.** `Register-AeroLinkSiteBackupTask` (in `AeroLinkSiteInstallation.psm1`) registers it, elevated,
-through the Task Scheduler API. The installer (#1614 1.7) calls it; `New-AeroLinkSiteBackupTaskDefinition` shows
+through the Task Scheduler API; the installer (#1614 1.7) calls it. `New-AeroLinkSiteBackupTaskDefinition` shows
 what it registers. The task:
-- runs `Invoke-AeroLinkScheduledBackup.ps1 -InstallationRoot <root>` daily, which backs up and then verifies;
-- runs as the installation's API account, `NT SERVICE\AeroLink-<name>`, with logon type ServiceAccount: no
-  password and no interactive user;
+- runs `<program>\scripts\Invoke-AeroLinkScheduledBackup.ps1 -InstallationRoot <root>` daily, which backs up and
+  then verifies;
+- runs as `NT SERVICE\AeroLink-<name>`, with logon type ServiceAccount: no password and no interactive user;
 - logs to `<root>\logs\scheduled-backup.log`.
 
-Whether Task Scheduler on the host accepts a virtual service account as a task principal is a Phase 2 check.
+Whether Task Scheduler on the host accepts a virtual service account as a task principal still has to be proved on
+the host (Phase 2).
 
-`AeroLinkSiteBackup.Acceptance.ps1 -PostgresBin <bin>` proves all of this on a disposable site cluster, run by
-hand and non-elevated:
-1. it initialises the cluster with `Initialize-AeroLinkSitePostgres`;
-2. it backs up a pg_trgm-indexed table written by the application role, verifies the archive and restores it;
-3. it restores a HOME-format archive taken as `postgres`;
-4. it checks ownership, row counts, trigram search and writes.
+**Proof.** `AeroLinkSiteBackup.Acceptance.ps1 -PostgresBin <bin>` (by hand, non-elevated, on a disposable cluster)
+keeps the two passwords in two separate protected stores, one per caller, so it cannot pass with the identities
+collapsed. It checks:
+1. the scheduled backup from a release-package layout, with the application password only;
+2. verification;
+3. the drill and an operator's backup with the superuser password only;
+4. a HOME-format archive restored into the site;
+5. ownership, rows, trigram search and writes;
+6. the evidence permissions after a move.
+
+It does not run a full production activation: that needs the site notification revocation from #1642, and a
+virtual account this machine cannot create.
 
 ## Isolated restore drill
 

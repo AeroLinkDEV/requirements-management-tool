@@ -25,15 +25,18 @@ $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot -InstallationRoot $InstallationRoot
-# A site cluster requires SCRAM passwords (#1614 1.4). Everything this backup reads, it reads as the declared
-# application role, which owns every object in aerolink; the password comes from the protected store and reaches
-# pg_dump and psql only through PGPASSWORD, with -w, never their command lines. HOME keeps postgres over trust.
+# A site cluster requires SCRAM passwords (#1614 1.4). The login depends on who is running the backup: the API's
+# service account (the scheduled task) holds only the application password and backs up as the application role,
+# which owns every object in aerolink; an elevated administrator (a manual, pre-restore or updater backup) holds
+# only the superuser password and backs up as postgres. The password reaches pg_dump and psql only through
+# PGPASSWORD, with -w, never their command lines. HOME keeps postgres over trust.
 $site = Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot
+if ($InstallationRoot -and -not $site) { throw "-InstallationRoot names a site server installation; $($installation.InstallationRoot) has no site declaration. Run without it for this checkout's own installation." }
 $pgAccess = $null
 $pgUser = 'postgres'
 if ($site) {
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
-    $pgAccess = Get-AeroLinkSitePostgresAccess -InstallationRoot $site.InstallationRoot -Role Application -ProtectedConfigRoot $ProtectedConfigRoot
+    $pgAccess = Get-AeroLinkSiteBackupAccess -InstallationRoot $site.InstallationRoot -ProtectedConfigRoot $ProtectedConfigRoot
     $pgUser = $pgAccess.User
 }
 $declaredPostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort
@@ -94,11 +97,13 @@ try {
     if ($beforeJson -ne $afterJson) { throw 'Controlled-attachment metadata changed during backup. No archive was published; retry after active storage operations complete.' }
     ConvertTo-Json -InputObject @($inventoryBefore) -Depth 4 | Set-Content -LiteralPath (Join-Path $staging 'attachment-inventory.json') -Encoding UTF8
     $config = Join-Path $staging 'configuration'; New-Item -ItemType Directory -Path $config | Out-Null
-    Copy-Item -LiteralPath (Join-Path $productRoot 'src\AeroLink.Api\appsettings.json') -Destination $config
-    Copy-Item -LiteralPath (Join-Path $productRoot 'src\AeroLink.Api\appsettings.Development.json') -Destination $config
+    # A source checkout (HOME) records its src settings, git HEAD and newest migration as before; a release package
+    # (a site, #1614 1.6) has none of those and records its app settings and its manifest's SHA and migration.
+    $program = Get-AeroLinkProgramLayout -ProductRoot $productRoot
+    foreach ($settingsFile in $program.SettingsFiles) { Copy-Item -LiteralPath $settingsFile -Destination $config }
     $files = Get-AeroLinkBackupFileInventory -StagingRoot $staging
-    $applicationSha = try { (& git -C $repositoryRoot rev-parse HEAD 2>$null).Trim() } catch { 'unknown' }
-    $schemaVersion = (Get-ChildItem -LiteralPath (Join-Path $productRoot 'src\AeroLink.Infrastructure\Persistence\Migrations') -Filter '*.cs' -File | Where-Object Name -notmatch 'Designer|Snapshot' | Sort-Object Name | Select-Object -Last 1).BaseName
+    $applicationSha = $program.SourceSha
+    $schemaVersion = $program.SchemaVersion
     $manifest = [ordered]@{
         FormatVersion = 2
         CreatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')

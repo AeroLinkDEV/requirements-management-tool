@@ -259,6 +259,11 @@ try {
         Assert-True ($backupTask.Action.Arguments -match [regex]::Escape('Invoke-AeroLinkScheduledBackup.ps1') -and $backupTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot))`"") -and
             $backupTask.Action.Arguments -match '-NonInteractive') `
             "The site backup task must run the verified scheduled backup for exactly this installation, non-interactively: $($backupTask.Action.Arguments)"
+        # A root written with a trailing backslash must not end its quoted argument with \", which Windows
+        # PowerShell reads as an escaped quote, swallowing the arguments after it into the path.
+        $slashTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot ($siteRoot.TrimEnd('\') + '\') -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
+        Assert-True ($slashTask.Action.Arguments -notmatch '\\"' -and $slashTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot).TrimEnd('\'))`" -RetentionDays")) `
+            "A trailing backslash on the root must not reach the task's quoted argument: $($slashTask.Action.Arguments)"
         Assert-Throws { Set-AeroLinkSiteDeclaration -InstallationRoot $siteRoot -ApiPort $siteApiPort -PostgresPort $sitePostgresPort -ConnectorDeploymentId 'aerolink-other' } 'orphan' `
             'A site declaration must refuse to replace an existing connector deployment id.'
 
@@ -310,9 +315,14 @@ try {
         # postgres over trust. The end-to-end site round trip is AeroLinkSiteBackup.Acceptance.ps1.
         Assert-Throws { & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive (Join-Path $siteFixture 'absent.zip') -DisposableQualification -PostgresPort $sitePostgresPort } `
             'protected site secret .* is not configured' 'Restore, including the isolated drill, must refuse a site without its protected credentials before connecting.'
-        Assert-Throws { & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning } 'protected site secret .* is not configured' 'Backup must refuse a site without its protected credentials before connecting.'
+        Assert-Throws { & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning } 'maintenance identity.*protected site secret .* is not configured' 'Backup must refuse a site without its protected credentials before connecting, naming who may run it.'
+        # -InstallationRoot names a site; on any other root it is refused rather than half-applied.
+        $notASite = Join-Path $siteFixture 'not-a-site'
+        New-Item -ItemType Directory -Path $notASite -Force | Out-Null
+        Assert-Throws { & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -InstallationRoot $notASite -PostgresAlreadyRunning } 'has no site declaration' 'Backup -InstallationRoot must refuse a root that is not a site.'
+        Assert-Throws { & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive (Join-Path $siteFixture 'absent.zip') -InstallationRoot $notASite } 'has no site declaration' 'Restore -InstallationRoot must refuse a root that is not a site.'
         # Import, upgrade and the HOME repair tools stay HOME-only.
-        Assert-Throws { Assert-AeroLinkNotSiteInstallation -InstallationRoot $siteRoot -Operation 'Snapshot import' } 'not yet supported on a site' 'HOME-only operations must still refuse a site.'
+        Assert-Throws { Assert-AeroLinkNotSiteInstallation -InstallationRoot $siteRoot -Operation 'Snapshot import' } 'HOME tool and is not supported on a site' 'HOME-only operations must still refuse a site.'
         # Diagnostics never probes a site at a loopback HTTP address: its API is HTTPS-only on the public name.
         $diagnosticsOutput = Join-Path $siteFixture 'diagnostics.json'
         $shell = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'powershell.exe' } else { 'pwsh' }
