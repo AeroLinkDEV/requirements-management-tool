@@ -153,6 +153,15 @@ try {
     Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Development -EnsureInstanceId).InstanceId -ne $firstRead.InstanceId) `
         'Two installations must not share an identifier.'
 
+    # Site classifications are part of the same read/write authority as HOME and local modes. The installer writes
+    # both values, and every subsequent guard must read them back rather than rejecting an otherwise valid site.
+    foreach ($siteClassification in @('SiteProduction', 'SiteDevelopment')) {
+        $siteIdentity = New-FixtureProductRoot -WithLocal
+        Set-AeroLinkInstanceConfig -ProductRoot $siteIdentity -Label $siteClassification -Classification $siteClassification | Out-Null
+        $readSiteIdentity = Get-AeroLinkInstanceConfig -ProductRoot $siteIdentity -Mode Development
+        Assert-True ($readSiteIdentity.Classification -eq $siteClassification) "The $siteClassification classification must survive the shared instance write/read path."
+    }
+
     # A classification outside the supported set fails closed.
     #
     # Every guard that protects real data compares this string for equality: the development launcher refuses
@@ -311,6 +320,8 @@ try {
 
     # --- 11. A site server installation (#1614) declares its own ports; HOME keeps 5080/54329 ---
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteServer.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkNotificationAuthority.psm1') -Force
     function Get-FreeLoopbackPort {
         $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $probe.Start()
         try { return $probe.LocalEndpoint.Port } finally { $probe.Stop() }
@@ -383,6 +394,47 @@ try {
             $runtime['AEROLINK_NOTIFICATION_AUTHORITY_ROOT'] -eq [IO.Path]::GetFullPath($siteAuthority) -and
             $runtime['ConnectionStrings__AeroLink'] -notmatch 'Password') `
             'A site API must be given installation-owned key ring, evidence, connector and notification-authority state, and no password unless asked.'
+
+        # A machine certificate key may arrive with a broad inherited grant. The installer must replace that DACL,
+        # not add the API SID beside Users. This uses only a disposable file; the machine certificate store is not
+        # touched by the contract test.
+        $certificateKeyRoot = Join-Path $siteFixture 'certificate-key'
+        $fixtures.Add($certificateKeyRoot)
+        New-Item -ItemType Directory -Path $certificateKeyRoot -Force | Out-Null
+        $certificateKey = Join-Path $certificateKeyRoot 'private-key'
+        [IO.File]::WriteAllText($certificateKey, 'temporary private-key fixture')
+        $broad = Get-Acl -LiteralPath $certificateKey
+        $broad.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),
+            [Security.AccessControl.FileSystemRights]::Read,
+            [Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $certificateKey -AclObject $broad
+        Set-AeroLinkCertificatePrivateKeyAcl -Path $certificateKey -Sid $declared.RunAsSid | Out-Null
+        $certificateAcl = Get-Acl -LiteralPath $certificateKey
+        $certificateRules = @($certificateAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        $certificateRuleSids = @($certificateRules | ForEach-Object IdentityReference | ForEach-Object Value | Sort-Object -Unique)
+        Assert-True ($certificateAcl.AreAccessRulesProtected -and ($certificateRuleSids -join ',') -eq ((@($declared.RunAsSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object -Unique) -join ',')) `
+            'The certificate private-key DACL must be protected and contain only the API, SYSTEM and Administrators.'
+        Assert-True (-not @($certificateRules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' }).Count) `
+            'A pre-existing Users grant must not survive certificate private-key ACL hardening.'
+
+        # #1647: both independent notification-authority files must be readable by the site API SID while retaining
+        # the owner/SYSTEM/Administrators write boundary. The authority is outside the installation and disposable.
+        $siteSource = Join-Path $siteFixture 'source'
+        New-Item -ItemType Directory -Path $siteSource -Force | Out-Null
+        Set-AeroLinkInstallationPointer -ProductRoot $siteSource -InstallationRoot $siteRoot | Out-Null
+        $authorityResult = Revoke-AeroLinkNotificationSendGeneration -ProductRoot $siteSource
+        $authorityPath = Get-AeroLinkNotificationAuthorityPath -InstanceId $instanceId -InstallationRoot $siteRoot
+        foreach ($authorityFile in @($authorityPath, "$authorityPath.generation")) {
+            $authorityAcl = Get-Acl -LiteralPath $authorityFile
+            $authorityRules = @($authorityAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+            $siteRead = @($authorityRules | Where-Object { $_.IdentityReference.Value -eq $declared.RunAsSid -and $_.AccessControlType -eq 'Allow' })
+            Assert-True ($authorityAcl.AreAccessRulesProtected -and $siteRead.Count -eq 1 -and
+                ($siteRead[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::Read) -eq [Security.AccessControl.FileSystemRights]::Read) `
+                "The site API must read the notification authority file '$authorityFile'."
+            Assert-True (-not @($authorityRules | Where-Object { $_.IdentityReference.Value -in @('S-1-5-32-545', 'S-1-5-11', 'S-1-1-0') }).Count) `
+                "The notification authority file '$authorityFile' must not grant broad Users/Authenticated Users/Everyone access."
+        }
 
         # HOME keeps exactly what it had: no site block, 5080/54329 as postgres.
         $homeRoot = Join-Path $siteFixture 'home-installation'
@@ -480,12 +532,97 @@ try {
         $env:AEROLINK_INSTALLATION_ROOT = $null
         # This process owns every folder, so it can always hand them back to itself before removing them.
         $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $certificateCleanup = Join-Path $siteFixture 'certificate-key'
+        if (Test-Path -LiteralPath $certificateCleanup -PathType Container) {
+            $certificateFile = Join-Path $certificateCleanup 'private-key'
+            if (Test-Path -LiteralPath $certificateFile -PathType Leaf) {
+                $certificateFileAcl = Get-Acl -LiteralPath $certificateFile
+                $certificateFileAcl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                    [Security.Principal.SecurityIdentifier]::new($me), [Security.AccessControl.FileSystemRights]::FullControl,
+                    [Security.AccessControl.AccessControlType]::Allow))
+                $certificateAccess = [Security.AccessControl.AccessControlSections]::Access
+                $certificateDacl = [Security.AccessControl.FileSecurity]::new()
+                $certificateDacl.SetSecurityDescriptorSddlForm($certificateFileAcl.GetSecurityDescriptorSddlForm($certificateAccess), $certificateAccess)
+                [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($certificateFile), $certificateDacl)
+            }
+            Set-AeroLinkDirectoryAccessBySid -Path $certificateCleanup -Grants @(@{ Sid = $me; Access = 'FullControl' })
+        }
         foreach ($entry in @($sitePlan | Sort-Object { $_.Path.Length })) {
             try { Set-AeroLinkDirectoryAccessBySid -Path $entry.Path -Grants @(@{ Sid = $me; Access = 'FullControl' }) } catch { }
         }
         Remove-Item -LiteralPath $siteFixture -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $siteFixture) { $failures.Add("The site fixture could not be removed: $siteFixture") }
     }
+
+    # --- 13. The site server installer's pure parts (#1614 1.7, 1.8, 1.10): names, plans, the service, the parsers ---
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteServer.psm1') -Force
+    $server = Get-AeroLinkServerIdentity -Name Production -MachineRoot 'C:\AeroLink'
+    Assert-True ($server.InstallationRoot -eq 'C:\AeroLink\AeroLink Production' -and $server.Classification -eq 'SiteProduction' -and
+        $server.ServiceName -eq 'AeroLink-Production' -and $server.PostgresServiceName -eq 'AeroLink-Production-PostgreSQL') `
+        "D8 names: one root, classification and service pair per installation; got $($server.InstallationRoot) $($server.ServiceName) $($server.PostgresServiceName)."
+    Assert-True ((Get-AeroLinkServerIdentity -Name Development).ServiceName -eq 'AeroLink-Development') 'The Development installation has its own services.'
+
+    # The machine roots are locked before anything is created inside them: no write for Users.
+    $rootPlan = @(Get-AeroLinkServerRootPlan -MachineRoot 'C:\AeroLink' -ProgramDataRoot 'C:\ProgramData\AeroLink')
+    Assert-True ($rootPlan.Count -eq 2 -and $rootPlan[0].Path -eq 'C:\AeroLink' -and $rootPlan[1].Path -eq 'C:\ProgramData\AeroLink') 'Both machine roots are in the lock plan.'
+    foreach ($entry in $rootPlan) {
+        $grantText = (@($entry.Grants | ForEach-Object { "$($_.Sid)=$($_.Access)" }) | Sort-Object) -join ';'
+        Assert-True ($grantText -eq 'S-1-5-18=FullControl;S-1-5-32-544=FullControl;S-1-5-32-545=Read') "$($entry.Path) is writable only by Administrators and SYSTEM: $grantText"
+    }
+
+    $layout = Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2.3'
+    Assert-True ($layout.VersionRoot -eq 'C:\AeroLink\AeroLink Production\program\versions\1.2.3' -and $layout.Current -eq 'C:\AeroLink\AeroLink Production\program\current' -and
+        $layout.ApiExecutable -eq 'C:\AeroLink\AeroLink Production\program\current\app\AeroLink.Api.exe' -and $layout.TrustedCertificate -eq 'C:\AeroLink\AeroLink Production\trust\release-signing.cer') `
+        'The layout: versions\<version>, a current junction, the API under current\app, the trusted certificate under trust\.'
+
+    # The API service, as data: the executable itself (UseWindowsService), as the virtual account, after PostgreSQL.
+    $fakeSite = [pscustomobject]@{ ServiceName = 'AeroLink-Production'; PostgresServiceName = 'AeroLink-Production-PostgreSQL'; Classification = 'SiteProduction'
+        RunAsAccount = 'NT SERVICE\AeroLink-Production'; RunAsSid = (Get-AeroLinkServiceSid 'AeroLink-Production') }
+    $environment = [ordered]@{ 'SiteServer__Enabled' = 'true'; 'ASPNETCORE_URLS' = $null; 'ConnectionStrings__AeroLink' = 'Host=127.0.0.1;Port=55432;Database=aerolink;Username=aerolink_app'; 'ASPNETCORE_ENVIRONMENT' = 'Production' }
+    $service = New-AeroLinkApiServiceDefinition -Site $fakeSite -CurrentProgram $layout.Current -Environment $environment
+    Assert-True ($service.PathName -eq '"C:\AeroLink\AeroLink Production\program\current\app\AeroLink.Api.exe"' -and $service.StartName -eq 'NT SERVICE\AeroLink-Production' -and
+        $service.DelayedAutoStart -and ($service.Dependencies -join ',') -eq 'AeroLink-Production-PostgreSQL' -and ($service.FailureActions -join ',') -eq 'restart/60000,restart/60000,restart/60000') `
+        "The API service runs current\app\AeroLink.Api.exe as its virtual account, delayed-automatic, after its cluster, restarted on failure: $($service.PathName) $($service.StartName)"
+    Assert-True (($service.Environment -join ';') -eq 'ASPNETCORE_ENVIRONMENT=Production;ConnectionStrings__AeroLink=Host=127.0.0.1;Port=55432;Database=aerolink;Username=aerolink_app;SiteServer__Enabled=true') `
+        "The service environment is the composed settings, sorted, without empty entries: $($service.Environment -join ' | ')"
+    Assert-Throws { New-AeroLinkApiServiceDefinition -Site $fakeSite -CurrentProgram $layout.Current -Environment ([ordered]@{ 'ConnectionStrings__AeroLink' = 'Host=x;Username=a;Password=secret' }) } 'may not carry a secret' `
+        'A password in the connection string must never reach the service key.'
+    Assert-Throws { New-AeroLinkApiServiceDefinition -Site $fakeSite -CurrentProgram $layout.Current -Environment ([ordered]@{ 'Identity__BootstrapSecret' = 'abc' }) } 'may not carry a secret' `
+        'The bootstrap secret must never reach the service key.'
+    Assert-True (Test-AeroLinkServiceSidMatchesAccount -Site $fakeSite) 'A declaration with the computed virtual-account SID is installable.'
+    Assert-True (-not (Test-AeroLinkServiceSidMatchesAccount -Site ([pscustomobject]@{ ServiceName = 'AeroLink-Production'; RunAsSid = 'S-1-5-21-1-2-3-1001' }))) 'A runAsSid override is not installable.'
+
+    # Host-check parsers.
+    $goodHba = "# AeroLink`r`n# TYPE DATABASE USER ADDRESS METHOD`r`nhost    all       all   127.0.0.1/32  scram-sha-256`r`n"
+    Assert-True ((ConvertFrom-AeroLinkPgHba -Text $goodHba).Passed) 'Loopback SCRAM only passes.'
+    Assert-True ((ConvertFrom-AeroLinkPgHba -Text 'host all all 127.0.0.1 255.255.255.255 scram-sha-256').Passed) 'An address-and-mask loopback rule is loopback.'
+    $trustHba = ConvertFrom-AeroLinkPgHba -Text ($goodHba + "host all all 127.0.0.1/32 trust`r`n")
+    Assert-True (-not $trustHba.Passed -and $trustHba.WeakRules.Count -eq 1) 'A trust rule fails the check.'
+    Assert-True (-not (ConvertFrom-AeroLinkPgHba -Text ($goodHba + "host all all ::1/128 scram-sha-256`r`nlocal all all scram-sha-256`r`n")).Passed) 'IPv6 loopback and local rules are outside the site''s single loopback rule.'
+    Assert-True (-not (ConvertFrom-AeroLinkPgHba -Text '').Passed) 'An empty pg_hba admits nothing and is not a pass.'
+    $conf = "listen_addresses = 'localhost'`r`n#listen_addresses = '*'`r`nport = 5432`r`nlisten_addresses = '127.0.0.1'`r`nport = 55432   # AeroLink`r`n"
+    Assert-True ((Get-AeroLinkPostgresSetting -Text $conf -Name 'listen_addresses') -eq '127.0.0.1' -and (Get-AeroLinkPostgresSetting -Text $conf -Name 'port') -eq '55432') `
+        'The last uncommented postgresql.conf assignment wins, quoted or not.'
+    $policyText = "[Unicode]`r`nUnicode=yes`r`n[Privilege Rights]`r`nSeServiceLogonRight = *S-1-5-80-0,*S-1-5-20`r`nSeBatchLogonRight = *S-1-5-32-544`r`n"
+    $holders = Get-AeroLinkUserRightSids -Text $policyText -Right 'SeServiceLogonRight'
+    Assert-True (($holders -join ',') -eq 'S-1-5-80-0,S-1-5-20' -and (Test-AeroLinkServiceLogonRight -Holders $holders -ServiceSid $fakeSite.RunAsSid).Allowed) 'NT SERVICE\ALL SERVICES in the policy admits the virtual account.'
+    Assert-True (-not (Test-AeroLinkServiceLogonRight -Holders @('S-1-5-20') -ServiceSid $fakeSite.RunAsSid -ServiceAccount 'NT SERVICE\AeroLink-Production').Allowed) 'A policy without ALL SERVICES or the account predicts error 1069.'
+    Assert-True ($null -eq (Get-AeroLinkUserRightSids -Text "[Privilege Rights]`r`nSeBatchLogonRight = *S-1-5-32-544`r`n" -Right 'SeServiceLogonRight') -and
+        (Test-AeroLinkServiceLogonRight -Holders $null -ServiceSid $fakeSite.RunAsSid).Allowed) 'No policy for the right means the Windows default, which admits services.'
+    $sanKey = [Security.Cryptography.RSA]::Create(2048)
+    try {
+        $request = New-Object Security.Cryptography.X509Certificates.CertificateRequest('CN=not-the-host.example.test', $sanKey, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $san = New-Object Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder
+        $san.AddDnsName('aerolink.example.test'); $san.AddDnsName('*.apps.example.test')
+        $request.CertificateExtensions.Add($san.Build())
+        $sanCertificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
+        $dnsNames = Get-AeroLinkCertificateDnsNames -Certificate $sanCertificate
+        Assert-True (($dnsNames -join ',') -eq 'aerolink.example.test,*.apps.example.test') "SAN DNS names are read from the extension's bytes: $($dnsNames -join ',')"
+        Assert-True ((Test-AeroLinkHostNameCovered -HostName 'AeroLink.Example.Test' -DnsNames $dnsNames) -and (Test-AeroLinkHostNameCovered -HostName 'x.apps.example.test' -DnsNames $dnsNames) -and
+            -not (Test-AeroLinkHostNameCovered -HostName 'not-the-host.example.test' -DnsNames $dnsNames) -and -not (Test-AeroLinkHostNameCovered -HostName 'a.b.apps.example.test' -DnsNames $dnsNames)) `
+            'The host name is matched against the SAN only (never the CN), with one wildcard label.'
+    }
+    finally { $sanKey.Dispose() }
 }
 finally {
     $env:AEROLINK_INSTALLATION_ROOT = $previousOverride
