@@ -54,11 +54,6 @@ public static class WindowsSignInEndpoints
             var destination = http.Request.Headers["Sec-Fetch-Dest"].ToString();
             if (destination.Length > 0 && !string.Equals(destination, "document", StringComparison.OrdinalIgnoreCase))
                 return Results.Json(new { error = "Windows sign-in is a page navigation.", code = "not_a_navigation" }, statusCode: StatusCodes.Status403Forbidden);
-            // The challenge is a 401 carrying WWW-Authenticate. Error-page middleware that rewrote it would break
-            // the handshake, so it is switched off for this request before anything can produce a 401.
-            if (http.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>() is { } statusCodePages)
-                statusCodePages.Enabled = false;
-
             var authenticated = await http.AuthenticateAsync(settings.Scheme);
             if (!authenticated.Succeeded || authenticated.Principal?.Identity?.IsAuthenticated != true)
             {
@@ -117,7 +112,7 @@ public static class WindowsSignInEndpoints
             var package = authenticated.Principal.Identity.AuthenticationType;
             var outcome = await identity.SignInWindowsAsync(person, package, ip, http.Request.Headers.UserAgent.ToString(), now, ct);
             if (outcome.Session is null) return Refused(outcome);
-            SessionCookies.Append(http, outcome.Session);
+            http.IssueSessionCookie(outcome.Session.Token, outcome.Session.ExpiresAt);
             return Results.Redirect(SafeReturnTo(returnTo));
         }).RequireRateLimiting("authentication");
 
@@ -147,7 +142,7 @@ public static class WindowsSignInEndpoints
                     ? Results.Json(new { error = "The credentials or second-factor code were not accepted.", code = "credentials" }, statusCode: StatusCodes.Status401Unauthorized)
                     : Results.Json(new { error = RefusalMessage(outcome.RefusalCode), code = outcome.RefusalCode }, statusCode: StatusCodes.Status409Conflict);
             http.Response.Cookies.Delete(LinkCookieName(http), LinkCookieOptions(http, null));
-            SessionCookies.Append(http, outcome.Session);
+            http.IssueSessionCookie(outcome.Session.Token, outcome.Session.ExpiresAt);
             return Results.Ok(outcome.Session.User);
         }).RequireRateLimiting("authentication");
     }
@@ -185,17 +180,25 @@ public static class WindowsSignInEndpoints
             && !value.StartsWith("/\\", StringComparison.Ordinal) && !value.Any(char.IsControl)
             ? value : "/";
 
-    private static string LinkCookieName(HttpContext http) => SessionCookies.Secure(http) ? "__Host-" + LinkCookie : LinkCookie;
-
-    private static CookieOptions LinkCookieOptions(HttpContext http, DateTimeOffset? expires) => new()
+    private static string LinkCookieName(HttpContext http)
     {
-        HttpOnly = true,
-        Secure = SessionCookies.Secure(http),
-        // Strict: a link form posted from another site cannot carry the proven Windows identity with it.
-        SameSite = SameSiteMode.Strict,
-        Path = "/",
-        Expires = expires,
-    };
+        var cookie = http.RequestServices.GetRequiredService<SessionCookie>();
+        return cookie.Secure ? SessionCookie.SecurePrefix + LinkCookie : LinkCookie;
+    }
+
+    private static CookieOptions LinkCookieOptions(HttpContext http, DateTimeOffset? expires)
+    {
+        var cookie = http.RequestServices.GetRequiredService<SessionCookie>();
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = cookie.Secure,
+            // Strict: a link form posted from another site cannot carry the proven Windows identity with it.
+            SameSite = SameSiteMode.Strict,
+            Path = "/",
+            Expires = expires,
+        };
+    }
 }
 
 public sealed record WindowsLinkRequest(string? UserName, string? Password, string? MfaCode);
@@ -222,10 +225,12 @@ public static class WindowsSignInStartupGuard
             throw new InvalidOperationException("Windows sign-in requires Identity:Windows:AllowedDomainSids to list at least one domain SID (S-1-5-21-a-b-c).");
         if (OperatingSystem.IsWindows() && RunsAsLocalSystem())
             throw new InvalidOperationException("Windows sign-in refuses to run as SYSTEM. Run AeroLink as the installation's virtual service account (#1614).");
-        // SiteServer:Http1Only is the site server profile's switch (#1614, parallel HTTPS work); the Kestrel key
-        // covers a listener configured directly.
-        var http1Only = configuration.GetValue<bool>("SiteServer:Http1Only")
-            || string.Equals(configuration["Kestrel:EndpointDefaults:Protocols"], "Http1", StringComparison.OrdinalIgnoreCase);
+        // SiteServerHosting sets the listener protocol explicitly, so its own setting is authoritative there;
+        // endpoint defaults cannot override that listener. Without a site server, use the direct Kestrel setting.
+        var siteServer = services.GetService<SiteServerSettings>();
+        var http1Only = siteServer is not null
+            ? siteServer.Http1Only
+            : string.Equals(configuration["Kestrel:EndpointDefaults:Protocols"], "Http1", StringComparison.OrdinalIgnoreCase);
         if (!http1Only)
             throw new InvalidOperationException("Windows sign-in requires an HTTP/1.1-only listener. Set SiteServer:Http1Only (or Kestrel:EndpointDefaults:Protocols=Http1).");
     }

@@ -127,21 +127,3 @@ public static class AuthEndpoints
         return null;
     }
 }
-
-/// <summary>
-/// The AeroLink session cookie, issued the same way whichever method signed somebody in (#1615): password
-/// sign-in, Windows sign-in and the Windows link all hand the browser this cookie and nothing else.
-/// </summary>
-internal static class SessionCookies
-{
-    public static bool Secure(HttpContext http)
-    {
-        var configuration = http.RequestServices.GetRequiredService<IConfiguration>();
-        var environment = http.RequestServices.GetRequiredService<IWebHostEnvironment>();
-        return configuration.GetValue<bool?>("Identity:CookieSecure") ?? !environment.IsDevelopment();
-    }
-
-    public static void Append(HttpContext http, LoginResult result) =>
-        http.Response.Cookies.Append(IdentityService.CookieName, result.Token,
-            new CookieOptions { HttpOnly = true, Secure = Secure(http), SameSite = SameSiteMode.Lax, Expires = result.ExpiresAt, Path = "/" });
-}

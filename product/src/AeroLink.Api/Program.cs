@@ -180,6 +180,13 @@ if (StallDiagnosticsSettings.StallReportAfter(builder.Configuration) is not null
 }
 app.UseCors();
 app.UseRateLimiter();
+// Any UseStatusCodePages must be added above this line. Negotiate writes intermediate 401 challenge responses from
+// inside UseAuthentication; this exemption must wrap it so those responses cannot be rewritten.
+app.Use(async (context, next) =>
+{
+    await next();
+    if (context.Response.StatusCode == StatusCodes.Status401Unauthorized) StatusCodePagesExemption.Apply(context);
+});
 // Authentication middleware runs only on Windows sign-in (#1615). Nothing else reads HttpContext.User: every other
 // route is authorized by the AeroLink session gate below. Confining it keeps Negotiate's handshake, which runs
 // inside this middleware for any request carrying `Authorization: Negotiate`, off every other path.
@@ -434,17 +441,6 @@ app.Use(async (context, next) =>
         {context.Response.StatusCode=StatusCodes.Status409Conflict;await context.Response.WriteAsJsonAsync(new{error="This controlled record belongs to a different build. Exit the workspace and select that build explicitly.",code="cross_build_resource"});return;}
     }
     await next();
-});
-
-// A 401 is an answer, never an error page. Windows sign-in (#1615) is a 401 challenge with an empty body and a
-// WWW-Authenticate header, and error-page middleware that rewrote it - with a body, a re-executed path or a
-// redirect - would break the handshake. None is wired today. This is the innermost middleware, so any
-// UseStatusCodePages added anywhere above it sees the exemption before it acts on an endpoint's empty 401; the
-// challenge handler below exempts the 401s authentication itself issues.
-app.Use(async (context, next) =>
-{
-    await next();
-    if (context.Response.StatusCode == StatusCodes.Status401Unauthorized) StatusCodePagesExemption.Apply(context);
 });
 
 app.MapGet("/health",() => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
