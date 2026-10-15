@@ -57,12 +57,15 @@ public static class WindowsAccountPolicy
 {
     public const string ForeignDomain = "foreign_domain";
     public const string BuiltInAccount = "builtin_account";
+    public const string MachineAccount = "machine_account";
 
-    /// <summary>The refusal code for <paramref name="sid"/>, or null when it may sign in.</summary>
-    public static string? Refusal(string sid, IReadOnlyCollection<string> allowedDomainSids)
+    /// <summary>The refusal code for this Windows account, or null when it may sign in.</summary>
+    public static string? Refusal(string sid, string principal, IReadOnlyCollection<string> allowedDomainSids)
     {
         var domain = DomainSid(sid, out var rid);
         if (domain is null || rid < 1000) return BuiltInAccount;
+        // Computer accounts and (group) managed service accounts have ordinary domain SIDs; their names end in '$'.
+        if ((principal ?? "").TrimEnd().EndsWith('$')) return MachineAccount;
         return allowedDomainSids.Any(x => string.Equals(x.Trim(), domain, StringComparison.OrdinalIgnoreCase)) ? null : ForeignDomain;
     }
 
@@ -96,13 +99,19 @@ public static class WindowsDefaultAccess
             db.ProgramMemberships.Add(new ProgramMembership(userId, programId, DefaultRole, Actor, now));
     }
 
-    /// <summary>Grants the default role in a Program being created, to every active Windows-created account.</summary>
+    /// <summary>
+    /// Grants the default role in a Program being created to every active Windows-created account that still
+    /// answers to a SID, and audits the grant as one event.
+    /// </summary>
     public static async Task GrantForNewProgramAsync(AeroLinkDbContext db, Guid programId, DateTimeOffset now, CancellationToken ct)
     {
         var accounts = await db.UserAccounts.AsNoTracking()
-            .Where(x => x.Origin == AccountOrigin.Windows && x.State == AccountState.Active)
+            .Where(x => x.Origin == AccountOrigin.Windows && x.State == AccountState.Active && x.WindowsSid != null)
             .Select(x => x.Id).ToListAsync(ct);
         foreach (var userId in accounts)
             db.ProgramMemberships.Add(new ProgramMembership(userId, programId, DefaultRole, Actor, now));
+        if (accounts.Count > 0)
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent("RoleGranted", Actor, $"Program:{programId}", "Success",
+                $"Granted {DefaultRole} for program {programId} to {accounts.Count} Windows account(s) on the Program's creation.", "local", now));
     }
 }

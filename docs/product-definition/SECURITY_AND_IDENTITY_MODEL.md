@@ -24,24 +24,32 @@ AeroLink decisions must be attributable to authenticated people, not browser-sup
 Where `Identity:Windows:Enabled` is set ([DEC-154](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-154---windows-sign-in-on-the-company-host)),
 `GET /api/auth/windows` signs a person in with the Windows logon their browser holds:
 
-- **Proof.** Negotiate on Kestrel (Kerberos, NTLM fallback) authenticates that one route only; it is never the
-  default scheme. The route then issues the same AeroLink session cookie a password sign-in issues, so nothing
-  after sign-in depends on the method. Its challenge is an empty 401 with `WWW-Authenticate`, which no error-page
-  middleware may rewrite, and Negotiate requires an HTTP/1.1 listener.
+- **Proof.** Negotiate on Kestrel (Kerberos, NTLM fallback) authenticates that one route only: the authentication
+  middleware runs only on that path, and Negotiate is never the default scheme. A completed NTLM handshake does not
+  persist on its connection. The route then issues the same AeroLink session cookie a password sign-in issues, so nothing
+  after sign-in depends on the method. Its challenge is a 401 with `WWW-Authenticate`, which no error-page
+  middleware may rewrite, and Negotiate requires an HTTP/1.1 listener. The 401 carries a short page linking to the
+  password sign-in (`/?windows=password`), for browsers that cannot finish Negotiate. Only a top-level navigation
+  may sign in: a request whose `Sec-Fetch-Dest` is anything but `document` is refused.
 - **Who may sign in.** The SID decides: only a domain user SID (`S-1-5-21-a-b-c-RID`) whose domain SID is in
   `Identity:Windows:AllowedDomainSids` and whose RID is at least 1000. Local, built-in and well-known accounts are
-  refused, as is an account the directory cannot find or that has no directory email. Refusals return to the
+  refused, as are computer and managed service accounts (`$` names), and an account the directory cannot find or
+  that has no directory email. Refusals return to the
   sign-in page with a reason and are audited.
 - **Accounts.** The first sign-in creates a Windows account keyed on the SID and named `DOMAIN\user`; the name
   stays fixed if the directory later renames the person, and the display name and email are refreshed from the
   directory on every sign-in. It has no AeroLink password, so password sign-in refuses it without counting a
-  failure. Nobody is provisioned until first-install setup has created `admin`.
+  failure, and an administrator password reset refuses it. Nobody is provisioned until first-install setup has
+  created `admin`. A Windows sign-in records the sign-in time but never clears a password failure count.
 - **Default access.** A new Windows account is Engineer in every Program, and every active Windows account is
   made Engineer in each Program created afterwards, both granted by `system.windows-provisioning`. Nothing else
   re-grants it, so an administrator's narrowing stands.
 - **Linking.** `?intent=link` holds the proven Windows identity for five minutes in an encrypted, host-only,
   SameSite=Strict cookie; `POST /api/auth/windows/link` then attaches it to an existing account after that
-  account's password and second factor, counting failures toward lockout. A SID already linked elsewhere is
+  account's password and second factor, counting failures toward lockout; an account still holding an
+  administrator-issued temporary password cannot be linked. The form names the Windows logon from the ticket. The
+  administrator roster shows each local account's linked Windows logon, and an administrator can unlink it, which
+  revokes that account's sessions. A SID already linked elsewhere is
   refused unless it belongs to a Windows account an administrator has disabled, which is how a SID used before
   linking is freed. A linked Local account (the administrator) keeps its own profile and signs in with Windows
   without MFA; its password plus MFA remains the break-glass.
@@ -51,10 +59,15 @@ Where `Identity:Windows:Enabled` is set ([DEC-154](../../DECISIONS_AND_OPEN_QUES
 - **Startup.** Production refuses to start Windows sign-in with a scheme other than Negotiate (which keeps the
   test scheme out of real deployments), with no allowed domain, when running as SYSTEM, or without an HTTP/1.1-only
   listener (`SiteServer:Http1Only` or `Kestrel:EndpointDefaults:Protocols=Http1`).
-- **Residual risk.** Kestrel cannot enforce TLS channel binding, so a relayed NTLM exchange is not bound to
-  AeroLink's TLS session; see DEC-154.
+- **Residual risk.** The Negotiate handler does not apply TLS channel binding, which is possible but not built
+  (#1646). Until it is, a relayed NTLM exchange, or a Kerberos ticket relayed by another application sharing this
+  host name's `HOST/` SPN, is accepted; a relay of the owner's logon is global administration, because the linked
+  `admin` signs in with Windows without MFA. Windows sign-in must not sit behind a reverse proxy, tunnel or any
+  intermediary that shares connections between users. Each Windows sign-in event records Kerberos or NTLM. See
+  DEC-154.
 - **Browser.** With Windows sign-in on, arriving without a session goes to Windows sign-in, except in a tab that
-  signed out, which stays signed out until the person chooses to sign in again.
+  signed out, which stays signed out until the person chooses to sign in again, and never twice in a row: an
+  automatic attempt that comes back without a session leaves the next arrival on the sign-in page.
 
 Global administration is still the `admin` account alone: Program roles, including a Program's Administrator role,
 can be granted to Windows accounts like any other, but no route grants the global administrator to another account (#1639).

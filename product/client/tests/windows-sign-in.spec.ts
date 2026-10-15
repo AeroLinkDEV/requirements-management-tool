@@ -1,10 +1,11 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { setStaySignedOut, shouldStartWindowsSignIn, staySignedOut } from '../src/windowsSignIn'
+import { recordWindowsAttempt, setStaySignedOut, shouldStartWindowsSignIn, staySignedOut, takeWindowsAttempt } from '../src/windowsSignIn'
 
 // #1615 guard: with Windows sign-in on, arriving without a session signs in with Windows, but signing out must
-// keep this tab signed out until the person explicitly signs in again; and a refusal must not loop.
+// keep this tab signed out until the person explicitly signs in again; and neither a refusal nor a browser that
+// cannot finish Negotiate may loop, so the password break-glass stays reachable.
 
-test('sign-out keeps the tab out of automatic Windows sign-in until an explicit sign-in clears it', () => {
+test('automatic Windows sign-in stops after a sign-out, an outcome page or one failed attempt', () => {
   const values = new Map<string, string>()
   const sessionStorage = {
     getItem: (key: string) => values.get(key) ?? null,
@@ -28,6 +29,12 @@ test('sign-out keeps the tab out of automatic Windows sign-in until an explicit 
     // Back from a refusal or mid-link: show the outcome instead of trying again.
     expect(shouldStartWindowsSignIn(on, '?windows=refused&code=no_email', staySignedOut())).toBe(false)
     expect(shouldStartWindowsSignIn(on, '?windows=link', staySignedOut())).toBe(false)
+    expect(shouldStartWindowsSignIn(on, '?windows=password', staySignedOut())).toBe(false)
+
+    // An automatic attempt that comes back without a session is not repeated on the next arrival, only after it.
+    recordWindowsAttempt()
+    expect(shouldStartWindowsSignIn(on, '', staySignedOut(), takeWindowsAttempt())).toBe(false)
+    expect(shouldStartWindowsSignIn(on, '', staySignedOut(), takeWindowsAttempt())).toBe(true)
   } finally {
     scope.window = previous
   }

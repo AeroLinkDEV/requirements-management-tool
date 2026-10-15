@@ -248,8 +248,9 @@ public sealed class ProjectSetupService(
                 "Activated the accepted ladder before first project content.", activation.CanonicalSnapshot,
                 ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot), activation.SnapshotSchemaVersion));
 
-            // The creator is the only project member at inception. Directory identities are intentionally not
-            // copied from the FMS showcase or any other program; staffing can be configured after completion.
+            // The creator is the project's Administrator at inception, and the only member besides the Windows
+            // accounts' default Engineer grant below (#1615). Directory identities are intentionally not copied from
+            // the FMS showcase or any other program; staffing can be configured after completion.
             // An administrator may resume somebody else's draft, but the draft creator remains the legitimate
             // project manager at completion. The actual finalizer stays attributable in GrantedBy and audit.
             db.ProgramMemberships.Add(new ProgramMembership(draft.CreatorUserId, program.Id, ProgramRole.Administrator,

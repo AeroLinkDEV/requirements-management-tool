@@ -42,6 +42,17 @@ export function LoginPage({
   }>();
   // #1615: where a Windows sign-in redirected back here, if it did.
   const [windows] = useState(() => windowsOutcome(window.location.search));
+  // The Windows logon about to be linked, as the server's ticket records it (never from the address bar).
+  const [linkTarget, setLinkTarget] = useState<{ principal: string; displayName: string } | null>();
+  useEffect(() => {
+    if (windows?.kind !== "link") return;
+    let active = true;
+    fetch(`${api}/api/auth/windows/link`)
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((target) => { if (active) setLinkTarget(target); })
+      .catch(() => { if (active) setLinkTarget(null); });
+    return () => { active = false; };
+  }, [api, windows]);
   const startWindowsSignIn = (link: boolean) => {
     // An explicit choice to sign in ends a "stay signed out" left by an earlier sign-out in this tab.
     setStaySignedOut(false);
@@ -229,10 +240,18 @@ export function LoginPage({
     <form onSubmit={linkWindows}>
       <div className="securityMark">◈</div>
       <h2>Link your Windows sign-in</h2>
-      <p>
-        Enter the AeroLink account and password to link to the Windows logon
-        you just signed in with. After this, Windows signs you in to it.
-      </p>
+      {linkTarget === null ? (
+        <div className="loginError" role="alert">
+          The Windows sign-in for this link has expired. Choose “Link an existing account” again.
+        </div>
+      ) : (
+        <p>
+          Enter the AeroLink account and password to link to the Windows logon{" "}
+          <b>{linkTarget?.principal ?? "…"}</b>
+          {linkTarget?.displayName && linkTarget.displayName !== linkTarget.principal ? ` (${linkTarget.displayName})` : ""}.
+          After this, that Windows logon signs in to the account without its password.
+        </p>
+      )}
       <label>
         Username
         <input name="userName" autoComplete="username" required autoFocus />
@@ -1131,6 +1150,10 @@ type AdminUser = {
   state: string;
   lastLoginAt?: string;
   isGlobalAdministrator: boolean;
+  /** #1615: "Local" or "Windows", and the Windows logon a Local account is linked to, if any. */
+  origin?: string;
+  windowsPrincipal?: string | null;
+  windowsLinked?: boolean;
   memberships: { programId: string; role: string }[];
 };
 export function AdministrationCenter({
@@ -1180,6 +1203,23 @@ export function AdministrationCenter({
     } catch (error) {
       recordClientOperationFailure("identity.account.state", error);
       setError(operationError(error, "The account state was not changed."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // #1615: a Windows logon linked to a local account signs in as that account with no password, so the link
+  // must be visible here and removable. Unlinking revokes the account's sessions.
+  const unlinkWindows = async (user: AdminUser) => {
+    if (busy) return;
+    if (!window.confirm(`Remove the Windows logon ${user.windowsPrincipal} from ${user.userName}? Its sessions end.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`${api}/api/admin/users/${user.id}/windows/unlink`, { method: "POST" });
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.windows.unlink", error);
+      setError(operationError(error, "The Windows logon was not unlinked."));
     } finally {
       setBusy(false);
     }
@@ -1329,6 +1369,9 @@ export function AdministrationCenter({
                 <small>
                   {user.userName} · {user.email}
                 </small>
+                {user.windowsLinked && user.origin !== "Windows" && (
+                  <small>Windows sign-in as {user.windowsPrincipal}</small>
+                )}
               </div>
             </div>
             <div className="roleCloud">
@@ -1357,6 +1400,11 @@ export function AdministrationCenter({
               >
                 {user.state === "Active" ? "Disable" : "Enable"}
               </button>
+              {user.windowsLinked && user.origin !== "Windows" && (
+                <button className="quiet" disabled={busy} onClick={() => unlinkWindows(user)}>
+                  Unlink Windows
+                </button>
+              )}
             </div>
           </article>
         ))}

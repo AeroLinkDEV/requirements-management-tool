@@ -125,7 +125,10 @@ var authentication = builder.Services.AddAuthentication(AeroLinkAuthorizationHan
 builder.Services.Configure<WindowsSignInOptions>(builder.Configuration.GetSection(WindowsSignInOptions.Section));
 var windowsSignIn = builder.Configuration.GetSection(WindowsSignInOptions.Section).Get<WindowsSignInOptions>() ?? new WindowsSignInOptions();
 if (windowsSignIn.Enabled && windowsSignIn.Scheme == Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
-    authentication.AddNegotiate();
+    // A completed NTLM handshake must not keep authenticating its TCP connection: any intermediary that shares
+    // connections between users would hand one person's identity to the next (DEC-154). Kerberos persistence is
+    // already off by default.
+    authentication.AddNegotiate(options => options.PersistNtlmCredentials = false);
 if (OperatingSystem.IsWindows()) builder.Services.AddSingleton<IWindowsDirectory, ActiveDirectoryWindowsDirectory>();
 builder.Services.AddSingleton<BrowserMutationProtector>();
 builder.Services.AddSingleton<ConnectorSigningService>();
@@ -177,7 +180,11 @@ if (StallDiagnosticsSettings.StallReportAfter(builder.Configuration) is not null
 }
 app.UseCors();
 app.UseRateLimiter();
-app.UseAuthentication();
+// Authentication middleware runs only on Windows sign-in (#1615). Nothing else reads HttpContext.User: every other
+// route is authorized by the AeroLink session gate below. Confining it keeps Negotiate's handshake, which runs
+// inside this middleware for any request carrying `Authorization: Negotiate`, off every other path.
+app.UseWhen(context => context.Request.Path.Equals(WindowsSignInEndpoints.SignInPath, StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseAuthentication());
 
 await using (var scope = app.Services.CreateAsyncScope())
 {

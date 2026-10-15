@@ -48,8 +48,14 @@ public static class WindowsSignInEndpoints
         {
             var settings = options.Value;
             if (!settings.Enabled) return Results.NotFound();
-            // The challenge is an empty 401 carrying WWW-Authenticate. Error-page middleware that rewrote it would
-            // break the handshake, so it is switched off for this request before anything can produce a 401.
+            // Signing in, and above all creating an account, happens only on a top-level navigation. An image or
+            // script on some other intranet page must not provision everybody who views it. Browsers that do not
+            // send Fetch Metadata are allowed, as they are for every other route.
+            var destination = http.Request.Headers["Sec-Fetch-Dest"].ToString();
+            if (destination.Length > 0 && !string.Equals(destination, "document", StringComparison.OrdinalIgnoreCase))
+                return Results.Json(new { error = "Windows sign-in is a page navigation.", code = "not_a_navigation" }, statusCode: StatusCodes.Status403Forbidden);
+            // The challenge is a 401 carrying WWW-Authenticate. Error-page middleware that rewrote it would break
+            // the handshake, so it is switched off for this request before anything can produce a 401.
             if (http.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>() is { } statusCodePages)
                 statusCodePages.Enabled = false;
 
@@ -57,6 +63,11 @@ public static class WindowsSignInEndpoints
             if (!authenticated.Succeeded || authenticated.Principal?.Identity?.IsAuthenticated != true)
             {
                 await http.ChallengeAsync(settings.Scheme);
+                // A browser that completes Negotiate never shows this body. One that cannot - an off-domain machine,
+                // a cancelled prompt, an unreachable domain controller - shows it, and it is the way to the password
+                // break-glass: any ?windows= value stops the page from trying Windows sign-in again.
+                http.Response.ContentType = "text/html; charset=utf-8";
+                await http.Response.WriteAsync(ChallengePage, ct);
                 return Results.Empty;
             }
 
@@ -67,9 +78,13 @@ public static class WindowsSignInEndpoints
             var claimed = new WindowsDirectoryIdentity(sid, principal, principal, "");
             if (sid.Length == 0 || principal.Length == 0)
                 return Refused(await identity.RefuseWindowsAsync(claimed, "no_identity", "Windows did not supply a SID and account name.", ip, now, ct));
-            if (WindowsAccountPolicy.Refusal(sid, settings.AllowedDomainSids) is { } policyRefusal)
-                return Refused(await identity.RefuseWindowsAsync(claimed, policyRefusal,
-                    policyRefusal == WindowsAccountPolicy.ForeignDomain ? "The account's domain is not allowed to sign in." : "Local, built-in and well-known accounts cannot sign in.", ip, now, ct));
+            if (WindowsAccountPolicy.Refusal(sid, principal, settings.AllowedDomainSids) is { } policyRefusal)
+                return Refused(await identity.RefuseWindowsAsync(claimed, policyRefusal, policyRefusal switch
+                {
+                    WindowsAccountPolicy.ForeignDomain => "The account's domain is not allowed to sign in.",
+                    WindowsAccountPolicy.MachineAccount => "Computer and managed service accounts cannot sign in.",
+                    _ => "Local, built-in and well-known accounts cannot sign in.",
+                }, ip, now, ct));
 
             var directory = http.RequestServices.GetService<IWindowsDirectory>();
             var domain = principal.Contains('\\') ? principal[..principal.IndexOf('\\')] : "";
@@ -98,25 +113,30 @@ public static class WindowsSignInEndpoints
                 return Results.Redirect("/?windows=link");
             }
 
-            var outcome = await identity.SignInWindowsAsync(person, ip, http.Request.Headers.UserAgent.ToString(), now, ct);
+            // Kerberos or NTLM, recorded on the sign-in event so NTLM use is visible (DEC-154).
+            var package = authenticated.Principal.Identity.AuthenticationType;
+            var outcome = await identity.SignInWindowsAsync(person, package, ip, http.Request.Headers.UserAgent.ToString(), now, ct);
             if (outcome.Session is null) return Refused(outcome);
             SessionCookies.Append(http, outcome.Session);
             return Results.Redirect(SafeReturnTo(returnTo));
         }).RequireRateLimiting("authentication");
 
+        // The link form names the Windows logon it is about to link, so nobody links a logon they did not mean to.
+        // It comes from the ticket, never from the address bar.
+        app.MapGet(LinkPath, (HttpContext http, IOptions<WindowsSignInOptions> options, IDataProtectionProvider dataProtection) =>
+        {
+            if (!options.Value.Enabled) return Results.NotFound();
+            var person = ReadLinkTicket(http, dataProtection);
+            return person is null
+                ? Results.Json(new { error = "Sign in with Windows again to link an account; the Windows sign-in has expired.", code = "link_expired" }, statusCode: StatusCodes.Status400BadRequest)
+                : Results.Ok(new { principal = person.Principal, displayName = person.DisplayName });
+        });
+
         app.MapPost(LinkPath, async (WindowsLinkRequest request, HttpContext http, IOptions<WindowsSignInOptions> options,
             IdentityService identity, IDataProtectionProvider dataProtection, CancellationToken ct) =>
         {
             if (!options.Value.Enabled) return Results.NotFound();
-            WindowsDirectoryIdentity? person = null;
-            try
-            {
-                var ticket = http.Request.Cookies[LinkCookieName(http)];
-                if (!string.IsNullOrEmpty(ticket))
-                    person = JsonSerializer.Deserialize<WindowsDirectoryIdentity>(
-                        dataProtection.CreateProtector(LinkPurpose).ToTimeLimitedDataProtector().Unprotect(ticket));
-            }
-            catch (Exception ex) when (ex is CryptographicException or JsonException) { person = null; }
+            var person = ReadLinkTicket(http, dataProtection);
             if (person is null)
                 return Results.Json(new { error = "Sign in with Windows again to link this account; the Windows sign-in has expired.", code = "link_expired" }, statusCode: StatusCodes.Status400BadRequest);
 
@@ -132,13 +152,30 @@ public static class WindowsSignInEndpoints
         }).RequireRateLimiting("authentication");
     }
 
+    private static WindowsDirectoryIdentity? ReadLinkTicket(HttpContext http, IDataProtectionProvider dataProtection)
+    {
+        try
+        {
+            var ticket = http.Request.Cookies[LinkCookieName(http)];
+            return string.IsNullOrEmpty(ticket) ? null : JsonSerializer.Deserialize<WindowsDirectoryIdentity>(
+                dataProtection.CreateProtector(LinkPurpose).ToTimeLimitedDataProtector().Unprotect(ticket));
+        }
+        catch (Exception ex) when (ex is CryptographicException or JsonException) { return null; }
+    }
+
+    private const string ChallengePage = """
+        <!doctype html><html lang="en"><head><meta charset="utf-8"><title>AeroLink sign-in</title></head>
+        <body><p>Windows sign-in did not complete.</p><p><a href="/?windows=password">Sign in with a password</a></p></body></html>
+        """;
+
     private static IResult Refused(WindowsSignInOutcome outcome) =>
         Results.Redirect($"/?windows=refused&code={Uri.EscapeDataString(outcome.RefusalCode ?? "refused")}");
 
     private static string RefusalMessage(string? code) => code switch
     {
-        "account_already_linked" => "That AeroLink account is already linked to a different Windows logon.",
+        "account_already_linked" => "That AeroLink account is already linked to a different Windows logon. An administrator must unlink it first.",
         "windows_already_linked" => "This Windows logon already signs in to another AeroLink account. An administrator must disable that account first.",
+        "password_change_required" => "Change this account's temporary password before linking a Windows logon to it.",
         _ => "The link was refused.",
     };
 

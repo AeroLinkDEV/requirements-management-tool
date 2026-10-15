@@ -61,7 +61,7 @@ import "./People.css";
 import "./CohesionPass.css";
 import ProblemReportsCommandCard from "./ProblemReportsCommandCard";
 import { ALL_FEATURES, hasFeature, viewEnabled, type ProjectFeature, type ProjectFeatureProjection } from "./projectFeatures";
-import { setStaySignedOut, shouldStartWindowsSignIn, staySignedOut, windowsSignInUrl } from "./windowsSignIn";
+import { recordWindowsAttempt, setStaySignedOut, shouldStartWindowsSignIn, staySignedOut, takeWindowsAttempt, windowsSignInUrl } from "./windowsSignIn";
 
 const projectLevelViews: View[] = ["projects", "projectSetup", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"];
 
@@ -360,12 +360,15 @@ function App() {
   useEffect(() => {
     fetch(`${API}/api/auth/me`)
       .then(async (r) => {
+        const attemptPending = takeWindowsAttempt();
         if (r.ok) { setUser(await r.json()); return; }
         // #1615: with Windows sign-in on, arriving without a session signs in with Windows, unless this tab
-        // signed out. The page stays on "Establishing your secure session" while the browser navigates away.
+        // signed out or the previous arrival already tried and came back without a session. The page stays on
+        // "Establishing your secure session" while the browser navigates away.
         if (r.status === 401) {
           const status = await fetch(`${API}/api/setup/status`).then(s => s.ok ? s.json() : {}).catch(() => ({}));
-          if (shouldStartWindowsSignIn(status, location.search, staySignedOut())) {
+          if (shouldStartWindowsSignIn(status, location.search, staySignedOut(), attemptPending)) {
+            recordWindowsAttempt();
             location.assign(windowsSignInUrl(API, { returnTo: location.pathname + location.search }));
             return;
           }

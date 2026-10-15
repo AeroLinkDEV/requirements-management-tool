@@ -503,6 +503,11 @@ public sealed class UserAccount
         WindowsPrincipal = trimmed.Length > WindowsPrincipalMaxLength ? trimmed[..WindowsPrincipalMaxLength] : trimmed;
     }
     public void LoginSucceeded(DateTimeOffset now) { FailedLoginCount = 0; LastLoginAt = now; }
+    /// <summary>
+    /// A sign-in that did not prove the AeroLink password (Windows sign-in). It must not clear the password's
+    /// failure count, or a Windows sign-in would hand a password guesser a fresh set of attempts.
+    /// </summary>
+    public void SignedInWithoutPassword(DateTimeOffset now) { LastLoginAt = now; }
     public void LoginFailed() { FailedLoginCount++; if (FailedLoginCount >= 8) State = AccountState.Locked; }
     public void ChangePassword(string hash) { PasswordHash = hash; MustChangePassword = false; FailedLoginCount = 0; State = AccountState.Active; }
     public void RequirePasswordChange(string temporaryHash) { PasswordHash = temporaryHash; MustChangePassword = true; FailedLoginCount = 0; State = AccountState.Active; }

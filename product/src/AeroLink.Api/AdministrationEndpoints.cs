@@ -19,7 +19,7 @@ public static class AdministrationEndpoints
         {
             if (!http.UserAccount().IsAdministrator) return Results.Forbid();
             var users = await db.UserAccounts.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(ct); var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.EndedAt == null).ToListAsync(ct);
-            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.UserName == IdentityService.SystemAdministratorUserName, origin = x.Origin.ToString(), x.WindowsPrincipal, windowsLinked = x.WindowsSid != null, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
+            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.UserName == IdentityService.SystemAdministratorUserName, origin = x.Origin.ToString(), windowsPrincipal = x.WindowsSid != null ? x.WindowsPrincipal : null, windowsLinked = x.WindowsSid != null, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
         });
 
         app.MapPost("/api/admin/users", async (CreateUserRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
@@ -96,7 +96,32 @@ public static class AdministrationEndpoints
 
         app.MapPost("/api/admin/users/{id:guid}/reset-password",async(Guid id,ResetPasswordRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
-            var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();try{var user=await db.UserAccounts.SingleOrDefaultAsync(x=>x.Id==id,ct);if(user is null)return Results.NotFound();user.RequirePasswordChange(IdentityService.HashPassword(request.TemporaryPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("AdministratorPasswordReset",actor.UserName,user.UserName,"Success",$"Issued temporary password requiring rotation and revoked {sessions.Count} session(s). Reason: {request.Reason.Trim()}",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+            var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();try{var user=await db.UserAccounts.SingleOrDefaultAsync(x=>x.Id==id,ct);if(user is null)return Results.NotFound();
+            // #1615: a Windows account proves itself to the domain only. An AeroLink password would outlive its
+            // directory account, make it lockable by guessing, and let it sign where its Windows password is required.
+            if(user.Origin==AccountOrigin.Windows)return Results.Conflict(new{error="This account signs in with Windows and has no AeroLink password.",code="windows_account"});
+            user.RequirePasswordChange(IdentityService.HashPassword(request.TemporaryPassword));var now=DateTimeOffset.UtcNow;var sessions=await db.UserSessions.Where(x=>x.UserId==id&&x.RevokedAt==null).ToListAsync(ct);foreach(var session in sessions)session.Revoke(now);db.SecurityAuditEvents.Add(new("AdministratorPasswordReset",actor.UserName,user.UserName,"Success",$"Issued temporary password requiring rotation and revoked {sessions.Count} session(s). Reason: {request.Reason.Trim()}",http.Connection.RemoteIpAddress?.ToString()??"local",now));await db.SaveChangesAsync(ct);return Results.NoContent();}catch(ArgumentException ex){return Results.BadRequest(new{error=ex.Message});}
+        });
+
+        // #1615: removes a Windows logon linked to a local account (the administrator's link above all), so a link
+        // made by mistake or by somebody who once held the password can be seen and undone. It revokes the account's
+        // sessions, because any of them may have been opened through the link. A Windows-created account has no
+        // other identity than its SID; disabling it is the tool there.
+        app.MapPost("/api/admin/users/{id:guid}/windows/unlink", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound();
+            if (user.Origin == AccountOrigin.Windows)
+                return Results.Conflict(new { error = "A Windows account is its Windows logon. Disable the account instead.", code = "windows_account" });
+            if (user.WindowsSid is null) return Results.Conflict(new { error = "This account is not linked to a Windows logon.", code = "not_linked" });
+            var now = DateTimeOffset.UtcNow; var unlinked = $"{user.WindowsPrincipal} ({user.WindowsSid})";
+            user.UnlinkWindows();
+            var sessions = await db.UserSessions.Where(x => x.UserId == id && x.RevokedAt == null).ToListAsync(ct);
+            foreach (var session in sessions) session.Revoke(now);
+            db.SecurityAuditEvents.Add(new("WindowsUnlinked", actor.UserName, user.UserName, "Success",
+                $"Removed the link to Windows logon {unlinked} and revoked {sessions.Count} session(s).", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
         });
 
         app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>

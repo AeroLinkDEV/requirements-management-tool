@@ -33,12 +33,33 @@ export function windowsSignInUrl(api: string, options: { returnTo?: string; link
   return `${api}/api/auth/windows${query}`
 }
 
+const ATTEMPT_PENDING = 'aerolink.windowsAttemptPending'
+
+/** Marks that this tab is about to try Windows sign-in on its own. */
+export function recordWindowsAttempt() {
+  try { storage()?.setItem(ATTEMPT_PENDING, '1') } catch { /* see setStaySignedOut */ }
+}
+
+/**
+ * Whether the previous arrival tried Windows sign-in on its own and came back without a session, clearing the
+ * mark either way. A browser that cannot finish Negotiate (an off-domain machine, a cancelled prompt, a refused
+ * cookie) therefore lands on the sign-in page the second time instead of being sent round again.
+ */
+export function takeWindowsAttempt(): boolean {
+  try {
+    const pending = storage()?.getItem(ATTEMPT_PENDING) === '1'
+    storage()?.removeItem(ATTEMPT_PENDING)
+    return pending
+  } catch { return false }
+}
+
 /**
  * Whether arriving without a session should go straight to Windows sign-in. Never after a sign-out in this
- * tab, and never while the page is reporting the outcome of a Windows sign-in, which would loop on a refusal.
+ * tab, never twice in a row, and never while the page is reporting the outcome of a Windows sign-in (or was
+ * sent to the password form), which would loop on a refusal.
  */
-export function shouldStartWindowsSignIn(status: { windowsSignIn?: boolean }, search: string, signedOut: boolean): boolean {
-  if (!status.windowsSignIn || signedOut) return false
+export function shouldStartWindowsSignIn(status: { windowsSignIn?: boolean }, search: string, signedOut: boolean, attemptPending = false): boolean {
+  if (!status.windowsSignIn || signedOut || attemptPending) return false
   return !new URLSearchParams(search).has('windows')
 }
 
@@ -54,6 +75,7 @@ export function windowsOutcome(search: string): { kind: 'link' } | { kind: 'refu
 export function windowsRefusalMessage(code: string): string {
   switch (code) {
     case 'foreign_domain': return 'Your Windows account belongs to a domain that is not allowed to sign in to AeroLink.'
+    case 'machine_account': return 'Computer and managed service accounts cannot sign in to AeroLink. Sign in with your own domain account.'
     case 'builtin_account': return 'Local, built-in and shared Windows accounts cannot sign in to AeroLink. Sign in with your own domain account.'
     case 'no_email': return 'Your Windows account has no email address in the directory, so AeroLink cannot create an account for it. Ask IT to add one.'
     case 'not_in_directory': return 'AeroLink could not find your Windows account in the directory.'
