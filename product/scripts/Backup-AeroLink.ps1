@@ -11,15 +11,31 @@ param(
     # restore-validation has its own evidence tree, and archiving the live one beside it would produce an
     # archive whose inventory and objects came from two different databases.
     [string]$EvidenceRoot,
-    [switch]$PostgresAlreadyRunning
+    [switch]$PostgresAlreadyRunning,
+    # A site server installation (#1614): its root, named explicitly by the scheduled task, which runs as the
+    # installation's service account from the installed program. Omitted, the installation is resolved from this
+    # source checkout exactly as before.
+    [string]$InstallationRoot,
+    # Qualification only: where the site's protected secrets live, instead of the machine store.
+    [string]$ProtectedConfigRoot
 )
 
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
-$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
-Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'Backup'
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot -InstallationRoot $InstallationRoot
+# A site cluster requires SCRAM passwords (#1614 1.4). Everything this backup reads, it reads as the declared
+# application role, which owns every object in aerolink; the password comes from the protected store and reaches
+# pg_dump and psql only through PGPASSWORD, with -w, never their command lines. HOME keeps postgres over trust.
+$site = Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot
+$pgAccess = $null
+$pgUser = 'postgres'
+if ($site) {
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
+    $pgAccess = Get-AeroLinkSitePostgresAccess -InstallationRoot $site.InstallationRoot -Role Application -ProtectedConfigRoot $ProtectedConfigRoot
+    $pgUser = $pgAccess.User
+}
 $declaredPostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort
 if (-not $PostgresPort) { $PostgresPort = $declaredPostgresPort }
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
@@ -40,11 +56,17 @@ $pgDump = Join-Path $PostgresBin 'pg_dump.exe'
 $storageModule = Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1'
 Import-Module $storageModule -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
-$evidence = if ($EvidenceRoot) { [IO.Path]::GetFullPath($EvidenceRoot) } else { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot -InstallationRoot $installation.InstallationRoot }
-$instanceIdentity = Get-AeroLinkInstanceConfig -ProductRoot $productRoot
+$evidence = if ($EvidenceRoot) { [IO.Path]::GetFullPath($EvidenceRoot) } elseif ($site) { $site.EvidenceRoot } else { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot -InstallationRoot $installation.InstallationRoot }
+$instanceIdentity = if ($site) {
+    # Read from the declaration itself: the HOME reader's modes do not admit a site installation.
+    $declared = Get-Content -LiteralPath $site.ConfigPath -Raw | ConvertFrom-Json
+    [pscustomobject]@{ Label = $(if ($declared.PSObject.Properties['label']) { [string]$declared.label } else { $site.Classification }); Classification = $site.Classification }
+} else { Get-AeroLinkInstanceConfig -ProductRoot $productRoot }
 
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
-if (-not $PostgresAlreadyRunning) {
+# A site cluster is a Windows service under its own account (#1614 1.4); a backup never starts or stops it, and an
+# unavailable cluster fails at the first query below.
+if (-not $PostgresAlreadyRunning -and -not $site) {
     if ($PostgresPort -ne $declaredPostgresPort -or $Database -ne 'aerolink') { throw 'A non-default backup target requires -PostgresAlreadyRunning and must be isolated qualification infrastructure.' }
     $start = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Start-Postgres.ps1') `
         -StandardOutput (Join-Path $installation.Logs 'backup-postgres-start.stdout.log') `
@@ -57,16 +79,17 @@ $backupLock = Enter-AeroLinkBackupLock -BackupRoot $backupRoot
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 try {
-    Assert-AeroLinkStorageLifecycleHealthy -Psql (Join-Path $PostgresBin 'psql.exe') -Database $Database -Port $PostgresPort
-    $inventoryBefore = @(Get-AeroLinkAttachmentInventory -Psql (Join-Path $PostgresBin 'psql.exe') -Database $Database -Port $PostgresPort)
+    $psqlPath = (Join-Path $PostgresBin 'psql.exe')
+    Invoke-AeroLinkWithPostgresAccess $pgAccess { Assert-AeroLinkStorageLifecycleHealthy -Psql $psqlPath -Database $Database -Port $PostgresPort -User $pgUser }
+    $inventoryBefore = @(Invoke-AeroLinkWithPostgresAccess $pgAccess { Get-AeroLinkAttachmentInventory -Psql $psqlPath -Database $Database -Port $PostgresPort -User $pgUser })
     $sourceEvidence = Test-AeroLinkAttachmentInventory -Inventory $inventoryBefore -EvidenceRoot $evidence
-    & $pgDump -h 127.0.0.1 -p $PostgresPort -U postgres -d $Database -Fc -f (Join-Path $staging 'aerolink-postgresql.dump')
-    if ($LASTEXITCODE -ne 0) { throw 'pg_dump did not complete successfully.' }
+    $dumpExit = Invoke-AeroLinkWithPostgresAccess $pgAccess { & $pgDump -w -h 127.0.0.1 -p $PostgresPort -U $pgUser -d $Database -Fc -f (Join-Path $staging 'aerolink-postgresql.dump') | Out-Host; $LASTEXITCODE }
+    if ($dumpExit -ne 0) { throw 'pg_dump did not complete successfully.' }
     if (Test-Path -LiteralPath $evidence) { Copy-AeroLinkEvidenceTree -Source $evidence -Destination (Join-Path $staging 'evidence') }
     $archivedEvidence = Join-Path $staging 'evidence'
     $archiveEvidence = Test-AeroLinkAttachmentInventory -Inventory $inventoryBefore -EvidenceRoot $archivedEvidence
-    $inventoryAfter = @(Get-AeroLinkAttachmentInventory -Psql (Join-Path $PostgresBin 'psql.exe') -Database $Database -Port $PostgresPort)
-    Assert-AeroLinkStorageLifecycleHealthy -Psql (Join-Path $PostgresBin 'psql.exe') -Database $Database -Port $PostgresPort
+    $inventoryAfter = @(Invoke-AeroLinkWithPostgresAccess $pgAccess { Get-AeroLinkAttachmentInventory -Psql $psqlPath -Database $Database -Port $PostgresPort -User $pgUser })
+    Invoke-AeroLinkWithPostgresAccess $pgAccess { Assert-AeroLinkStorageLifecycleHealthy -Psql $psqlPath -Database $Database -Port $PostgresPort -User $pgUser }
     $beforeJson = ConvertTo-Json -InputObject @($inventoryBefore) -Depth 4 -Compress; $afterJson = ConvertTo-Json -InputObject @($inventoryAfter) -Depth 4 -Compress
     if ($beforeJson -ne $afterJson) { throw 'Controlled-attachment metadata changed during backup. No archive was published; retry after active storage operations complete.' }
     ConvertTo-Json -InputObject @($inventoryBefore) -Depth 4 | Set-Content -LiteralPath (Join-Path $staging 'attachment-inventory.json') -Encoding UTF8

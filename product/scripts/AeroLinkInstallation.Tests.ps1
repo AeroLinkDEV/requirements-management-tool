@@ -252,6 +252,13 @@ try {
         Assert-True ($redeclared.ConnectorDeploymentId -eq $declared.ConnectorDeploymentId -and $redeclared.NotificationAuthorityRoot -eq [IO.Path]::GetFullPath($siteAuthority) -and
             (Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json).instanceId -eq $instanceId) `
             'Re-declaring a site must keep its connector deployment id, instance id and notification authority root; a new id would orphan every enrolled connector.'
+        # #1614 1.9 (D7): the daily verified backup runs as the installation's own API account, never a person.
+        $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
+        Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
+            "The site backup task must run as the API's virtual account with no password; got $($backupTask.Principal.UserId) $($backupTask.Principal.LogonType) $($backupTask.Principal.RunLevel)."
+        Assert-True ($backupTask.Action.Arguments -match [regex]::Escape('Invoke-AeroLinkScheduledBackup.ps1') -and $backupTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot))`"") -and
+            $backupTask.Action.Arguments -match '-NonInteractive') `
+            "The site backup task must run the verified scheduled backup for exactly this installation, non-interactively: $($backupTask.Action.Arguments)"
         Assert-Throws { Set-AeroLinkSiteDeclaration -InstallationRoot $siteRoot -ApiPort $siteApiPort -PostgresPort $sitePostgresPort -ConnectorDeploymentId 'aerolink-other' } 'orphan' `
             'A site declaration must refuse to replace an existing connector deployment id.'
 
@@ -298,10 +305,14 @@ try {
 
         # --- 12. On a site, operator scripts fail fast instead of prompting, and Diagnostics uses the site block ---
         $env:AEROLINK_INSTALLATION_ROOT = $siteRoot
-        # Without these refusals psql would sit at a hidden password prompt against the SCRAM cluster.
+        # Backup and restore support a site (#1614 1.9) with the site's own credentials. Without them they refuse
+        # before connecting, rather than sit at a hidden password prompt against the SCRAM cluster or fall back to
+        # postgres over trust. The end-to-end site round trip is AeroLinkSiteBackup.Acceptance.ps1.
         Assert-Throws { & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive (Join-Path $siteFixture 'absent.zip') -DisposableQualification -PostgresPort $sitePostgresPort } `
-            'not yet supported on a site' 'Restore, including the isolated drill, must refuse a site installation before connecting.'
-        Assert-Throws { & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning } 'not yet supported on a site' 'Backup must refuse a site installation before connecting.'
+            'protected site secret .* is not configured' 'Restore, including the isolated drill, must refuse a site without its protected credentials before connecting.'
+        Assert-Throws { & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning } 'protected site secret .* is not configured' 'Backup must refuse a site without its protected credentials before connecting.'
+        # Import, upgrade and the HOME repair tools stay HOME-only.
+        Assert-Throws { Assert-AeroLinkNotSiteInstallation -InstallationRoot $siteRoot -Operation 'Snapshot import' } 'not yet supported on a site' 'HOME-only operations must still refuse a site.'
         # Diagnostics never probes a site at a loopback HTTP address: its API is HTTPS-only on the public name.
         $diagnosticsOutput = Join-Path $siteFixture 'diagnostics.json'
         $shell = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'powershell.exe' } else { 'pwsh' }

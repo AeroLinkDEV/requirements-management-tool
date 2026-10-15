@@ -611,7 +611,33 @@ function Assert-AeroLinkPortAvailable {
     }
 }
 
+function Invoke-AeroLinkWithPostgresAccess {
+    <#
+        .SYNOPSIS Runs a script block with PGPASSWORD set to one login's password, then restores the previous value.
+        .DESCRIPTION
+            A site installation's PostgreSQL requires SCRAM passwords (#1614 1.4). Every PostgreSQL tool started inside
+            the block inherits PGPASSWORD, never a command-line argument; the callers pass -w, which makes a missing
+            or wrong password a refusal instead of a hidden prompt. With no access object (HOME, trust over loopback)
+            the block runs exactly as before. The access object comes from Get-AeroLinkSitePostgresAccess.
+
+            The block runs in a child scope: return values from it, do not assign variables inside it.
+    #>
+    param([AllowNull()]$Access, [Parameter(Mandatory)][scriptblock]$Action)
+    if ($null -eq $Access) { return (& $Action) }
+    $previous = $env:PGPASSWORD
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Access.Password)
+    try {
+        $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        return (& $Action)
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        if ($null -eq $previous) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue } else { $env:PGPASSWORD = $previous }
+    }
+}
+
 Export-ModuleMember -Function @(
+    'Invoke-AeroLinkWithPostgresAccess',
     'Get-AeroLinkInstallationPointerPath',
     'Get-AeroLinkInstallationRoot',
     'Get-AeroLinkInstallationPaths',

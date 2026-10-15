@@ -99,9 +99,11 @@ key ring and the trust-mode development cluster.
   `SiteDevelopment` installation may carry one, and a port another process is listening on is refused. The site
   block is the single source of the API port. `Get-AeroLinkServiceEndpoints` returns the declared ports, and stop,
   diagnostics and the HOME-shaped scripts take their default port from it instead of a literal.
-- **Not yet on a site.** Backup, restore (including the isolated drill), the clone-validated upgrade, snapshot
-  import, showcase pruning and the FMS history repair connect as `postgres` without a password. On a site they
-  refuse at once rather than wait at a hidden password prompt; site support is the server backup item (#1614 1.9).
+- **Backup and restore on a site.** These are supported with the site's own credentials; see "Site server
+  backup and restore" under Backup and verification.
+- **Not on a site.** The clone-validated upgrade, snapshot import, showcase pruning and the FMS history repair are
+  HOME tools. They connect as `postgres` without a password, so on a site they refuse at once rather than wait at
+  a hidden password prompt.
   Diagnostics never prompts (`psql -w`), and probes a site at `https://<publicHostName>:<apiPort>`, or reports the
   API as not probed while no public name is declared.
 - **Hardened PostgreSQL.** `Initialize-AeroLinkSitePostgres` creates the cluster with `scram-sha-256` for every
@@ -1259,6 +1261,61 @@ retention policy and reconciliation/request policy are unchanged; refusal does n
 successful deployment.
 
 Ordinary repository CSV exports expire after seven days; completed job metadata remains attributable and the download returns `410 export_expired` after expiry. The worker reclaims files from the dedicated temporary-export namespace every ten minutes. Controlled publications, signed packages, uploaded documents, legacy job outputs and their exact historical files are retained. Browser harnesses use owned temporary database/evidence storage, including across a restart-recovery run, and release it after the run.
+
+### Site server backup and restore (#1614 1.9)
+
+A site installation keeps its backups on the host, under `<root>\backups`, for DEC-130's 15 days. Under D7 there
+is no off-machine copy yet. Backup, verification and restore take `-InstallationRoot <root>`. Without it they
+resolve the installation from the checkout, exactly as on HOME.
+
+**Credentials.** The site cluster accepts only SCRAM passwords. Each step uses one of two logins, both read from the
+protected-config store:
+- **The application role** (`aerolink_app`) owns `aerolink`. It runs the backup's `pg_dump` and attachment
+  inventory, and the restore's `pg_restore` and checks. Its password is readable by the API's service account.
+- **The superuser** (`postgres`) is used only to terminate, create, rename and drop databases. Its password is
+  readable by Administrators, so a restore runs elevated.
+
+A password reaches `pg_dump`, `pg_restore` and `psql` only through `PGPASSWORD`, never their command lines, and
+every tool runs with `-w`. A missing or wrong password is therefore a refusal, not a hidden prompt.
+
+**Ownership after a restore.** The target database is created `OWNER aerolink_app` and closed to `PUBLIC`, as
+`aerolink` is. The dump is then restored as that role with `--no-owner --no-privileges`, so every object belongs
+to the application role, even in a HOME archive whose objects `postgres` owned. The restore then checks that no
+relation belongs to another role and that the role can write, and refuses otherwise. `pg_trgm` is a trusted
+extension, so the owner role creates it.
+
+**Isolated drill:**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Restore-AeroLink.ps1 `
+    -InstallationRoot 'C:\AeroLink\AeroLink Production' -BackupArchive <zip> -TargetDatabase aerolink_restore_validation
+```
+
+**Production restore, including Phase 3's HOME archive:**
+- run from that installation's own program;
+- stop the site's AeroLink service first; the restore refuses while the API port listens;
+- add `-TargetDatabase aerolink -AllowProductionRestore -Confirmation RESTORE-AEROLINK`.
+
+It takes a pre-restore backup with the site credentials. It never starts or stops the site cluster or the API
+service, and it never runs a HOME launcher. Start the service afterwards. The notification revocation it performs
+needs the site-aware reader (#1642).
+
+**Daily backup.** `Register-AeroLinkSiteBackupTask` (in `AeroLinkSiteInstallation.psm1`) registers it, elevated,
+through the Task Scheduler API. The installer (#1614 1.7) calls it; `New-AeroLinkSiteBackupTaskDefinition` shows
+what it registers. The task:
+- runs `Invoke-AeroLinkScheduledBackup.ps1 -InstallationRoot <root>` daily, which backs up and then verifies;
+- runs as the installation's API account, `NT SERVICE\AeroLink-<name>`, with logon type ServiceAccount: no
+  password and no interactive user;
+- logs to `<root>\logs\scheduled-backup.log`.
+
+Whether Task Scheduler on the host accepts a virtual service account as a task principal is a Phase 2 check.
+
+`AeroLinkSiteBackup.Acceptance.ps1 -PostgresBin <bin>` proves all of this on a disposable site cluster, run by
+hand and non-elevated:
+1. it initialises the cluster with `Initialize-AeroLinkSitePostgres`;
+2. it backs up a pg_trgm-indexed table written by the application role, verifies the archive and restores it;
+3. it restores a HOME-format archive taken as `postgres`;
+4. it checks ownership, row counts, trigram search and writes.
 
 ## Isolated restore drill
 
