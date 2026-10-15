@@ -184,7 +184,7 @@ public static class WindowsSignInStartupGuard
             || settings.AllowedDomainSids.Any(x => WindowsAccountPolicy.DomainSid(x.Trim() + "-1000", out _) is null))
             throw new InvalidOperationException("Windows sign-in requires Identity:Windows:AllowedDomainSids to list at least one domain SID (S-1-5-21-a-b-c).");
         if (OperatingSystem.IsWindows() && RunsAsLocalSystem())
-            throw new InvalidOperationException("Windows sign-in refuses to run as SYSTEM. Run AeroLink as NETWORK SERVICE (#1614).");
+            throw new InvalidOperationException("Windows sign-in refuses to run as SYSTEM. Run AeroLink as the installation's virtual service account (#1614).");
         // SiteServer:Http1Only is the site server profile's switch (#1614, parallel HTTPS work); the Kestrel key
         // covers a listener configured directly.
         var http1Only = configuration.GetValue<bool>("SiteServer:Http1Only")

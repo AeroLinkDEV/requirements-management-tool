@@ -57,7 +57,7 @@ Where `Identity:Windows:Enabled` is set ([DEC-154](../../DECISIONS_AND_OPEN_QUES
   signed out, which stays signed out until the person chooses to sign in again.
 
 Global administration is still the `admin` account alone: Program roles, including a Program's Administrator role,
-can be granted to Windows accounts like any other, but no route grants the global administrator to another account.
+can be granted to Windows accounts like any other, but no route grants the global administrator to another account (#1639).
 
 The Documentation Center desktop connector never receives a reusable browser session. AeroLink issues a
 short-lived one-use launch token scoped to one document revision and mode. After redemption, the connector keeps

@@ -28,7 +28,7 @@ public interface IWindowsDirectory
 
 /// <summary>
 /// Active Directory through <c>System.DirectoryServices.AccountManagement</c>, bound as the service account
-/// (NETWORK SERVICE presents the computer account to the domain). Every call asks the directory afresh: a failed
+/// (the installation's virtual service account acts as the computer account on the network). Every call asks the directory afresh: a failed
 /// lookup is never remembered, so a domain controller that was briefly unreachable does not refuse people later.
 /// </summary>
 [SupportedOSPlatform("windows")]
