@@ -206,13 +206,15 @@ export class FmsKernel {
   get controlRecords(): readonly ControlRecord[] { return this.controls; }
   /** The most recent published outcome, for the bench's event-stream subscription. */
   get latestOutcome(): OutcomeEvent | null { return this.lastOutcome; }
-  /** D_j observes the closed ACTION, immediately before its composite INTEGRATE. A fresh hex copy of every D_j. */
-  get frameDigests(): readonly string[] { return this.digests.hex(); }
-  /** The number of frames digested so far. */
-  get frameDigestCount() { return this.digests.length; }
-  /** D_frame as 16 hex digits, or undefined if that frame has not closed. */
+  /**
+   * D_frame (taken as ACTION at F_frame closes, immediately before its composite INTEGRATE) as 16 hex digits, or
+   * undefined if that frame has not closed. The verifier reads it.
+   */
   frameDigest(frame: number): string | undefined { return this.digests.hexAt(frame); }
-  /** D_0 .. D_(end-1) as hex. The log is append-only, so a prefix read later equals the prefix at its boundary. */
+  /**
+   * D_0 .. D_(end-1) as hex, clamped to the frames taken. The log is append-only, so a prefix read later equals the
+   * prefix at its boundary. The export reads it.
+   */
   frameDigestsTo(end: number): string[] { return this.digests.hex(end); }
   /** Failed INTEGRATE reaches no S_k, even though the adapter's unit clock has already moved. */
   get lastSuccessfulBoundary() { return this.successfulBoundary; }
@@ -367,20 +369,30 @@ export class FmsKernel {
       // S_{j+1}: the unit clock is F_{j+1}; no pending input or runner poll at that instant has run.
       this.successfulBoundary = this.frame;
       this.atBoundary = true;
-      // A one-shot observer that throws is its own failure: the others still run, this boundary still ends and
-      // F_{j+1}'s ACTION still opens, then the error is reported. The caller's atNextBoundary propagates at once.
+      // Boundary callbacks (the caller's atNextBoundary, then one-shot observers) are outside the simulation. If one
+      // throws, the rest still run and this boundary still ends; F_{j+1}'s ACTION still opens; then the first error is
+      // thrown. At a private verifier's terminal S_k the kernel stays at the boundary and the first error is thrown
+      // instead of returning, so a verifier never discards a callback's failure.
       let observerFailed = false, observerError: unknown = null;
+      let terminal = false;
       try {
-        if (!hookCalled) { hookCalled = true; options.atNextBoundary?.(); }
+        if (!hookCalled) {
+          hookCalled = true;
+          try { options.atNextBoundary?.(); } catch (error) { observerFailed = true; observerError = error; }
+        }
         const hooks = [...this.boundaryHooks];
         for (const hook of hooks) {
           this.boundaryHooks.delete(hook);
           try { hook(); } catch (error) { if (!observerFailed) { observerFailed = true; observerError = error; } }
         }
-        if (this.verificationTarget === this.frame) return done + 1;
+        terminal = this.verificationTarget === this.frame;
       } finally {
         // Only a private verifier's terminal S_k stays a boundary; nothing else may leave the kernel resting at one.
-        if (this.verificationTarget !== this.frame) this.atBoundary = false;
+        if (!terminal) this.atBoundary = false;
+      }
+      if (terminal) {
+        if (observerFailed) throw observerError;
+        return done + 1;
       }
       // ACTION at F_{j+1}: what was submitted while F_j's later phases ran, then the translated v1 steps and checks due.
       this.open = true;

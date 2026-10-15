@@ -1,6 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { createSession, type SessionSetup } from '../src/fmsCdu/kernel/session'
-import { parseRecording, serializeRecording, SessionRecording, verifyRecording, type RecordingIdentity } from '../src/fmsCdu/kernel/recording'
+import { pageRecordingIdentity, parseRecording, serializeRecording, SessionRecording, verifyRecording, type RecordingIdentity } from '../src/fmsCdu/kernel/recording'
 import { CanonicalWriter, frameBytes, frameDigest, xxh64, writeValue } from './fixtures/fms-kernel-digest'
 import * as product from '../src/fmsCdu/kernel/stateDigest'
 import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
@@ -10,6 +10,8 @@ import { ContentStore } from '../src/fmsCdu/kernel/contentStore'
 import type { ActionSource, KernelAction } from '../src/fmsCdu/kernel/actions'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { scenarioStart } from '../src/fmsCdu/scenario'
+import { DualFmsSystem } from '../src/fmsCdu/dualFms'
+import { FRAME_UNITS } from '../src/fmsCdu/kernel/time'
 
 const setup: SessionSetup = { composition: 'dual', utc0Ms: Date.UTC(2026, 8, 29, 15), profileId: 'cma9000-s300-heli-civil',
   variantId: '002/003/005/102/103/302/303/502/503', initialFreeze: true, startModes: ['WARM', 'WARM'], onGround: false,
@@ -113,31 +115,145 @@ test('a mid-session user-database import replays from content and writes no brow
 })
 
 // The build identity is the expensive part of a recording (a fetch and hash of every emitted asset): it is asked for
-// only when an export is encoded, once per recording, never when a session is constructed or flown.
-test('a recording asks for the build identity only when it encodes an export, and only once', async () => {
+// only when an export is encoded, never when a session is constructed or flown. The page keeps the answer (below).
+test('a recording asks for the build identity only when it encodes an export', async () => {
   let asked = 0
   const session = createSession(setup), recording = new SessionRecording(session, () => { asked += 1; return Promise.resolve(identity) })
   session.kernel.advance(5)
   expect(asked).toBe(0)
   const first = recording.requestExport(); session.kernel.advance(1); await first
   expect(asked).toBe(1)
-  const second = recording.requestExport(); session.kernel.advance(1); await second
-  expect(asked).toBe(1)
 })
 
-// A one-shot boundary observer is outside the simulation: if it throws, the kernel still leaves S_k, opens the next
-// ACTION and keeps running, and the frames match a kernel that never had the observer.
-test('a throwing boundary observer is reported but leaves the live kernel running and unchanged', () => {
-  const observed = createSession(setup), control = createSession(setup)
-  observed.kernel.onNextBoundary(() => { throw new Error('observer failed') })
-  expect(() => observed.kernel.advance(3)).toThrow('observer failed')
-  expect(observed.kernel.frame).toBe(1)
-  expect(observed.kernel.advance(2)).toBe(2)
-  observed.port.submit({ kind: 'ios.wind', direction: 180, speed: 5 }, ios)
-  expect(observed.kernel.journal).toHaveLength(1)
-  expect(observed.kernel.journal[0]).toMatchObject({ frame: 3, kind: 'ios.wind', outcome: { status: 'accepted' } })
-  control.kernel.advance(3); control.port.submit({ kind: 'ios.wind', direction: 180, speed: 5 }, ios)
-  expect(observed.kernel.frameDigests).toEqual(control.kernel.frameDigests)
+// The page keeps a definitive identity for its lifetime, but a transient failure (here an HTTP 503 for the manifest)
+// is returned unkept, so the next export asks again instead of staying unqualified until a reload.
+test('the page identity retries after a failed manifest fetch and keeps the first definitive answer', async () => {
+  const global = globalThis as { location?: unknown; fetch: typeof fetch }
+  const hadLocation = Object.hasOwn(global, 'location'), previousLocation = global.location, previousFetch = global.fetch
+  const requests: string[] = []
+  global.location = { href: 'http://127.0.0.1:1/bench' }
+  global.fetch = (async (input: string | URL) => {
+    requests.push(String(input))
+    return requests.length === 1 ? new Response('unavailable', { status: 503 })
+      : new Response(JSON.stringify({ schema: 'aerolink.fms-build.v1', kind: 'development', commit: 'literal', dirty: false, assets: [], bundleHash: null }), { status: 200 })
+  }) as typeof fetch
+  try {
+    const failed = await pageRecordingIdentity()
+    expect(failed).toMatchObject({ qualified: false, reason: 'missing build identity', build: null })
+    const definitive = await pageRecordingIdentity()
+    expect(definitive).toMatchObject({ qualified: false, reason: 'development build: unqualified', build: { kind: 'development' } })
+    expect(await pageRecordingIdentity()).toBe(definitive)
+    expect(requests).toEqual(['http://127.0.0.1:1/fms-recording-build.json', 'http://127.0.0.1:1/fms-recording-build.json'])
+  } finally { global.fetch = previousFetch; if (hadLocation) global.location = previousLocation; else delete global.location }
+})
+
+// Boundary callbacks (a one-shot observer, or the caller's atNextBoundary) are outside the simulation. When one throws,
+// F_{j+1}'s ACTION must still open BEFORE the error surfaces: the input pending from INTEGRATE executes, the scenario
+// step due at F_{j+1} polls, and an input made right after the throw executes at R_{j+1}. The run then matches one
+// that never had the callback.
+test('a throwing boundary callback surfaces only after the next ACTION opened, and leaves the run unchanged', () => {
+  const scenario = { id: 'callback', title: 'Callback', objective: '', maxSeconds: 10, steps: [
+    { when: { kind: 'time' as const, seconds: 0.25 }, action: { kind: 'alert' as const, text: 'AT F1' } },
+    { when: { kind: 'time' as const, seconds: 2 }, action: { kind: 'alert' as const, text: 'LATER' } },
+  ] }
+  const wind = (direction: number): KernelAction => ({ kind: 'ios.wind', direction, speed: direction / 10 })
+  const drive = (callback: 'observer' | 'atNextBoundary' | null) => {
+    const session = createSession({ ...setup, initialFreeze: false, scenario })
+    session.port.submit(wind(10), ios)
+    if (callback === 'observer') session.kernel.onNextBoundary(() => { throw new Error('callback failed') })
+    let pending = false
+    const advance = () => session.kernel.advance(callback ? 3 : 1, {
+      onInstantClose: () => { if (!pending) { pending = true; session.port.submit(wind(20), ios) } },
+      ...(callback === 'atNextBoundary' ? { atNextBoundary: () => { throw new Error('callback failed') } } : {}),
+    })
+    if (callback) expect(advance).toThrow('callback failed'); else expect(advance()).toBe(1)
+    expect(session.kernel.frame).toBe(1)
+    const atF1 = session.kernel.journal.filter(entry => entry.frame === 1).map(entry => `${entry.origin}:${entry.kind}`)
+    expect(atF1).toContain('native:ios.wind')
+    expect(atF1.some(entry => entry.startsWith('v1-translated'))).toBe(true)
+    const r1 = session.port.submit(wind(30), ios)
+    expect(session.kernel.journal.at(-1)).toMatchObject({ submissionSeq: r1.submissionSeq, frame: 1, outcome: { status: 'accepted' } })
+    expect(session.kernel.advance(5)).toBe(5)
+    return { digests: session.kernel.frameDigestsTo(Number.POSITIVE_INFINITY), journal: session.kernel.record().journal }
+  }
+  const control = drive(null)
+  expect(drive('observer')).toEqual(control)
+  expect(drive('atNextBoundary')).toEqual(control)
+})
+
+// At a private verifier's terminal S_k the kernel stays at the boundary, and a callback's failure is thrown rather
+// than discarded by the return: a verifier never reports a boundary whose callback failed.
+test('a callback failing at a verifier\'s terminal S_k is thrown, and the kernel stays at that boundary', () => {
+  for (const kind of ['observer', 'atNextBoundary'] as const) {
+    const verifier = createSession(setup, { verification: true })
+    if (kind === 'observer') verifier.kernel.onNextBoundary(() => { throw new Error(`terminal ${kind}`) })
+    expect(() => verifier.kernel.verifyTo(1, kind === 'atNextBoundary' ? { atNextBoundary: () => { throw new Error(`terminal ${kind}`) } } : {}))
+      .toThrow(`terminal ${kind}`)
+    expect(verifier.kernel.boundaryRecord().frame).toBe(1)
+  }
+})
+
+// D_j lives in 4096-entry typed-array chunks. Every real recording crosses the first boundary (16 s at 64x), so the
+// boundaries themselves are owned: exact 64-bit values (including 0 and 2^64-1 at a boundary) read back by index and
+// by prefix across 4095/4096 and 8191/8192, and out-of-range reads refused. Expected hex is BigInt.toString(16), not
+// the product's hex64.
+test('the digest log keeps exact 64-bit values across its chunk boundaries and refuses out-of-range reads', () => {
+  const log = new product.DigestLog(), values: bigint[] = []
+  let x = 0x9e3779b97f4a7c15n
+  for (let i = 0; i < 8200; i += 1) {
+    x = (x * 6364136223846793005n + 1442695040888963407n) & ((1n << 64n) - 1n)
+    values.push(i === 4095 || i === 8191 ? (1n << 64n) - 1n : i === 4096 || i === 8192 ? 0n : x)
+    log.push(values[i])
+  }
+  const hex = (value: bigint) => value.toString(16).padStart(16, '0')
+  expect(log.length).toBe(8200)
+  for (const i of [0, 4094, 4095, 4096, 4097, 8190, 8191, 8192, 8193, 8199]) expect(log.hexAt(i), `hexAt ${i}`).toBe(hex(values[i]))
+  expect([log.hexAt(4095), log.hexAt(4096), log.hexAt(8191), log.hexAt(8192)]).toEqual(['ffffffffffffffff', '0000000000000000', 'ffffffffffffffff', '0000000000000000'])
+  expect(log.hex()).toEqual(values.map(hex))
+  expect(log.hex(4097)).toEqual(values.slice(0, 4097).map(hex))
+  expect(log.hex(8193)).toEqual(values.slice(0, 8193).map(hex))
+  expect(log.hex(0)).toEqual([]); expect(log.hex(-5)).toEqual([]); expect(log.hex(99_999)).toHaveLength(8200)
+  for (const bad of [-1, 8200, 1.5, NaN, Infinity]) expect(log.hexAt(bad), `hexAt ${bad}`).toBeUndefined()
+})
+
+// The same boundary through the verifier: a 4200-frame recording (frames past the first chunk) whose R_4150 input is
+// changed must be refused at frame 4150, not verified because later chunks went unread.
+test('a recording changed after frame 4095 is refused at that frame', async () => {
+  test.setTimeout(5 * 60_000)
+  const single: SessionSetup = { ...setup, composition: 'single', startModes: ['WARM'], initialFreeze: false }
+  const { exported } = await recordTo(single, 4200, { 4150: [submit({ kind: 'ios.wind', direction: 270, speed: 20 })] })
+  expect(exported.digests).toHaveLength(4200)
+  const changed = structuredClone(exported)
+  ;(changed.journal.find(entry => entry.kind === 'ios.wind')!.payload as { direction: number }).direction = 90
+  await expect(verifyRecording(changed, identity)).rejects.toThrow('digest mismatch at frame 4150')
+})
+
+// T17: a composite INTEGRATE that throws is recorded as an execution-error control record, and replay accepts the
+// fault only where the fresh composition faults at the same instant with the same record. The fault is made the way
+// the I1a phases owner makes one (the composite's step replaced in the test), here on the prototype so the verifier's
+// own fresh composition faults too; it is restored before anything else runs.
+test('a recorded composite fault replays through the verifier, and a different or missing fault is refused', async () => {
+  const original = DualFmsSystem.prototype.step
+  const steps = new WeakMap<object, number>()
+  DualFmsSystem.prototype.step = function (this: DualFmsSystem, dt: number) {
+    const n = (steps.get(this) ?? 0) + 1; steps.set(this, n)
+    if (n === 3) throw new Error('guidance source switch')
+    return original.call(this, dt)
+  }
+  let exported: Awaited<ReturnType<SessionRecording['requestExport']>>
+  try {
+    const session = createSession({ ...setup, initialFreeze: false }), recording = new SessionRecording(session, () => Promise.resolve(identity))
+    let faults = 0
+    while (session.kernel.frame < 8) { try { session.kernel.advance(1) } catch { faults += 1 } }
+    const pending = recording.requestExport(); expect(session.kernel.advance(1)).toBe(1); exported = await pending
+    expect(faults).toBe(1)
+    expect(exported.control).toMatchObject([{ kind: 'execution-error', message: 'guidance source switch', instant: 2 * FRAME_UNITS }])
+    expect(await verifyRecording(exported, identity)).toEqual({ status: 'verified', frame: 9, exact: true })
+    const otherMessage = structuredClone(exported); (otherMessage.control[0] as { message: string }).message = 'a different failure'
+    await expect(verifyRecording(otherMessage, identity)).rejects.toThrow('guidance source switch')
+  } finally { DualFmsSystem.prototype.step = original }
+  // Without the fault the fresh composition completes the step the record says failed, so frame 3 differs.
+  await expect(verifyRecording(exported!, identity)).rejects.toThrow('digest mismatch at frame 3')
 })
 
 // Codec parity is independent: published empty XXH64 and handwritten -0/NaN bytes, then unchanged frozen frame codec.
@@ -152,7 +268,7 @@ test('the production codec agrees with published literals and the frozen observa
     const actual = product.frameBytes(session.units, new product.CanonicalWriter())
     expect([...actual]).toEqual([...bytes]); expect(product.frameDigest(actual)).toBe(frameDigest(bytes))
   } })
-  expect(session.kernel.frameDigests).toEqual(frames)
+  expect(session.kernel.frameDigestsTo(Number.POSITIVE_INFINITY)).toEqual(frames)
   // Keep the frozen scalar/hash owner authoritative; these imports do not manufacture a second expected codec.
   expect(xxh64(new Uint8Array())).toBe(0xef46db3751d8e999n)
   const frozen = new CanonicalWriter(); writeValue(frozen, NaN)
@@ -175,8 +291,8 @@ test('recording takes the first lawful S_k without changing the callback rate an
   const control = createSession(setup)
   control.port.submit({ kind: 'cdu.key', side: 2, fn: 'RTE', held: false }, { kind: 'cdu', id: 'CDU 2', side: 2, surface: 'popout' })
   expect(control.kernel.advance(4)).toBe(4)
-  expect(session.kernel.frameDigests).toHaveLength(4)
-  expect(session.kernel.frameDigests).toEqual(control.kernel.frameDigests)
+  expect(session.kernel.frameDigestsTo(Number.POSITIVE_INFINITY)).toHaveLength(4)
+  expect(session.kernel.frameDigestsTo(Number.POSITIVE_INFINITY)).toEqual(control.kernel.frameDigestsTo(Number.POSITIVE_INFINITY))
   expect(session.kernel.record()).toEqual(control.kernel.record())
   expect(await verifyRecording(exported, identity)).toEqual({ status: 'verified', frame: 1, exact: true })
   expect(session.kernel.frame).toBe(4)
@@ -258,7 +374,7 @@ test('private verifyTo stops before the next poll; R_j and a fault are not S_k, 
   const privateSession = createSession({ ...setup, scenario }, { verification: true })
   privateSession.kernel.verifyTo(1)
   expect(privateSession.kernel.boundaryRecord().journal).toEqual([])
-  expect(privateSession.kernel.frameDigests).toHaveLength(1)
+  expect(privateSession.kernel.frameDigestsTo(Number.POSITIVE_INFINITY)).toHaveLength(1)
   expect(() => privateSession.kernel.advance(1)).toThrow('cannot resume')
   // After the run ends the bench keeps advancing (paused, without haltOnRunEnd), so the export waits for that S_k.
   const ended = createSession({ ...setup, scenario })

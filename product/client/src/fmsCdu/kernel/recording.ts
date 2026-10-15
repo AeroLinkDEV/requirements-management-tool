@@ -68,12 +68,20 @@ export async function currentRecordingIdentity(): Promise<RecordingIdentity> {
 
 let pageIdentity: Promise<RecordingIdentity> | null = null;
 /**
- * This page's identity, resolved on the first export that needs it and then kept: the served bytes cannot change under
- * a loaded page. Session construction, Restart and profile or scenario changes do no fetch or hashing.
+ * This page's identity, resolved on the first export that needs it. Session construction, Restart and profile or
+ * scenario changes do no fetch or hashing. Only a definitive answer is kept for the page (a verified built identity,
+ * or a well-formed development manifest): the served bytes cannot change under a loaded page. Any other answer (a
+ * failed fetch, an HTTP error, a missing asset, a mismatch) is returned but not kept, so the next export asks again
+ * and one transient failure does not leave every later export unqualified.
  */
 export function pageRecordingIdentity(): Promise<RecordingIdentity> {
-  pageIdentity ??= currentRecordingIdentity();
-  return pageIdentity;
+  if (pageIdentity) return pageIdentity;
+  const attempt: Promise<RecordingIdentity> = currentRecordingIdentity().then(identity => {
+    if (!identity.qualified && identity.build?.kind !== "development" && pageIdentity === attempt) pageIdentity = null;
+    return identity;
+  });
+  pageIdentity = attempt;
+  return attempt;
 }
 
 type ContentPayload = { readonly kind: string; readonly unit: number; readonly op?: string; readonly name?: string; readonly airports?: readonly string[]; readonly content: ContentRef };
@@ -127,11 +135,13 @@ export class SessionRecording {
   private readonly store = new ContentStore();
   private readonly imports = new Map<number, Uint8Array>();
   private readonly identity: () => Promise<RecordingIdentity>;
-  private resolvedIdentity: Promise<RecordingIdentity> | null = null;
   private readonly session: RecordingSession;
   private readonly cancellations = new Set<() => void>();
   private generation = 0;
-  /** `identity` is asked for only when an export is encoded, never at session construction. */
+  /**
+   * `identity` is asked for each time an export is encoded, never at session construction. The bench passes
+   * pageRecordingIdentity, which keeps a definitive answer for the page and retries anything else.
+   */
   constructor(session: RecordingSession, identity: () => Promise<RecordingIdentity>) { this.session = session; this.identity = identity; }
 
   retainImport(submissionSeq: number, bytes: Uint8Array) { this.imports.set(submissionSeq, new Uint8Array(bytes)); }
@@ -180,8 +190,7 @@ export class SessionRecording {
     };
     const journal = await Promise.all(record.journal.map(async entry => ({ ...entry, payload: await encodeAction(entry.payload as KernelAction, entry.submissionSeq) })));
     const pendingInputs = pending ? await Promise.all(pending.map(async entry => ({ ...entry, action: await encodeAction(entry.action, entry.submissionSeq) }))) : null;
-    this.resolvedIdentity ??= this.identity();
-    const identity = await this.resolvedIdentity;
+    const identity = await this.identity();
     if (generation !== this.generation) throw new Error("recording session ended");
     const boundary = kind === "boundary";
     return { ...record, journal, schema: "aerolink.fms-recording.v1", initial: { version: 1, setup: initial.setup,

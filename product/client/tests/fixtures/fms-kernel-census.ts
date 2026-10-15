@@ -239,7 +239,7 @@ const ARM: Arm = {
       units: { computers: [fms], flights: [sim] }, runner, system: null, guidance: () => ({ fms, sim }),
       fly: frames => { kernel.advance(frames, { onInstantClose }) },
       freeze: () => { throw new Error('the single composition has no freeze') },
-      kernelDigests: () => kernel.frameDigests,
+      kernelDigests: () => kernel.frameDigestsTo(Number.POSITIVE_INFINITY),
     }
   },
   dual(start, scenario, onInstantClose) {
@@ -254,7 +254,7 @@ const ARM: Arm = {
       guidance: () => ({ fms: system.computers[system.guidanceSide - 1], sim: system.simulator }),
       fly: frames => { freezing(false); kernel.advance(frames, { onInstantClose }) },
       freeze: () => { freezing(true); kernel.advance(1, { onInstantClose }) },
-      kernelDigests: () => kernel.frameDigests,
+      kernelDigests: () => kernel.frameDigestsTo(Number.POSITIVE_INFINITY),
     }
   },
 }
