@@ -130,8 +130,8 @@ export function runRow(entry: Record<string, any>, resultFile: string, dir: stri
 }
 /** The W3 session record (w3-session.json; w3-end.json repeats it). The admitted input manifest (with every arm's
  * dependency and dist lists) is copied once into the output and referenced by path, size, SHA-256 and canonical digest. */
-export function w3SessionRecord(fields: { id: string; plan: unknown; sessionIndex: number; slots: unknown[]; manifest: unknown; manifestInput: string; dir: string;
-  cold: unknown; harness: unknown; startedAt: string; monotonicStart: number; deadline: number }) {
+export function w3SessionRecord(fields: { id: string; plan: unknown; sessionIndex: number; slots: unknown[]; manifest: unknown; manifestInput: string; manifestPinnedSha256: string; dir: string;
+  cold: unknown; harness: unknown; startedAt: string; monotonicStart: number; deadline: number; comparison?: unknown }) {
   const { id, plan, sessionIndex, slots, manifest, manifestInput, dir, cold, harness, startedAt, monotonicStart, deadline } = fields
   const copy = join(dir, 'w3-input-manifest.json')
   if (digest(JSON.parse(readFileSync(manifestInput, 'utf8'))) !== digest(manifest)) throw new Error('W3 input manifest file is not the admitted manifest')
@@ -139,6 +139,16 @@ export function w3SessionRecord(fields: { id: string; plan: unknown; sessionInde
   if (fileDigest(copy) !== fileDigest(manifestInput)) throw new Error('W3 input manifest copy bytes disagree')
   const manifestFile = { path: 'w3-input-manifest.json', sha256: fileDigest(copy), bytes: lstatSync(copy).size, digest: digest(manifest) }
   return {schema:'aerolink.fms-w3-paired-session.v1',id,plan,sessionIndex,slots,manifestFile,cold,harness,startedAt,monotonicStart,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
+}
+/** The four planned slots of one declared W3 cell-session, in plan order. */
+export function w3SessionSlots(plan: ReturnType<typeof w3PairedPlan>, repeat: number, session: number, _aa?: string) {
+  const slots=plan.slots.filter(slot=>slot.repeat===repeat&&slot.session===session)
+  if(slots.length!==4)throw new Error('W3 complete ABBA session missing')
+  return slots
+}
+/** Per-slot admission before each W3 child: the manifest's source, build and dependency bytes. */
+export function w3SlotAdmission(manifest: any, _harnessNow: unknown, _sessionHarness: unknown) {
+  admitW3Manifest(manifest,true)
 }
 /** The W3 session end record the executor writes to w3-end.json. The end re-admission outcome is recorded beside the
  * original stop reason and never replaces it or prevents the record; the caller decides what to throw after writing. */

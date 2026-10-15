@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { blockZeroCheck, comparisonKind, failedRunRule, headlessSchedule, headlessVerdict, holm, judgeFamily, medianLevel, nearestRank, permutationTest, plannedRuns, primingPlan, relativeEffect, runClassification, scoredRuns, type Arm, type DispatchedRoute, type RunValue, type SessionEvidence } from './stats.ts'
 import { browserQualification } from './browser-accounting.ts'
-import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest, w3EndRecord, archiveW3ColdInput, runRow, w3SessionRecord } from './browser-capture.ts'
+import { browserCapturePlan, captureDisposition, coldPayload, copyColdPayload, digest, fileDigest, requireClosure, CAPTURE_SCHEMA, materializeW3Arms, admitW3Manifest, w3EndRecord, archiveW3ColdInput, runRow, w3SessionRecord, w3SessionSlots, w3SlotAdmission } from './browser-capture.ts'
 // @ts-expect-error a JavaScript module without declarations
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '../scripts/browser-storage.mjs'
 
@@ -489,8 +489,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   const {manifest,plan}=w3Input(true), index=Number(options.session), repeat=Number(options.repeat)
   if(options.session===undefined || options.repeat===undefined || !Number.isSafeInteger(index) || index<0 || index>7 || !Number.isSafeInteger(repeat) || repeat<0 || repeat>15)throw new Error('W3 requires explicit planned repeat0..15 and complete cell-block session index0..7')
   if(!options['cold-input'] || options.arm || options.rounds || options.rates || options.configurations || options.hours || options['dirty-smoke'])throw new Error('W3 session requires sealed cold input and refuses allocation/budget/arm overrides')
-  const slots=plan.slots.filter(slot=>slot.repeat===repeat&&slot.session===index)
-  if(slots.length!==4)throw new Error('W3 complete ABBA session missing')
+  const slots=w3SessionSlots(plan,repeat,index)
   const input=resolve(options['cold-input']), payload=join(input,'payload'), cold=JSON.parse(readFileSync(join(input,'cold.json'),'utf8')), closure=JSON.parse(readFileSync(join(input,'closure.json'),'utf8'))
   requireClosure(closure);const entries=coldPayload(payload)
   if(digest(entries)!==cold.payloadSha256 || fileDigest(join(input,'seed.json'))!==cold.seedSha256 || fileDigest(join(input,'closure.json'))!==cold.closureSha256)throw new Error('W3 cold input changed')
@@ -499,12 +498,12 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   const began=performance.now(),deadline=began+14_400_000,dir=out()
   if(nextIndex(dir))throw new Error('W3 requires fresh run output')
   const {archive,seed}=archiveW3ColdInput(input,dir,entries,cold)
-  const session=w3SessionRecord({id:randomUUID(),plan,sessionIndex:index,slots,manifest,manifestInput:resolve(options['w3-input']!),dir,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline})
+  const session=w3SessionRecord({id:randomUUID(),plan,sessionIndex:index,slots,manifest,manifestInput:resolve(options['w3-input']!),manifestPinnedSha256:options['w3-input-sha256']!,dir,cold,harness,startedAt:new Date().toISOString(),monotonicStart:began,deadline})
   writeFileSync(join(dir,'w3-session.json'),JSON.stringify(session,null,2),{flag:'wx'})
   let stopped:string|null=null,failure:{error:unknown}|null=null
   try {
     for(const slot of slots) {
-      admitW3Manifest(manifest,true)
+      w3SlotAdmission(manifest,harnessIdentity(),harness)
       const arm=manifest.arms[slot.arm],build=manifest.builds[slot.arm],runId=`w3-${session.id}-${slot.slot}`,storage=createBrowserStorage(runId)
       copyColdPayload(archive,storage.root,entries)
       const identity={original:arm.original,effectiveSourceSha256:arm.effectiveSourceSha256,overlaySha256:manifest.overlaySha256,harness:manifest.harness,build,manifestSha256:digest(manifest),rate:slot.rate,configuration:slot.configuration}
