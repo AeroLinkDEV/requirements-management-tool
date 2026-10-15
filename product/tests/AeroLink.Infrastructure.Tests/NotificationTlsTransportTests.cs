@@ -283,20 +283,71 @@ public sealed class NotificationTlsTransportTests
         internal TlsRelay(X509Certificate2 certificate, Reply reply, int timeoutSeconds = 30, string? intermediatePem = null)
         {
             Directory.CreateDirectory(directory);
-            File.WriteAllText(Path.Combine(directory, "certificate.pem"), certificate.ExportCertificatePem() + "\n" + intermediatePem);
-            using var key = certificate.GetRSAPrivateKey()!;
-            File.WriteAllText(Path.Combine(directory, "key.pem"), key.ExportPkcs8PrivateKeyPem());
-            File.Copy(Path.Combine(AppContext.BaseDirectory, "TestSupport", "NotificationTlsRelay.py"), Path.Combine(directory, "relay.py"));
-            // Test-only process support uses an explicit interpreter or the normal CI Python command.
-            // Absence fails the positive fixture; it never silently skips qualification.
-            var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("AEROLINK_TEST_PYTHON") ?? (OperatingSystem.IsWindows() ? "python" : "python3"))
-            { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-            start.ArgumentList.Add(Path.Combine(directory, "relay.py")); start.ArgumentList.Add(directory); start.ArgumentList.Add(reply.ToString());
-            start.ArgumentList.Add("0"); start.ArgumentList.Add(timeoutSeconds.ToString());
-            process = Process.Start(start) ?? throw new InvalidOperationException("Owned TLS relay could not start.");
-            var first = process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
-            if (!int.TryParse(first, out var port)) throw new InvalidOperationException("Owned TLS relay did not publish its port.");
-            Port = port; Completion = ReadCompletionAsync();
+            Process? started = null;
+            try
+            {
+                File.WriteAllText(Path.Combine(directory, "certificate.pem"), certificate.ExportCertificatePem() + "\n" + intermediatePem);
+                using (var key = certificate.GetRSAPrivateKey()!)
+                    File.WriteAllText(Path.Combine(directory, "key.pem"), key.ExportPkcs8PrivateKeyPem());
+                File.Copy(Path.Combine(AppContext.BaseDirectory, "TestSupport", "NotificationTlsRelay.py"), Path.Combine(directory, "relay.py"));
+                // Test-only process support uses an explicit interpreter or the normal CI Python command.
+                // Absence fails the positive fixture; it never silently skips qualification.
+                var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("AEROLINK_TEST_PYTHON") ?? (OperatingSystem.IsWindows() ? "python" : "python3"))
+                { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+                start.ArgumentList.Add(Path.Combine(directory, "relay.py")); start.ArgumentList.Add(directory); start.ArgumentList.Add(reply.ToString());
+                start.ArgumentList.Add("0"); start.ArgumentList.Add(timeoutSeconds.ToString());
+                var elapsed = Stopwatch.StartNew();
+                process = started = Process.Start(start) ?? throw new InvalidOperationException("Owned TLS relay could not start.");
+                // #1612: redirected pipes are synchronous handles, so ReadLineAsync parks a blocking read on a thread-pool
+                // worker. With the pool saturated that read was never scheduled and the 10 s wait expired against a peer
+                // that had already published its port. Readiness and stderr are read on dedicated threads instead.
+                var error = new StringBuilder();
+                var errorReader = new Thread(() =>
+                {
+                    // Incremental, so a peer that never exits still reports what it had written when it was killed.
+                    var buffer = new char[1024];
+                    try { int count; while ((count = started.StandardError.Read(buffer, 0, buffer.Length)) > 0) lock (error) error.Append(buffer, 0, count); }
+                    catch (Exception failure) when (failure is IOException or ObjectDisposedException) { }
+                }) { IsBackground = true, Name = "Owned TLS relay stderr" };
+                errorReader.Start();
+                string? first = null;
+                var readyReader = new Thread(() =>
+                {
+                    try { first = started.StandardOutput.ReadLine(); }
+                    catch (Exception failure) when (failure is IOException or ObjectDisposedException) { }
+                }) { IsBackground = true, Name = "Owned TLS relay readiness" };
+                readyReader.Start();
+                // Unchanged 10 s readiness bound, now measured against the peer rather than against pool scheduling.
+                var ready = readyReader.Join(TimeSpan.FromSeconds(10));
+                if (ready && int.TryParse(first, out var port)) { Port = port; Completion = ReadCompletionAsync(); return; }
+                throw StartupFailure(started, ready, first, error, errorReader, elapsed.Elapsed);
+            }
+            catch
+            {
+                started?.Dispose();
+                try { Directory.Delete(directory, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                throw;
+            }
+        }
+        // A failed constructor has no await-using owner, so it reaps its own peer and reports what the peer actually did.
+        private static Exception StartupFailure(Process peer, bool ready, string? first, StringBuilder error, Thread errorReader, TimeSpan elapsed)
+        {
+            var aliveAtFailure = !peer.HasExited;
+            if (aliveAtFailure)
+            {
+                try { peer.Kill(entireProcessTree: true); }
+                catch (Exception failure) when (failure is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            }
+            var exited = peer.WaitForExit(35_000);
+            if (exited) errorReader.Join(TimeSpan.FromSeconds(5));
+            string stderr; lock (error) stderr = error.ToString().Trim();
+            if (stderr.Length > 4000) stderr = "..." + stderr[^4000..];
+            var observed = !ready ? "no stdout line" : first is null ? "first stdout line <EOF>" : $"first stdout line '{first[..Math.Min(first.Length, 256)]}'";
+            var message = $"Owned TLS relay pid {peer.Id} did not publish its port: {observed} after {elapsed.TotalSeconds:0.0} s (bound 10 s); "
+                + $"peer {(aliveAtFailure ? "was still running and was killed" : "had already exited")}; "
+                + $"exit code {(exited ? peer.ExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture) : "unavailable (no exit within 35 s)")}; "
+                + $"stderr: {(stderr.Length == 0 ? "<empty>" : stderr)}";
+            return ready ? new InvalidOperationException(message) : new TimeoutException(message);
         }
         private async Task ReadCompletionAsync()
         {
@@ -316,5 +367,55 @@ public sealed class NotificationTlsTransportTests
             try { await Completion; } finally { process.Dispose(); Directory.Delete(directory, recursive: true); }
         }
 
+    }
+
+    // #1612: hosted Infrastructure runs timed out in the relay constructor after exactly 10 s, while no other test in the
+    // process completed. The readiness read must not depend on thread-pool scheduling the fixture cannot control.
+    // Non-parallel because it deliberately saturates the process-wide pool for the few seconds the peer takes to start.
+    [CollectionDefinition(nameof(RelayStartupUnderPoolSaturation), DisableParallelization = true)]
+    public sealed class RelayStartupUnderPoolSaturationCollection;
+
+    [Collection(nameof(RelayStartupUnderPoolSaturation))]
+    public sealed class RelayStartupUnderPoolSaturation
+    {
+        [Fact]
+        public async Task Relay_readiness_is_observed_while_every_thread_pool_worker_is_blocked()
+        {
+            using var certificate = Certificate("localhost");
+            using var release = new ManualResetEventSlim();
+            var queued = ThreadPool.ThreadCount + 256; var entered = 0;
+            for (var index = 0; index < queued; index++)
+                ThreadPool.UnsafeQueueUserWorkItem(_ => { Interlocked.Increment(ref entered); release.Wait(); }, null);
+            TlsRelay? relay = null; Exception? failure = null; var enteredAtReady = 0;
+            try
+            {
+                // Constructed off the pool so any pool-scheduled read queues globally behind the blockers.
+                var constructing = new Thread(() =>
+                {
+                    try { relay = new TlsRelay(certificate, Reply.NoStartTls); } catch (Exception error) { failure = error; }
+                    enteredAtReady = Volatile.Read(ref entered);
+                }) { IsBackground = true };
+                constructing.Start(); constructing.Join();
+            }
+            finally { release.Set(); }
+            // Positive control on the saturation itself: work queued ahead of any pool-scheduled read was still waiting.
+            Assert.True(enteredAtReady < queued, $"The pool drained {enteredAtReady}/{queued} blockers; saturation was not established.");
+            Assert.Null(failure);
+            await using (relay) Assert.InRange(relay!.Port, 1, 65535);
+        }
+    }
+
+    [Fact]
+    public async Task Relay_that_exits_before_publishing_its_port_fails_with_its_exit_code_and_stderr()
+    {
+        using var certificate = Certificate("localhost");
+        // A malformed chain member makes the real peer's certificate load fail before it binds or prints a port.
+        const string malformed = "-----BEGIN CERTIFICATE-----\nnot-a-certificate\n-----END CERTIFICATE-----\n";
+        var error = await Record.ExceptionAsync(async () => { await using var relay = new TlsRelay(certificate, Reply.NoStartTls, intermediatePem: malformed); });
+        var failure = Assert.IsType<InvalidOperationException>(error);
+        Assert.Contains("first stdout line <EOF>", failure.Message);
+        Assert.Contains("exit code 1", failure.Message);
+        Assert.Contains("Traceback", failure.Message);
+        Assert.Contains("load_cert_chain", failure.Message);
     }
 }
