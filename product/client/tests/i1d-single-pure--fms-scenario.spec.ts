@@ -1,0 +1,530 @@
+import { readFileSync } from 'node:fs'
+import { expect, logicTest as test } from './isolated-client-test'
+import { DualFmsSystem } from '../src/fmsCdu/dualFms'
+import { fmsOutputs } from '../src/fmsCdu/efis'
+import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FmsKernel } from '../src/fmsCdu/kernel/kernel'
+import { singleComposition } from '../src/fmsCdu/kernel/legacyPlantAdapter'
+import {
+  ScenarioRecorder, ScenarioRunner, TICK_SECONDS, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
+  scenarioDigest, scenarioProblems, type Scenario,
+} from './fixtures/fms-headless-outcome-census-shim'
+import { UNMODELLED_CONDITIONS } from '../src/fmsCdu/conditions'
+import { HELICOPTER_PROFILE, profileById, profileFingerprint } from '../src/fmsCdu/profile'
+import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
+import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { screenText } from '../src/fmsCdu/screen'
+
+// Scenarios, record and playback, screen assertions and test procedure export (the FMS test bench research
+// roadmap, step 8). A scenario's steps run in order, each after its trigger; an expectation may wait for its
+// condition, and a step the run never reaches fails it.
+const START = Date.UTC(2026, 8, 27, 14, 0, 0)
+const library = (id: string) => SCENARIO_LIBRARY.find(entry => entry.id === id)!
+
+// F16 replay owner: the supported world outage must reach both independent computers, while HBT's separate DME
+// keeps transmitting. Receiver and rendered owners cannot detect an action refused by admission or applied to one FMS.
+test('F16 authored NDB outage replay flags both computers and restores raw bearing without failing the paired DME', () => {
+  let now = START
+  const system = new DualFmsSystem(() => new Date(now))
+  const fixture = readFileSync('tests/fixtures/cifp/pasd-2609.pc', 'latin1')
+  for (const unit of system.computers) {
+    expect.soft(unit.loadArinc424(fixture, 'pasd-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
+    unit.swapCycles()
+    // Literal HBT CIFP2609 coordinates: due south, heading east, so the independent relative bearing is 270.
+    unit.setAircraft({ position: { lat: 55 + 18 / 60 + 56.4 / 3600 - 0.02, lon: -(160 + 31 / 60 + 6.22 / 3600) }, heading: 90 })
+    unit.open('ADF_RADIO')
+  }
+  system.computers[0].setCondition('independent', true)
+  system.computers[0].setRadio('adf', '0390')
+  system.computers[0].setRadio('nav1', '113.20')
+  for (let i = 0; i < 60; i++) { now += 1000; system.tick(); system.computers.forEach(unit => unit.updateNavigation(1)) }
+  const dmeBefore = system.computers.map((unit, i) => fmsOutputs(unit, system.flights[i]).radioMeasurements.dme1.dmeDistance)
+  dmeBefore.forEach(word => expect.soft(word.status).toBe('NORMAL'))
+  for (const offAir of [true, false]) {
+    const scenario = parseScenario(JSON.stringify({ id: 'hbt-outage', title: 'HBT ground outage', objective: '', maxSeconds: 5,
+      steps: [{ when: { kind: 'start' }, action: { kind: 'ndb', ident: 'HBT', offAir } },
+        { when: { kind: 'start' }, action: { kind: 'expectLine', line: 10, pattern: offAir ? '^---' : '^270°' } }] }))
+    expect.soft(procedureText(scenario).steps).toContain(offAir ? 'take NDB HBT off the air' : 'restore NDB HBT on the air')
+    const runner = new ScenarioRunner(scenario, system.computers[1])
+    expect.soft(runner.passed).toBe(true)
+    for (const [i, unit] of system.computers.entries()) {
+      const words = fmsOutputs(unit, system.flights[i])
+      expect.soft(words.radioMeasurements.adf.adfBearing).toEqual(offAir ? { value: null, status: 'NCD' } : { value: 270, status: 'NORMAL' })
+      expect.soft(words.radioMeasurements.dme1.dmeDistance).toEqual(dmeBefore[i])
+      expect.soft(words.radios.adf.receiver).toEqual({ value: 'NORMAL', status: 'NORMAL' })
+      expect.soft(unit.lastAdvisories.filter(text => /ADF/.test(text))).toEqual([])
+    }
+  }
+})
+
+test('F16 outage replay refuses malformed actions and unknown, non-NDB or ambiguous active-database identifiers', () => {
+  const fixture = readFileSync('tests/fixtures/cifp/pasd-2609.pc', 'latin1')
+  const scenario = (ident: unknown, offAir: unknown) => JSON.stringify({ id: 'outage', title: 'Outage', maxSeconds: 1,
+    steps: [{ when: { kind: 'start' }, action: { kind: 'ndb', ident, offAir } }] })
+  for (const [ident, offAir] of [['', true], ['HBT', 'true'], ['HBT', null], ['HBT!', true]]) expect.soft(() => parseScenario(scenario(ident, offAir))).toThrow(/ndb needs/)
+  const ndb = fixture.split('\n').find(line => line.startsWith('SCANDB') && line.includes('HBT'))!
+  for (const [ident, data] of [['ZZZZZ', fixture], ['PASD', fixture], ['HBT', `${fixture}\n${ndb.replace('N55185640', 'N56185640')}`]]) {
+    const unit = new ScriptedFms(() => new Date(START))
+    expect.soft(unit.loadArinc424(data, 'outage.pc')).toMatchObject({ loaded: 'CIFP2609' }); unit.swapCycles()
+    const runner = new ScenarioRunner(parseScenario(scenario(ident, true)), unit)
+    expect.soft(runner.outcome).toBe('error')
+    expect.soft(runner.results[0].actual).toContain('requires one unambiguous NDB in the active database')
+  }
+})
+
+// One test per scenario, so the Fast logic shards can spread them (#1456); together they took two minutes.
+test('the built-in scenario library is not empty', () => {
+  expect.soft(SCENARIO_LIBRARY.length).toBeGreaterThan(0)
+})
+
+for (const scenario of SCENARIO_LIBRARY) {
+  test(`built-in scenario ${scenario.id} passes against the simulation`, () => {
+    const { runner } = runHeadless(scenario)
+    expect.soft(runner.results.filter(result => result.status !== 'done' && result.status !== 'pass'), scenario.id).toEqual([])
+    expect.soft(runner.passed).toBe(true)
+    if (scenario.id === '87n-b-tdn-off-track') {
+      // Only synchronized legacy composition admits the 0.25 s skew; remove its tolerance at I3.
+      const alert = scenario.steps.findIndex(step => step.action.kind === 'expectAlert' && step.action.text === 'TDN NOT POSSIBLE')
+      const refusal = scenario.steps.findIndex(step => step.action.kind === 'expectHover' && step.action.reason === 'OFF FINAL TRACK')
+      expect.soft(runner.results[refusal].at).toBe(runner.results[alert].at)
+    }
+  })
+}
+
+test('GPS lost 2 NM before the FAF: the loss is injected at the distance, and the alerts and missed approach follow', () => {
+  const { runner, fms } = runHeadless(library('gps-lost-before-faf'))
+  // The condition went in when the aircraft reached 2 NM from FERDI, not at the start.
+  expect.soft(runner.results[3].at).toBeGreaterThan(600)
+  expect.soft(runner.results[4]).toMatchObject({ status: 'pass', actual: 'GPS NAV LOST' })
+  expect.soft(runner.results[8].at! - runner.results[7].at!).toBeLessThanOrEqual(30)
+  expect.soft(runner.results[9]).toEqual({ status: 'pass', at: runner.results[8].at, actual: 'not raised' })
+  expect.soft(fms.hasCondition('gpsLost')).toBe(true)
+
+  // The checks prove the actions: without TOGA the aircraft reaches UL501 too late, and unarmed the FMS asks for it.
+  const scenario = library('gps-lost-before-faf')
+  // Distance triggers use aircraft truth; ARM APPROACH uses measured position. For the omitted-arm mutation, leave
+  // 0.1 NM inside the trigger boundary before immediately calling TOGA, so GPS noise cannot order those two events.
+  const without = (kind: string) => runHeadless({ ...scenario, steps: scenario.steps.map(step => step.action.kind === kind
+    ? { ...step, action: { kind: 'keys' as const, keys: ['PROG' as const] } }
+    : kind === 'armApproach' && step.when.kind === 'distance' ? { ...step, when: { ...step.when, nm: 1.9 } } : step) }).runner.results
+  expect.soft(without('goAround')[8]).toMatchObject({ status: 'fail' })
+  expect.soft(without('armApproach')[9]).toMatchObject({ status: 'fail', actual: 'ARM APPROACH' })
+})
+
+test('steps run strictly in order: a later step waits for an earlier one even if its own trigger has come', () => {
+  const scenario: Scenario = {
+    id: 'order', title: 'Order', objective: '', maxSeconds: 30,
+    steps: [
+      { when: { kind: 'time', seconds: 10 }, action: { kind: 'alert', text: 'TEST ALERT' } },
+      { when: { kind: 'start' }, action: { kind: 'expectAlert', text: 'TEST ALERT' } },
+    ],
+  }
+  const { runner } = runHeadless(scenario)
+  expect.soft(runner.results.map(result => [result.status, result.at])).toEqual([['done', 10], ['pass', 10]])
+})
+
+test('an expectation waits up to its "within", passing when met and failing after it with what was shown', () => {
+  // CHECK ANP comes after the terminal phase's 30-second time to alert (M300 15-2), inside the 120-second window: it passes when it comes.
+  const rnp = runHeadless(library('manual-rnp')).runner
+  expect.soft(rnp.results[7]).toEqual({ status: 'pass', at: 30, actual: 'CHECK ANP' })
+
+  const waiting: Scenario = {
+    id: 'wait', title: 'Wait', objective: '', maxSeconds: 60,
+    steps: [
+      { when: { kind: 'time', seconds: 5 }, action: { kind: 'alert', text: 'LATE ALERT' } },
+      { when: { kind: 'start' }, action: { kind: 'expectAlert', text: 'NEVER RAISED' }, within: 10 },
+      { when: { kind: 'start' }, action: { kind: 'expectLine', line: 0, pattern: '^RTE' } },
+      { when: { kind: 'start' }, action: { kind: 'expectActive', waypoint: 'NOWHERE' } },
+      // A wait longer than the run ends at maxSeconds as a failure with what was shown, not as not reached.
+      { when: { kind: 'start' }, action: { kind: 'expectAlert', text: 'NEVER RAISED' }, within: 600 },
+    ],
+  }
+  const { runner } = runHeadless(waiting)
+  expect.soft(runner.results[1]).toEqual({ status: 'fail', at: 15, actual: 'LATE ALERT' })
+  // A screen check reports the line it saw; an active waypoint check, the active waypoint.
+  expect.soft(runner.results[2]).toMatchObject({ status: 'fail', actual: expect.stringMatching(/^IDENT/) })
+  expect.soft(runner.results[3]).toMatchObject({ status: 'fail', actual: expect.stringMatching(/^[A-Z0-9]{2,5}$/) })
+  expect.soft(runner.results[4]).toEqual({ status: 'fail', at: 60, actual: 'LATE ALERT' })
+  expect.soft(runner.passed).toBe(false)
+})
+
+test('steps the run never reaches by maxSeconds fail as not reached', () => {
+  const scenario: Scenario = {
+    id: 'timeout', title: 'Timeout', objective: '', maxSeconds: 20,
+    steps: [
+      { when: { kind: 'active', waypoint: 'NOWHERE' }, action: { kind: 'alert', text: 'X' } },
+      { when: { kind: 'start' }, action: { kind: 'expectLamp', lamp: 'MSG', lit: true } },
+    ],
+  }
+  const { runner } = runHeadless(scenario)
+  expect.soft(runner.results).toEqual([{ status: 'not reached' }, { status: 'not reached' }])
+  // The run ends at the first tick past its limit.
+  expect.soft(runner.endedAfter).toBe(20 + TICK_SECONDS)
+  expect.soft(runner.outcome).toBe('timed out')
+  expect.soft(runner.passed).toBe(false)
+})
+
+test('a recording of keys, conditions and a screen check plays back and passes; a changed screen fails it', () => {
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const recorder = new ScenarioRecorder(() => new Date(now))
+  const press = (fn: Parameters<ScriptedFms['press']>[0]) => { fms.press(fn); recorder.key(fn) }
+  press('PROG')
+  now += 300
+  press('CHAR_1')
+  now += 2000
+  fms.setCondition('gpsLost', true)
+  recorder.condition('gpsLost', true)
+  now += 1000
+  recorder.checkLine(0, screenText(fms.screen())[0])
+  const scenario = recorder.toScenario('Recorded')
+  // Each key keeps its own tick (#1505): 0.3 s after PROG is the next tick, not PROG's step.
+  expect.soft(scenario.steps.map(step => step.action.kind)).toEqual(['keys', 'keys', 'condition', 'expectLine'])
+  expect.soft(scenario.steps[0]).toEqual({ when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG'] } })
+  expect.soft(scenario.steps[1]).toEqual({ when: { kind: 'time', seconds: 0.5 }, action: { kind: 'keys', keys: ['CHAR_1'] } })
+  // Recorded times land on the tick grid, at the tick where playback will run them.
+  expect.soft(scenario.steps[2].when).toEqual({ kind: 'time', seconds: 2.5 })
+  expect.soft(scenario.steps[3].within).toBe(5)
+  expect.soft(scenario.maxSeconds).toBe(60)
+
+  // Played back on a fresh simulation, and through JSON as a saved scenario would be.
+  const replay = runHeadless(parseScenario(JSON.stringify(scenario)))
+  expect.soft(replay.runner.passed).toBe(true)
+  expect.soft(replay.fms.hasCondition('gpsLost')).toBe(true)
+
+  const tampered = structuredClone(scenario)
+  tampered.steps[0].action = { kind: 'keys', keys: ['RTE'] }
+  expect.soft(runHeadless(tampered).runner.passed).toBe(false)
+})
+
+test('a screen line pattern matches the line as shown, whatever the spacing, and escapes its text', () => {
+  const pattern = new RegExp(linePattern(' RNP/ANP   MANUAL (0.3) '))
+  expect.soft(pattern.test(' RNP/ANP MANUAL (0.3)   ')).toBe(true)
+  expect.soft(pattern.test('RNP/ANP  MANUAL (0.3)')).toBe(true)
+  expect.soft(pattern.test('RNP/ANP MANUAL (0x3)')).toBe(false)
+  expect.soft(pattern.test('RNP/ANP MANUAL (0.3) X')).toBe(false)
+})
+
+test('the runner can drive a bench session: poll after each flight step, and abandon marks the rest not reached', () => {
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(fms)
+  const runner = new ScenarioRunner(library('dead-reckoning'), fms)
+  for (let t = 0; t < 130; t += 1) { now += 1000; sim.step(1); runner.poll() }
+  // Seven steps done by 130 s: the APIRS and DVS failures, then the first five of the DR sequence.
+  expect.soft(runner.current).toBe(7)
+  runner.abandon()
+  expect.soft(runner.finished).toBe(true)
+  expect.soft(runner.results.slice(7).map(result => result.status)).toEqual(['not reached', 'not reached'])
+})
+
+test('a scenario becomes test procedure text, and its run a Markdown report marked as simulation evidence', () => {
+  const scenario = library('manual-rnp')
+  const text = procedureText(scenario)
+  expect.soft(text.title).toBe(scenario.title)
+  expect.soft(text.objective).toBe(scenario.objective)
+  expect.soft(text.preconditions).toMatch(/scripted CMA-9000 simulation \(not a navigation computer\)/)
+  expect.soft(text.steps.split('\n')).toHaveLength(scenario.steps.length)
+  expect.soft(text.steps.split('\n')[0]).toBe('1. At the start, press PROG.')
+  // After the first step, a step with no trigger of its own follows on: "then".
+  expect.soft(text.steps).toMatch(/^2\. Then type \.01 into the scratchpad\.$/m)
+  expect.soft(text.steps).toMatch(/^7\. At 25 s, check that screen line 14 matches/m)
+  expect.soft(text.steps).toMatch(/^8\. Then check that the alert CHECK ANP has been raised within 120 s\.$/m)
+  expect.soft(text.expectedResult).toMatch(/^- the RNP annunciator is lit\.$/m)
+
+  const { runner } = runHeadless(scenario, START, { variant: 'A', cycle: 'DEMO-2609' })
+  const report = reportMarkdown(runner)
+  expect.soft(report).toMatch(/^\*\*Result: PASS\*\*$/m)
+  expect.soft(report).toMatch(/not flight-qualified evidence/)
+  expect.soft(report).toMatch(/^- Hardware variation: A$/m)
+  // The run names the aircraft profile it flew, with a fingerprint that changes with any profile value (plan A2).
+  expect.soft(report).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v10 \(fnv1a-[0-9a-f]{8}\): CMA-9000 helicopter, civil SAR target \(S\/W -300 baseline\); 80 of 81 parameters in force; declared only: settlingTime; civil-sar-s300: 87 configured references resolved; \d+ options on \(\d+ implemented, \d+ partial, \d+ pending\)$/m)
+  expect.soft(report).toMatch(new RegExp(`^- Scenario: manual-rnp, ${scenarioDigest(scenario)}$`, 'm'))
+  expect.soft(report).toMatch(/^\| 4 \| Then check that screen line 10 matches \/MANUAL\/\. \| 0 s \| PASS \| RNP\/ANP MANUAL \|$/m)
+})
+
+test('a file that is not a scenario is refused', () => {
+  expect.soft(() => parseScenario('{"title":"x"}')).toThrow(/needs maxSeconds.*needs steps/)
+  expect.soft(() => parseScenario('{"title":"x","maxSeconds":5,"steps":[{"when":{"kind":"start"}}]}')).toThrow(/step 1: an action is required/)
+  expect.soft(() => parseScenario('not json')).toThrow()
+  expect.soft(parseScenario('{"title":"x","maxSeconds":5,"steps":[]}')).toMatchObject({ id: 'imported-x', objective: '' })
+})
+
+// The run contract (review observations N01 to N08, 28 September): a run passes only when every check it makes holds,
+// and it cannot report success for something it did not evaluate, or evaluate something after its deadline.
+const scenarioOf = (steps: unknown[], maxSeconds = 30): Scenario => ({ id: 'contract', title: 'Contract', objective: '', maxSeconds, steps: steps as Scenario['steps'] })
+
+test('an unsupported step or payload is refused at import and never runs as a pass (N01, N02, N07, N08)', () => {
+  const refused: [unknown, RegExp][] = [
+    [{ when: { kind: 'start' }, action: { kind: 'unsupportedCommand' } }, /unsupported action "unsupportedCommand"/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectUnsupported' } }, /unsupported action "expectUnsupported"/],
+    [{ when: { kind: 'sometime' }, action: { kind: 'goAround' } }, /unsupported trigger "sometime"/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectLine', line: 2, pattern: '[' } }, /not a valid regular expression/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectLine', line: 40, pattern: 'X' } }, /line from 0 to 13/],
+    [{ when: { kind: 'start' }, action: { kind: 'keys', keys: ['LAUNCH'] } }, /list of CDU functions/],
+    [{ when: { kind: 'start' }, action: { kind: 'condition', condition: 'meteor', on: true } }, /known condition/],
+    [{ when: { kind: 'time', seconds: Number.NaN }, action: { kind: 'goAround' } }, /seconds between 0 and 86400/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectNoAlert', text: 'CHECK ANP' }, within: 5 }, /checked at one moment/],
+    [{ when: { kind: 'start' }, action: { kind: 'goAround' }, within: 5 }, /within applies only to a check/],
+  ]
+  for (const [step, reason] of refused) {
+    expect.soft(() => parseScenario(JSON.stringify(scenarioOf([step]))), JSON.stringify(step)).toThrow(reason)
+    // Handed to the runner directly, it is not run at all.
+    const { runner } = runHeadless(scenarioOf([step]))
+    expect.soft(runner.outcome, JSON.stringify(step)).toBe('invalid')
+    expect.soft(runner.results[0].status).toBe('pending')
+    expect.soft(reportMarkdown(runner)).toMatch(/^\*\*Result: INVALID SCENARIO \(not run\)\*\*$/m)
+  }
+})
+
+test('a run with no checks is "no checks", not a pass, and its procedure text promises nothing (N03, N06)', () => {
+  const empty = runHeadless(scenarioOf([])).runner
+  expect.soft(empty.outcome).toBe('no checks')
+  expect.soft(empty.passed).toBe(false)
+  expect.soft(reportMarkdown(empty)).toMatch(/^\*\*Result: NO CHECKS/m)
+  const actionsOnly = scenarioOf([{ when: { kind: 'start' }, action: { kind: 'alert', text: 'SURPRISE' } }])
+  expect.soft(runHeadless(actionsOnly).runner.outcome).toBe('no checks')
+  expect.soft(procedureText(actionsOnly).expectedResult).toBe('None: this scenario has no checks. It plays back its actions and verifies no outcome.')
+})
+
+test('nothing runs after the time limit; a step due at the limit still runs (N04)', () => {
+  const late = runHeadless(scenarioOf([
+    { when: { kind: 'time', seconds: 1 }, action: { kind: 'alert', text: 'ON TIME' } },
+    { when: { kind: 'time', seconds: 2 }, action: { kind: 'alert', text: 'AT THE LIMIT' } },
+    { when: { kind: 'time', seconds: 3 }, action: { kind: 'alert', text: 'TOO LATE' } },
+  ], 2))
+  expect.soft(late.runner.results.map(result => [result.status, result.at])).toEqual([['done', 1], ['done', 2], ['not reached', undefined]])
+  expect.soft(late.fms.recallList.map(message => message.text)).toEqual(expect.arrayContaining(['ON TIME', 'AT THE LIMIT']))
+  expect.soft(late.fms.recallList.some(message => message.text === 'TOO LATE')).toBe(false)
+  expect.soft(late.runner.outcome).toBe('timed out')
+})
+
+test('a condition first met after its window does not satisfy the check (N05)', () => {
+  const { runner } = runHeadless(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'expectAlert', text: 'LATE' }, within: 1 },
+    { when: { kind: 'time', seconds: 2 }, action: { kind: 'alert', text: 'LATE' } },
+  ]))
+  // The check fails at its one-second deadline; the alert that comes at 2 s is too late for it.
+  expect.soft(runner.results[0]).toEqual({ status: 'fail', at: 1, actual: 'no alerts' })
+  expect.soft(runner.outcome).toBe('failed')
+  // Met inside the window, it passes when met.
+  const inTime = runHeadless(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'condition', condition: 'gpsLost', on: true } },
+    { when: { kind: 'start' }, action: { kind: 'expectLamp', lamp: 'MSG', lit: true }, within: 1 },
+  ])).runner
+  expect.soft(inTime.results[1].status).toBe('pass')
+  expect.soft(inTime.results[1].at).toBeLessThanOrEqual(1)
+})
+
+test('a step that throws ends the run as an execution error, not a pass or a failed check', () => {
+  const { fms, plant } = singleComposition(START)
+  fms.press = () => { throw new Error('panel disconnected') }
+  const runner = new ScenarioRunner(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG'] } },
+    { when: { kind: 'start' }, action: { kind: 'expectLamp', lamp: 'MSG', lit: false } },
+  ]), fms)
+  new FmsKernel(plant, runner).advance(4)
+  expect.soft(runner.results).toEqual([{ status: 'error', at: 0, actual: 'panel disconnected' }, { status: 'not reached' }])
+  expect.soft(runner.outcome).toBe('error')
+})
+
+test('stopping a run is its own outcome', () => {
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const runner = new ScenarioRunner(library('dead-reckoning'), fms)
+  runner.abandon()
+  expect.soft(runner.outcome).toBe('stopped')
+})
+
+test('the same scenario gives the same timeline however the ticks are grouped, as the bench groups them by rate', () => {
+  const scenario = library('gps-lost-before-faf')
+  const run = (chunk: number) => {
+    const { fms, plant } = singleComposition(START, { profile: profileById(scenario.profile) })
+    const runner = new ScenarioRunner(scenario, fms)
+    const kernel = new FmsKernel(plant, runner)
+    while (!runner.finished) kernel.advance(chunk)
+    return { results: runner.results, position: fms.truePosition, altitude: fms.altitude, elapsed: runner.elapsed }
+  }
+  const oneAtATime = run(1)
+  expect.soft(oneAtATime.results.every(result => result.status === 'done' || result.status === 'pass')).toBe(true)
+  // At 64 times real time the bench runs 64 ticks per callback; an uneven grouping stands for a throttled browser.
+  for (const chunk of [7, 64]) {
+    const grouped = run(chunk)
+    expect.soft(grouped.results).toEqual(oneAtATime.results)
+    expect.soft(grouped.position).toEqual(oneAtATime.position)
+    expect.soft(grouped.altitude).toBe(oneAtATime.altitude)
+  }
+})
+
+// N05, second review (Astra C07): a window shorter than a tick. The deadline falls between observations; a condition
+// first seen after it must fail, even when the next tick is the first chance to look.
+test('a check first observed strictly after its window fails, even when the deadline falls between ticks (N05)', () => {
+  // The DEMO-2609 cycle ends at 23:59:00Z; starting 0.125 s before, DATABASE OUT OF DATE first appears at the 0.25 s tick.
+  const start = Date.UTC(2026, 8, 30, 23, 58, 59, 875)
+  const run = (within: number) => runHeadless(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'expectAlert', text: 'DATABASE OUT OF DATE' }, within },
+  ], 10), start).runner
+  const late = run(0.1)
+  expect.soft(late.results[0]).toMatchObject({ status: 'fail', at: 0.25 })
+  expect.soft(late.outcome).toBe('failed')
+  // Observed exactly at the deadline, or inside it, it passes.
+  expect.soft(run(0.25).results[0]).toMatchObject({ status: 'pass', at: 0.25 })
+  expect.soft(run(0.3).results[0]).toMatchObject({ status: 'pass', at: 0.25 })
+})
+
+test('a cleared scratchpad can be checked with an empty expectation (second review C12)', () => {
+  const scenario = scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'type', text: 'ABC' } },
+    { when: { kind: 'start' }, action: { kind: 'expectScratchpad', text: 'ABC' } },
+    { when: { kind: 'start' }, action: { kind: 'keys', keys: ['CLR', 'CLR', 'CLR'] } },
+    { when: { kind: 'start' }, action: { kind: 'expectScratchpad', text: '' } },
+  ])
+  expect.soft(() => parseScenario(JSON.stringify(scenario))).not.toThrow()
+  expect.soft(runHeadless(scenario).runner.outcome).toBe('passed')
+  // Alert text still needs something to look for.
+  expect.soft(() => parseScenario(JSON.stringify(scenarioOf([{ when: { kind: 'start' }, action: { kind: 'expectAlert', text: '' } }])))).toThrow(/1 to 24 characters/)
+})
+
+test('APPR pressed off is recorded and replayed, and a non-boolean on is refused at import (third review D03)', () => {
+  let now = START
+  const recorder = new ScenarioRecorder(() => new Date(now))
+  recorder.armApproach()
+  now += 2000
+  recorder.armApproach(false)
+  const scenario = recorder.toScenario('APPR on then off')
+  expect.soft(scenario.steps.map(step => step.action)).toEqual([{ kind: 'armApproach' }, { kind: 'armApproach', on: false }])
+  expect.soft(procedureText(scenario).steps).toContain('press APPR off')
+  const replayed = parseScenario(JSON.stringify(scenario))
+  const { fms } = runHeadless(replayed)
+  expect.soft(fms.approachArmed).toBe(false)
+  const armedOnly = runHeadless(parseScenario(JSON.stringify({ ...scenario, steps: scenario.steps.slice(0, 1) }))).fms
+  expect.soft(armedOnly.approachArmed).toBe(true)
+  expect.soft(() => parseScenario(JSON.stringify({ ...scenario, steps: [{ when: { kind: 'start' }, action: { kind: 'armApproach', on: 'no' } }] }))).toThrow(/armApproach on must be true or false/)
+})
+
+test('the profile fingerprint changes when any profile value changes, so evidence names the exact profile (plan A2)', () => {
+  const base = profileFingerprint(HELICOPTER_PROFILE)
+  expect.soft(base).toMatch(/^fnv1a-[0-9a-f]{8}$/)
+  expect.soft(profileFingerprint(structuredClone(HELICOPTER_PROFILE))).toBe(base)
+  const faster = structuredClone(HELICOPTER_PROFILE)
+  faster.parameters.gateSpeed.value = 81
+  expect.soft(profileFingerprint(faster)).not.toBe(base)
+  const forced = structuredClone(HELICOPTER_PROFILE)
+  forced.parameters.rollRate.inForce = !forced.parameters.rollRate.inForce
+  expect.soft(profileFingerprint(forced)).not.toBe(base)
+})
+
+test('a scenario declares the radio altimeter surface by id; the report names it, and an unknown surface is refused (Stage B2)', () => {
+  const declared = runHeadless({ id: 's', title: 's', objective: '', maxSeconds: 1, surface: 'offshore-87n', steps: [] }).runner
+  expect.soft(reportMarkdown(declared)).toMatch(/^- Surface for the radio altimeter: offshore-87n \(declared flat sea at 0 ft MSL/m)
+  const none = runHeadless({ id: 'n', title: 'n', objective: '', maxSeconds: 1, steps: [] }).runner
+  expect.soft(reportMarkdown(none)).toMatch(/^- Surface for the radio altimeter: none \(radio height NCD everywhere\)$/m)
+  const unknown = runHeadless({ id: 'u', title: 'u', objective: '', maxSeconds: 1, surface: 'moon', steps: [] }).runner
+  expect.soft(unknown.outcome).toBe('invalid')
+  expect.soft(unknown.problems.join(' ')).toMatch(/surface must be one of none, offshore-87n/)
+})
+
+// Rev 3 B3.5 F10: baro, heading and attitude failures are not modelled in v1, so a scenario that injects one is refused
+// at admission with that reason, rather than run as though the aircraft had them.
+test('a scenario that injects baro, heading or attitude invalid is refused at admission, with the reason (F10)', () => {
+  for (const [condition, name] of [['baroFail', 'barometric altitude invalid'], ['headingFail', 'heading invalid'], ['attitudeFail', 'attitude invalid']]) {
+    for (const on of [true, false]) {
+      const scenario = { id: 'f10', title: 'f10', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'after', seconds: 1 }, action: { kind: 'condition', condition, on } }] }
+      expect.soft(scenarioProblems(scenario), condition).toEqual([`step 1: ${name} is not modelled in v1, so a scenario that injects it is refused (rev 3 B3.5 F10)`])
+      const { runner } = runHeadless(scenario as unknown as Scenario)
+      expect.soft(runner.outcome).toBe('invalid')
+      // Refused before it ran: no step was reached.
+      expect.soft(runner.results.every(result => result.status === 'pending')).toBe(true)
+    }
+  }
+  expect.soft(UNMODELLED_CONDITIONS.map(condition => condition.id)).toEqual(['baroFail', 'headingFail', 'attitudeFail'])
+  // An unknown condition is still an unknown condition.
+  expect.soft(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'start' }, action: { kind: 'condition', condition: 'gremlins', on: true } }] }))
+    .toEqual(['step 1: condition needs a known condition and on true or false'])
+})
+
+test('a scenario names its aircraft profile and makes autopilot selections; both are validated (Stage B3)', () => {
+  const climb = runHeadless({ id: 'p', title: 'p', objective: '', maxSeconds: 60, steps: [
+    { when: { kind: 'start' }, action: { kind: 'autopilot', altitude: 3500, verticalSpeed: 500, speed: 100 } },
+  ] }).runner
+  expect.soft(climb.results[0]).toEqual({ status: 'done', at: 0 })
+  expect.soft(reportMarkdown(climb)).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v10 /m)
+  const lab = runHeadless({ id: 'l', title: 'l', objective: '', maxSeconds: 1, profile: 'lab-airline-vnav', steps: [
+    { when: { kind: 'start' }, action: { kind: 'autopilot', verticalSpeed: 500 } },
+  ] })
+  expect.soft(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v10 /m)
+  expect.soft(reportMarkdown(lab.runner)).toContain('78 of 81 parameters in force; declared only: advisoryMinimumProgress, temperatureLapseRate, settlingTime')
+  // VS is a helicopter-profile mode: under the laboratory VNAV profile it is an execution error, not a silent pass.
+  expect.soft(lab.runner.outcome).toBe('error')
+  expect.soft(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 1, profile: 'jet', steps: [] })).toEqual([expect.stringMatching(/profile must be one of cma9000-s300-heli-civil, cma9000-later-sbas-heli, lab-airline-vnav/)])
+  expect.soft(scenarioProblems({ id: 'y', title: 'y', objective: '', maxSeconds: 1, steps: [{ when: { kind: 'start' }, action: { kind: 'autopilot' } }] }).join(' ')).toMatch(/autopilot needs at least one/)
+})
+
+test('a TOGA the FMS refuses is an error in the run, never a silent pass', () => {
+  // No approach in the demonstration route: nothing to go around onto.
+  const scenario: Scenario = {
+    id: 'toga-refused', title: 'TOGA refused', objective: '', maxSeconds: 5,
+    steps: [{ when: { kind: 'start' }, action: { kind: 'goAround' } }, { when: { kind: 'start' }, action: { kind: 'expectActive', waypoint: 'MUN' } }],
+  }
+  const { runner } = runHeadless(scenario)
+  expect.soft(runner.outcome).toBe('error')
+  expect.soft(runner.results[0]).toMatchObject({ status: 'error', actual: expect.stringContaining('TOGA refused') })
+})
+
+test('a fresh alert check counts only what was raised since the last action began', () => {
+  const run = (steps: Scenario['steps']) => runHeadless({ id: 'fresh', title: 'Fresh', objective: '', maxSeconds: 5, steps }).runner
+  const raise = { when: { kind: 'start' as const }, action: { kind: 'alert' as const, text: 'CHECK ANP' } }
+  const fresh = { when: { kind: 'start' as const }, action: { kind: 'expectAlert' as const, text: 'CHECK ANP', fresh: true } }
+  const other = { when: { kind: 'start' as const }, action: { kind: 'keys' as const, keys: ['PROG' as const] } }
+  expect.soft(run([raise, fresh]).outcome).toBe('passed')
+  // Raised before a later action: not fresh any more; without fresh it still counts.
+  expect.soft(run([raise, other, fresh]).results[2]).toMatchObject({ status: 'fail' })
+  expect.soft(run([raise, other, { ...fresh, action: { kind: 'expectAlert', text: 'CHECK ANP' } }]).outcome).toBe('passed')
+  expect.soft(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'start' }, action: { kind: 'expectNoAlert', text: 'X', fresh: true } }] })).toEqual(['step 1: fresh applies only to expectAlert, true or false'])
+})
+
+test('below triggers, expectAircraft ranges and expectHover are validated', () => {
+  const problems = (action: unknown, when: unknown = { kind: 'start' }) => scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when, action }] })
+  expect.soft(problems({ kind: 'expectAircraft', minGroundSpeed: 4, track: 50 })).toEqual([])
+  expect.soft(problems({ kind: 'expectAircraft' })).toEqual([expect.stringContaining('expectAircraft needs at least one of')])
+  expect.soft(problems({ kind: 'expectAircraft', track: 400 })).toEqual(['step 1: expectAircraft track must be between 0 and 360'])
+  expect.soft(problems({ kind: 'expectAircraft', maxCrossTrack: 0.1, nearMetres: 10 })).toEqual(['step 1: expectAircraft nearMetres and minNearMetres need near'])
+  expect.soft(problems({ kind: 'expectHover' })).toEqual(['step 1: expectHover needs refused or reason'])
+  expect.soft(problems({ kind: 'expectHover', reason: 'OFF FINAL TRACK' })).toEqual([])
+  expect.soft(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below', feet: 350 })).toEqual([])
+  expect.soft(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below' })).toEqual(['step 1: a below trigger needs feet between -1500 and 60000'])
+  // The cyclic force-trim release as an autopilot action.
+  expect.soft(problems({ kind: 'autopilot', forceTrimRelease: true })).toEqual([])
+  expect.soft(problems({ kind: 'autopilot', forceTrimRelease: 'yes' })).toEqual(['step 1: autopilot altitude, verticalSpeed, speed, groundSpeed and heading must be numbers; hold, lnav, hover, transitionUp and forceTrimRelease true or false'])
+  // GSPD as an autopilot selection (B3.1).
+  expect.soft(problems({ kind: 'autopilot', groundSpeed: 10 })).toEqual([])
+  expect.soft(problems({ kind: 'autopilot', groundSpeed: 'ten' })).toEqual(['step 1: autopilot altitude, verticalSpeed, speed, groundSpeed and heading must be numbers; hold, lnav, hover, transitionUp and forceTrimRelease true or false'])
+})
+
+test('an above trigger fires when the altimeter reads the altitude, to the foot; expectAfcs checks the low-height caption', () => {
+  const problems = (action: unknown, when: unknown = { kind: 'start' }) => scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when, action }] })
+  expect.soft(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'above', feet: 2000 })).toEqual([])
+  expect.soft(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'above' })).toEqual(['step 1: an above trigger needs feet between -1500 and 60000'])
+  expect.soft(problems({ kind: 'expectAfcs', lowHeight: 'LOW HT OFF' })).toEqual([])
+  expect.soft(problems({ kind: 'expectAfcs', lowHeight: 'OFF' })).toEqual(['step 1: expectAfcs lowHeight must be LOW HT, LOW HT OFF or NONE'])
+  expect.soft(problems({ kind: 'expectAfcs' })).toEqual(['step 1: expectAfcs needs at least one of collective, pitch, roll and lowHeight'])
+  // The trigger: 1,999.4 ft reads 1,999; 1,999.5 reads 2,000 (a capture settles onto its altitude without reaching it).
+  const unit = new ScriptedFms(() => new Date(START))
+  const place = (altitude: number) => unit.placeAircraft({ position: unit.truePosition, track: 0, altitude }, 'test: altitude')
+  place(1999.4)
+  const runner = new ScenarioRunner({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'above', feet: 2000 }, action: { kind: 'keys', keys: ['PROG'] } }] }, unit)
+  runner.poll()
+  expect.soft(runner.results[0].status).toBe('pending')
+  place(1999.5)
+  runner.poll()
+  expect.soft(runner.results[0].status).toBe('done')
+  // The caption: none in level flight, so a step expecting LOW HT OFF fails there; LOW HT OFF once the radio height is
+  // lost under a radio-height mode.
+  const wrong = new ScenarioRunner({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'start' }, action: { kind: 'expectAfcs', lowHeight: 'LOW HT OFF' } }] }, unit, undefined, new FlightSimulator(unit))
+  wrong.poll()
+  expect.soft(wrong.results[0]).toMatchObject({ status: 'fail', actual: expect.stringContaining('low height NONE') })
+  const { runner: a4 } = runHeadless(library('87n-a4-ra-lost-in-hover'))
+  expect.soft(a4.outcome).toBe('passed')
+  const caption = library('87n-a4-ra-lost-in-hover').steps.findIndex(step => step.action.kind === 'expectAfcs' && step.action.lowHeight === 'LOW HT OFF')
+  expect.soft(a4.results[caption]).toMatchObject({ status: 'pass', actual: 'ALT | HOV | HOV, low height LOW HT OFF' })
+})
