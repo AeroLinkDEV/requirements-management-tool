@@ -167,6 +167,10 @@ test('another unit\'s object is shared only under a declared link to an earlier 
   // Decode applies the same rule: without B's declared link the cross-unit reference refuses.
   const unlinked = decodeState(linked.value.bytes)
   expect(unlinked.ok ? 'accepted' : unlinked.refusal.code).toBe('OWNERSHIP_AMBIGUOUS')
+  // A link must name the field it covers: an empty path is refused on encode and covers nothing on decode.
+  expect(refusalOf([owner, holder([{ path: [], owner: 'A' }])])).toBe('OWNERSHIP_AMBIGUOUS')
+  const emptyPath = decodeState(linked.value.bytes, { links: { B: [{ path: [], owner: 'A' }] } })
+  expect(emptyPath.ok ? 'accepted' : emptyPath.refusal.code).toBe('OWNERSHIP_AMBIGUOUS')
   const decoded = decodeState(linked.value.bytes, { links: { B: [{ path: ['y'], owner: 'A' }] } })
   if (!decoded.ok) throw new Error(decoded.refusal.detail)
   expect((decoded.value.units[1].fields.y as { frame: unknown }).frame).toBe(decoded.value.units[0].fields.x)
@@ -208,6 +212,24 @@ test('values with no exact encoding are refused, never approximated', () => {
   expect(refusalOf([{ unitId: 'U', root: { s: new Registered() }, fields: { s: 'authoritative' } }], [{ name: 'Registered', prototype: Registered.prototype }])).toBe('accepted')
 })
 
+test('a built-in whose prototype was reassigned is refused on encode and walked by its slots, never emptied or thrown on', () => {
+  const reassigned = <T extends object>(value: T, prototype: object | null) => Object.setPrototypeOf(value, prototype) as T
+  const buffer = new ArrayBuffer(8)
+  for (const value of [
+    reassigned(new Map([[1, 2]]), null), reassigned(new Set([1]), Object.prototype), reassigned(new Date(5), Object.prototype),
+    reassigned(new ArrayBuffer(4), Object.prototype), reassigned(new DataView(new ArrayBuffer(4)), Object.prototype), reassigned(new Uint8Array(4), null),
+  ]) expect(fieldRefusal(value), Object.prototype.toString.call(value)).toBe('UNCLASSIFIED_VALUE')
+  // Ordinary empty objects are still plain objects.
+  expect(fieldRefusal([{}, Object.create(null)])).toBe('accepted')
+  // The config walk follows a reassigned Map, Set or view by its slots.
+  const shared = { id: 'p' }
+  const config = (value: unknown, s: unknown) => refusalOf([{ unitId: 'U', root: { config: value, s }, fields: { config: 'config', s: 'authoritative' } }])
+  expect(config(reassigned(new Map([[shared, 1]]), null), shared)).toBe('UNCLASSIFIED_ALIAS')
+  expect(config(reassigned(new Set([shared]), Object.prototype), shared)).toBe('UNCLASSIFIED_ALIAS')
+  expect(config(reassigned(new DataView(buffer), Object.prototype), buffer)).toBe('UNCLASSIFIED_ALIAS')
+  expect(config(reassigned(new Uint8Array(buffer), null), buffer)).toBe('UNCLASSIFIED_ALIAS')
+})
+
 test('UTC0 must be whole epoch milliseconds of a valid Date', () => {
   for (const utc0 of [1.5, Number.NaN, 8_640_000_000_000_001, -8_640_000_000_000_001]) {
     expect(refusalOf([{ unitId: 'U', root: { s: 1 }, fields: { s: 'authoritative' } }], [], utc0), String(utc0)).toBe('INVALID_UTC0')
@@ -220,6 +242,7 @@ test('a class registry may not name a class twice, register a prototype twice, o
   class Second { v = 2 }
   class Indexed extends Map<number, number> {}
   class Failure extends Error {}
+  class Formatter extends Intl.NumberFormat {}
   class Grandchild extends First {}
   const builtIn = (name: string, prototype: object) => [{ name, prototype }]
   const invalid: ClassRegistration[][] = [
@@ -227,6 +250,7 @@ test('a class registry may not name a class twice, register a prototype twice, o
     [{ name: 'K', prototype: First.prototype }, { name: 'L', prototype: First.prototype }],
     builtIn('M', Map.prototype), builtIn('O', Object.prototype), builtIn('N', Number.prototype), builtIn('B', Boolean.prototype),
     builtIn('W', WeakMap.prototype), builtIn('P', Promise.prototype), builtIn('I', Indexed.prototype), builtIn('F', Failure.prototype),
+    builtIn('Fmt', Formatter.prototype), builtIn('A', AbortController.prototype), builtIn('Z', null as unknown as object),
   ]
   // A plain class hierarchy is fine.
   expect(refusalOf([{ unitId: 'U', root: { s: new Grandchild() }, fields: { s: 'authoritative' } }], [{ name: 'G', prototype: Grandchild.prototype }])).toBe('accepted')
@@ -257,6 +281,8 @@ test('unclassified root properties refuse; configuration may not share with auth
   // A unit root is never serialized state.
   const peer = { name: 'peer' }
   expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { s: peer }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  // Configuration may hold a unit: the config walk stops at unit roots, whose state is the unit's own.
+  expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { config: { unit: peer }, s: 1 }, fields: { config: 'config', s: 'authoritative' } }])).toBe('accepted')
   // Config, observer, derived and link fields are not encoded.
   const encoded = encodeState([{ unitId: 'U', root: { config: { big: 1 }, seen: [2], cache: new Set([3]), read: () => 4, s: 'p' }, fields: { config: 'config', seen: 'observer', cache: 'derived', read: 'link', s: 'authoritative' } }], { utc0Ms: 0 })
   if (!encoded.ok) throw new Error(encoded.refusal.detail)
@@ -322,6 +348,14 @@ test('registered content is always written as a content reference and resolved t
   const wrong: ContentRegistry = { referenceOf: value => value === other ? { contentHash: 'c1', ident: 'KXYZ', index: 0 } : content.referenceOf(value), resolve: () => other }
   const misresolved = decodeState(encoded.value.bytes, { content: wrong })
   expect(misresolved.ok ? undefined : misresolved.refusal).toMatchObject({ code: 'CONTENT_MISSING', contentHash: 'c1' })
+  // Encode checks that each reference resolves back to its object, so a bad registry fails at capture: two references
+  // resolving to one object, or a reference that does not resolve at all.
+  const second = { ident: 'KXYZ' }
+  const merging: ContentRegistry = { referenceOf: value => value === entry ? content.referenceOf(entry) : value === second ? { contentHash: 'c1', ident: 'KXYZ', index: 0 } : undefined, resolve: () => entry }
+  const merged = encodeState([{ unitId: 'U', root: { s: [entry, second] }, fields: { s: 'authoritative' } }], { utc0Ms: 0, content: merging })
+  expect(merged.ok ? 'accepted' : merged.refusal.code).toBe('CONTENT_AMBIGUOUS')
+  const unresolvable = encodeState([{ unitId: 'U', root: { s: entry }, fields: { s: 'authoritative' } }], { utc0Ms: 0, content: { ...content, resolve: () => undefined } })
+  expect(unresolvable.ok ? 'accepted' : unresolvable.refusal.code).toBe('CONTENT_AMBIGUOUS')
 })
 
 test('nesting is limited to 256 path steps, at the same point on encode and decode, and never throws', () => {
