@@ -222,9 +222,11 @@ function run(dir: string, record: Record<string, unknown>, env: Record<string, s
     routeIdentityRefusal,
     host: { quietBefore: quiet, busyPercentDuringRun: busy(before, cpus()), powerPlan: powerPlan() }, result,
   }
-  appendFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify(runRow(entry, resultPath, dir))}\n`)
-  console.log(`${name} ${entry.status} ${JSON.stringify(record)} ${wallSeconds.toFixed(1)} s`)
-  return entry
+  // The recorded row is the run's classification: a W3 row whose result names another identity is failed there.
+  const row = runRow(entry, resultPath, dir) as RunRecord
+  appendFileSync(join(dir, 'runs.jsonl'), `${JSON.stringify(row)}\n`)
+  console.log(`${name} ${row.status} ${JSON.stringify(record.kind === 'browser-w3' ? { kind: record.kind, lineage: record.lineage } : record)} ${wallSeconds.toFixed(1)} s`)
+  return row
 }
 
 function arms() {

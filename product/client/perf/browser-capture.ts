@@ -122,21 +122,24 @@ export function archiveW3ColdInput(input: string, dir: string, entries: readonly
 export function runRow(entry: Record<string, any>, resultFile: string, dir: string) {
   if (entry.kind !== 'browser-w3') return entry
   const { result, identity, ...rest } = entry
-  const bound = existsSync(resultFile) && result !== null && result !== undefined && digest(result.identity) === digest(identity)
-  if (!bound) return { ...rest, identity, resultFile: null, resultSummary: null }
-  return { ...rest, identitySha256: digest(identity),
-    resultFile: { path: relative(dir, resultFile).replaceAll('\\', '/'), bytes: lstatSync(resultFile).size, sha256: fileDigest(resultFile) },
-    resultSummary: { refusal: result.refusal ?? null, accountingStatus: result.accounting?.status ?? null, routeId: result.route?.id ?? null, identitySha256: digest(result.identity) } }
+  if (!existsSync(resultFile) || result === null || result === undefined) return { ...rest, identity, resultFile: null, resultSummary: null }
+  const file = { path: relative(dir, resultFile).replaceAll('\\', '/'), bytes: lstatSync(resultFile).size, sha256: fileDigest(resultFile) }
+  const summary = { refusal: result.refusal ?? null, accountingStatus: result.accounting?.status ?? null, routeId: result.route?.id ?? null, identitySha256: digest(result.identity) }
+  // A result that names another identity is still bound by hash, never dropped, and the slot fails.
+  if (digest(result.identity) !== digest(identity))
+    return { ...rest, status: 'failed', identity, identityMatches: false, identityRefusal: 'child result identity differs from the dispatched slot identity', resultFile: file, resultSummary: summary }
+  return { ...rest, identitySha256: digest(identity), identityMatches: true, resultFile: file, resultSummary: summary }
 }
 /** The W3 session record (w3-session.json; w3-end.json repeats it). The admitted input manifest (with every arm's
  * dependency and dist lists) is copied once into the output and referenced by path, size, SHA-256 and canonical digest. */
 export function w3SessionRecord(fields: { id: string; plan: unknown; sessionIndex: number; slots: unknown[]; manifest: unknown; manifestInput: string; manifestPinnedSha256: string; dir: string;
   cold: unknown; harness: unknown; startedAt: string; monotonicStart: number; deadline: number; comparison?: unknown }) {
-  const { id, plan, sessionIndex, slots, manifest, manifestInput, dir, cold, harness, startedAt, monotonicStart, deadline } = fields
+  const { id, plan, sessionIndex, slots, manifest, manifestInput, manifestPinnedSha256, dir, cold, harness, startedAt, monotonicStart, deadline } = fields
   const copy = join(dir, 'w3-input-manifest.json')
   if (digest(JSON.parse(readFileSync(manifestInput, 'utf8'))) !== digest(manifest)) throw new Error('W3 input manifest file is not the admitted manifest')
   cpSync(manifestInput, copy, { errorOnExist: true, force: false })
   if (fileDigest(copy) !== fileDigest(manifestInput)) throw new Error('W3 input manifest copy bytes disagree')
+  if (fileDigest(copy) !== String(manifestPinnedSha256).toLowerCase()) throw new Error('W3 input manifest copy does not match the pinned --w3-input-sha256')
   const manifestFile = { path: 'w3-input-manifest.json', sha256: fileDigest(copy), bytes: lstatSync(copy).size, digest: digest(manifest) }
   return {schema:'aerolink.fms-w3-paired-session.v1',id,plan,sessionIndex,slots,manifestFile,cold,harness,startedAt,monotonicStart,deadline,qualification:'NOT_CALIBRATED',inference:'DISABLED',closure:'UNPROVEN'}
 }
