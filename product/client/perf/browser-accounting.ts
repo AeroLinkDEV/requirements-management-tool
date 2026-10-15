@@ -496,6 +496,26 @@ export function finiteMissionEvidence(recorded: RecordedWindow, accounting: Wind
 
 /** W3 is a separate estimator. It never changes the between-task W2/finite readers above. */
 export const W3_SCHEMA = 'aerolink.fms-perf-w3-prefix.v1'
+/** W3 recipe amendment 3: the interaction schedule is declared on the simulated-frame clock (protocol.json
+ * w3Recipe.interactionSchedule), so both arms receive identical interaction work whatever the harness costs. */
+export type W3KeySpec = { firstFrame: number; everyFrames: number; count: number; keys: string[] }
+export const W3_INTERACTION_SCHEDULE: W3KeySpec = { firstFrame: 120, everyFrames: 120, count: 59, keys: ['PROG', 'LEGS'] }
+export function w3KeySchedule(spec: W3KeySpec) {
+  return Array.from({ length: spec.count }, (_, index) => ({ index, frame: spec.firstFrame + index * spec.everyFrames, key: spec.keys[index % spec.keys.length] }))
+}
+/** Dispatched keys against the declared schedule: every key, in order, at or after its declared completed frame. */
+function w3ScheduleStatus(inputs: Record<string, any>[]) {
+  const schedule = w3KeySchedule(W3_INTERACTION_SCHEDULE)
+  const late = inputs.map((input, index) => Number(input.completedAtDispatch) - (schedule[index]?.frame ?? NaN))
+  const complete = inputs.length === schedule.length && inputs.every((input, index) => input.expectedKey === schedule[index].key) && late.every(frames => frames >= 0)
+  return { status: complete ? 'COMPLETE' : 'INCOMPLETE', spec: W3_INTERACTION_SCHEDULE, declared: schedule.length, dispatched: inputs.length,
+    maxLateFrames: late.length ? Math.max(...late) : null, lateFrames: late }
+}
+/** The next declared key once its frame has completed, else null. Keys are dispatched in order, one at a time. */
+export function w3DueKey(schedule: ReturnType<typeof w3KeySchedule>, dispatched: number, completed: number) {
+  const next = schedule[dispatched]
+  return next && completed >= next.frame ? next : null
+}
 export type W3Observation = { identity: Record<string, unknown>; setupReport: string; timeline: TimelineEntry[];
   frames: Record<string, any>[]; clocks: Record<string, any>[]; closes: Record<string, any>[]; tasks: TimerTask[];
   frozen: Record<string, any>[]; inputs: Record<string, any>[]; events: Record<string, any>[];
@@ -597,7 +617,7 @@ export function w3PrefixAccounting(raw: W3Observation, expected: FiniteMissionId
     boundaryCounters:{warmup:frames[239].state.boundary,end:frames[7199].state.boundary},sync:{total:7200,scored:6960,firstDrop:null},
     overrun:{completed:completed-7200,frames:frames.slice(7200),close,frozen:raw.frozen},
     availability:raw.availability,longTasks:raw.longTasks.map(row=>({...row,relation:relation(row.start,row.start+row.duration)})),loaf:raw.loaf.map(row=>({...row,relation:relation(row.start,row.start+row.duration)})),
-    interactions,eventTiming:{thresholdMs:16,roundingMs:8,missing:'CENSORED_OR_UNAVAILABLE_NOT_ZERO',exactLatencyP95:'UNAVAILABLE_UNTIL_COMPLETE_CENSORING_ADMISSION'},
+    interactions,interactionSchedule:w3ScheduleStatus(raw.inputs),eventTiming:{thresholdMs:16,roundingMs:8,missing:'CENSORED_OR_UNAVAILABLE_NOT_ZERO',exactLatencyP95:'UNAVAILABLE_UNTIL_COMPLETE_CENSORING_ADMISSION'},
     heap:{retainedF7200:'UNAVAILABLE',laterPostGc:'CONTEXTUAL_ONLY',clockCoverage:'FROZEN_TIMELINE_ONLY_NO_TERMINAL_CLOCK_GETTER',reason:'ordinary Pause freezes flight but does not stop existing clock advances'},workerBacklog:'NOT_APPLICABLE_BEFORE_I3'}
 }
 
