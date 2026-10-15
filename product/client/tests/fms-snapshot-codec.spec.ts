@@ -168,7 +168,7 @@ test('another unit\'s object is shared only under a declared link to an earlier 
   const unlinked = decodeState(linked.value.bytes)
   expect(unlinked.ok ? 'accepted' : unlinked.refusal.code).toBe('OWNERSHIP_AMBIGUOUS')
   // A link must name the field it covers: an empty path is refused on encode and covers nothing on decode.
-  expect(refusalOf([owner, holder([{ path: [], owner: 'A' }])])).toBe('OWNERSHIP_AMBIGUOUS')
+  expect(refusalOf([owner, { unitId: 'B', root: { y: 1 }, fields: { y: 'authoritative' }, links: [{ path: [], owner: 'A' }] }])).toBe('OWNERSHIP_AMBIGUOUS')
   const emptyPath = decodeState(linked.value.bytes, { links: { B: [{ path: [], owner: 'A' }] } })
   expect(emptyPath.ok ? 'accepted' : emptyPath.refusal.code).toBe('OWNERSHIP_AMBIGUOUS')
   const decoded = decodeState(linked.value.bytes, { links: { B: [{ path: ['y'], owner: 'A' }] } })
