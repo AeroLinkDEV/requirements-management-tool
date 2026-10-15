@@ -125,6 +125,9 @@ if ($production -and -not $DisposableQualification) {
 }
 if ($PostgresPort -eq $persistentPostgresPort) { & (Join-Path $PSScriptRoot 'Start-Postgres.ps1') }
 
+# Imported again, deliberately: a production restore's notification revocation force-reimports this module inside
+# AeroLinkNotificationAuthority, which removes this script's copy of its commands.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
 if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
 $bin = [IO.Path]::GetFullPath($PostgresBin)
