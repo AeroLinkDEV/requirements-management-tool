@@ -8,7 +8,7 @@ import { scenarioDigest, type Scenario } from '../src/fmsCdu/scenario'
 import { ACTIVE_PROFILE } from '../src/fmsCdu/profile'
 import { GPS_MODEL_VERSION } from '../src/fmsCdu/gps'
 import { apiLogin, login, selectProgram } from '../tests/auth'
-import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
+import { AccountingRefusal, BROWSER_RUN_SCHEMA, browserWindowAccounting, captureEvidence, finiteMissionEvidence, installBrowserRecorder, measureWindow, W3_INTERACTION_SCHEDULE, w3DueKey, w3KeySchedule, w3PrefixAccounting, w3RunSummary, w3SetupEvidence, type W3Observation, type RecordedWindow, type TimelineEntry, type WindowAccounting, type WindowProbe } from './browser-accounting.ts'
 import { frameSummary } from './stats.ts'
 
 // One browser run (#1510 I0a; accounting revision 2, #1557): the 87N offshore SAR mission from its planned start, at
@@ -39,7 +39,7 @@ if (!family || declaredRoute?.status !== 'IMPLEMENTED' || topology !== 'dual')
 const route = { schema: protocol.routeContract.schema, id: `${workload}/browser-paced/${topology}/v${declaredRoute.version ?? 1}`, workload, scenario: family.scenario, topology, ...declaredRoute }
 const finite = declaredRoute.scored.kind === 'successful-scenario-end-after-warmup'
 const w3 = workload === 'W3'
-type Recorder = { __fmsPerf: { armW3(): void; w3Snapshot(): Omit<W3Observation, 'identity' | 'setupReport'>; armFinite(): void; finiteStatus: { started: boolean; ended: boolean; error: string | null }; begin(): number; boundary(label: string): unknown; keyDispatch(expectedKey?: string): void; keyOutcome(): void; drain(): RecordedWindow['events']; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
+type Recorder = { __fmsPerf: { armW3(): void; w3Snapshot(): Omit<W3Observation, 'identity' | 'setupReport'>; w3Progress(): { frames: number; lastOrdinal: number; firstEntry: { kernelTime: number; unitClockMs: number } | null; closes: number; inputs: number }; armFinite(): void; finiteStatus: { started: boolean; ended: boolean; error: string | null }; begin(): number; boundary(label: string): unknown; keyDispatch(expectedKey?: string): void; keyOutcome(): void; drain(): RecordedWindow['events']; completed: number; finish(): RecordedWindow; timeline: TimelineEntry[] } }
 // The protocol declares the run schema this owner writes; a mismatch is a protocol edit without a harness edit.
 if (protocol.browser.accounting.schema !== BROWSER_RUN_SCHEMA) throw new Error(`protocol.json declares ${protocol.browser.accounting.schema}; this owner writes ${BROWSER_RUN_SCHEMA}`)
 
@@ -149,21 +149,26 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     try { await page.waitForFunction(() => { const fly = (window as unknown as { __w3Fly: { clickMs: number | null; error: string | null } }).__w3Fly; return fly.clickMs !== null || fly.error !== null }, null, { timeout: 60_000 }) }
     catch { observed = 'finished t=0 setup was not observed within 60 s of the public Run click; no Fly' }
     const fly = await page.evaluate(() => (window as unknown as { __w3Fly: { dispatchMs: number | null; clickMs: number | null; error: string | null; setupPassed: boolean | null } }).__w3Fly)
-    let raw: Omit<W3Observation, 'identity' | 'setupReport'>, refusal: string | null = observed ?? fly.error ?? (fly.setupPassed === false ? 'public t=0 setup did not pass; flight not scored' : null), key = 0
-    if (!refusal) try { do {
-      raw = await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.w3Snapshot())
-      const first = raw.frames[0]
-      if (first && (first.entry.kernelTime !== 0 || first.entry.unitClockMs !== Date.parse(expected.startUtc))) { refusal = 'first actual Fly ENTRY was late; no rewind or retry'; break }
-      if (raw.closes.length) { refusal = 'unexpected stop before ordinary public Pause'; break }
-      if ((raw.frames.at(-1)?.ordinal ?? 0) >= 7200) break
-      // Real non-commanding CDU page keys; before/after is actual committed aria-label, not a BRT proxy.
-      const expectedKey=key++ % 2 ? 'LEGS' : 'PROG'
-      await page.evaluate(key => (window as unknown as Recorder).__fmsPerf.keyDispatch(key),expectedKey)
-      await page.locator(`.fmsCduKey[data-fn="${expectedKey}"]`).first().click()
+    let refusal: string | null = observed ?? fly.error ?? (fly.setupPassed === false ? 'public t=0 setup did not pass; flight not scored' : null)
+    // In flight the child polls only the constant-size progress probe (night-1 audit P1-1); the whole observation is
+    // taken once, after Pause. Keys follow the declared completed-frame schedule (amendment 3), not loop timing.
+    const declaredSchedule = protocol.browser.w3Recipe.interactionSchedule
+    if (JSON.stringify(declaredSchedule) !== JSON.stringify(W3_INTERACTION_SCHEDULE)) throw new Error('protocol W3 interaction schedule disagrees with the accounting declaration')
+    const schedule = w3KeySchedule(W3_INTERACTION_SCHEDULE)
+    if (!refusal) try { for (;;) {
+      const progress = await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.w3Progress())
+      const first = progress.firstEntry
+      if (first && (first.kernelTime !== 0 || first.unitClockMs !== Date.parse(expected.startUtc))) { refusal = 'first actual Fly ENTRY was late; no rewind or retry'; break }
+      if (progress.closes) { refusal = 'unexpected stop before ordinary public Pause'; break }
+      if (progress.lastOrdinal >= 7200) break
+      const due = w3DueKey(schedule, progress.inputs, progress.lastOrdinal)
+      if (!due) { await page.waitForTimeout(100); continue }
+      // Real non-commanding CDU page keys; before is read at dispatch, after is the committed screen after two frames.
+      await page.evaluate(key => (window as unknown as Recorder).__fmsPerf.keyDispatch(key), due.key)
+      await page.locator(`.fmsCduKey[data-fn="${due.key}"]`).first().click()
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
       await page.evaluate(() => (window as unknown as Recorder).__fmsPerf.keyOutcome())
-      await page.waitForTimeout(1000)
-    } while (true) } catch(error) { refusal=error instanceof Error?error.message:String(error) }
+    } } catch(error) { refusal=error instanceof Error?error.message:String(error) }
     const pause = page.getByRole('button', { name: 'Pause', exact: true })
     try { if (await pause.count()) await pause.click() } catch(error) { refusal??=error instanceof Error?error.message:String(error) } // ordinary public cancellation; retain actual batch overrun/discard
     await page.evaluate(() => new Promise<void>(resolve => queueMicrotask(resolve)))
@@ -180,6 +185,7 @@ test('browser frame cost', async ({ page, request, context, headless }) => {
     const observation: W3Observation = { ...heap.observations, identity, setupReport }
     let accounting: ReturnType<typeof w3PrefixAccounting> | null = null
     try { accounting = w3PrefixAccounting(observation,expected,identity) } catch(error) { refusal ??= error instanceof Error ? error.message : String(error) }
+    if (accounting && accounting.interactionSchedule.status !== 'COMPLETE') refusal ??= 'declared W3 interaction schedule was not dispatched in full before F7200'
     const summary = w3RunSummary({ schema:protocol.browser.w3Recipe.schema,route,rate,configuration:configuration.id,identity,expected,observation,accounting,refusal,
       scenarioInput:{sourceScenario:family.scenario,bytes:inputBytes,sha256:createHash('sha256').update(inputBytes!).digest('hex')},
       heap:{status:gc==='CDP_COLLECTED'&&heap.usedBytes!==null?'CONTEXTUAL_OBSERVATION':'UNAVAILABLE',retainedF7200:'UNAVAILABLE',method:gc,utcMs:heap.utcMs,monotonicMs:heap.monotonicMs,usedBytes:heap.usedBytes,
