@@ -228,8 +228,9 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         [int]$ValidationApiPort = 5093
     )
     $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
+    Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'The clone-validated upgrade'
     if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort }
-    $token = [Guid]::NewGuid().ToString('N').Substring(0, 10)
+    $token =[Guid]::NewGuid().ToString('N').Substring(0, 10)
     $cloneDatabase = "aerolink_upgrade_validation_$token"
     $cloneConnection = "Host=127.0.0.1;Port=$PostgresPort;Database=$cloneDatabase;Username=postgres"
     # The clone's OWN evidence tree, which is where the restore already places its evidence. Without binding
@@ -438,7 +439,9 @@ function Remove-AeroLinkUpgradeValidationDatabase {
         throw "Refusing to drop '$Database': only a generated AeroLink upgrade-validation database may be removed here."
     }
     $bin = (Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot).PostgresBin
-    if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot (Get-AeroLinkInstallationRoot -ProductRoot $ProductRoot)).DeclaredPostgresPort }
+    $upgradeInstallationRoot = Get-AeroLinkInstallationRoot -ProductRoot $ProductRoot
+    Assert-AeroLinkNotSiteInstallation -InstallationRoot $upgradeInstallationRoot -Operation 'Removing an upgrade-validation database'
+    if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $upgradeInstallationRoot).DeclaredPostgresPort }
     & (Join-Path $bin 'psql.exe') -h 127.0.0.1 -p $PostgresPort -U postgres -d postgres -v ON_ERROR_STOP=1 -tA `
         -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();" | Out-Null
     & (Join-Path $bin 'dropdb.exe') -h 127.0.0.1 -p $PostgresPort -U postgres --if-exists $Database
@@ -463,6 +466,7 @@ function Remove-AeroLinkSnapshotStagingDatabase {
         throw "Refusing to drop '$Database': only a generated AeroLink snapshot-staging database may be removed here."
     }
     $paths = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
+    Assert-AeroLinkNotSiteInstallation -InstallationRoot $paths.InstallationRoot -Operation 'Removing a snapshot-staging database'
     if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $paths.InstallationRoot).DeclaredPostgresPort }
     & (Join-Path $paths.PostgresBin 'psql.exe') -h 127.0.0.1 -p $PostgresPort -U postgres -d postgres -v ON_ERROR_STOP=1 -tA `
         -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();" | Out-Null

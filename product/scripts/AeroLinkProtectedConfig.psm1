@@ -489,12 +489,26 @@ function Set-AeroLinkProtectedSiteSecret {
         finally { [Array]::Clear($plain, 0, $plain.Length) }
     }
     finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    function Set-SiteSecretDirectoryAcl([string[]]$Sids) {
+        $security = New-Object Security.AccessControl.DirectorySecurity
+        $security.SetAccessRuleProtection($true, $false)
+        foreach ($sid in ($Sids | Select-Object -Unique)) {
+            $security.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+        }
+        $info = [IO.DirectoryInfo]::new($directory)
+        if ($PSVersionTable.PSEdition -eq 'Desktop') { $info.SetAccessControl($security) } else { [IO.FileSystemAclExtensions]::SetAccessControl($info, $security) }
+    }
+    $narrowDirectory = $false
     if (Test-Path -LiteralPath $directory -PathType Container) {
         # Replacement never repairs a directory somebody else has widened.
         Assert-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ReaderSid -Subject "protected site secret '$Name'"
     } else {
+        # A new directory is closed at once, before any file exists in it. The writer - an installer storing the
+        # password for a service account it is not - keeps FullControl only until the file is in place, so it can
+        # write and rename it; the directory is then narrowed to exactly the reader, SYSTEM and Administrators.
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
-        Set-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ReaderSid
+        Set-SiteSecretDirectoryAcl @($ReaderSid, 'S-1-5-18', 'S-1-5-32-544', (Get-AeroLinkProtectedConfigOwnerSid))
+        $narrowDirectory = $true
     }
     $record = [ordered]@{
         schemaVersion = $script:ProtectedSiteSecretSchemaVersion; purpose = $script:ProtectedSiteSecretPurpose; name = $Name
@@ -505,12 +519,19 @@ function Set-AeroLinkProtectedSiteSecret {
     $backupPath = Join-Path $directory ('.secret.' + [guid]::NewGuid().ToString('N') + '.bak')
     try {
         [IO.File]::WriteAllText($tempPath, ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
-        Set-AeroLinkProtectedFileAcl -FilePath $tempPath -OwnerSid $ReaderSid
-        if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::Replace($tempPath, $path, $backupPath, $true) } else { [IO.File]::Move($tempPath, $path) }
+        if ($narrowDirectory) {
+            # A new, already-closed directory: the file carries only its ACL until it is in place, then is narrowed.
+            [IO.File]::Move($tempPath, $path)
+            Set-AeroLinkProtectedFileAcl -FilePath $path -OwnerSid $ReaderSid
+        } else {
+            Set-AeroLinkProtectedFileAcl -FilePath $tempPath -OwnerSid $ReaderSid
+            if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::Replace($tempPath, $path, $backupPath, $true) } else { [IO.File]::Move($tempPath, $path) }
+        }
     }
     finally {
         if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $backupPath -PathType Leaf) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
+        if ($narrowDirectory) { Set-SiteSecretDirectoryAcl @($ReaderSid, 'S-1-5-18', 'S-1-5-32-544') }
     }
     return [pscustomobject]@{ Name = $Name; Path = $path; ReaderSid = $ReaderSid }
 }

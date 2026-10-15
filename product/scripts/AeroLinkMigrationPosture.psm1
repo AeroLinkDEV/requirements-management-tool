@@ -36,7 +36,7 @@ function Get-AeroLinkMigrationCount {
     $sql = 'SELECT COUNT(*) FROM "__EFMigrationsHistory"'
 
     try {
-        $output = $sql | & $PsqlPath -X -h $DatabaseHost -p $DatabasePort -U $DatabaseUser -d $DatabaseName -tA -q 2>$null
+        $output = $sql | & $PsqlPath -X -w -h $DatabaseHost -p $DatabasePort -U $DatabaseUser -d $DatabaseName -tA -q 2>$null
         $exitCode = $LASTEXITCODE
     }
     catch {

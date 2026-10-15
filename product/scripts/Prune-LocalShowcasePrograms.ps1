@@ -11,6 +11,7 @@ $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'Showcase program pruning'
 $postgresBin = $installation.PostgresBin
 $postgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort
 $psql = Join-Path $postgresBin 'psql.exe'

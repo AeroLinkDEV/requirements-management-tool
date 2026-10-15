@@ -10,9 +10,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
+$repairInstallationRoot = Get-AeroLinkInstallationRoot -ProductRoot (Split-Path -Parent $PSScriptRoot)
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $repairInstallationRoot -Operation 'The FMS demo history repair'
 if (-not $PSBoundParameters.ContainsKey('PostgresPort')) {
-    Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
-    $PostgresPort = (Get-AeroLinkServiceEndpoints).DeclaredPostgresPort
+    $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $repairInstallationRoot).DeclaredPostgresPort
 }
 if ($Database -notmatch '^[A-Za-z][A-Za-z0-9_]{0,62}$') { throw 'Unsafe database name.' }
 if ($PostgresPort -lt 1 -or $PostgresPort -gt 65535) { throw 'Invalid PostgreSQL port.' }

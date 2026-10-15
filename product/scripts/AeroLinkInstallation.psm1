@@ -365,6 +365,42 @@ $script:AeroLinkDefaultApiPort = 5080
 $script:AeroLinkDefaultPostgresPort = 54329
 $script:AeroLinkSiteClassifications = @('SiteProduction', 'SiteDevelopment')
 
+function Test-AeroLinkSiteClassification {
+    <# .SYNOPSIS Whether a classification is one of the site server classifications. The one list lives here. #>
+    param([AllowNull()][AllowEmptyString()][string]$Classification)
+    return ($Classification -in $script:AeroLinkSiteClassifications)
+}
+
+function Get-AeroLinkServiceSid {
+    <#
+        .SYNOPSIS The SID of the virtual account NT SERVICE\<ServiceName>: S-1-5-80 plus the SHA-1 of the upper-cased name.
+        .DESCRIPTION
+            The same derivation Windows uses (sc showsid), so a folder can be granted to an installation's service
+            account before that service exists; the grant takes effect when the service runs as the account.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9_-]{1,256}$')][string]$ServiceName)
+    $sha = [Security.Cryptography.SHA1]::Create()
+    try { $hash = $sha.ComputeHash([Text.Encoding]::Unicode.GetBytes($ServiceName.ToUpperInvariant())) }
+    finally { $sha.Dispose() }
+    $parts = for ($i = 0; $i -lt 20; $i += 4) { [BitConverter]::ToUInt32($hash, $i) }
+    return 'S-1-5-80-' + ($parts -join '-')
+}
+
+function Assert-AeroLinkNotSiteInstallation {
+    <#
+        .SYNOPSIS Refuses, without prompting, an operation that does not yet support a site server installation.
+        .DESCRIPTION
+            A site cluster requires SCRAM passwords; these HOME-shaped operations connect as postgres with none, so
+            psql would sit at a hidden password prompt. Fail fast and say which item will add site support.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InstallationRoot, [Parameter(Mandatory)][string]$Operation)
+    if (Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot) {
+        throw "$Operation is not yet supported on a site server installation; it connects to PostgreSQL without the site's credentials (#1614 1.9). Nothing was changed."
+    }
+}
+
 function Get-AeroLinkSiteDeclaration {
     <#
         .SYNOPSIS The site server declaration in this installation's instance.json, or $null when it has none.
@@ -388,7 +424,7 @@ function Get-AeroLinkSiteDeclaration {
     if (-not $declared -or -not $declared.PSObject.Properties['site'] -or $null -eq $declared.site) { return $null }
     $site = $declared.site
     $classification = if ($declared.PSObject.Properties['classification']) { [string]$declared.classification } else { '' }
-    if ($classification -notin $script:AeroLinkSiteClassifications) {
+    if (-not (Test-AeroLinkSiteClassification $classification)) {
         throw "The AeroLink instance declaration at $configPath has a site block but classification '$classification'. Only $($script:AeroLinkSiteClassifications -join ' and ') installations may declare one."
     }
     function Read-SitePort([string]$Name) {
@@ -404,10 +440,34 @@ function Get-AeroLinkSiteDeclaration {
     $apiPort = Read-SitePort 'apiPort'
     $postgresPort = Read-SitePort 'postgresPort'
     if ($apiPort -eq $postgresPort) { throw "The site declaration at $configPath gives the API and PostgreSQL the same port $apiPort." }
-    $runAsSid = if ($site.PSObject.Properties['runAsSid']) { [string]$site.runAsSid } else { '' }
-    try { $runAsSid = (New-Object Security.Principal.SecurityIdentifier($runAsSid)).Value }
-    catch { throw "The site declaration at $configPath must name the run-as identity as a SID; it is '$runAsSid'." }
-    $role = if ($site.PSObject.Properties['databaseRole']) { [string]$site.databaseRole } else { '' }
+    # D2 (revised 15 Oct): each installation runs as its own virtual service accounts, NT SERVICE\<service name>,
+    # one for the API and one for PostgreSQL. The SIDs are computed from the names, so they need no lookup and
+    # cannot drift from them; an explicit SID is accepted only as an override for disposable qualification.
+    function Read-SiteServiceName([string]$Name) {
+        $raw = if ($site.PSObject.Properties[$Name]) { [string]$site.$Name } else { '' }
+        if ($raw -notmatch '^[A-Za-z0-9_-]{3,80}$') { throw "The site declaration at $configPath must set $Name to a Windows service name of 3-80 letters, digits, '_' or '-'; it is '$raw'." }
+        return $raw
+    }
+    function Read-SiteSid([string]$Name, [string]$ServiceName) {
+        if (-not $site.PSObject.Properties[$Name] -or [string]::IsNullOrWhiteSpace([string]$site.$Name)) { return (Get-AeroLinkServiceSid -ServiceName $ServiceName) }
+        $raw = [string]$site.$Name
+        try { return (New-Object Security.Principal.SecurityIdentifier($raw)).Value }
+        catch { throw "The site declaration at $configPath must give $Name as a SID; it is '$raw'." }
+    }
+    $serviceName = Read-SiteServiceName 'serviceName'
+    $postgresServiceName = Read-SiteServiceName 'postgresServiceName'
+    if ($serviceName -eq $postgresServiceName) { throw "The site declaration at $configPath gives the API and PostgreSQL the same service account '$serviceName'." }
+    $runAsSid = Read-SiteSid 'runAsSid' $serviceName
+    $postgresRunAsSid = Read-SiteSid 'postgresRunAsSid' $postgresServiceName
+    $publicHostName = $null
+    if ($site.PSObject.Properties['publicHostName'] -and -not [string]::IsNullOrWhiteSpace([string]$site.publicHostName)) {
+        $publicHostName = ([string]$site.publicHostName).Trim().ToLowerInvariant()
+        # D3: the full host name, never the short one, which neither resolves from other sites nor is on the certificate.
+        if ($publicHostName -notmatch '^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$') {
+            throw "The site declaration at $configPath must give publicHostName as a fully qualified host name; it is '$publicHostName'."
+        }
+    }
+    $role =if ($site.PSObject.Properties['databaseRole']) { [string]$site.databaseRole } else { '' }
     if ($role -cnotmatch '^[a-z_][a-z0-9_]{2,62}$' -or $role -eq 'postgres') {
         throw "The site declaration at $configPath must name a lower-case, non-superuser databaseRole; it is '$role'."
     }
@@ -438,7 +498,13 @@ function Get-AeroLinkSiteDeclaration {
         InstallationRoot          = $root
         ApiPort                   = $apiPort
         PostgresPort              = $postgresPort
+        ServiceName               = $serviceName
+        RunAsAccount              = "NT SERVICE\$serviceName"
         RunAsSid                  = $runAsSid
+        PostgresServiceName       = $postgresServiceName
+        PostgresRunAsAccount      = "NT SERVICE\$postgresServiceName"
+        PostgresRunAsSid          = $postgresRunAsSid
+        PublicHostName            = $publicHostName
         DatabaseRole              = $role
         ConnectorDeploymentId     = $deploymentId
         # Installation-owned state (#1614 1.5). Derived from the root rather than stored, so a declaration can
@@ -554,6 +620,9 @@ Export-ModuleMember -Function @(
     'Get-AeroLinkInstanceConfig',
     'Get-AeroLinkServiceEndpoints',
     'Get-AeroLinkSiteDeclaration',
+    'Test-AeroLinkSiteClassification',
+    'Get-AeroLinkServiceSid',
+    'Assert-AeroLinkNotSiteInstallation',
     'Get-AeroLinkPortListenerProcessIds',
     'Assert-AeroLinkPortAvailable',
     'Set-AeroLinkInstanceConfig'

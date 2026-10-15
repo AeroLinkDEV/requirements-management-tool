@@ -33,7 +33,10 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 # The installation's own ports. The guards below protect the persistent database, so they compare against the
 # declared port, never a disposable qualification override.
-$serviceEndpoints = Get-AeroLinkServiceEndpoints -InstallationRoot (Get-AeroLinkInstallationRoot -ProductRoot $productRoot)
+$restoreInstallationRoot = Get-AeroLinkInstallationRoot -ProductRoot $productRoot
+# The isolated drill as well as production: both connect as postgres without a site credential (#1614 1.9).
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $restoreInstallationRoot -Operation 'Restore'
+$serviceEndpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $restoreInstallationRoot
 $persistentPostgresPort = $serviceEndpoints.DeclaredPostgresPort
 if (-not $PostgresPort) { $PostgresPort = $persistentPostgresPort }
 if ($TargetDatabase -notmatch '^[a-zA-Z][a-zA-Z0-9_]{0,62}$') { throw 'The target database name is unsafe.' }

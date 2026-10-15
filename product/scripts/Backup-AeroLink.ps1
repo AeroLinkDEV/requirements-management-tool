@@ -19,6 +19,7 @@ $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'Backup'
 $declaredPostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort
 if (-not $PostgresPort) { $PostgresPort = $declaredPostgresPort }
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force

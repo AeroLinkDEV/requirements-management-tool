@@ -44,6 +44,7 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'A HOME snapshot import'
 if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort }
 $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development
 

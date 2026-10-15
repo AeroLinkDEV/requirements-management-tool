@@ -212,6 +212,35 @@ Write-Output 'FRESH_PROCESS_PROTECTED_CONFIG_OK'
     $widened.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Read', 'Allow')))
     if ($PSVersionTable.PSEdition -eq 'Desktop') { $storedFile.SetAccessControl($widened) } else { [IO.FileSystemAclExtensions]::SetAccessControl($storedFile, $widened) }
     Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -RootOverride $siteRoot } 'A site secret whose file Users can read was still used.'
+    # An installer stores the application password for the API's virtual account, which it is not (D2 revised). The
+    # first write must succeed for such a writer and leave the file and directory readable by exactly that account,
+    # SYSTEM and Administrators - the writer keeps nothing.
+    $serviceSid = 'S-1-5-80-1-2-3-4-5'
+    $serviceInstall = Join-Path $root 'service-installation'
+    $forService = Set-AeroLinkProtectedSiteSecret -InstallationRoot $serviceInstall -Name 'postgres-application' -ReaderSid $serviceSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    $expectedReaders = (@($serviceSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object) -join ','
+    foreach ($securedPath in @($forService.Path, (Split-Path -Parent $forService.Path))) {
+        $sections = [Security.AccessControl.AccessControlSections]::Access
+        # Named, not probed: this process deliberately has no access left inside the directory.
+        $security = if ($securedPath -ne $forService.Path) {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') { ([IO.DirectoryInfo]::new($securedPath)).GetAccessControl($sections) } else { [IO.FileSystemAclExtensions]::GetAccessControl([IO.DirectoryInfo]::new($securedPath), $sections) }
+        } else {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') { ([IO.FileInfo]::new($securedPath)).GetAccessControl($sections) } else { [IO.FileSystemAclExtensions]::GetAccessControl([IO.FileInfo]::new($securedPath), $sections) }
+        }
+        $holders = (@($security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique)) -join ','
+        Assert-True ($security.AreAccessRulesProtected -and $holders -eq $expectedReaders) "A secret stored for a service account must leave $securedPath to exactly that account, SYSTEM and Administrators; holders: $holders."
+    }
+    # This process owns both, so it hands them back to itself to let the fixture be removed.
+    $mine = New-Object Security.Principal.SecurityIdentifier($currentSid)
+    $directoryReset = New-Object Security.AccessControl.DirectorySecurity
+    $directoryReset.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($mine, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    $serviceDirectory = [IO.DirectoryInfo]::new((Split-Path -Parent $forService.Path))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $serviceDirectory.SetAccessControl($directoryReset) } else { [IO.FileSystemAclExtensions]::SetAccessControl($serviceDirectory, $directoryReset) }
+    $fileReset = New-Object Security.AccessControl.FileSecurity
+    $fileReset.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($mine, 'FullControl', 'Allow')))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.File]::SetAccessControl($forService.Path, $fileReset) } else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($forService.Path), $fileReset) }
+
     # A record that names another reader - here NETWORK SERVICE - is refused to this process even though it can open the file.
     $superuser = Set-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-superuser' -ReaderSid $currentSid `
         -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
