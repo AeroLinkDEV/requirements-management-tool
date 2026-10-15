@@ -27,10 +27,20 @@ function Set-AeroLinkNotificationAccessRules {
 
 function Get-AeroLinkNotificationAuthorityPath {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$InstanceId)
+    param(
+        [Parameter(Mandatory)][string]$InstanceId,
+        # A site server installation (#1614) owns its authority root under the installation, not the operator's
+        # profile; revoking under %LOCALAPPDATA% there would revoke nothing.
+        [string]$InstallationRoot
+    )
     $parsed = [guid]::Empty
     if (-not [guid]::TryParse($InstanceId, [ref]$parsed)) { throw 'Notification authority requires an existing installation instance identity.' }
     $authorityRoot = $env:AEROLINK_NOTIFICATION_AUTHORITY_ROOT
+    if ([string]::IsNullOrWhiteSpace($authorityRoot) -and -not [string]::IsNullOrWhiteSpace($InstallationRoot)) {
+        if (-not (Get-Command Get-AeroLinkSiteDeclaration -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') }
+        $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+        if ($site) { $authorityRoot = $site.NotificationAuthorityRoot }
+    }
     if ([string]::IsNullOrWhiteSpace($authorityRoot)) { $authorityRoot = Join-Path $env:LOCALAPPDATA 'AeroLink\notification-authority' }
     $authorityRoot = [IO.Path]::GetFullPath($authorityRoot)
     return Join-Path $authorityRoot ($parsed.ToString('D') + '.json')
@@ -47,7 +57,7 @@ function Revoke-AeroLinkNotificationSendGeneration {
         # A host without an instance identity cannot match any external send authority.
         return [pscustomobject]@{ State = 'DisabledWithoutInstallationIdentity'; SendGeneration = $null }
     }
-    $path = Get-AeroLinkNotificationAuthorityPath -InstanceId $instance.InstanceId
+    $path = Get-AeroLinkNotificationAuthorityPath -InstanceId $instance.InstanceId -InstallationRoot $installation.InstallationRoot
     $root = Split-Path $path -Parent
     $installationPrefix = [IO.Path]::GetFullPath($installation.InstallationRoot).TrimEnd('\') + '\'
     if (($root.TrimEnd('\') + '\').StartsWith($installationPrefix, [StringComparison]::OrdinalIgnoreCase)) {

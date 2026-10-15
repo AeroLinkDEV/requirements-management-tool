@@ -69,7 +69,7 @@ foreach ($pem in $trustAnchors) {
         if ($constraints.Count -ne 1 -or -not $constraints[0].CertificateAuthority) { throw 'Approved custom trust anchors must be certificate authorities.' }
     } finally { $certificate.Dispose() }
 }
-$path = Get-AeroLinkNotificationAuthorityPath -InstanceId $instance.InstanceId
+$path = Get-AeroLinkNotificationAuthorityPath -InstanceId $instance.InstanceId -InstallationRoot (Get-AeroLinkInstallationRoot -ProductRoot $ProductRoot)
 $witness = $path + '.generation'
 if (Test-Path -LiteralPath $witness) {
     if ((Get-Item -LiteralPath $witness).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Generation witness cannot be indirect.' }

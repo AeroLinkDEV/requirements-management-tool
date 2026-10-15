@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$Database,
     [Parameter(Mandatory)][string]$EvidenceRoot,
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AttachmentInventory,
-    [int]$PostgresPort = 54329,
+    # The caller's resolved port: Restore-AeroLink, which takes it from the installation.
+    [Parameter(Mandatory)][int]$PostgresPort,
     [int]$ApiPort = 5091,
     [string]$LogRoot,
     # The exact build to validate with. Named by the caller, never guessed - see below.

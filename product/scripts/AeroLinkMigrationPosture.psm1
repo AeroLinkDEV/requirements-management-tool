@@ -17,7 +17,8 @@ function Get-AeroLinkMigrationCount {
         [Parameter(Mandatory = $true)]
         [string]$PsqlPath,
         [string]$DatabaseHost = '127.0.0.1',
-        [int]$DatabasePort = 54329,
+        [Parameter(Mandatory = $true)]
+        [int]$DatabasePort,
         [string]$DatabaseUser = 'postgres',
         [string]$DatabaseName = 'aerolink'
     )
@@ -35,7 +36,7 @@ function Get-AeroLinkMigrationCount {
     $sql = 'SELECT COUNT(*) FROM "__EFMigrationsHistory"'
 
     try {
-        $output = $sql | & $PsqlPath -X -h $DatabaseHost -p $DatabasePort -U $DatabaseUser -d $DatabaseName -tA -q 2>$null
+        $output = $sql | & $PsqlPath -X -w -h $DatabaseHost -p $DatabasePort -U $DatabaseUser -d $DatabaseName -tA -q 2>$null
         $exitCode = $LASTEXITCODE
     }
     catch {

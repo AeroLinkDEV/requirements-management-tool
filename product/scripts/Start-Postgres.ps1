@@ -156,7 +156,9 @@ $bin = $installation.PostgresBin
 $data = $installation.PostgresData
 $log = $installation.PostgresLog
 $logs = $installation.Logs
-$postgresPort = (Get-AeroLinkServiceEndpoints).PostgresPort
+$endpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot
+$postgresPort = $endpoints.PostgresPort
+
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
 # The helper is a separate process whose stderr the remote-demo launcher retains; a bare
@@ -181,6 +183,43 @@ trap {
     }
     catch { }
     throw
+}
+
+$script:helperPhase = 'site cluster check'
+if ($endpoints.Site) {
+    # A site server installation (#1614) runs PostgreSQL as a Windows service under its run-as identity, with
+    # password authentication; it was initialised by Initialize-AeroLinkSitePostgres, never by the trust-mode
+    # initdb below. This helper only confirms that the listener on the declared port is THIS installation's
+    # postmaster: on a host with two installations and other applications, "something answers on the port"
+    # is not evidence that it is ours.
+    if (-not (Test-Path -LiteralPath (Join-Path $data 'PG_VERSION') -PathType Leaf)) {
+        throw "This site installation has no PostgreSQL cluster at $data. Initialise it with Initialize-AeroLinkSitePostgres (AeroLinkSiteInstallation.psm1); this helper never initialises a site cluster."
+    }
+    $listeners = @(Get-AeroLinkPortListenerProcessIds -Port $postgresPort)
+    if ($listeners.Count -eq 0) {
+        throw "PostgreSQL for this site installation is not running on 127.0.0.1:$postgresPort. Start its Windows service (Register-AeroLinkSitePostgresService); this helper does not start a site cluster under the operator's account."
+    }
+    # postmaster.pid: line 1 the postmaster pid, line 2 its data directory, line 4 its port. All three must name
+    # this cluster on this port, and the pid must be the process holding the declared port.
+    $pidFile = Join-Path $data 'postmaster.pid'
+    $pidLines = @()
+    try { $pidLines = @(Get-Content -LiteralPath $pidFile -TotalCount 4 -ErrorAction Stop) }
+    catch [System.Management.Automation.ItemNotFoundException] { $pidLines = @() }
+    $postmasterPid = 0
+    $owned = $pidLines.Count -ge 4 -and [int]::TryParse(([string]$pidLines[0]).Trim(), [ref]$postmasterPid) -and $postmasterPid -gt 0 -and
+        $postmasterPid -in $listeners -and ([string]$pidLines[3]).Trim() -eq "$postgresPort" -and
+        [string]::Equals([IO.Path]::GetFullPath(([string]$pidLines[1]).Trim()).TrimEnd('\'), [IO.Path]::GetFullPath($data).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+    if (-not $owned) {
+        throw "127.0.0.1:$postgresPort is held by process $($listeners -join ', '), which this site installation's postmaster.pid at $pidFile does not identify as its own cluster on that port. Refusing to treat it as this installation's PostgreSQL."
+    }
+    $readyRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'pg_isready.exe') `
+        -ArgumentList @('-h', '127.0.0.1', '-p', "$postgresPort", '-d', 'aerolink') `
+        -StandardOutput (Join-Path $logs 'postgres-pg_isready.stdout.log') `
+        -StandardError (Join-Path $logs 'postgres-pg_isready.stderr.log') `
+        -TimeoutSeconds 30 -StepName 'pg_isready' -CaptureOutput
+    if ($readyRun.ExitCode -ne 0) { throw "This site installation's PostgreSQL (pid $postmasterPid) holds 127.0.0.1:$postgresPort but is not accepting connections: $($readyRun.Detail)" }
+    Write-Host "PostgreSQL for this site installation is running (pid $postmasterPid) and accepting connections on 127.0.0.1:$postgresPort."
+    exit 0
 }
 
 # Fast path: already genuinely query-ready.

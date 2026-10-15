@@ -34,7 +34,8 @@ param(
     # Accepts an archive whose source installation did not declare itself HOME CANONICAL, recording the
     # provenance the archive actually carries. Provenance is never invented: it is read from the manifest.
     [switch]$AllowUndeclaredSource,
-    [int]$PostgresPort = 54329
+    # Defaults to this installation's declared PostgreSQL port (Get-AeroLinkServiceEndpoints).
+    [int]$PostgresPort = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +44,8 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'A HOME snapshot import'
+if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort }
 $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode Development
 
 # The one direction that is supported. Restoring a snapshot onto the canonical HOME installation would

@@ -15,8 +15,18 @@ function Invoke-AeroLinkEvidenceSql {
 }
 
 function Get-AeroLinkEvidenceRoot {
-    param([Parameter(Mandatory)][string]$ProductRoot)
+    param(
+        [Parameter(Mandatory)][string]$ProductRoot,
+        # A site server installation (#1614) owns its evidence under the installation root; pass the root so
+        # that operator scripts find the same tree the API is given. Other installations are unaffected.
+        [string]$InstallationRoot
+    )
     if (-not [string]::IsNullOrWhiteSpace($env:Evidence__Root)) { return [IO.Path]::GetFullPath($env:Evidence__Root) }
+    if (-not [string]::IsNullOrWhiteSpace($InstallationRoot)) {
+        if (-not (Get-Command Get-AeroLinkSiteDeclaration -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') }
+        $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+        if ($site) { return $site.EvidenceRoot }
+    }
     $apiRoot = Join-Path $ProductRoot 'src\AeroLink.Api'
     $root = $null
     foreach ($name in @('appsettings.json', $(if ($env:ASPNETCORE_ENVIRONMENT) { "appsettings.$($env:ASPNETCORE_ENVIRONMENT).json" }))) {
@@ -42,7 +52,7 @@ function Get-AeroLinkEvidenceSqlText {
       value a caller may pass to a string method. Absent output becomes '' here, and every caller validates it.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329,
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port,
         [Parameter(Mandatory)][string]$Sql,[string[]]$OutputArguments=@())
     $raw = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $Sql -OutputArguments $OutputArguments
     if ($null -eq $raw) { return '' }
@@ -85,7 +95,7 @@ function Get-AeroLinkDatabaseSchemaState {
         treat a query failure, a partial schema, or an unknown state as an empty database.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port)
     # Two probes, deliberately. PostgreSQL resolves table references when a statement is analysed, so a
     # CASE-guarded `SELECT count(*) FROM "__EFMigrationsHistory"` fails on a database where that table does not
     # exist yet - which is exactly the first-start case. Probe 1 asks the catalogue only; probe 2 runs the
@@ -181,7 +191,7 @@ SELECT (SELECT count(*)::text FROM "__EFMigrationsHistory") || ',' ||
 }
 
 function Get-AeroLinkAttachmentInventory {
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port)
     # A database with no applied schema, or one that genuinely predates the attachment migration, has no
     # controlled attachments to inventory; the verified backup of a first start must not query a table that does
     # not exist yet (#1055). The CAPABILITY decides, not the state name: a supported older schema that has the
@@ -228,7 +238,7 @@ function Test-AeroLinkAttachmentInventory {
 }
 
 function Assert-AeroLinkStorageLifecycleHealthy {
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port)
     # A database that has never had the AeroLink schema applied - a genuine first start - has no controlled
     # storage to verify; so does a supported older schema that predates the ATOMIC-STORAGE bookkeeping (its
     # attachment inventory is still taken by the reader above). Measured in the #1055 INT first start: the

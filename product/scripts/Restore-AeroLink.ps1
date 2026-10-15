@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$BackupArchive,
     [string]$TargetDatabase = 'aerolink_restore_validation',
     [string]$EvidenceTarget,
-    [int]$PostgresPort = 54329,
+    # Defaults to this installation's declared PostgreSQL port (Get-AeroLinkServiceEndpoints).
+    [int]$PostgresPort = 0,
     [string]$PostgresBin,
     [int]$ValidationApiPort = 5091,
     [switch]$DisposableQualification,
@@ -29,12 +30,21 @@ $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+# The installation's own ports. The guards below protect the persistent database, so they compare against the
+# declared port, never a disposable qualification override.
+$restoreInstallationRoot = Get-AeroLinkInstallationRoot -ProductRoot $productRoot
+# The isolated drill as well as production: both connect as postgres without a site credential (#1614 1.9).
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $restoreInstallationRoot -Operation 'Restore'
+$serviceEndpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $restoreInstallationRoot
+$persistentPostgresPort = $serviceEndpoints.DeclaredPostgresPort
+if (-not $PostgresPort) { $PostgresPort = $persistentPostgresPort }
 if ($TargetDatabase -notmatch '^[a-zA-Z][a-zA-Z0-9_]{0,62}$') { throw 'The target database name is unsafe.' }
 $production = $TargetDatabase -eq 'aerolink'
 if ($production -and (-not $AllowProductionRestore -or $Confirmation -ne 'RESTORE-AEROLINK')) { throw 'Production restore requires -AllowProductionRestore and -Confirmation RESTORE-AEROLINK.' }
 if (-not $production -and $TargetDatabase -notmatch '(restore|validation|test)') { throw 'Isolated restore database names must contain restore, validation, or test.' }
-if ($production -and -not $DisposableQualification -and $PostgresPort -ne 54329) { throw 'Production restore is restricted to the configured AeroLink PostgreSQL port 54329.' }
-if ($DisposableQualification -and $PostgresPort -eq 54329) { throw 'Disposable restore qualification is forbidden on the persistent AeroLink PostgreSQL port 54329.' }
+if ($production -and -not $DisposableQualification -and $PostgresPort -ne $persistentPostgresPort) { throw "Production restore is restricted to the configured AeroLink PostgreSQL port $persistentPostgresPort." }
+if ($DisposableQualification -and $PostgresPort -eq $persistentPostgresPort) { throw "Disposable restore qualification is forbidden on the persistent AeroLink PostgreSQL port $persistentPostgresPort." }
 
 function Invoke-Fault([string]$Phase) { if ($FaultInjection -eq $Phase) { throw "Injected restore fault at $Phase." } }
 function Invoke-Psql([string]$Database, [string]$Sql) {
@@ -59,7 +69,7 @@ function Rename-Database([string]$From, [string]$To) {
     [void](Invoke-Psql 'postgres' "ALTER DATABASE `"$From`" RENAME TO `"$To`";")
 }
 function Stop-AeroLinkApplicationProcesses {
-    foreach ($port in 5173,5080) {
+    foreach ($port in 5173, $serviceEndpoints.DeclaredApiPort) {
         foreach ($listener in @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)) {
             $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
             $command = "$($process.ExecutablePath) $($process.CommandLine)"
@@ -113,8 +123,10 @@ if ($production -and -not $DisposableQualification) {
     & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -RetentionDays 15
     & (Join-Path $PSScriptRoot 'Stop-AeroLink.ps1')
 }
-if ($PostgresPort -eq 54329) { & (Join-Path $PSScriptRoot 'Start-Postgres.ps1') }
+if ($PostgresPort -eq $persistentPostgresPort) { & (Join-Path $PSScriptRoot 'Start-Postgres.ps1') }
 
+# Imported again, deliberately: a production restore's notification revocation force-reimports this module inside
+# AeroLinkNotificationAuthority, which removes this script's copy of its commands.
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
 if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
@@ -146,7 +158,7 @@ try {
     if ($restoredInventory.Count -gt 0 -and -not (Test-Path -LiteralPath $evidenceSource)) { throw 'The archive contains attachment rows but no evidence directory.' }
     [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $evidenceSource)
 
-    if (-not $EvidenceTarget) { $EvidenceTarget = if ($production) { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot } else { Join-Path $installation.RestoreValidation "$TargetDatabase\evidence" } }
+    if (-not $EvidenceTarget) { $EvidenceTarget = if ($production) { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot -InstallationRoot $installation.InstallationRoot } else { Join-Path $installation.RestoreValidation "$TargetDatabase\evidence" } }
     $resolvedTarget = [IO.Path]::GetFullPath($EvidenceTarget)
     $validationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation) + [IO.Path]::DirectorySeparatorChar
     if (-not $production -and -not ($resolvedTarget + [IO.Path]::DirectorySeparatorChar).StartsWith($validationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The isolated evidence target must remain under the installation restore-validation root.' }

@@ -79,6 +79,56 @@ a running process instead of a commit SHA pretending nothing changed.
 A remote-demo browser session is a view of HOME. The work-laptop repository and work-laptop database are
 irrelevant to it, and it never writes to them.
 
+### Site server installation building blocks (#1614)
+
+A site server installation is one of the two installations planned for the company host
+(`C:\AeroLink\AeroLink Production` and `C:\AeroLink\AeroLink Development`). It is not yet a supported operating
+mode: the release package, installer and boot supervision are later #1614 items. What exists now are the pieces
+the installer will call, in `product/scripts/AeroLinkSiteInstallation.psm1`. None of them acts on an installation
+without a `site` block, so HOME, laptop and demo installations are unchanged: still 5080 and 54329, the per-user
+key ring and the trust-mode development cluster.
+
+- **Service accounts.** Each installation runs as its own virtual service accounts (D2, revised):
+  `NT SERVICE\AeroLink-Production` for the API and `NT SERVICE\AeroLink-Production-PostgreSQL` for its cluster, and
+  the same pair for Development. PostgreSQL has its own account because the API needs only a database connection,
+  not pgdata, and PostgreSQL needs none of the API's keys, evidence or secrets. Their SIDs (`S-1-5-80-...`) are
+  computed from the service names, so folders and secrets are granted before the services exist.
+- **Declared ports.** `Set-AeroLinkSiteDeclaration` writes a `site` block into `instance.json`: API port,
+  PostgreSQL port, the two service names, database role, an optional `publicHostName`, and an explicit connector
+  deployment id and `instanceId`, each minted once and never replaced. Only a `SiteProduction` or
+  `SiteDevelopment` installation may carry one, and a port another process is listening on is refused. The site
+  block is the single source of the API port. `Get-AeroLinkServiceEndpoints` returns the declared ports, and stop,
+  diagnostics and the HOME-shaped scripts take their default port from it instead of a literal.
+- **Not yet on a site.** Backup, restore (including the isolated drill), the clone-validated upgrade, snapshot
+  import, showcase pruning and the FMS history repair connect as `postgres` without a password. On a site they
+  refuse at once rather than wait at a hidden password prompt; site support is the server backup item (#1614 1.9).
+  Diagnostics never prompts (`psql -w`), and probes a site at `https://<publicHostName>:<apiPort>`, or reports the
+  API as not probed while no public name is declared.
+- **Hardened PostgreSQL.** `Initialize-AeroLinkSitePostgres` creates the cluster with `scram-sha-256` for every
+  connection, listening on `127.0.0.1` only, with a non-superuser role that owns `aerolink`. It generates both
+  passwords and stores them in the DPAPI-LocalMachine protected-config store: the application password readable by
+  the API's account, the superuser password by Administrators only, for maintenance. It refuses an existing
+  cluster, and keeps its logs under `<root>\logs` if it fails. `Register-AeroLinkSitePostgresService` (elevated)
+  creates the service under its declared name, running as its virtual account with no password, through
+  `pg_ctl register` or, failing that, `Win32_Service.Create`. `Start-Postgres.ps1` never initialises or starts a
+  site cluster; it only confirms, from `postmaster.pid`, that the listener on the declared port is this
+  installation's cluster.
+- **Installation-owned state.** `Get-AeroLinkSiteRuntimeEnvironment` gives the API its key ring
+  (`<root>\keys\data-protection`, with `DataProtection:ApplicationName=AeroLink` and keys protected with
+  DPAPI-LocalMachine), `Evidence:Root` (`<root>\evidence`), `Connector:SigningKeyPath`, `Connector:DeploymentId`,
+  the instance id and `AEROLINK_NOTIFICATION_AUTHORITY_ROOT`, which stays outside the installation, by default under
+  `%ProgramData%\AeroLink\notification-authority\<installation hash>`. Run as the API's account with
+  `-IncludeConnectionSecret`, it also returns the connection string with the application password.
+  `DataProtection:ApplicationName` and `DataProtection:ProtectKeysWith` are opt-in. HOME sets neither, because
+  changing its discriminator or key location would orphan existing MFA secrets.
+- **Folder ownership and permissions by SID.** `Set-AeroLinkSiteFolderAcl` makes Administrators the owner and
+  refuses a folder somebody else already owns. The installation root and `program` are read-only to the API's
+  account; the PostgreSQL binaries are read and execute for Users, because initdb and pg_ctl run with
+  Administrators deny-only; `pgdata` is writable by the PostgreSQL account and Administrators only; every other
+  data folder (evidence, key ring, connector key, logs, backups and restore space) by the API's account and
+  Administrators only. Permissions are written and read by SID, never by parsing `icacls`, `schtasks` or `netsh`
+  text. Creating and locking `C:\AeroLink` itself is the installer's job (#1614 1.7).
+
 ### Dedicated HOME production source
 
 HOME production and the protected remote demo run from a **separate clone**, used by nothing else:

@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
     [switch]$Json,
-    [uri]$ApiBaseUri = 'http://127.0.0.1:5080',
+    # The API, database port and database user default to this installation's declared endpoints
+    # (Get-AeroLinkServiceEndpoints): 5080, 54329 and postgres everywhere except a site server installation.
+    [uri]$ApiBaseUri,
     [uri]$ClientUri,
     [string]$DatabaseHost = '127.0.0.1',
-    [int]$DatabasePort = 54329,
+    [int]$DatabasePort = 0,
     [string]$DatabaseName = 'aerolink',
-    [string]$DatabaseUser = 'postgres',
+    [string]$DatabaseUser,
     [string]$BackupRoot,
     [string]$EvidenceRoot,
     [switch]$AuthenticatedProbe,
@@ -19,11 +21,24 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
 $postgresBin = $installation.PostgresBin
 $checks = @()
+$endpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot
+$site = Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot
 
+# A site API listens HTTPS-only on the port its site block declares (the single source of that port), and its
+# certificate covers the public host name, not loopback. So a site is probed at https://<publicHostName>:<port>,
+# the way a browser reaches it, or reported as not probed until the public name is declared.
+$apiNotProbed = $null
+if (-not $ApiBaseUri) {
+    if (-not $site) { $ApiBaseUri = "http://127.0.0.1:$($endpoints.DeclaredApiPort)" }
+    elseif ($site.PublicHostName) { $ApiBaseUri = "https://$($site.PublicHostName):$($site.ApiPort)" }
+    else { $apiNotProbed = "Not probed: this site installation declares API port $($site.ApiPort) but no publicHostName yet, and its HTTPS-only listener cannot be checked at a loopback HTTP address." }
+}
+if (-not $DatabasePort) { $DatabasePort = $endpoints.DeclaredPostgresPort }
+if (-not $DatabaseUser) { $DatabaseUser = $endpoints.DatabaseUser }
 if (-not $ClientUri) { $ClientUri = $ApiBaseUri }
 if (-not $BackupRoot) { $BackupRoot = $installation.Backups }
 if (-not $EvidenceRoot) {
-    $EvidenceRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AeroLink\evidence'
+    $EvidenceRoot = if ($site) { $site.EvidenceRoot } else { Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AeroLink\evidence' }
 }
 
 function Add-Check([string]$Category, [string]$Name, [bool]$Healthy, [string]$Detail) {
@@ -56,28 +71,36 @@ else {
     Add-Check 'Readiness' 'Database listener' $false "pg_isready.exe was not found under the configured AeroLink runtime."
 }
 
-try {
-    $response = Invoke-RestMethod (Join-Endpoint $ApiBaseUri '/health/live') -TimeoutSec 3
-    Add-Check 'Liveness' 'API process' ($response.status -eq 'healthy') $ApiBaseUri.AbsoluteUri
+if ($apiNotProbed) {
+    # Reported, never silently passed: an undeclared public name means the site is not ready to be checked.
+    Add-Check 'Liveness' 'API process' $false $apiNotProbed
+    Add-Check 'Readiness' 'API and database' $false $apiNotProbed
+    Add-Check 'Liveness' 'Client application' $false $apiNotProbed
 }
-catch {
-    Add-Check 'Liveness' 'API process' $false (Get-SafeFailureDetail $_)
-}
+else {
+    try {
+        $response = Invoke-RestMethod (Join-Endpoint $ApiBaseUri '/health/live') -TimeoutSec 3
+        Add-Check 'Liveness' 'API process' ($response.status -eq 'healthy') $ApiBaseUri.AbsoluteUri
+    }
+    catch {
+        Add-Check 'Liveness' 'API process' $false (Get-SafeFailureDetail $_)
+    }
 
-try {
-    $response = Invoke-RestMethod (Join-Endpoint $ApiBaseUri '/health/ready') -TimeoutSec 5
-    Add-Check 'Readiness' 'API and database' ($response.status -eq 'ready' -and $response.database -eq 'connected') $ApiBaseUri.AbsoluteUri
-}
-catch {
-    Add-Check 'Readiness' 'API and database' $false (Get-SafeFailureDetail $_)
-}
+    try {
+        $response = Invoke-RestMethod (Join-Endpoint $ApiBaseUri '/health/ready') -TimeoutSec 5
+        Add-Check 'Readiness' 'API and database' ($response.status -eq 'ready' -and $response.database -eq 'connected') $ApiBaseUri.AbsoluteUri
+    }
+    catch {
+        Add-Check 'Readiness' 'API and database' $false (Get-SafeFailureDetail $_)
+    }
 
-try {
-    $response = Invoke-WebRequest $ClientUri -UseBasicParsing -TimeoutSec 3
-    Add-Check 'Liveness' 'Client application' ($response.StatusCode -eq 200) $ClientUri.AbsoluteUri
-}
-catch {
-    Add-Check 'Liveness' 'Client application' $false (Get-SafeFailureDetail $_)
+    try {
+        $response = Invoke-WebRequest $ClientUri -UseBasicParsing -TimeoutSec 3
+        Add-Check 'Liveness' 'Client application' ($response.StatusCode -eq 200) $ClientUri.AbsoluteUri
+    }
+    catch {
+        Add-Check 'Liveness' 'Client application' $false (Get-SafeFailureDetail $_)
+    }
 }
 
 if ($AuthenticatedProbe) {
