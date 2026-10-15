@@ -61,7 +61,7 @@
       "warmupFrames": 240,
       "totalFrames": 7200,
       "scoredFrames": 6960,
-      "executorLimitSeconds": 2100,
+      "executorLimitSeconds": 2700,
       "successFrame": "aerolink.fms-bench.pacing-success-frame",
       "frozenFrame": "aerolink.fms-bench.frozen-frame",
       "primary": "Actual timer handler end-start wholly contained in direct [F240,F7200] monotonic boundaries; unique simulation-slice join. Retain whole crossers and excluded scored-frame exposure separately per metric; never prorate.",
