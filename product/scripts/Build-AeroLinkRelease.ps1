@@ -98,7 +98,9 @@ $latestMigration = $migrations[-1]
 $certificate = Get-AeroLinkReleaseSigningCertificate -Thumbprint $SigningCertificateThumbprint
 
 New-Item -ItemType Directory -Path $output -Force | Out-Null
-$staging = Join-Path $output ('.staging-' + [Guid]::NewGuid().ToString('N'))
+# Staged under a short temporary path, not under -OutputDirectory: the client's deepest files (Cesium workers)
+# exceed Windows PowerShell 5.1's 260-character path limit below a deep output folder.
+$staging = Join-Path ([IO.Path]::GetTempPath()) ('alr-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
 $app = Join-Path $staging 'app'
 $scripts = Join-Path $staging 'scripts'
 $publicCertificate = Join-Path $output ('.verify-' + [Guid]::NewGuid().ToString('N') + '.cer')
