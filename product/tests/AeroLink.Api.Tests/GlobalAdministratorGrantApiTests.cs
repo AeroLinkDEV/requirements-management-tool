@@ -113,6 +113,71 @@ public sealed class GlobalAdministratorGrantApiTests
         Assert.False(me.GetProperty("isAdministrator").GetBoolean());
     }
 
+    /// <summary>
+    /// Owner decision (15 Oct, #1639): project creation and setup acceptance, artifact schemas and assurance
+    /// policy are system powers. Both people below are ordinary Engineer members of the Program, as every
+    /// Windows-provisioned account is; only the grant separates them.
+    /// </summary>
+    [Theory]
+    [InlineData("workspace")]
+    [InlineData("project-setup")]
+    [InlineData("artifact-schema")]
+    [InlineData("assurance-policy")]
+    public async Task A_granted_administrator_may_use_each_moved_system_power_and_an_engineer_may_not(string area)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(administrator);
+        using var workspace = await administrator.PostAsJsonAsync("/api/workspaces", new
+        { programName = "System Powers", programCode = "SYP", projectName = "System Powers", softwareProduct = "Powers Product", initialRelease = "1.0" });
+        Assert.Equal(HttpStatusCode.Created, workspace.StatusCode);
+        var created = await workspace.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var projectId = created.GetProperty("project").GetProperty("id").GetGuid();
+        var maintainerId = await AddMaintainerAsync(factory);
+        var engineerId = await AddAccountAsync(factory, "plain.engineer");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync();
+            foreach (var id in new[] { maintainerId, engineerId })
+                db.ProgramMemberships.Add(new ProgramMembership(id, programId, ProgramRole.Engineer, "test.setup", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.NoContent, (await administrator.PostAsync($"/api/admin/users/{maintainerId}/global-administrator", null)).StatusCode);
+        Guid schemaId = Guid.Empty;
+        if (area == "artifact-schema")
+        {
+            using var schema = await administrator.PostAsJsonAsync("/api/enterprise-requirements/schemas",
+                new { projectId, key = "base", name = "Base", appliesTo = "System", description = "Base schema" });
+            Assert.Equal(HttpStatusCode.Created, schema.StatusCode);
+            schemaId = (await schema.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();
+        }
+
+        async Task<HttpStatusCode> Attempt(HttpClient client, string suffix)
+        {
+            using var response = area switch
+            {
+                "workspace" => await client.PostAsJsonAsync("/api/workspaces", new
+                { programName = $"Created {suffix}", programCode = $"CR{suffix}", projectName = $"Created {suffix}", softwareProduct = "Product", initialRelease = "1.0" }),
+                "project-setup" => await client.PostAsJsonAsync("/api/project-setups", new { projectName = $"Setup {suffix}" }),
+                "artifact-schema" => await client.PostAsJsonAsync($"/api/enterprise-requirements/schemas/{schemaId}/fields",
+                    new { key = $"field{suffix}", label = $"Field {suffix}", type = "ShortText", isRequired = false, sortOrder = 1, optionsJson = "[]" }),
+                _ => await client.PutAsJsonAsync($"/api/projects/{projectId}/assurance-policy", new
+                {
+                    expectedVersion = (await client.GetFromJsonAsync<System.Text.Json.JsonElement>($"/api/projects/{projectId}/assurance-policy")).GetProperty("version").GetInt32(),
+                    declaredLevel = "LevelC", reason = $"Declare as {suffix}.", selections = Array.Empty<object>(), deviations = Array.Empty<object>(),
+                }),
+            };
+            return response.StatusCode;
+        }
+
+        using var engineer = await LoginAsync(factory, "plain.engineer");
+        Assert.Equal(HttpStatusCode.Forbidden, await Attempt(engineer, "E"));
+        using var maintainer = await LoginMaintainerAsync(factory);
+        var allowed = area switch { "artifact-schema" => HttpStatusCode.NoContent, "assurance-policy" => HttpStatusCode.OK, _ => HttpStatusCode.Created };
+        Assert.Equal(allowed, await Attempt(maintainer, "M"));
+    }
+
     [Fact]
     public async Task The_last_active_administrator_cannot_be_revoked_even_by_themselves()
     {
@@ -147,10 +212,12 @@ public sealed class GlobalAdministratorGrantApiTests
         return account.Id;
     }
 
-    private static async Task<HttpClient> LoginMaintainerAsync(AeroLinkApiFactory factory)
+    private static Task<HttpClient> LoginMaintainerAsync(AeroLinkApiFactory factory) => LoginAsync(factory, MaintainerUserName);
+
+    private static async Task<HttpClient> LoginAsync(AeroLinkApiFactory factory, string userName)
     {
         var client = factory.CreateClient();
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = MaintainerUserName, password = AeroLinkApiFactory.MemberPassword });
+        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
         return client;

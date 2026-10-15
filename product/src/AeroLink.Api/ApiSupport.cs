@@ -101,17 +101,23 @@ static class IdentityHttpExtensions
     }
 
     /// <summary>
-    /// Who may configure review workflows and approval procedures: the approval-configuration authority above,
-    /// plus any global system administrator (#1639 owner decision: approval configuration is a system power a
-    /// granted administrator holds). It applies in the Programs the administrator can see: system
-    /// administration does not by itself grant access to every Program. Assurance policy keeps the narrower
-    /// check, because it is an assurance decision rather than system configuration.
+    /// Whether a global system administrator may configure this project (#1639 owner decisions: review and
+    /// approval configuration, assurance policy and artifact schemas are system powers a granted administrator
+    /// holds). It applies in the Programs the administrator can see: system administration does not by itself
+    /// grant access to every Program.
     /// </summary>
-    public static async Task<bool> HasReviewConfigurationAuthorityAsync(this HttpContext context,
+    public static async Task<bool> IsSystemAdministratorForProjectAsync(this HttpContext context,
+        AeroLinkDbContext db, Guid projectId, CancellationToken ct) =>
+        context.UserAccount().IsSystemAdministrator && await context.HasProjectAccessAsync(db, projectId, ct);
+
+    /// <summary>
+    /// Who may configure review workflows, approval procedures and assurance policy: the approval-configuration
+    /// authority above, or a system administrator who can see the project.
+    /// </summary>
+    public static async Task<bool> HasProjectConfigurationAuthorityAsync(this HttpContext context,
         AeroLinkDbContext db, ProjectAuthorityResolver resolver, Guid projectId, CancellationToken ct)
     {
-        if (context.UserAccount().IsSystemAdministrator && await context.HasProjectAccessAsync(db, projectId, ct))
-            return true;
+        if (await context.IsSystemAdministratorForProjectAsync(db, projectId, ct)) return true;
         return await context.HasApprovalConfigurationAuthorityAsync(db, resolver, projectId, ct);
     }
 

@@ -5,6 +5,7 @@ import type { AuthorizedProject } from "./workspaceContext";
 import type { ProjectSetupDraftSummary } from "./ProjectSetupWalkthrough";
 import { setupDraftDisplayName, type DiscardSetupOutcome } from "./projectSetupDrafts";
 import { projectAreaPath } from "./routing";
+import { isSystemAdministrator } from "./administratorCapability";
 import "./ProjectsLanding.css";
 
 export type ProjectIconName =
@@ -127,13 +128,13 @@ export default function ProjectsLanding({
   onOpenProject: (project: AuthorizedProject) => void;
   onSignOut: () => void;
 }) {
-  const showSetupDrafts = user.isAdministrator || drafts.length > 0 || draftStatus !== "ready";
+  const showSetupDrafts = isSystemAdministrator(user) || drafts.length > 0 || draftStatus !== "ready";
   const setupDraftsSection = showSetupDrafts && (
     <SetupDrafts
       drafts={drafts}
       draftStatus={draftStatus}
       onRetryDrafts={onRetryDrafts}
-      canCreate={user.isAdministrator}
+      canCreate={isSystemAdministrator(user)}
       onCreateProject={onCreateProject}
       onResumeSetup={onResumeSetup}
       onDiscardSetup={onDiscardSetup}

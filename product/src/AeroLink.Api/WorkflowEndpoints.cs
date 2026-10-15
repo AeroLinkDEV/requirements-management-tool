@@ -44,7 +44,7 @@ public static class WorkflowEndpoints
             ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             // Deciding how a team reviews is a configuration-management act, not an authoring one.
-            if (!await http.HasReviewConfigurationAuthorityAsync(db, authority, request.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, request.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -70,7 +70,7 @@ public static class WorkflowEndpoints
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasReviewConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -102,7 +102,7 @@ public static class WorkflowEndpoints
         {
             var current = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (current is null) return Results.NotFound();
-            if (!await http.HasReviewConfigurationAuthorityAsync(db, authority, current.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, current.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -128,7 +128,7 @@ public static class WorkflowEndpoints
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasReviewConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
