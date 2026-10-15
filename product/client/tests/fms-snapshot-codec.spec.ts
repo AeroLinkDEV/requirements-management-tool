@@ -1,7 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { createHash } from 'node:crypto'
-import { decodeState, encodeState, type ClassRegistration, type SnapshotUnit } from '../src/fmsCdu/snapshot/codec'
-import { encodeHeaderBody, sealSnapshot, SNAPSHOT_HEADER_FIELD_ORDER, type SnapshotHeaderBody } from '../src/fmsCdu/snapshot/envelope'
+import { decodeState, encodeState, type ClassRegistration, type ContentRegistry, type SnapshotUnit } from '../src/fmsCdu/snapshot/codec'
+import { encodeHeaderBody, sealSnapshot, type SnapshotHeaderBody } from '../src/fmsCdu/snapshot/envelope'
 import { sha256 } from '../src/fmsCdu/snapshot/integrity'
 
 // #1516 I2a: the owner of the aerolink.fms.snapshot v1 state codec, its alias census, the envelope header and SHA-256.
@@ -25,10 +25,35 @@ const encodeField = (value: unknown, utc0Ms = 0) => {
   return result.value.bytes
 }
 const authoritative = (root: object): SnapshotUnit['fields'] => Object.fromEntries(Object.keys(root).map(key => [key, 'authoritative' as const]))
-const refusalOf = (units: SnapshotUnit[], classes: ClassRegistration[] = []) => {
-  const result = encodeState(units, { utc0Ms: 0, classes })
+const refusalOf = (units: SnapshotUnit[], classes: ClassRegistration[] = [], utc0Ms = 0) => {
+  const result = encodeState(units, { utc0Ms, classes })
   return result.ok ? 'accepted' : result.refusal.code
 }
+const fieldRefusal = (value: unknown) => refusalOf([{ unitId: 'U', root: { s: value }, fields: { s: 'authoritative' } }])
+const decodeCode = (...parts: string[]) => { const result = decodeState(hex(...parts)); return result.ok ? 'accepted' : result.refusal.code }
+
+/** A header body whose bytes are written out by hand in BODY_FIELDS below. */
+const BODY: SnapshotHeaderBody = {
+  format: 'aerolink.fms.snapshot', formatVersion: 1, runId: 'r1', frame: 4, coverage: 'partial (kernel-only)',
+  units: [{ unitId: 'K', schema: 'kernel', schemaVersion: 1 }],
+  configuration: [{ unitId: 'FMS1', profileId: 'cma', profileVersion: '1', equipment: ['gps'], seeds: [7], frozenParametersHash: 'ff', rtcOffsetsMs: [0] }],
+  contentRefs: [{ kind: 'userDatabase', contentHash: 'ab' }],
+  environment: { bundleHash: 'h', runtimeKind: 'node', runtimeName: 'node', runtimeVersion: '24', engine: 'v8', os: 'w', platform: 'win32', arch: 'x64' },
+}
+const BODY_FIELDS = [
+  s('format'), '05', s('aerolink.fms.snapshot'),
+  s('formatVersion'), '04 000000000000F03F',
+  s('runId'), '05', s('r1'),
+  s('frame'), '04 0000000000001040',
+  s('coverage'), '05', s('partial (kernel-only)'),
+  s('units'), '06 01000000 07 03000000', s('unitId'), '05', s('K'), s('schema'), '05', s('kernel'), s('schemaVersion'), '04 000000000000F03F',
+  s('configuration'), '06 01000000 07 07000000', s('unitId'), '05', s('FMS1'), s('profileId'), '05', s('cma'), s('profileVersion'), '05', s('1'),
+  s('equipment'), '06 01000000 05', s('gps'), s('seeds'), '06 01000000 04 0000000000001C40', s('frozenParametersHash'), '05', s('ff'),
+  s('rtcOffsetsMs'), '06 01000000 04 0000000000000000',
+  s('contentRefs'), '06 01000000 07 02000000', s('kind'), '05', s('userDatabase'), s('contentHash'), '05', s('ab'),
+  s('environment'), '07 08000000', s('bundleHash'), '05', s('h'), s('runtimeKind'), '05', s('node'), s('runtimeName'), '05', s('node'),
+  s('runtimeVersion'), '05', s('24'), s('engine'), '05', s('v8'), s('os'), '05', s('w'), s('platform'), '05', s('win32'), s('arch'), '05', s('x64'),
+].join('')
 
 test('object keys keep ECMAScript own-key order: integer-like keys ascending, then creation order', () => {
   const value = { b: 1, a: 2, 10: 'x', 2: true }
@@ -59,8 +84,7 @@ test('every scalar NaN encodes as the one canonical NaN, and decode refuses any 
   const bits = (value: number) => { const view = new DataView(new ArrayBuffer(8)); view.setFloat64(0, value, true); return show(new Uint8Array(view.buffer)) }
   expect(bits(payload)).not.toBe(bits(negative))
   expect(show(encodeField([payload, negative, NaN]))).toBe(show(hex(ONE_FIELD, '06 03000000', '04 000000000000F87F', '04 000000000000F87F', '04 000000000000F87F')))
-  const other = decodeState(hex(ONE_FIELD, '04 010000000000F87F'))
-  expect(other.ok ? 'accepted' : other.refusal.code).toBe('NON_CANONICAL')
+  expect(decodeCode(ONE_FIELD, '04 010000000000F87F')).toBe('NON_CANONICAL')
 })
 
 test('an invalid Date has its own explicit encoding and decodes to an invalid Date', () => {
@@ -79,13 +103,14 @@ test('valid Dates are whole milliseconds relative to UTC0, exact across the whol
     '09 D204000000000000',
     '09 FFFFFFFFFFFFFFFF',
     '09 00981A3074FEFFFF')))
-  // Offsets beyond 2^53 ms stay exact: the earliest UTC0 and the latest Date are 1.728e16 ms apart.
+  // The earliest UTC0 and the latest Date but one are 17279999999999999 ms apart: odd and beyond 2^53, so binary64
+  // arithmetic would round it to ...000 on either side.
   const earliest = -8_640_000_000_000_000
-  const bytes = encodeField(new Date(8_640_000_000_000_000), earliest)
-  expect(show(bytes)).toBe(show(hex('0000243DF74DE1FF ','01000000 0100000055 01000000 0100000073', '09 0000B88511643D00')))
+  const bytes = encodeField(new Date(8_639_999_999_999_999), earliest)
+  expect(show(bytes)).toBe(show(hex('0000243DF74DE1FF 01000000 0100000055 01000000 0100000073', '09 FFFFB78511643D00')))
   const decoded = decodeState(bytes)
   if (!decoded.ok) throw new Error(decoded.refusal.detail)
-  expect((decoded.value.units[0].fields.s as Date).getTime()).toBe(8_640_000_000_000_000)
+  expect((decoded.value.units[0].fields.s as Date).getTime()).toBe(8_639_999_999_999_999)
 })
 
 test('Map and Set entries keep insertion order', () => {
@@ -125,7 +150,7 @@ test('an alias is emitted once and referenced by its first path; equal but disti
   expect(fields.r).toEqual(fields.p)
 })
 
-test('another unit\'s object is refused unless the holder declares a link to its owner', () => {
+test('another unit\'s object is shared only under a declared link to an earlier owner, on encode and on decode', () => {
   const frame = { gps: 1 }
   const owner: SnapshotUnit = { unitId: 'A', root: { x: frame }, fields: { x: 'authoritative' } }
   const holder = (links?: SnapshotUnit['links']): SnapshotUnit => ({ unitId: 'B', root: { y: { frame } }, fields: { y: 'authoritative' }, links })
@@ -133,77 +158,150 @@ test('another unit\'s object is refused unless the holder declares a link to its
   expect(refusalOf([owner, holder([{ path: ['y'], owner: 'C' }])])).toBe('OWNERSHIP_AMBIGUOUS')
   expect(refusalOf([owner, holder([{ path: ['z'], owner: 'A' }])])).toBe('OWNERSHIP_AMBIGUOUS')
   expect(refusalOf([owner, { unitId: 'A', root: {}, fields: {} }])).toBe('OWNERSHIP_AMBIGUOUS')
+  expect(refusalOf([holder([{ path: ['y'], owner: 'A' }]), owner])).toBe('OWNER_AFTER_HOLDER')
   const linked = encodeState([owner, holder([{ path: ['y'], owner: 'A' }])], { utc0Ms: 0 })
   if (!linked.ok) throw new Error(linked.refusal.detail)
   expect(show(linked.value.bytes)).toBe(show(hex('0000000000000000 02000000',
     '0100000041 01000000  01000000 78  07 01000000  03000000 677073  04 000000000000F03F',
     '0100000042 01000000  01000000 79  07 01000000  05000000 6672616D65  10 0100000041  01000000  00 01000000 78')))
+  // Decode applies the same rule: without B's declared link the cross-unit reference refuses.
+  const unlinked = decodeState(linked.value.bytes)
+  expect(unlinked.ok ? 'accepted' : unlinked.refusal.code).toBe('OWNERSHIP_AMBIGUOUS')
+  const decoded = decodeState(linked.value.bytes, { links: { B: [{ path: ['y'], owner: 'A' }] } })
+  if (!decoded.ok) throw new Error(decoded.refusal.detail)
+  expect((decoded.value.units[1].fields.y as { frame: unknown }).frame).toBe(decoded.value.units[0].fields.x)
 })
 
 test('values with no exact encoding are refused, never approximated', () => {
   class Unregistered { v = 1 }
   class Registered { v = 1 }
-  const refusal = (value: unknown, classes: ClassRegistration[] = []) => refusalOf([{ unitId: 'U', root: { s: value }, fields: { s: 'authoritative' } }], classes)
-  expect(refusal(() => 1)).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal(Symbol('s'))).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal(1n)).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal(new Unregistered())).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal({ get v() { return 1 } })).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal(Object.freeze({ v: 1 }))).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal({ [Symbol('k')]: 1 })).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal(Object.assign([1], { extra: 2 }))).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal(Object.assign(new Map(), { extra: 2 }))).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal('\uD800')).toBe('UNCLASSIFIED_VALUE')
-  expect(refusal(new Registered(), [{ name: 'Registered', prototype: Registered.prototype }])).toBe('accepted')
+  type Buffers = { new (length: number, options: { maxByteLength: number }): ArrayBuffer }
+  const resizable = new (ArrayBuffer as unknown as Buffers)(8, { maxByteLength: 16 })
+  const detached = new ArrayBuffer(8)
+  ;(detached as unknown as { transfer(): ArrayBuffer }).transfer()
+  expect(fieldRefusal(() => 1)).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(Symbol('s'))).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(1n)).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(new Unregistered())).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal({ get v() { return 1 } })).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(Object.freeze({ v: 1 }))).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal({ [Symbol('k')]: 1 })).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(Object.assign([1], { extra: 2 }))).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(Object.assign(new Map(), { extra: 2 }))).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(Object.assign(new Date(0), { extra: 2 }))).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(resizable)).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal(detached)).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal('\uD800')).toBe('UNCLASSIFIED_VALUE')
+  expect(fieldRefusal({ ['\uDC00']: 1 })).toBe('UNCLASSIFIED_VALUE')
+  expect(refusalOf([{ unitId: 'U', root: { s: new Registered() }, fields: { s: 'authoritative' } }], [{ name: 'Registered', prototype: Registered.prototype }])).toBe('accepted')
 })
 
-test('unclassified root properties and aliases into unserialized fields are refused', () => {
-  const profile = { id: 'p' }
-  const peer = { name: 'peer' }
+test('UTC0 must be whole epoch milliseconds of a valid Date', () => {
+  for (const utc0 of [1.5, Number.NaN, 8_640_000_000_000_001, -8_640_000_000_000_001]) {
+    expect(refusalOf([{ unitId: 'U', root: { s: 1 }, fields: { s: 'authoritative' } }], [], utc0), String(utc0)).toBe('INVALID_UTC0')
+  }
+  expect(refusalOf([{ unitId: 'U', root: { s: 1 }, fields: { s: 'authoritative' } }], [], -8_640_000_000_000_000)).toBe('accepted')
+})
+
+test('a class registry may not name a class twice, register a prototype twice or register a built-in', () => {
+  class First { v = 1 }
+  class Second { v = 2 }
+  const invalid = [
+    [{ name: 'K', prototype: First.prototype }, { name: 'K', prototype: Second.prototype }],
+    [{ name: 'K', prototype: First.prototype }, { name: 'L', prototype: First.prototype }],
+    [{ name: 'M', prototype: Map.prototype }],
+  ]
+  for (const classes of invalid) {
+    expect(refusalOf([{ unitId: 'U', root: { s: new First() }, fields: { s: 'authoritative' } }], classes)).toBe('CLASS_REGISTRY_INVALID')
+    const decoded = decodeState(hex(ONE_FIELD, '01'), { classes })
+    expect(decoded.ok ? 'accepted' : decoded.refusal.code).toBe('CLASS_REGISTRY_INVALID')
+  }
+})
+
+test('unclassified root properties refuse, and serialized state may not reach anything restore rebuilds', () => {
+  const shared = { id: 'p' }
   expect(refusalOf([{ unitId: 'U', root: { s: 1, extra: 2 }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_PROPERTY')
-  expect(refusalOf([{ unitId: 'U', root: { config: profile, s: { profile } }, fields: { config: 'config', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  expect(refusalOf([{ unitId: 'U', root: { seen: profile, s: [profile] }, fields: { seen: 'observer', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  // Through config, observer and derived fields, directly or anywhere inside them.
+  expect(refusalOf([{ unitId: 'U', root: { config: shared, s: { shared } }, fields: { config: 'config', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([{ unitId: 'U', root: { config: { inner: shared }, s: shared }, fields: { config: 'config', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([{ unitId: 'U', root: { seen: { list: [shared] }, s: { y: shared } }, fields: { seen: 'observer', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([{ unitId: 'U', root: { cache: new Map([['k', shared]]), s: shared }, fields: { cache: 'derived', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([{ unitId: 'P', root: { config: { deep: [shared] } }, fields: { config: 'config' } }, { unitId: 'U', root: { s: shared }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  // A unit root is never serialized state.
+  const peer = { name: 'peer' }
   expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { s: peer }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  // A link field is re-bound by link() on restore, so sharing with it is allowed; config and link fields are not encoded.
-  const linked = encodeState([{ unitId: 'U', root: { peer: profile, s: profile, config: { big: 1 } }, fields: { peer: 'link', s: 'authoritative', config: 'config' } }], { utc0Ms: 0 })
-  if (!linked.ok) throw new Error(linked.refusal.detail)
-  expect(show(linked.value.bytes)).toBe(show(hex(ONE_FIELD, '07 01000000  02000000 6964  05 01000000 70')))
+  // A link field holds a unit root, or an object a declared owner emits: never the holder's own state, never an
+  // object nobody emits.
+  expect(refusalOf([{ unitId: 'U', root: { peer: shared, s: shared }, fields: { peer: 'link', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([{ unitId: 'U', root: { peer: { w: shared }, s: shared }, fields: { peer: 'link', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  const frame = { gps: 1 }
+  const owner: SnapshotUnit = { unitId: 'A', root: { x: frame }, fields: { x: 'authoritative' } }
+  expect(refusalOf([owner, { unitId: 'B', root: { sensors: frame }, fields: { sensors: 'link' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([owner, { unitId: 'B', root: { sensors: frame }, fields: { sensors: 'link' }, links: [{ path: ['sensors'], owner: 'A' }] }])).toBe('accepted')
+  expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { peer, read: () => 1, s: 1 }, fields: { peer: 'link', read: 'link', s: 'authoritative' } }])).toBe('accepted')
+  // Config, observer, derived and link fields are not encoded.
+  const encoded = encodeState([{ unitId: 'U', root: { config: { big: 1 }, seen: [2], cache: new Set([3]), read: () => 4, s: 'p' }, fields: { config: 'config', seen: 'observer', cache: 'derived', read: 'link', s: 'authoritative' } }], { utc0Ms: 0 })
+  if (!encoded.ok) throw new Error(encoded.refusal.detail)
+  expect(show(encoded.value.bytes)).toBe(show(hex(ONE_FIELD, '05 01000000 70')))
+})
+
+test('registered content is always written as a content reference and resolved through the registry on decode', () => {
+  const entry = { ident: 'KBTV', elevation: Object.freeze({ ft: 335 }) }
+  const content: ContentRegistry = {
+    referenceOf: value => value === entry ? { contentHash: 'c1', ident: 'KBTV', index: 2 } : undefined,
+    resolve: reference => reference.contentHash === 'c1' && reference.ident === 'KBTV' && reference.index === 2 ? entry : undefined,
+  }
+  // Content held by configuration (the navigation database) is still referable from state.
+  const root = { database: { entries: [entry] }, s: [entry, entry] }
+  const encoded = encodeState([{ unitId: 'U', root, fields: { database: 'config', s: 'authoritative' } }], { utc0Ms: 0, content })
+  if (!encoded.ok) throw new Error(encoded.refusal.detail)
+  const contentRef = ['12', s('c1'), s('KBTV'), '02000000'].join('')
+  expect(show(encoded.value.bytes)).toBe(show(hex(ONE_FIELD, '06 02000000', contentRef, contentRef)))
+  const decoded = decodeState(encoded.value.bytes, { content })
+  if (!decoded.ok) throw new Error(decoded.refusal.detail)
+  expect(decoded.value.units[0].fields.s).toEqual([entry, entry])
+  expect((decoded.value.units[0].fields.s as unknown[])[0]).toBe(entry)
+  for (const registry of [undefined, { referenceOf: () => undefined, resolve: () => undefined }]) {
+    const missing = decodeState(encoded.value.bytes, { content: registry })
+    expect(missing.ok ? undefined : missing.refusal).toMatchObject({ code: 'CONTENT_MISSING', contentHash: 'c1' })
+  }
+})
+
+test('nesting is limited to 256 path steps, at the same point on encode and decode, and never throws', () => {
+  const nested = (depth: number) => { let value: unknown = 1; for (let i = 0; i < depth; i += 1) value = [value]; return value }
+  const crafted = (depth: number) => hex(ONE_FIELD, '06 01000000'.repeat(depth), '04 000000000000F03F')
+  // The number inside 255 arrays sits at step 256 (the field is step 1): the deepest value allowed.
+  expect(show(encodeField(nested(255)))).toBe(show(crafted(255)))
+  const atLimit = decodeState(crafted(255))
+  expect(atLimit.ok).toBe(true)
+  expect(fieldRefusal(nested(256))).toBe('NESTING_LIMIT')
+  expect(decodeCode(show(crafted(256)))).toBe('NON_CANONICAL')
+  // A crafted stream far deeper than any stack, and a deep linked list, refuse instead of throwing.
+  expect(decodeCode(show(crafted(200_000)))).toBe('NON_CANONICAL')
+  expect(decodeCode(ONE_FIELD, '07 01000000 01000000 6E'.repeat(200_000))).toBe('NON_CANONICAL')
+  let list: unknown = null
+  for (let i = 0; i < 5_000; i += 1) list = { next: list }
+  expect(fieldRefusal(list)).toBe('NESTING_LIMIT')
 })
 
 test('the envelope header is written in its fixed version-1 field order, whatever order it is given in', () => {
-  const body: SnapshotHeaderBody = {
-    format: 'aerolink.fms.snapshot', formatVersion: 1, runId: 'r1', frame: 4, coverage: 'partial (kernel-only)',
-    units: [{ unitId: 'K', schema: 'kernel', schemaVersion: 1 }],
-    configuration: [{ unitId: 'FMS1', profileId: 'cma', profileVersion: '1', equipment: ['gps'], seeds: [7], frozenParametersHash: 'ff', rtcOffsetsMs: [0] }],
-    contentRefs: [{ kind: 'userDatabase', contentHash: 'ab' }],
-    environment: { bundleHash: 'h', runtimeKind: 'node', runtimeName: 'node', runtimeVersion: '24', engine: 'v8', os: 'w', platform: 'win32', arch: 'x64' },
-  }
-  const expected = hex('07 09000000',
-    s('format'), '05', s('aerolink.fms.snapshot'),
-    s('formatVersion'), '04 000000000000F03F',
-    s('runId'), '05', s('r1'),
-    s('frame'), '04 0000000000001040',
-    s('coverage'), '05', s('partial (kernel-only)'),
-    s('units'), '06 01000000 07 03000000', s('unitId'), '05', s('K'), s('schema'), '05', s('kernel'), s('schemaVersion'), '04 000000000000F03F',
-    s('configuration'), '06 01000000 07 07000000', s('unitId'), '05', s('FMS1'), s('profileId'), '05', s('cma'), s('profileVersion'), '05', s('1'),
-    s('equipment'), '06 01000000 05', s('gps'), s('seeds'), '06 01000000 04 0000000000001C40', s('frozenParametersHash'), '05', s('ff'),
-    s('rtcOffsetsMs'), '06 01000000 04 0000000000000000',
-    s('contentRefs'), '06 01000000 07 02000000', s('kind'), '05', s('userDatabase'), s('contentHash'), '05', s('ab'),
-    s('environment'), '07 08000000', s('bundleHash'), '05', s('h'), s('runtimeKind'), '05', s('node'), s('runtimeName'), '05', s('node'),
-    s('runtimeVersion'), '05', s('24'), s('engine'), '05', s('v8'), s('os'), '05', s('w'), s('platform'), '05', s('win32'), s('arch'), '05', s('x64'))
+  const expected = hex('07 09000000', BODY_FIELDS)
   const reversed = <T extends object>(record: T): T => Object.fromEntries(Object.entries(record).reverse()) as T
-  const scrambled = reversed({ ...body, environment: reversed(body.environment), configuration: body.configuration.map(reversed), units: body.units.map(reversed) })
-  for (const given of [body, scrambled]) {
+  const scrambled = reversed({ ...BODY, environment: reversed(BODY.environment), configuration: BODY.configuration.map(reversed), units: BODY.units.map(reversed) })
+  for (const given of [BODY, scrambled]) {
     const bytes = encodeHeaderBody(given)
     if (!bytes.ok) throw new Error(bytes.refusal.detail)
     expect(show(bytes.value)).toBe(show(expected))
   }
-  expect(SNAPSHOT_HEADER_FIELD_ORDER).toEqual(['format', 'formatVersion', 'runId', 'frame', 'coverage', 'units', 'configuration', 'contentRefs', 'environment', 'sha256'])
-  // The environment record carries no host name and no path.
-  const withHost = encodeHeaderBody({ ...body, environment: { ...body.environment, hostname: 'bench-pc' } as SnapshotHeaderBody['environment'] })
+  // The environment record carries no undeclared field (such as a host name) and no path.
+  const withHost = encodeHeaderBody({ ...BODY, environment: { ...BODY.environment, hostname: 'bench-pc' } as SnapshotHeaderBody['environment'] })
   expect(withHost.ok ? 'accepted' : withHost.refusal.code).toBe('UNCLASSIFIED_PROPERTY')
-  const withPath = encodeHeaderBody({ ...body, environment: { ...body.environment, os: 'C:\\Users\\someone' } })
+  const withPath = encodeHeaderBody({ ...BODY, environment: { ...BODY.environment, os: 'C:\\Users\\someone' } })
   expect(withPath.ok ? 'accepted' : withPath.refusal.code).toBe('UNCLASSIFIED_VALUE')
+  // A header field is read once, as data: an accessor refuses.
+  const withAccessor = Object.defineProperty({ ...BODY }, 'frame', { get: () => 4, enumerable: true, configurable: true })
+  const accessor = encodeHeaderBody(withAccessor)
+  expect(accessor.ok ? 'accepted' : accessor.refusal.code).toBe('UNCLASSIFIED_PROPERTY')
 })
 
 test('decode reproduces the state exactly: identity, prototypes, order, buffer bytes and every typed value', () => {
@@ -262,16 +360,21 @@ test('decode reproduces the state exactly: identity, prototypes, order, buffer b
 })
 
 test('decode refuses bytes that are not the canonical encoding', () => {
-  const code = (...parts: string[]) => { const result = decodeState(hex(...parts)); return result.ok ? 'accepted' : result.refusal.code }
-  expect(code(ONE_FIELD, '07 02000000  01000000 62 01  01000000 31 01')).toBe('NON_CANONICAL') // "b" before "1"
-  expect(code(ONE_FIELD, '07 02000000  01000000 61 01  01000000 61 01')).toBe('NON_CANONICAL') // duplicate key
-  expect(code(ONE_FIELD, '01', '00')).toBe('NON_CANONICAL') // trailing byte
-  expect(code(ONE_FIELD, '04 0000')).toBe('NON_CANONICAL') // truncated
-  expect(code(ONE_FIELD, '0F')).toBe('NON_CANONICAL') // a hole outside an array
-  expect(code(ONE_FIELD, '05 01000000 FF')).toBe('NON_CANONICAL') // invalid UTF-8
-  expect(code(ONE_FIELD, '0B 02000000  05 01000000 61 01  05 01000000 61 01')).toBe('NON_CANONICAL') // duplicate Map key
-  expect(code(ONE_FIELD, '10 0100000055 01000000 00 01000000 78')).toBe('REFERENCE_UNRESOLVED')
-  expect(code(ONE_FIELD, '01')).toBe('accepted')
+  expect(decodeCode(ONE_FIELD, '07 02000000  01000000 62 01  01000000 31 01')).toBe('NON_CANONICAL') // "b" before "1"
+  expect(decodeCode(ONE_FIELD, '07 02000000  01000000 61 01  01000000 61 01')).toBe('NON_CANONICAL') // duplicate key
+  expect(decodeCode(ONE_FIELD, '01', '00')).toBe('NON_CANONICAL') // trailing byte
+  expect(decodeCode(ONE_FIELD, '04 0000')).toBe('NON_CANONICAL') // truncated
+  expect(decodeCode(ONE_FIELD, '0F')).toBe('NON_CANONICAL') // a hole outside an array
+  expect(decodeCode(ONE_FIELD, '13')).toBe('NON_CANONICAL') // an unknown tag
+  expect(decodeCode(ONE_FIELD, '05 01000000 FF')).toBe('NON_CANONICAL') // invalid UTF-8
+  expect(decodeCode(ONE_FIELD, '0B 02000000  05 01000000 61 01  05 01000000 61 01')).toBe('NON_CANONICAL') // duplicate Map key
+  expect(decodeCode(ONE_FIELD, '0B 01000000  04 0000000000000080 01')).toBe('NON_CANONICAL') // -0 Map key
+  expect(decodeCode(ONE_FIELD, '0C 01000000  04 0000000000000080')).toBe('NON_CANONICAL') // -0 Set entry
+  expect(decodeCode(ONE_FIELD, '09 0100DCC208B21E00')).toBe('NON_CANONICAL') // a Date at 8.64e15 + 1 ms
+  expect(decodeCode('0100DCC208B21E00 00000000')).toBe('NON_CANONICAL') // UTC0 at 8.64e15 + 1 ms
+  expect(decodeCode('0000000000000000 02000000  0100000055 00000000  0100000055 00000000')).toBe('OWNERSHIP_AMBIGUOUS') // duplicate unit id
+  expect(decodeCode(ONE_FIELD, '10 0100000055 01000000 00 01000000 78')).toBe('REFERENCE_UNRESOLVED')
+  expect(decodeCode(ONE_FIELD, '01')).toBe('accepted')
 })
 
 test('SHA-256 matches the FIPS 180-4 examples, including input viewed inside a larger buffer', async () => {
@@ -285,19 +388,16 @@ test('SHA-256 matches the FIPS 180-4 examples, including input viewed inside a l
   for (const [input, expected] of vectors) expect(await sha256(input)).toEqual({ ok: true, value: expected })
 })
 
-test('without WebCrypto, hashing and sealing refuse INTEGRITY_UNAVAILABLE instead of skipping the check', async () => {
+test('without a working WebCrypto, hashing and sealing refuse INTEGRITY_UNAVAILABLE instead of skipping the check', async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
   expect(original?.configurable).toBe(true)
-  const body: SnapshotHeaderBody = {
-    format: 'aerolink.fms.snapshot', formatVersion: 1, runId: 'r', frame: 0, coverage: 'partial (kernel-only)', units: [], configuration: [], contentRefs: [],
-    environment: { bundleHash: 'h', runtimeKind: 'node', runtimeName: 'node', runtimeVersion: '24', engine: 'v8', os: 'w', platform: 'win32', arch: 'x64' },
-  }
-  for (const replacement of [undefined, {}]) {
+  const failing = { subtle: { digest: () => Promise.reject(new Error('digest failed')) } }
+  for (const replacement of [undefined, {}, failing]) {
     Object.defineProperty(globalThis, 'crypto', { configurable: true, get: () => replacement })
     try {
       const hashed = await sha256(new Uint8Array([1]))
       expect(hashed.ok ? 'accepted' : hashed.refusal.code).toBe('INTEGRITY_UNAVAILABLE')
-      const sealed = await sealSnapshot(body, new Uint8Array([1]))
+      const sealed = await sealSnapshot(BODY, new Uint8Array([1]))
       expect(sealed.ok ? 'accepted' : sealed.refusal.code).toBe('INTEGRITY_UNAVAILABLE')
     } finally {
       Object.defineProperty(globalThis, 'crypto', original!)
@@ -305,20 +405,20 @@ test('without WebCrypto, hashing and sealing refuse INTEGRITY_UNAVAILABLE instea
   }
 })
 
-test('the seal covers the header, so the coverage label cannot change without changing sha256', async () => {
-  const body: SnapshotHeaderBody = {
-    format: 'aerolink.fms.snapshot', formatVersion: 1, runId: 'r', frame: 3, coverage: 'partial (kernel-only)', units: [], configuration: [], contentRefs: [],
-    environment: { bundleHash: 'h', runtimeKind: 'node', runtimeName: 'node', runtimeVersion: '24', engine: 'v8', os: 'w', platform: 'win32', arch: 'x64' },
-  }
+test('the seal covers header and state, copies the state before awaiting, and writes the exact sealed header', async () => {
   const state = hex(ONE_FIELD, '01')
-  const partial = await sealSnapshot(body, state)
-  const complete = await sealSnapshot({ ...body, coverage: 'complete' }, state)
-  if (!partial.ok || !complete.ok) throw new Error('seal refused')
-  const bodyBytes = encodeHeaderBody(body)
-  if (!bodyBytes.ok) throw new Error(bodyBytes.refusal.detail)
-  const length = Buffer.alloc(4); length.writeUInt32LE(bodyBytes.value.length)
-  expect(partial.value.header.sha256).toBe(createHash('sha256').update(length).update(bodyBytes.value).update(state).digest('hex'))
-  expect(complete.value.header.sha256).not.toBe(partial.value.header.sha256)
-  expect(Object.keys(partial.value.header)).toEqual(SNAPSHOT_HEADER_FIELD_ORDER)
-  expect(show(partial.value.state)).toBe(show(state))
+  const original = state.slice()
+  const pending = sealSnapshot(BODY, state)
+  state.fill(0) // the caller reuses its buffer while the hash is awaited
+  const sealed = await pending
+  if (!sealed.ok) throw new Error(sealed.refusal.detail)
+  const body = hex('07 09000000', BODY_FIELDS)
+  const length = Buffer.alloc(4); length.writeUInt32LE(body.length)
+  const expectedSha = createHash('sha256').update(length).update(body).update(original).digest('hex')
+  expect(sealed.value.header.sha256).toBe(expectedSha)
+  expect(show(sealed.value.state)).toBe(show(original))
+  expect(show(sealed.value.headerBytes)).toBe(show(hex('07 0A000000', BODY_FIELDS, s('sha256'), '05', s(expectedSha))))
+  const complete = await sealSnapshot({ ...BODY, coverage: 'complete' }, original)
+  if (!complete.ok) throw new Error(complete.refusal.detail)
+  expect(complete.value.header.sha256).not.toBe(expectedSha)
 })
