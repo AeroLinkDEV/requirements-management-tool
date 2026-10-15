@@ -386,10 +386,29 @@ function Invoke-AeroLinkSitePsql {
         $arguments = @('-X', '-w', '-h', '127.0.0.1', '-p', "$Port", '-U', $User, '-d', $Database, '-v', 'ON_ERROR_STOP=1', '-tA', '-q')
         if ($SqlFile) { $arguments += @('-f', $SqlFile) } else { $arguments += @('-c', $Sql) }
         $stem = Join-Path $WorkDirectory ($StepName -replace '[^A-Za-z0-9]+', '-')
-        return Invoke-AeroLinkNativeCommand -FilePath (Join-Path $Bin 'psql.exe') -ArgumentList $arguments `
-            -StandardOutput "$stem.stdout.log" -StandardError "$stem.stderr.log" -TimeoutSeconds 60 -StepName $StepName -CaptureOutput
+        return Save-AeroLinkStepOutput (Invoke-AeroLinkNativeCommand -FilePath (Join-Path $Bin 'psql.exe') -ArgumentList $arguments `
+            -StandardOutput "$stem.stdout.log" -StandardError "$stem.stderr.log" -TimeoutSeconds 60 -StepName $StepName -CaptureOutput)
     }
     finally { if ($null -eq $previous) { Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue } else { $env:PGPASSWORD = $previous } }
+}
+
+function Save-AeroLinkStepOutput {
+    # The runner holds captured output in memory only; write it to the log paths it names, so a failure's kept
+    # logs contain what the tool said. None of these tools prints a password.
+    param([Parameter(Mandatory)]$Run)
+    foreach ($pair in @(@('StdOutPath', 'StdOutText'), @('StdErrPath', 'StdErrText'))) {
+        if ($Run.PSObject.Properties[$pair[0]] -and $Run.($pair[0]) -and $Run.PSObject.Properties[$pair[1]] -and $null -ne $Run.($pair[1])) {
+            try { [IO.File]::WriteAllText([string]$Run.($pair[0]), [string]$Run.($pair[1]), (New-Object Text.UTF8Encoding($false))) } catch { }
+        }
+    }
+    return $Run
+}
+
+function Get-AeroLinkStepFailure {
+    # The runner's detail plus the tool's own error text.
+    param([Parameter(Mandatory)]$Run)
+    $text = if ($Run.PSObject.Properties['StdErrText'] -and $Run.StdErrText) { ' ' + ([string]$Run.StdErrText).Trim() } else { '' }
+    return "$($Run.Detail)$text"
 }
 
 function Initialize-AeroLinkSitePostgres {
@@ -462,13 +481,15 @@ function Initialize-AeroLinkSitePostgres {
         $pwFile = Join-Path $work 'superuser.pw'
         Use-AeroLinkPlainSecret -Secret $superuserPassword -Action { param($plain) [IO.File]::WriteAllText($pwFile, $plain, (New-Object Text.UTF8Encoding($false))) }
         try {
-            $init = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'initdb.exe') `
+            # A leaf process, so its output is captured; the working directory is the private one, because initdb's
+            # restricted re-execution inherits it and must not depend on the program folder or installation root.
+            $init = Save-AeroLinkStepOutput (Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'initdb.exe') `
                 -ArgumentList @('-D', $data, '-U', 'postgres', '--pwfile', $pwFile, '-A', 'scram-sha-256', '--encoding=UTF8', '--no-locale') `
                 -StandardOutput (Join-Path $work 'initdb.stdout.log') -StandardError (Join-Path $work 'initdb.stderr.log') `
-                -TimeoutSeconds 300 -StepName 'initdb (site)'
+                -WorkingDirectory $work -TimeoutSeconds 300 -StepName 'initdb (site)' -CaptureOutput)
         }
         finally { Remove-Item -LiteralPath $pwFile -Force -ErrorAction SilentlyContinue }
-        if ($init.ExitCode -ne 0) { throw "initdb failed: $($init.Detail)" }
+        if ($init.ExitCode -ne 0) { throw "initdb failed: $(Get-AeroLinkStepFailure $init)" }
 
         # Loopback SCRAM only. initdb also writes ::1 and replication lines; this file replaces them.
         $hba = "# AeroLink site installation (#1614): loopback only, SCRAM password authentication for every connection.`r`n" +
@@ -483,7 +504,8 @@ function Initialize-AeroLinkSitePostgres {
             -ArgumentList @('-D', $data, '-l', (Join-Path $work 'bootstrap-postgres.log'), '-w', '-t', "$TimeoutSeconds", 'start') `
             -StandardOutput (Join-Path $work 'pg_ctl-start.stdout.log') -StandardError (Join-Path $work 'pg_ctl-start.stderr.log') `
             -TimeoutSeconds ($TimeoutSeconds + 30) -StepName 'pg_ctl start (site bootstrap)'
-        if ($start.ExitCode -ne 0) { throw "The new site cluster did not start for bootstrap: $($start.Detail)" }
+        # Not captured: the postmaster would inherit the pipe. Its own output is in bootstrap-postgres.log, which is kept.
+        if ($start.ExitCode -ne 0) { throw "The new site cluster did not start for bootstrap: $($start.Detail) See bootstrap-postgres.log." }
         $started = $true
 
         $role = $site.DatabaseRole
@@ -501,7 +523,7 @@ function Initialize-AeroLinkSitePostgres {
         $bootstrap = Invoke-AeroLinkSitePsql -Bin $bin -Port $port -User 'postgres' -Database 'postgres' -WorkDirectory $work `
             -StepName 'create application role' -SqlFile $sqlFile -Password $superuserPassword
         Remove-Item -LiteralPath $sqlFile -Force -ErrorAction SilentlyContinue
-        if ($bootstrap.ExitCode -ne 0) { throw "The application role could not be created: $($bootstrap.Detail)" }
+        if ($bootstrap.ExitCode -ne 0) { throw "The application role could not be created: $(Get-AeroLinkStepFailure $bootstrap)" }
 
         # Verify against the running cluster rather than trusting the configuration just written.
         $noPassword = Invoke-AeroLinkSitePsql -Bin $bin -Port $port -User 'postgres' -Database 'postgres' -WorkDirectory $work `
@@ -515,7 +537,7 @@ function Initialize-AeroLinkSitePostgres {
         $probe = Invoke-AeroLinkSitePsql -Bin $bin -Port $port -User $role -Database 'aerolink' -WorkDirectory $work `
             -StepName 'application role login' -Password $applicationPassword `
             -Sql "SELECT current_user || '|' || r.rolsuper || '|' || pg_get_userbyid(d.datdba) || '|' || current_setting('listen_addresses') || '|' || current_setting('port') || '|' || current_setting('password_encryption') FROM pg_roles r, pg_database d WHERE r.rolname = current_user AND d.datname = 'aerolink'"
-        if ($probe.ExitCode -ne 0) { throw "The application role could not log in to aerolink: $($probe.Detail)" }
+        if ($probe.ExitCode -ne 0) { throw "The application role could not log in to aerolink: $(Get-AeroLinkStepFailure $probe)" }
         $answer = (Get-AeroLinkNativeOutputLine $probe.StdOutText)
         $expected = "$role|false|$role|127.0.0.1|$port|scram-sha-256"
         if ([string]$answer -ne $expected) { throw "The site cluster's role and listener are not as initialised: '$answer', expected '$expected'." }
@@ -525,15 +547,16 @@ function Initialize-AeroLinkSitePostgres {
             -Sql "SELECT count(*) FILTER (WHERE error IS NOT NULL) || '|' || count(*) || '|' || coalesce(string_agg(concat_ws(' ', coalesce(type, '-'), coalesce(array_to_string(database, ','), '-'), coalesce(array_to_string(user_name, ','), '-'), coalesce(address, '-'), coalesce(netmask, '-'), coalesce(auth_method, '-')), ';' ORDER BY line_number), '') FROM pg_hba_file_rules"
         $hbaAnswer = Get-AeroLinkNativeOutputLine $hbaRules.StdOutText
         $hbaExpected = '0|1|host all all 127.0.0.1 255.255.255.255 scram-sha-256'
-        if ($hbaRules.ExitCode -ne 0 -or [string]$hbaAnswer -ne $hbaExpected) { throw "The site cluster's authentication rules are not loopback SCRAM only: '$hbaAnswer', expected '$hbaExpected'." }
+        if ($hbaRules.ExitCode -ne 0 -or [string]$hbaAnswer -ne $hbaExpected) { throw "The site cluster's authentication rules are not loopback SCRAM only: '$hbaAnswer', expected '$hbaExpected'. $(Get-AeroLinkStepFailure $hbaRules)" }
         $failed = $false
     }
     finally {
         if ($started) {
             $stop = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'pg_ctl.exe') -ArgumentList @('-D', $data, '-m', 'fast', '-w', '-t', '60', 'stop') `
                 -StandardOutput (Join-Path $work 'pg_ctl-stop.stdout.log') -StandardError (Join-Path $work 'pg_ctl-stop.stderr.log') `
-                -TimeoutSeconds 90 -StepName 'pg_ctl stop (site bootstrap)'
-            if ($stop.ExitCode -ne 0) { Write-Warning "The bootstrap postmaster did not stop cleanly: $($stop.Detail)" }
+                -TimeoutSeconds 90 -StepName 'pg_ctl stop (site bootstrap)' -CaptureOutput
+            $stop = Save-AeroLinkStepOutput $stop
+            if ($stop.ExitCode -ne 0) { Write-Warning "The bootstrap postmaster did not stop cleanly: $(Get-AeroLinkStepFailure $stop)" }
         }
         if ($failed) {
             # Keep the evidence: the thrown detail names log files that would otherwise be deleted with $work.

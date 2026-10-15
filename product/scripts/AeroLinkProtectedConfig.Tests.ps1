@@ -248,6 +248,41 @@ Write-Output 'FRESH_PROCESS_PROTECTED_CONFIG_OK'
     $reassigned.readerSid = 'S-1-5-20'
     [IO.File]::WriteAllText($superuser.Path, ($reassigned | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
     Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-superuser' -RootOverride $siteRoot } 'A site secret recorded for NETWORK SERVICE was read by another identity.'
+
+    # Review 02 P2-A: the secret path is predictable. A directory prepared in advance with exactly the expected DACL,
+    # holding a planted secret.json that Users can read, must not pass that file's ACL on to the stored secret.
+    $plantedInstall = Join-Path $root 'planted-installation'
+    $plantedPath = Get-AeroLinkProtectedSiteSecretPath -InstallationRoot $plantedInstall -Name 'postgres-superuser' -RootOverride $siteRoot
+    $plantedDirectory = Split-Path -Parent $plantedPath
+    New-Item -ItemType Directory -Path $plantedDirectory -Force | Out-Null
+    $prepared = New-Object Security.AccessControl.DirectorySecurity
+    $prepared.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($currentSid, 'S-1-5-18', 'S-1-5-32-544')) {
+        $prepared.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    }
+    $preparedInfo = [IO.DirectoryInfo]::new($plantedDirectory)
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $preparedInfo.SetAccessControl($prepared) } else { [IO.FileSystemAclExtensions]::SetAccessControl($preparedInfo, $prepared) }
+    [IO.File]::WriteAllText($plantedPath, '{}')
+    $planted = New-Object Security.AccessControl.FileSecurity
+    $planted.SetAccessRuleProtection($true, $false)
+    $planted.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($currentSid)), 'FullControl', 'Allow')))
+    $planted.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Read', 'Allow')))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.File]::SetAccessControl($plantedPath, $planted) } else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($plantedPath), $planted) }
+    $null = Set-AeroLinkProtectedSiteSecret -InstallationRoot $plantedInstall -Name 'postgres-superuser' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    $storedHolders = (@((Get-Acl -LiteralPath $plantedPath).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique)) -join ','
+    Assert-True ($storedHolders -eq ((@($currentSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object) -join ',')) "A secret written over a planted file must end with exactly reader, SYSTEM and Administrators; holders: $storedHolders."
+    # A secret directory that is a link is refused outright.
+    $linkInstall = Join-Path $root 'linked-installation'
+    $linkPath = Split-Path -Parent (Get-AeroLinkProtectedSiteSecretPath -InstallationRoot $linkInstall -Name 'postgres-superuser' -RootOverride $siteRoot)
+    $linkTarget = Join-Path $root 'link-target'
+    New-Item -ItemType Directory -Path $linkTarget, (Split-Path -Parent $linkPath) -Force | Out-Null
+    cmd /c mklink /J "$linkPath" "$linkTarget" | Out-Null
+    try {
+        Assert-Throws { Set-AeroLinkProtectedSiteSecret -InstallationRoot $linkInstall -Name 'postgres-superuser' -ReaderSid $currentSid -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot } 'A site secret directory that is a link was used.'
+        Assert-True (@(Get-ChildItem -LiteralPath $linkTarget -Force).Count -eq 0) 'A refused link must receive no file.'
+    }
+    finally { cmd /c rmdir "$linkPath" | Out-Null }
 }
 finally {
     if (Test-Path -LiteralPath $root) {

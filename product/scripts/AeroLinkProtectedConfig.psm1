@@ -499,15 +499,25 @@ function Set-AeroLinkProtectedSiteSecret {
         if ($PSVersionTable.PSEdition -eq 'Desktop') { $info.SetAccessControl($security) } else { [IO.FileSystemAclExtensions]::SetAccessControl($info, $security) }
     }
     $narrowDirectory = $false
+    $writerSid = Get-AeroLinkProtectedConfigOwnerSid
+    $subject = "protected site secret '$Name'"
     if (Test-Path -LiteralPath $directory -PathType Container) {
-        # Replacement never repairs a directory somebody else has widened.
-        Assert-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ReaderSid -Subject "protected site secret '$Name'"
+        # The path is predictable and ProgramData lets ordinary users create folders, so an existing directory may
+        # be somebody else's: refuse a link, refuse a foreign owner (an owner can always re-grant itself), and
+        # refuse a widened DACL. The installer (#1614 1.7) also creates and locks %ProgramData%\AeroLink first.
+        $existingDirectory = [IO.DirectoryInfo]::new($directory)
+        if ($existingDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "The $subject directory is a link; refusing to store a secret through it." }
+        $ownerSections = [Security.AccessControl.AccessControlSections]::Owner
+        $ownerSecurity = if ($PSVersionTable.PSEdition -eq 'Desktop') { $existingDirectory.GetAccessControl($ownerSections) } else { [IO.FileSystemAclExtensions]::GetAccessControl($existingDirectory, $ownerSections) }
+        $directoryOwner = $ownerSecurity.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($directoryOwner -notin @('S-1-5-32-544', 'S-1-5-18', $writerSid)) { throw "The $subject directory is owned by $directoryOwner, not Administrators, SYSTEM or this writer; refusing to store a secret in it." }
+        Assert-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ReaderSid -Subject $subject
     } else {
         # A new directory is closed at once, before any file exists in it. The writer - an installer storing the
         # password for a service account it is not - keeps FullControl only until the file is in place, so it can
         # write and rename it; the directory is then narrowed to exactly the reader, SYSTEM and Administrators.
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
-        Set-SiteSecretDirectoryAcl @($ReaderSid, 'S-1-5-18', 'S-1-5-32-544', (Get-AeroLinkProtectedConfigOwnerSid))
+        Set-SiteSecretDirectoryAcl @($ReaderSid, 'S-1-5-18', 'S-1-5-32-544', $writerSid)
         $narrowDirectory = $true
     }
     $record = [ordered]@{
@@ -516,21 +526,19 @@ function Set-AeroLinkProtectedSiteSecret {
         protectedSecret = $ciphertext; updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     }
     $tempPath = Join-Path $directory ('.secret.' + [guid]::NewGuid().ToString('N') + '.tmp')
-    $backupPath = Join-Path $directory ('.secret.' + [guid]::NewGuid().ToString('N') + '.bak')
     try {
+        # The temp file inherits the (new or verified) directory DACL. A previous secret.json is deleted, never
+        # replaced: File.Replace keeps the REPLACED file's DACL, so a planted file's ACL would survive. Then the
+        # file is moved in, narrowed explicitly, and its final DACL is checked to be exactly reader, SYSTEM and
+        # Administrators before the writer gives up its own access.
         [IO.File]::WriteAllText($tempPath, ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
-        if ($narrowDirectory) {
-            # A new, already-closed directory: the file carries only its ACL until it is in place, then is narrowed.
-            [IO.File]::Move($tempPath, $path)
-            Set-AeroLinkProtectedFileAcl -FilePath $path -OwnerSid $ReaderSid
-        } else {
-            Set-AeroLinkProtectedFileAcl -FilePath $tempPath -OwnerSid $ReaderSid
-            if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::Replace($tempPath, $path, $backupPath, $true) } else { [IO.File]::Move($tempPath, $path) }
-        }
+        if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) }
+        [IO.File]::Move($tempPath, $path)
+        Set-AeroLinkProtectedFileAcl -FilePath $path -OwnerSid $ReaderSid
+        Assert-AeroLinkProtectedAcl -FilePath $path -OwnerSid $ReaderSid -Subject $subject
     }
     finally {
         if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
-        if (Test-Path -LiteralPath $backupPath -PathType Leaf) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
         if ($narrowDirectory) { Set-SiteSecretDirectoryAcl @($ReaderSid, 'S-1-5-18', 'S-1-5-32-544') }
     }
     return [pscustomobject]@{ Name = $Name; Path = $path; ReaderSid = $ReaderSid }
