@@ -175,7 +175,7 @@ async function collectFallback(reader, fallbackRunId, candidateSha, now) {
     const latestJobs = await readAllReusePages(reader.request, `${prefix}/actions/runs/${run.id}/jobs?filter=latest`, 'jobs')
     result.jobOrigins = await collectReuseJobOrigins(reader, run, latestJobs)
     const jobs = result.jobs = result.jobOrigins.jobs
-    const names = requiredNativeNames().filter(n => !n.startsWith('Browser journeys (')).concat([1, 2, 3, 4, 5, 6].map(n => `Full browser journeys (${n}/6)`))
+    const names = requiredNativeNames().map(n => n.startsWith('Browser journeys (') ? `Full browser ${n.slice('Browser '.length)}` : n)
     const checks = result.checks = await readAllReusePages(reader.request, `${prefix}/commits/${run.head_sha}/check-runs?filter=all`, 'check_runs')
     for (const name of names) {
       const matches = jobs.filter(j => j.name === name)
