@@ -518,6 +518,7 @@ function browserW3Capture(selectedRoute: ReturnType<typeof browserRoute>) {
   // The original error is rethrown unchanged; a refused end re-admission only fails an otherwise complete session.
   if(failure)throw failure.error
   if(end.endAdmission.status!=='ADMITTED')throw new Error(`W3 manifest refused at session end: ${end.endAdmission.error}`)
+  if(!end.harnessAtEndMatches)throw new Error('W3 harness identity changed by session end')
 }
 function browserCaptureReport() {
   const dir = out(), session = JSON.parse(readFileSync(join(dir, 'paired-session.json'), 'utf8'))
