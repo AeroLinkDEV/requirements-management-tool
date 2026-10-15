@@ -109,20 +109,26 @@ try {
 
     # The builder's runtime guard: a publish that ships the vulnerable Pkcs (10.0.9's 10.0.926.x) is refused by
     # name, and a fixed one (10.0.13's 10.0.1326.x) passes with the bundled frameworks read for the manifest.
-    function New-PublishedApp([string]$Name, [string]$PkcsFileVersion) {
+    function New-PublishedApp([string]$Name, [string]$PkcsFileVersion, [string]$NetCoreVersion = '10.0.13', [string]$AspNetVersion = '10.0.13') {
         $app = Join-Path $root "$Name-app"
         New-Item -ItemType Directory -Path $app | Out-Null
         $type = 'PkcsStand' + [Guid]::NewGuid().ToString('N')
         Add-Type -TypeDefinition "[assembly: System.Reflection.AssemblyFileVersion(`"$PkcsFileVersion`")] public class $type { }" `
             -OutputAssembly (Join-Path $app 'System.Security.Cryptography.Pkcs.dll') -OutputType Library
         [System.IO.File]::WriteAllText((Join-Path $app 'AeroLink.Api.runtimeconfig.json'),
-            '{ "runtimeOptions": { "tfm": "net10.0", "includedFrameworks": [ { "name": "Microsoft.NETCore.App", "version": "10.0.13" }, { "name": "Microsoft.AspNetCore.App", "version": "10.0.13" } ] } }')
+            ('{ "runtimeOptions": { "tfm": "net10.0", "includedFrameworks": [ { "name": "Microsoft.NETCore.App", "version": "' + $NetCoreVersion + '" }, { "name": "Microsoft.AspNetCore.App", "version": "' + $AspNetVersion + '" } ] } }'))
         return $app
     }
     Assert-Throws { Assert-AeroLinkReleaseRuntime -AppRoot (New-PublishedApp 'vulnerable' '10.0.926.27113') } 'Pkcs\.dll is file version 10\.0\.926\.27113 \(servicing 10\.0\.9\)\. 10\.0\.13 or later is required' `
         'A publish that ships a vulnerable System.Security.Cryptography.Pkcs must be refused, naming the version found.'
     $fixedRuntime = Assert-AeroLinkReleaseRuntime -AppRoot (New-PublishedApp 'fixed' '10.0.1326.50504')
     Assert-True (($fixedRuntime.Frameworks -join ';') -eq 'Microsoft.NETCore.App 10.0.13;Microsoft.AspNetCore.App 10.0.13') "The bundled runtime is read from the publish (was '$($fixedRuntime.Frameworks -join ';')')."
+    # A package pin can fix Pkcs while the self-contained runtime remains old. Both frameworks independently
+    # have to meet the documented release minimum; the other framework remains current in each row.
+    Assert-Throws { Assert-AeroLinkReleaseRuntime -AppRoot (New-PublishedApp 'old-netcore' '10.0.1326.50504' '10.0.9') } 'Microsoft.NETCore.App.*10\.0\.9.*10\.0\.13 or later is required' `
+        'A patched Pkcs must not hide an outdated bundled .NET runtime.'
+    Assert-Throws { Assert-AeroLinkReleaseRuntime -AppRoot (New-PublishedApp 'old-aspnet' '10.0.1326.50504' '10.0.13' '10.0.9') } 'Microsoft.AspNetCore.App.*10\.0\.9.*10\.0\.13 or later is required' `
+        'A patched Pkcs must not hide an outdated bundled ASP.NET Core runtime.'
 
     # No signature at all.
     Remove-Item -LiteralPath $good.Signature

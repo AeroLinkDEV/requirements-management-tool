@@ -124,8 +124,8 @@ function Get-AeroLinkReleaseSigningCertificate {
 
 function Assert-AeroLinkReleaseRuntime {
     <#
-        .SYNOPSIS Reads the runtime a self-contained publish bundles, and refuses one that ships a known-vulnerable
-        System.Security.Cryptography.Pkcs.
+        .SYNOPSIS Refuses a self-contained publish whose bundled frameworks or System.Security.Cryptography.Pkcs
+        do not meet the release servicing minimum.
         .DESCRIPTION
             A self-contained publish ships whichever Pkcs copy wins conflict resolution: the pinned 10.0.13 package
             (#1637) or the shared framework's copy from the builder's SDK. Versions 10.0.0 to 10.0.12 are affected by
@@ -133,6 +133,8 @@ function Assert-AeroLinkReleaseRuntime {
             is 10.0.13 or later. The file version encodes the servicing patch as build / 100 (10.0.926.x is 10.0.9,
             10.0.1326.x is 10.0.13). A missing file is a refusal too: the ASP.NET Core framework always carries it,
             so its absence means the guard is no longer looking at what ships.
+            The bundled framework versions must independently be at least 10.0.13; a package pin can fix Pkcs
+            without updating the remainder of a self-contained runtime.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$AppRoot)
@@ -151,7 +153,16 @@ function Assert-AeroLinkReleaseRuntime {
     if ($runtimeConfig.Count -ne 1) { throw "Release refused: expected one runtimeconfig.json in $AppRoot, found $($runtimeConfig.Count)." }
     $options = ([System.IO.File]::ReadAllText($runtimeConfig[0].FullName) | ConvertFrom-Json).runtimeOptions
     if ($options.PSObject.Properties['includedFrameworks']) {
-        $frameworks = @($options.includedFrameworks | ForEach-Object { "$($_.name) $($_.version)" })
+        $frameworks = @(foreach ($framework in $options.includedFrameworks) {
+            [System.Version]$bundledVersion = $null
+            if (-not [System.Version]::TryParse([string]$framework.version, [ref]$bundledVersion)) {
+                throw "Release refused: bundled $($framework.name) has an invalid runtime version '$($framework.version)'. 10.0.13 or later is required."
+            }
+            if ($bundledVersion -lt [System.Version]'10.0.13') {
+                throw "Release refused: bundled $($framework.name) is $bundledVersion. 10.0.13 or later is required."
+            }
+            "$($framework.name) $($framework.version)"
+        })
     }
     if ($frameworks.Count -eq 0) { throw "Release refused: $($runtimeConfig[0].Name) lists no bundled frameworks; the publish is not self-contained." }
     return [pscustomobject]@{ Frameworks = $frameworks; PkcsFileVersion = $found.ToString() }
