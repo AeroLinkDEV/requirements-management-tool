@@ -1,15 +1,16 @@
 // Drives the #1517 I1d outcome census (fms-headless-outcome-census.ts) at one checkout. Node 24, from product/client:
 //
 //   node tests/fixtures/fms-headless-outcome-census-run.ts scenarios --out <dir>
-//   node tests/fixtures/fms-headless-outcome-census-run.ts sites --out <dir>
+//   node tests/fixtures/fms-headless-outcome-census-run.ts sites --out <dir> [--arms control,single,dual,single-pure,dual-pure]
 //
 // scenarios: every library scenario and the 87N mission, flown single and dual in lockstep (scenarios.json). Each run
 //   is anchored: its single end state must equal today's runHeadless, and both must match the I1 golden end digests.
-// sites: every runHeadless call in the specs. The specs that call it are run three times with Playwright, one worker:
-//   unchanged (the control), and as temporary copies whose scenario import is the census stand-in
-//   (fms-headless-outcome-census-shim.ts) on the single arm and on the dual arm. In the copies every expect is soft, so
-//   each test reports every assertion that fails, not only the first. Writes sites-*.jsonl, the three Playwright JSON
-//   reports and sites-inventory.json; the copies and their config are removed afterwards.
+// sites: every runHeadless call in the specs. The specs that call it are run with Playwright, one worker: unchanged
+//   (control), and as temporary copies whose scenario import is the census stand-in (fms-headless-outcome-census-shim.ts)
+//   on each arm: single and dual instrumented (each call's END state, and the lockstep divergence on dual), and
+//   single-pure and dual-pure (the arm's run alone; the assertion results of record). In the copies every expect is
+//   soft, so each test reports every assertion that fails, not only the first. Writes sites-<arm>.jsonl, a Playwright
+//   JSON report and log per arm, and sites-inventory.json; the copies and their config are removed afterwards.
 //
 // No production code changes: the stand-in replaces runHeadless only in the copies.
 
@@ -18,7 +19,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 
-const { values: options, positionals } = parseArgs({ allowPositionals: true, options: { out: { type: 'string' }, only: { type: 'string' }, files: { type: 'string' } } })
+const { values: options, positionals } = parseArgs({ allowPositionals: true, options: { out: { type: 'string' }, only: { type: 'string' }, files: { type: 'string' }, arms: { type: 'string' } } })
 const client = resolve(import.meta.dirname, '..', '..')
 const git = (...args: string[]) => execFileSync('git', ['-C', client, ...args], { encoding: 'utf8' }).trim()
 const identity = () => ({
@@ -116,8 +117,12 @@ function sites() {
     writeFileSync(join(dir, `pw-${label}.log`), `${result.stdout}\n--- stderr ---\n${result.stderr}`)
     console.log(`${label}: exit ${result.status}, ${Math.round((Date.now() - begin) / 1000)} s`)
   }
+  const ARMS = { single: { arm: 'single', pure: false }, dual: { arm: 'dual', pure: false }, 'single-pure': { arm: 'single', pure: true }, 'dual-pure': { arm: 'dual', pure: true } } as const
+  const chosen = (options.arms ?? 'control,single,dual,single-pure,dual-pure').split(',').filter(Boolean)
+  for (const label of chosen) if (label !== 'control' && !(label in ARMS)) throw new Error(`unknown arm ${label}`)
+  const labels = chosen.filter((label): label is keyof typeof ARMS => label in ARMS)
   try {
-    for (const arm of ['single', 'dual'] as const) {
+    for (const arm of labels) {
       for (const file of found.files) {
         const source = readFileSync(join(tests, file), 'utf8')
         if (!HAS_SCENARIO_IMPORT.test(source)) throw new Error(`${file} does not import the scenario module by its usual path`)
@@ -127,12 +132,12 @@ function sites() {
         writeFileSync(target, copy); copies.push(target)
       }
     }
-    if (!options.only || options.only === 'control') playwright('control', found.files, {})
-    for (const arm of ['single', 'dual'] as const) {
-      if (options.only && options.only !== arm) continue
-      const jsonl = join(dir, `sites-${arm}.jsonl`)
+    if (chosen.includes('control')) playwright('control', found.files, {})
+    for (const label of labels) {
+      const jsonl = join(dir, `sites-${label}.jsonl`)
       if (existsSync(jsonl)) rmSync(jsonl)
-      playwright(arm, found.files.map(file => `i1d-${arm}--${file}`), { AEROLINK_I1D_ARM: arm, AEROLINK_I1D_OUT: jsonl })
+      playwright(label, found.files.map(file => `i1d-${label}--${file}`),
+        { AEROLINK_I1D_ARM: ARMS[label].arm, AEROLINK_I1D_OUT: jsonl, AEROLINK_I1D_PURE: ARMS[label].pure ? '1' : '0' })
     }
   } finally {
     for (const copy of copies) rmSync(copy, { force: true })
@@ -140,7 +145,7 @@ function sites() {
   }
   const after = identity()
   if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`the checkout changed during the run (${JSON.stringify(before)} -> ${JSON.stringify(after)})`)
-  writeFileSync(join(dir, 'sites-checkout.json'), JSON.stringify({ checkout: before, node: process.version }, null, 1))
+  writeFileSync(join(dir, `sites-checkout-${chosen.join('+')}.json`), JSON.stringify({ checkout: before, node: process.version, arms: chosen }, null, 1))
 }
 
 const command = positionals[0]

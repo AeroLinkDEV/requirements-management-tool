@@ -4,6 +4,8 @@
 //
 // - AEROLINK_I1D_ARM=single: today's runHeadless, plus a check that the census's single replica ends in the same state.
 // - AEROLINK_I1D_ARM=dual: the dual composition (what the switch would return), plus the lockstep comparison.
+// - AEROLINK_I1D_PURE=1 with either: the arm's run alone. Assertion results are taken from the pure runs, since the
+//   extra runs of the instrumented mode are visible to specs that count calls or spy on prototypes.
 //
 // Each call appends one JSON line to AEROLINK_I1D_OUT: the calling spec line, the test, the outcome and END state.
 import { appendFileSync } from 'node:fs'
@@ -15,13 +17,15 @@ export * from '../../src/fmsCdu/scenario'
 
 const arm = process.env.AEROLINK_I1D_ARM
 const out = process.env.AEROLINK_I1D_OUT
+/** AEROLINK_I1D_PURE=1: run only the arm itself (see runHeadless below). */
+const pure = process.env.AEROLINK_I1D_PURE === '1'
 
 /** The spec line that called runHeadless, from the stack: the first frame in a copied spec. */
 function callSite() {
   const stack = new Error().stack ?? ''
   for (const line of stack.split('\n')) {
     const match = /[\\/]tests[\\/](i1d-[^\\/]*?\.spec\.ts):(\d+):(\d+)/.exec(line)
-    if (match) return { file: match[1].replace(/^i1d-(single|dual)--/, ''), line: Number(match[2]), column: Number(match[3]) }
+    if (match) return { file: match[1].replace(/^i1d-(single|dual)(-pure)?--/, ''), line: Number(match[2]), column: Number(match[3]) }
   }
   return { file: 'unknown', line: 0, column: 0 }
 }
@@ -37,7 +41,16 @@ export function runHeadless(scenario: Scenario, start = scenarioStart(scenario) 
   const key = `${site.file}:${site.line}:${site.column}|${title.join(' > ')}`
   const ordinal = (ordinals.get(key) ?? 0) + 1
   ordinals.set(key, ordinal)
-  const base = { schema: 'aerolink.fms-i1d-outcome-census-call.v1', arm, site, title, ordinal, scenarioId: scenario?.id ?? null, start }
+  const base = { schema: 'aerolink.fms-i1d-outcome-census-call.v1', arm, pure, site, title, ordinal, scenarioId: scenario?.id ?? null, start }
+  if (pure) {
+    // Only the arm's own run: no replica or lockstep beside it, so a spec that counts calls or spies on prototypes sees
+    // exactly one run. The assertion results of record come from these runs.
+    const composed = arm === 'single' ? null : flyToEnd(composeDual(scenario, start, context), scenario)
+    const result = composed ? { runner: composed.runner, fms: composed.fms, sim: composed.sim } : singleRunHeadless(scenario, start, context)
+    appendFileSync(out, `${JSON.stringify({ ...base, outcome: result.runner.outcome, results: result.runner.results, endedAfter: result.runner.endedAfter,
+      end: unitDigest({ fms: result.fms, sim: result.sim }) })}\n`)
+    return result
+  }
   if (arm === 'single') {
     const real = singleRunHeadless(scenario, start, context)
     // The replica is runHeadless line for line; its end state must equal the real one's, or the lockstep proves nothing.
