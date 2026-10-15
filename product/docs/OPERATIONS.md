@@ -615,7 +615,8 @@ webhooks off. The API then does the following:
   it is set to anything else.
 - Names its cookies `__Host-aerolink_session` and `__Host-AeroLink.PreferenceConfirmation`. The host name is
   shared with the other applications, and the prefix keeps them from reading or shadowing AeroLink's
-  cookies. Plain-HTTP launches keep the old names.
+  cookies. HOME, the work laptop and other plain-HTTP launches keep the old names. Any other launch with
+  `Identity:CookieSecure=true` prefixes the session cookie too.
 
 The API refuses to start, naming every problem, when any of these holds:
 

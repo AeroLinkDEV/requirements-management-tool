@@ -103,7 +103,9 @@ public sealed class SiteServerProfileTests : IDisposable
     [Fact]
     public async Task A_site_server_serves_its_public_name_over_hsts_with_host_prefixed_cookies_every_reader_understands()
     {
-        using var factory = Host(ValidSite());
+        var settings = ValidSite();
+        settings["Notifications:UnsubscribeSecret"] = new string('s', 48);
+        using var factory = Host(settings);
         using var client = factory.CreateClient(new() { BaseAddress = new Uri(Origin), HandleCookies = true });
 
         using var health = await client.GetAsync("/health");
@@ -150,6 +152,17 @@ public sealed class SiteServerProfileTests : IDisposable
         Assert.Contains("secure", cleared, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/", cleared, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
+
+        // The other AeroLink cookie, the email-preference confirmation's antiforgery cookie, is prefixed as well.
+        string token;
+        using (var scope = factory.Services.CreateScope())
+            token = scope.ServiceProvider.GetRequiredService<AeroLink.Infrastructure.Notifications.UnsubscribeTokenService>().Issue("admin")!;
+        using var preference = await client.GetAsync($"/api/notifications/unsubscribe?recipient=admin&token={token}");
+        Assert.Equal(HttpStatusCode.OK, preference.StatusCode);
+        var antiforgery = Assert.Single(preference.Headers.GetValues("Set-Cookie"));
+        Assert.StartsWith("__Host-AeroLink.PreferenceConfirmation=", antiforgery);
+        Assert.Contains("secure", antiforgery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/", antiforgery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -60,14 +60,19 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.W
 var siteServer = SiteServerHosting.Configure(builder);
 // Cookie names are decided once. Secure cookies take the __Host- prefix so that another application on the same
 // host name (a site server shares one, #1614 D3) can neither read nor shadow them; see SessionCookie.
-var sessionCookie = new SessionCookie(SessionCookie.SecureFrom(builder.Configuration, builder.Environment));
-builder.Services.AddSingleton(sessionCookie);
+// Resolved from the built configuration, the same as the sign-in endpoint always read it, so a source added after
+// this line (a host's own configuration callbacks run at Build) still decides it.
+builder.Services.AddSingleton(services => new SessionCookie(SessionCookie.SecureFrom(
+    services.GetRequiredService<IConfiguration>(), services.GetRequiredService<IHostEnvironment>())));
 builder.Services.AddAntiforgery(options =>
 {
-    options.Cookie.Name = sessionCookie.Secure ? SessionCookie.SecurePrefix + "AeroLink.PreferenceConfirmation" : "AeroLink.PreferenceConfirmation";
+    // Prefixed only where AeroLink terminates TLS itself. Antiforgery decides Secure from the request, and with
+    // SecurePolicy=Always it refuses any request that did not arrive over HTTPS - which is every request behind a
+    // TLS-terminating proxy, where Identity:CookieSecure is also true. A site server always sees HTTPS.
+    options.Cookie.Name = siteServer is not null ? SessionCookie.SecurePrefix + "AeroLink.PreferenceConfirmation" : "AeroLink.PreferenceConfirmation";
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.HttpOnly = true;
-    if (sessionCookie.Secure)
+    if (siteServer is not null)
     {
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.Cookie.Path = "/";
