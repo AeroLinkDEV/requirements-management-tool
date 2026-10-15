@@ -170,6 +170,18 @@ test('another unit\'s object is shared only under a declared link to an earlier 
   const decoded = decodeState(linked.value.bytes, { links: { B: [{ path: ['y'], owner: 'A' }] } })
   if (!decoded.ok) throw new Error(decoded.refusal.detail)
   expect((decoded.value.units[1].fields.y as { frame: unknown }).frame).toBe(decoded.value.units[0].fields.x)
+  // A holder named after an Object.prototype member has no inherited links: it refuses, never throws.
+  for (const id of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    const bytes = hex('0000000000000000 02000000', s('A'), '01000000', s('x'), '07 01000000', s('g'), '04 000000000000F03F',
+      s(id), '01000000', s('y'), '10', s('A'), '01000000 00', s('x'))
+    for (const links of [undefined, {}]) {
+      const refused = decodeState(bytes, { links })
+      expect(refused.ok ? 'accepted' : refused.refusal.code, id).toBe('OWNERSHIP_AMBIGUOUS')
+    }
+    const declared = decodeState(bytes, { links: { [id]: [{ path: ['y'], owner: 'A' }] } })
+    if (!declared.ok) throw new Error(`${id}: ${declared.refusal.detail}`)
+    expect(declared.value.units[1].fields.y, id).toBe(declared.value.units[0].fields.x)
+  }
 })
 
 test('values with no exact encoding are refused, never approximated', () => {
@@ -203,14 +215,21 @@ test('UTC0 must be whole epoch milliseconds of a valid Date', () => {
   expect(refusalOf([{ unitId: 'U', root: { s: 1 }, fields: { s: 'authoritative' } }], [], -8_640_000_000_000_000)).toBe('accepted')
 })
 
-test('a class registry may not name a class twice, register a prototype twice or register a built-in', () => {
+test('a class registry may not name a class twice, register a prototype twice, or register a built-in or its subclass', () => {
   class First { v = 1 }
   class Second { v = 2 }
-  const invalid = [
+  class Indexed extends Map<number, number> {}
+  class Failure extends Error {}
+  class Grandchild extends First {}
+  const builtIn = (name: string, prototype: object) => [{ name, prototype }]
+  const invalid: ClassRegistration[][] = [
     [{ name: 'K', prototype: First.prototype }, { name: 'K', prototype: Second.prototype }],
     [{ name: 'K', prototype: First.prototype }, { name: 'L', prototype: First.prototype }],
-    [{ name: 'M', prototype: Map.prototype }],
+    builtIn('M', Map.prototype), builtIn('O', Object.prototype), builtIn('N', Number.prototype), builtIn('B', Boolean.prototype),
+    builtIn('W', WeakMap.prototype), builtIn('P', Promise.prototype), builtIn('I', Indexed.prototype), builtIn('F', Failure.prototype),
   ]
+  // A plain class hierarchy is fine.
+  expect(refusalOf([{ unitId: 'U', root: { s: new Grandchild() }, fields: { s: 'authoritative' } }], [{ name: 'G', prototype: Grandchild.prototype }])).toBe('accepted')
   for (const classes of invalid) {
     expect(refusalOf([{ unitId: 'U', root: { s: new First() }, fields: { s: 'authoritative' } }], classes)).toBe('CLASS_REGISTRY_INVALID')
     const decoded = decodeState(hex(ONE_FIELD, '01'), { classes })
@@ -218,31 +237,50 @@ test('a class registry may not name a class twice, register a prototype twice or
   }
 })
 
-test('unclassified root properties refuse, and serialized state may not reach anything restore rebuilds', () => {
+test('unclassified root properties refuse; configuration may not share with authoritative state; caches may', () => {
   const shared = { id: 'p' }
-  expect(refusalOf([{ unitId: 'U', root: { s: 1, extra: 2 }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_PROPERTY')
-  // Through config, observer and derived fields, directly or anywhere inside them.
-  expect(refusalOf([{ unitId: 'U', root: { config: shared, s: { shared } }, fields: { config: 'config', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  expect(refusalOf([{ unitId: 'U', root: { config: { inner: shared }, s: shared }, fields: { config: 'config', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  expect(refusalOf([{ unitId: 'U', root: { seen: { list: [shared] }, s: { y: shared } }, fields: { seen: 'observer', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  expect(refusalOf([{ unitId: 'U', root: { cache: new Map([['k', shared]]), s: shared }, fields: { cache: 'derived', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  const one = (root: object, fields: SnapshotUnit['fields']) => refusalOf([{ unitId: 'U', root, fields }])
+  expect(one({ s: 1, extra: 2 }, { s: 'authoritative' })).toBe('UNCLASSIFIED_PROPERTY')
+  // Configuration is rebuilt separately, so sharing with it splits: directly, nested, and through a Set entry, a Map
+  // key, a symbol-keyed property or a view's buffer.
+  expect(one({ config: shared, s: { shared } }, { config: 'config', s: 'authoritative' })).toBe('UNCLASSIFIED_ALIAS')
+  expect(one({ config: { inner: shared }, s: shared }, { config: 'config', s: 'authoritative' })).toBe('UNCLASSIFIED_ALIAS')
+  expect(one({ config: new Set([shared]), s: shared }, { config: 'config', s: 'authoritative' })).toBe('UNCLASSIFIED_ALIAS')
+  expect(one({ config: new Map([[shared, 1]]), s: shared }, { config: 'config', s: 'authoritative' })).toBe('UNCLASSIFIED_ALIAS')
+  expect(one({ config: { [Symbol('k')]: shared }, s: shared }, { config: 'config', s: 'authoritative' })).toBe('UNCLASSIFIED_ALIAS')
+  const buffer = new ArrayBuffer(8)
+  expect(one({ config: new Uint8Array(buffer), s: buffer }, { config: 'config', s: 'authoritative' })).toBe('UNCLASSIFIED_ALIAS')
   expect(refusalOf([{ unitId: 'P', root: { config: { deep: [shared] } }, fields: { config: 'config' } }, { unitId: 'U', root: { s: shared }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  // Observer and derived values are re-read or recomputed against the restored state: pointing into it is allowed.
+  expect(one({ seen: { list: [shared] }, s: { y: shared } }, { seen: 'observer', s: 'authoritative' })).toBe('accepted')
+  expect(one({ cache: new Map([['k', shared]]), s: shared }, { cache: 'derived', s: 'authoritative' })).toBe('accepted')
   // A unit root is never serialized state.
   const peer = { name: 'peer' }
   expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { s: peer }, fields: { s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  // A link field holds a unit root, or an object a declared owner emits: never the holder's own state, never an
-  // object nobody emits.
-  expect(refusalOf([{ unitId: 'U', root: { peer: shared, s: shared }, fields: { peer: 'link', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  expect(refusalOf([{ unitId: 'U', root: { peer: { w: shared }, s: shared }, fields: { peer: 'link', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
-  const frame = { gps: 1 }
-  const owner: SnapshotUnit = { unitId: 'A', root: { x: frame }, fields: { x: 'authoritative' } }
-  expect(refusalOf([owner, { unitId: 'B', root: { sensors: frame }, fields: { sensors: 'link' } }])).toBe('UNCLASSIFIED_ALIAS')
-  expect(refusalOf([owner, { unitId: 'B', root: { sensors: frame }, fields: { sensors: 'link' }, links: [{ path: ['sensors'], owner: 'A' }] }])).toBe('accepted')
-  expect(refusalOf([{ unitId: 'P', root: peer, fields: { name: 'authoritative' } }, { unitId: 'U', root: { peer, read: () => 1, s: 1 }, fields: { peer: 'link', read: 'link', s: 'authoritative' } }])).toBe('accepted')
   // Config, observer, derived and link fields are not encoded.
   const encoded = encodeState([{ unitId: 'U', root: { config: { big: 1 }, seen: [2], cache: new Set([3]), read: () => 4, s: 'p' }, fields: { config: 'config', seen: 'observer', cache: 'derived', read: 'link', s: 'authoritative' } }], { utc0Ms: 0 })
   if (!encoded.ok) throw new Error(encoded.refusal.detail)
   expect(show(encoded.value.bytes)).toBe(show(hex(ONE_FIELD, '05 01000000 70')))
+})
+
+test('link fields are wiring: objects no unit emits are accepted, emitted objects need another owner and a declared link', () => {
+  const shared = { id: 'p' }
+  const gps1 = { seed: 101 }, gps2 = { seed: 202 }
+  const receivers: SnapshotUnit[] = [{ unitId: 'GPS1', root: gps1, fields: { seed: 'authoritative' } }, { unitId: 'GPS2', root: gps2, fields: { seed: 'authoritative' } }]
+  const wiring = (value: unknown) => refusalOf([...receivers, { unitId: 'F', root: { w: value, s: 1 }, fields: { w: 'link', s: 'authoritative' } }])
+  // The holder's own state, directly or inside the wiring, is not wiring.
+  expect(refusalOf([{ unitId: 'U', root: { peer: shared, s: shared }, fields: { peer: 'link', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([{ unitId: 'U', root: { peer: { w: shared }, s: shared }, fields: { peer: 'link', s: 'authoritative' } }])).toBe('UNCLASSIFIED_ALIAS')
+  // Callback holders, unit tuples, shared computations and ports are wiring.
+  expect(wiring({ read: () => 1 })).toBe('accepted')
+  expect(wiring([gps1, gps2])).toBe('accepted')
+  expect(wiring({ depth: 0, observing: 0, members: [gps1, gps2] })).toBe('accepted')
+  expect(wiring({ port: 1, owner: gps1, send: () => undefined })).toBe('accepted')
+  // An object another unit emits needs a declared link for this field.
+  const frame = { gps: 1 }
+  const owner: SnapshotUnit = { unitId: 'A', root: { x: frame }, fields: { x: 'authoritative' } }
+  expect(refusalOf([owner, { unitId: 'B', root: { sensors: { frame } }, fields: { sensors: 'link' } }])).toBe('UNCLASSIFIED_ALIAS')
+  expect(refusalOf([owner, { unitId: 'B', root: { sensors: { frame } }, fields: { sensors: 'link' }, links: [{ path: ['sensors'], owner: 'A' }] }])).toBe('accepted')
 })
 
 test('registered content is always written as a content reference and resolved through the registry on decode', () => {
@@ -265,6 +303,25 @@ test('registered content is always written as a content reference and resolved t
     const missing = decodeState(encoded.value.bytes, { content: registry })
     expect(missing.ok ? undefined : missing.refusal).toMatchObject({ code: 'CONTENT_MISSING', contentHash: 'c1' })
   }
+  // A link field holding content is wiring.
+  expect(encodeState([{ unitId: 'U', root: { station: entry }, fields: { station: 'link' } }], { utc0Ms: 0, content }).ok).toBe(true)
+
+  // The registry must be a bijection. Two objects with one reference refuse on encode.
+  const twin = { ident: 'KBTV', elevation: entry.elevation }
+  const colliding: ContentRegistry = { ...content, referenceOf: value => value === entry || value === twin ? { contentHash: 'c1', ident: 'KBTV', index: 2 } : undefined }
+  const collision = encodeState([{ unitId: 'U', root: { s: [entry, twin] }, fields: { s: 'authoritative' } }], { utc0Ms: 0, content: colliding })
+  expect(collision.ok ? 'accepted' : collision.refusal.code).toBe('CONTENT_AMBIGUOUS')
+  // A registry that resolves to a fresh object each time still gives one object per reference.
+  const fresh: ContentRegistry = { referenceOf: value => (value as { ident?: unknown }).ident === 'KBTV' ? { contentHash: 'c1', ident: 'KBTV', index: 2 } : undefined, resolve: () => ({ ident: 'KBTV' }) }
+  const twice = decodeState(encoded.value.bytes, { content: fresh })
+  if (!twice.ok) throw new Error(twice.refusal.detail)
+  const both = twice.value.units[0].fields.s as unknown[]
+  expect(both[0]).toBe(both[1])
+  // A registry that resolves a reference to an object with a different reference refuses.
+  const other = { ident: 'KXYZ' }
+  const wrong: ContentRegistry = { referenceOf: value => value === other ? { contentHash: 'c1', ident: 'KXYZ', index: 0 } : content.referenceOf(value), resolve: () => other }
+  const misresolved = decodeState(encoded.value.bytes, { content: wrong })
+  expect(misresolved.ok ? undefined : misresolved.refusal).toMatchObject({ code: 'CONTENT_MISSING', contentHash: 'c1' })
 })
 
 test('nesting is limited to 256 path steps, at the same point on encode and decode, and never throws', () => {
@@ -374,6 +431,7 @@ test('decode refuses bytes that are not the canonical encoding', () => {
   expect(decodeCode('0100DCC208B21E00 00000000')).toBe('NON_CANONICAL') // UTC0 at 8.64e15 + 1 ms
   expect(decodeCode('0000000000000000 02000000  0100000055 00000000  0100000055 00000000')).toBe('OWNERSHIP_AMBIGUOUS') // duplicate unit id
   expect(decodeCode(ONE_FIELD, '10 0100000055 01000000 00 01000000 78')).toBe('REFERENCE_UNRESOLVED')
+  expect(decodeCode(ONE_FIELD, '10 0100000055 01010000', '01 00000000'.repeat(257))).toBe('NON_CANONICAL') // a 257-step reference path
   expect(decodeCode(ONE_FIELD, '01')).toBe('accepted')
 })
 
