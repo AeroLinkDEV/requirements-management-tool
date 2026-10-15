@@ -390,16 +390,16 @@ test('refuses an incomplete, over-counted, or inconsistent shard set', () => {
   assert.ok(inconsistent.reasons.some((reason) => reason.startsWith('shard-set-inconsistent: API test suite')))
 })
 
-// #1358: the browser group moves from 4 to 6 PR shards in two maintenance steps. The verifier the binder runs
-// is main's, so it accepts either size first; the matrix changes after it. Any other size is still drift.
+// #1630 stage 1 installs acceptance of six or eight shards before either workflow matrix moves.
+// The installed main verifier owns binding; another size, mixed totals or partial evidence still refuses.
 function withBrowserShards(jobs, total, shards = Array.from({ length: total }, (_, index) => index + 1), conclusion = 'success') {
   return jobs
     .filter((job) => !/^Browser journeys \(\d+\/\d+\)$/.test(job.name))
     .concat(shards.map((shard) => ({ name: `Browser journeys (${shard}/${total})`, conclusion, runId: RUN_ID, runAttempt: RUN_ATTEMPT })))
 }
 
-test('accepts a complete browser shard set of 6, on the full and the FMS topologies (#1358 step 2)', () => {
-  for (const total of [6]) {
+test('accepts a complete browser shard set of 6 or 8 on the full and FMS topologies (#1630 stage 1)', () => {
+  for (const total of [6, 8]) {
     assert.deepEqual(reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), total) }), { decision: 'PASS', reasons: [] }, `${total} shards`)
     assert.deepEqual(
       evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: withBrowserShards(fmsTopologyJobs(), total), fmsOnlyCandidate: true }),
@@ -409,21 +409,40 @@ test('accepts a complete browser shard set of 6, on the full and the FMS topolog
   }
 })
 
-test('refuses any other browser shard count, an incomplete or mixed 6-shard set, and a failed sixth shard (#1358)', () => {
-  for (const total of [1, 3, 4, 5, 7, 8]) {
+test('refuses other browser counts and incomplete, mixed or unsuccessful 6/8 evidence (#1630)', () => {
+  for (const total of [1, 2, 3, 4, 5, 7, 9, 10]) {
     const drifted = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), total) })
     assert.equal(drifted.decision, 'REFUSE', `${total} shards`)
     assert.ok(drifted.reasons.some((reason) => reason.startsWith('shard-count-drift: Browser journeys')), `${total} shards`)
   }
-  const incomplete = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6, [1, 2, 3, 4, 5]) })
-  assert.equal(incomplete.decision, 'REFUSE')
-  assert.ok(incomplete.reasons.some((reason) => reason.startsWith('shard-set-incomplete: Browser journeys ran 5 of 6')))
-  const duplicated = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6, [1, 2, 3, 4, 5, 5]) })
-  assert.ok(duplicated.reasons.some((reason) => reason.startsWith('shard-set-incomplete: Browser journeys')))
-  const mixed = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6, [1, 2, 3, 4, 5]).concat([{ name: 'Browser journeys (4/4)', conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }]) })
-  assert.ok(mixed.reasons.some((reason) => reason.startsWith('shard-set-inconsistent: Browser journeys')))
-  const failed = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6).map((job) => (job.name === 'Browser journeys (6/6)' ? { ...job, conclusion: 'failure' } : job)) })
-  assert.ok(failed.reasons.some((reason) => reason === "job-not-success: Browser journeys shard 6 concluded 'failure'"))
+  for (const total of [6, 8]) {
+    for (const fmsOnlyCandidate of [false, true]) {
+      const jobs = withBrowserShards(fmsOnlyCandidate ? fmsTopologyJobs() : allJobsSuccess(), total)
+      const last = `Browser journeys (${total}/${total})`
+      const changeLast = (change) => jobs.map((job) => job.name === last ? change(job) : job)
+      const variants = [
+        ['missing last', jobs.filter((job) => job.name !== last), 'shard-set-incomplete: Browser journeys'],
+        ['duplicate', changeLast((job) => ({ ...job, name: `Browser journeys (${total - 1}/${total})` })), 'shard-set-incomplete: Browser journeys'],
+        ['zero index', changeLast((job) => ({ ...job, name: `Browser journeys (0/${total})` })), 'shard-set-incomplete: Browser journeys'],
+        ['out of range', changeLast((job) => ({ ...job, name: `Browser journeys (${total + 1}/${total})` })), 'shard-set-incomplete: Browser journeys'],
+        ['malformed required name', changeLast((job) => ({ ...job, name: `Browser journeys (${total}/unknown)` })), 'shard-set-incomplete: Browser journeys'],
+        ['mixed complete 6 and 8', jobs.concat(withBrowserShards([], total === 6 ? 8 : 6)), 'shard-set-inconsistent: Browser journeys'],
+        ['foreign run', changeLast((job) => ({ ...job, runId: RUN_ID + 1 })), 'job-from-foreign-run'],
+        ['missing run', changeLast((job) => ({ ...job, runId: undefined })), 'job-run-id-missing'],
+        ['future attempt', changeLast((job) => ({ ...job, runAttempt: RUN_ATTEMPT + 1 })), 'job-attempt-mismatch'],
+        ['missing attempt', changeLast((job) => ({ ...job, runAttempt: undefined })), 'job-attempt-missing'],
+        ...['failure', 'cancelled', 'skipped', 'timed_out', undefined].map((conclusion) => [
+          `last shard ${conclusion}`, changeLast((job) => ({ ...job, conclusion })), 'job-not-success: Browser journeys',
+        ]),
+      ]
+      for (const [name, changedJobs, reason] of variants) {
+        const result = evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: changedJobs, fmsOnlyCandidate })
+        const description = `${total} shards, FMS-only=${fmsOnlyCandidate}, ${name}`
+        assert.equal(result.decision, 'REFUSE', description)
+        assert.ok(result.reasons.some((entry) => entry.startsWith(reason)), `${description}: ${result.reasons.join('; ')}`)
+      }
+    }
+  }
   // The API group is not part of the change: 3 only.
   const api = reasonsFor({ jobs: allJobsSuccess().filter((job) => !/^API test suite \(/.test(job.name))
     .concat([1, 2, 3, 4, 5, 6].map((shard) => ({ name: `API test suite (${shard}/6)`, conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }))) })

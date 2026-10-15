@@ -294,7 +294,7 @@ test('expectedRun carries PR, base/head SHA, ref, and workflow identity from the
   }
 })
 
-// #1358: the browser-pr instances come from the workflow's own matrix, so the move from 4 to 6 shards is one change.
+// #1630 stage 1: metadata follows either accepted PR matrix before the later six-to-eight workflow cutover.
 const realWorkflow = readFileSync(fileURLToPath(new URL('../../../.github/workflows/ci.yml', import.meta.url)), 'utf8')
 
 function withBrowserMatrix(shards) {
@@ -309,8 +309,8 @@ function withBrowserMatrix(shards) {
   return { directory, path }
 }
 
-test('the browser-pr instances follow the workflow matrix: 6 since #1358, selected and skipped alike', () => {
-  for (const total of [6]) {
+test('the browser-pr instances follow accepted 6 or 8 matrices, selected and skipped alike (#1630)', () => {
+  for (const total of [6, 8]) {
     const workflow = withBrowserMatrix(Array.from({ length: total }, (_, index) => index + 1))
     const names = Array.from({ length: total }, (_, index) => `browser-pr-${index + 1}`)
     try {
@@ -329,7 +329,11 @@ test('the browser-pr instances follow the workflow matrix: 6 since #1358, select
 })
 
 test('a browser-pr matrix the verifier does not accept, or cannot be read, fails closed', () => {
-  for (const shards of [[1, 2, 3, 4], [1, 2, 3, 4, 5], [1, 2, 4, 5, 6, 7], [2, 3, 4, 5]]) {
+  for (const shards of [
+    [1, 2, 3, 4], [1, 2, 3, 4, 5], [1, 2, 4, 5, 6, 7], [2, 3, 4, 5],
+    [1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 2, 3, 4, 5, 6, 7, 7], [1, 2, 3, 4, 5, 6, 7, 9], [0, 2, 3, 4, 5, 6, 7, 8],
+  ]) {
     const workflow = withBrowserMatrix(shards)
     try {
       const { directory, result } = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: workflow.path })

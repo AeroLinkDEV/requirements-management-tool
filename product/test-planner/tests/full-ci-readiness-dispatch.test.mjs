@@ -208,12 +208,18 @@ test('trusted readiness recovers failed attempts once and binds only its fresh n
       const script = `set -euo pipefail
 headers=()
 api=https://invalid.example
+copy_response() {
+  # JSON.stringify writes one line without a trailing newline; preserve escaped characters verbatim.
+  local payload=""
+  IFS= read -r payload < "$1" || [ -n "$payload" ]
+  printf '%s' "$payload" > "$2"
+}
 read_api() {
   [ "$2" = --output ]
   case "$1" in
     "$api/pulls/$PR_NUMBER") kind=pr; limit=${prs.length} ;;
     "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100") kind=runs; limit=${row.runs.length} ;;
-    "$api/actions/runs/"*) printf '%s\\n' "$1" >> "$RUNNER_TEMP/jobs-reads"; cp "$RUNNER_TEMP/jobs.json" "$3"; return ;;
+    "$api/actions/runs/"*) printf '%s\\n' "$1" >> "$RUNNER_TEMP/jobs-reads"; printf 'read jobs\\n' > "$RUNNER_TEMP/phase"; copy_response "$RUNNER_TEMP/jobs.json" "$3"; printf 'delivered jobs\\n' > "$RUNNER_TEMP/phase"; return ;;
     *) echo 'unexpected API read' >&2; return 99 ;;
   esac
   count=0
@@ -222,11 +228,14 @@ read_api() {
   printf '%s\\n' "$count" > "$RUNNER_TEMP/$kind-count"
   response=$count
   if [ "$response" -gt "$limit" ]; then response=$limit; fi
-  cp "$RUNNER_TEMP/$kind-$response.json" "$3"
+  printf 'read %s %s\\n' "$kind" "$count" > "$RUNNER_TEMP/phase"
+  copy_response "$RUNNER_TEMP/$kind-$response.json" "$3"
+  printf 'delivered %s %s\\n' "$kind" "$count" > "$RUNNER_TEMP/phase"
 }
-curl() { printf 'DISPATCH\\n' >> "$RUNNER_TEMP/dispatches"; return ${row.postStatus ?? 0}; }
+curl() { printf 'dispatch\\n' > "$RUNNER_TEMP/phase"; printf 'DISPATCH\\n' >> "$RUNNER_TEMP/dispatches"; return ${row.postStatus ?? 0}; }
 node() {
   if [ "$1" = "$RUNNER_TEMP/verify-readiness-target.mjs" ]; then return 0; fi
+  printf 'native jobs validator\\n' > "$RUNNER_TEMP/phase"
   command node "$@"
 }
 sleep() {
@@ -244,6 +253,14 @@ echo BOUND:$run_id
           REQUEST_LABEL: row.label ?? 'ready-for-full-ci', GITHUB_STEP_SUMMARY: '/dev/null' },
         encoding: 'utf8', timeout: 10_000,
       })
+      if (result.error) {
+        // This fixture uses synthetic transport responses and empty headers; never include ambient environment.
+        const state = name => existsSync(join(scratch, name)) ? readFileSync(join(scratch, name), 'utf8').slice(0, 128).trim() : '(absent)'
+        console.error(`Readiness fixture child error: ${row.name}; code=${result.error.code}; status=${result.status}; signal=${result.signal}; pid=${result.pid}; phase=${state('phase')}; PR reads=${state('pr-count')}; run reads=${state('runs-count')}`)
+        for (const stream of ['stdout', 'stderr']) {
+          console.error(`Captured ${stream} (first 8192 characters):\n${(result[stream] ?? '').slice(0, 8192)}`)
+        }
+      }
       assert.ifError(result.error)
       const detail = `${row.name}: ${result.stdout}\n${result.stderr}`
       const dispatchPath = join(scratch, 'dispatches')
