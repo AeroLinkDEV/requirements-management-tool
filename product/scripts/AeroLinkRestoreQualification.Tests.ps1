@@ -248,24 +248,74 @@ try {
     Invoke-Checked $pwsh.Source @('-NoProfile','-File',$generator,'-Directory',$Directory)
 }
 function Start-QualificationTlsRelay([string]$Directory) {
-    $python = if ($env:AEROLINK_TEST_PYTHON) { $env:AEROLINK_TEST_PYTHON } else { (Get-Command python.exe -ErrorAction Stop).Source }
     $relay = Join-Path $PSScriptRoot 'test-support\NotificationTlsRelay.py'
-    if (-not (Test-Path -LiteralPath $relay -PathType Leaf)) { throw 'The shared executable TLS relay fixture is missing.' }
     $stdout = Join-Path $Directory 'relay.stdout.log'
     $stderr = Join-Path $Directory 'relay.stderr.log'
-    $process = Start-Process -FilePath $python -ArgumentList @(('"'+$relay+'"'),('"'+$Directory+'"'),'AcceptThenDropQuit',"$smtpPort",'180') `
-        -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
-    # Retain the process handle before a quick relay can exit; Windows PowerShell otherwise may lose
-    # the exit code when WaitForExit is first called after termination.
-    [void]$process.Handle
+    # Nested JSONL is already retained by Save-QualificationDiagnostics; PEM/key files remain excluded.
+    $receiptPath = Join-Path $Directory 'relay.readiness.jsonl'
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $history = [Collections.Generic.List[object]]::new()
+    $receipt = [ordered]@{ outcome='StartFailed'; pythonPath=$null; helperPath=$relay
+        processId=$null; processStartUtc=$null; identityError=$null; observedState='NotCreated'; exitCode=$null
+        attemptBudget=100; sleepMilliseconds=100; expectedFirstLine="$smtpPort"; attempts=0; elapsedMilliseconds=0
+        history=$null; stdout=$null; stderr=$null; error=$null
+        cleanup=[ordered]@{outcome='NotRequired'; waitMilliseconds=10000; error=$null} }
+    $process = $null
     try {
+        $python = if ($env:AEROLINK_TEST_PYTHON) { $env:AEROLINK_TEST_PYTHON } else { 'python.exe' }
+        $python = (Get-Command $python -CommandType Application -ErrorAction Stop).Source
+        $receipt.pythonPath = $python
+        if (-not (Test-Path -LiteralPath $relay -PathType Leaf)) { throw 'The shared executable TLS relay fixture is missing.' }
+        $process = Start-Process -FilePath $python -ArgumentList @(('"'+$relay+'"'),('"'+$Directory+'"'),'AcceptThenDropQuit',"$smtpPort",'180') `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+        # Keep the exact child handle, including after exit, for attribution and owned cleanup.
+        [void]$process.Handle
+        $receipt.processId = $process.Id
+        try { $receipt.processStartUtc = $process.StartTime.ToUniversalTime().ToString('o') }
+        catch { $receipt.identityError = $_.Exception.Message }
+        $ready = $false
         for ($attempt=0;$attempt -lt 100;$attempt++) {
+            $receipt.attempts++
             if ($process.HasExited) { break }
-            if ((Test-Path -LiteralPath $stdout) -and ((Get-Content -LiteralPath $stdout -TotalCount 1) -eq "$smtpPort")) { return $process }
+            $firstLine = if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout -TotalCount 1 } else { $null }
+            $history.Add([ordered]@{attempt=$receipt.attempts; elapsedMilliseconds=$clock.ElapsedMilliseconds
+                firstLine=$(if ($null -eq $firstLine) { $null } else { ([string]$firstLine).Substring(0,[Math]::Min(400,([string]$firstLine).Length)) })})
+            if ($firstLine -eq "$smtpPort") { $ready = $true; break }
             Start-Sleep -Milliseconds 100
         }
-        throw "Owned STARTTLS relay did not become ready. See $stderr."
-    } catch { if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }; throw }
+        $receipt.elapsedMilliseconds = $clock.ElapsedMilliseconds
+        $receipt.observedState = if ($process.HasExited) { 'Exited' } else { 'Running' }
+        if ($process.HasExited) { $receipt.exitCode = $process.ExitCode }
+        $receipt.outcome = if ($ready) { 'Ready' } elseif ($process.HasExited) { 'ExitedBeforeReady' } else { 'ReadinessNotObserved' }
+        if (-not $ready) { throw "Owned STARTTLS relay did not become ready. See $stderr." }
+        return $process
+    } catch {
+        $receipt.error = $_.Exception.Message
+        if ($receipt.elapsedMilliseconds -eq 0) { $receipt.elapsedMilliseconds = $clock.ElapsedMilliseconds }
+        if ($process) {
+            if ($receipt.outcome -eq 'StartFailed') { $receipt.outcome = 'ObservationFailed' }
+            try {
+                $wasExited = $process.HasExited
+                $receipt.observedState = if ($wasExited) { 'Exited' } else { 'Running' }
+                if ($wasExited) { $receipt.exitCode = $process.ExitCode }
+                if (-not $wasExited) { $process.Kill() }
+                # This is cleanup after refusal, never additional readiness acceptance time.
+                if (-not $process.WaitForExit(10000)) { throw 'Owned relay termination was not confirmed within the cleanup bound.' }
+                $receipt.cleanup.outcome = if ($wasExited) { 'AlreadyExited' } else { 'Terminated' }
+            } catch { $receipt.cleanup.outcome='Unconfirmed'; $receipt.cleanup.error=$_.Exception.Message }
+        }
+        throw
+    } finally {
+        # Diagnostics are best effort and must not mask the original qualification failure.
+        try {
+            $receipt.history = $history.ToArray()
+            foreach ($stream in @(@('stdout',$stdout),@('stderr',$stderr))) {
+                $file = Get-Item -LiteralPath $stream[1] -ErrorAction SilentlyContinue
+                $receipt[$stream[0]] = [ordered]@{bytes=$(if ($file) { $file.Length } else { $null }); tail=(Get-QualificationLogTail $stream[1])}
+            }
+            $receipt | ConvertTo-Json -Depth 6 -Compress | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+        } catch { Write-Warning "Owned STARTTLS startup diagnostics could not be retained: $($_.Exception.Message)" -WarningAction Continue }
+    }
 }
 
 $token = [Guid]::NewGuid().ToString('N')

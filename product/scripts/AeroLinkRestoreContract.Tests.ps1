@@ -193,6 +193,106 @@ try {
         if (-not $message -or -not $message.Contains("Listener on port ${closedPort}: unknown (Get-NetTCPConnection failed: CIM provider unavailable)")) { throw "A failed listener query was not reported as such: $message" }
     } finally { Remove-Item -LiteralPath Function:\Get-NetTCPConnection }
 
+    # #1633: the existing operator owner needs native PowerShell, not a Python installation.
+    # Substitute only process launch in this owned runner; return genuine OS processes. All readiness,
+    # observation and cleanup logic still comes from the production AST. Full qualification uses Python.
+    $relayDefinition = $qualificationAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Start-QualificationTlsRelay' }, $true)
+    if (-not $relayDefinition) { throw 'The qualification relay launcher is missing.' }
+    $tailDefinition = $qualificationAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-QualificationLogTail' }, $true)
+    $relayRunnerRoot = Join-Path $readinessFixture 'relay runner'
+    New-Item -ItemType Directory -Path (Join-Path $relayRunnerRoot 'test-support') | Out-Null
+    $relayRunner = Join-Path $relayRunnerRoot 'run.ps1'
+    $runnerBody = @'
+param([string]$Directory, [int]$Port)
+$ErrorActionPreference = 'Stop'
+$smtpPort = $Port
+$env:AEROLINK_TEST_PYTHON = (Get-Process -Id $PID).Path
+function Start-Process {
+    param($FilePath, $ArgumentList, $RedirectStandardOutput, $RedirectStandardError, $WindowStyle, [switch]$PassThru)
+    Microsoft.PowerShell.Management\Start-Process -FilePath $FilePath -ArgumentList @('-NoProfile','-File',('"'+(Join-Path $PSScriptRoot 'child.ps1')+'"'),'-Directory',$ArgumentList[1],'-Port',$ArgumentList[3]) `
+        -RedirectStandardOutput $RedirectStandardOutput -RedirectStandardError $RedirectStandardError -WindowStyle $WindowStyle -PassThru
+}
+'@
+    $runnerBody += "`n" + $tailDefinition.Extent.Text + "`n" + $relayDefinition.Extent.Text + "`n" + @'
+$ownedRelay = $null
+try {
+    $ownedRelay = Start-QualificationTlsRelay $Directory
+    @{ ready=$true } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Directory 'runner-result.json') -Encoding UTF8
+} catch {
+    @{ ready=$false; message=$_.Exception.Message } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Directory 'runner-result.json') -Encoding UTF8
+} finally {
+    if ($ownedRelay -and -not $ownedRelay.HasExited) { $ownedRelay.Kill(); if (-not $ownedRelay.WaitForExit(10000)) { throw 'Ready control cleanup failed.' } }
+}
+'@
+    Set-Content -LiteralPath $relayRunner -Value $runnerBody -Encoding UTF8
+    $childSource = @'
+param([string]$Directory, [int]$Port)
+$self = Get-Process -Id $PID
+@{pid=$PID;creationFileTime=$self.StartTime.ToUniversalTime().ToFileTimeUtc()} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Directory 'child.json') -Encoding UTF8
+$mode = Split-Path $Directory -Leaf
+if ($mode.StartsWith('exit')) { [Console]::Error.WriteLine('controlled early exit 7'); exit 7 }
+if ($mode -eq 'ready') { [Console]::Out.WriteLine($Port) }
+if ($mode -eq 'wrong') { [Console]::Out.WriteLine('wrong-first-line'); [Console]::Out.WriteLine($Port) }
+Start-Sleep -Seconds 60
+'@
+    Set-Content -LiteralPath (Join-Path $relayRunnerRoot 'child.ps1') -Value $childSource -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $relayRunnerRoot 'test-support\NotificationTlsRelay.py') -Value '# Owned launcher path; the process stimulus is child.ps1.' -Encoding UTF8
+    function Invoke-RelayStartupControl([string]$Mode, [bool]$BlockReceipt = $false) {
+        $caseRoot = Join-Path $ownedRun $Mode
+        New-Item -ItemType Directory -Path $caseRoot | Out-Null
+        $receiptPath = Join-Path $caseRoot 'relay.readiness.jsonl'
+        if ($BlockReceipt) { New-Item -ItemType Directory -Path $receiptPath | Out-Null }
+        $runner = $null; $childIdentity = $null
+        try {
+            $runner = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @('-NoProfile','-File',('"'+$relayRunner+'"'),'-Directory',('"'+$caseRoot+'"'),'-Port',"$closedPort") `
+                -RedirectStandardOutput (Join-Path $caseRoot 'runner.stdout.log') -RedirectStandardError (Join-Path $caseRoot 'runner.stderr.log') -WindowStyle Hidden -PassThru
+            [void]$runner.Handle
+            if (-not $runner.WaitForExit(35000)) { throw "Relay $Mode control runner did not finish." }
+            if ($runner.ExitCode -ne 0) { throw "Relay $Mode control runner failed: $(Get-QualificationLogTail (Join-Path $caseRoot 'runner.stderr.log'))" }
+            $childIdentity = Get-Content -LiteralPath (Join-Path $caseRoot 'child.json') -Raw | ConvertFrom-Json
+            $result = Get-Content -LiteralPath (Join-Path $caseRoot 'runner-result.json') -Raw | ConvertFrom-Json
+            $survivor = Get-Process -Id $childIdentity.pid -ErrorAction SilentlyContinue
+            if ($survivor -and $survivor.StartTime.ToUniversalTime().ToFileTimeUtc() -eq $childIdentity.creationFileTime) { throw "Relay $Mode left its exact owned child alive." }
+            if ($BlockReceipt) {
+                if ($result.ready -or $result.message -notlike 'Owned STARTTLS relay did not become ready.*') { throw 'Diagnostic write failure replaced the relay readiness refusal.' }
+                return
+            }
+            if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) {
+                throw "Relay $Mode is missing attributable startup receipt; child=$($childIdentity | ConvertTo-Json -Compress); stderr=$(Get-QualificationLogTail (Join-Path $caseRoot 'relay.stderr.log')); result=$($result | ConvertTo-Json -Compress)"
+            }
+            $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            # PowerShell 7 parses ISO JSON timestamps as DateTime; reparsing that object as a culture
+            # string drops subsecond birth identity. Windows PowerShell 5 leaves the JSON value a string.
+            $birth = if ($receipt.processStartUtc -is [DateTime]) { $receipt.processStartUtc } else { [DateTime]::Parse($receipt.processStartUtc) }
+            if ($receipt.processId -ne $childIdentity.pid -or $birth.ToFileTimeUtc() -ne $childIdentity.creationFileTime) { throw "Relay $Mode receipt does not name the actual child birth identity." }
+            if ($receipt.helperPath -ne (Join-Path $relayRunnerRoot 'test-support\NotificationTlsRelay.py') -or -not [IO.Path]::IsPathRooted($receipt.pythonPath)) { throw "Relay $Mode receipt lacks resolved executable/helper paths." }
+            if ($receipt.attemptBudget -ne 100 -or $receipt.sleepMilliseconds -ne 100 -or $receipt.expectedFirstLine -ne "$closedPort") { throw "Relay $Mode changed its readiness policy." }
+            if ($Mode -eq 'ready') {
+                if (-not $result.ready -or $receipt.outcome -ne 'Ready' -or $receipt.observedState -ne 'Running' -or $receipt.cleanup.outcome -ne 'NotRequired') { throw 'The exact ready-line child was refused or misreported.' }
+            } else {
+                if ($result.ready -or $result.message -notlike 'Owned STARTTLS relay did not become ready.*' -or $receipt.cleanup.outcome -notin @('AlreadyExited','Terminated')) { throw "Relay $Mode lost refusal or confirmed owned cleanup." }
+                if ($Mode -eq 'exit') {
+                    if ($receipt.outcome -ne 'ExitedBeforeReady' -or $receipt.observedState -ne 'Exited' -or $receipt.exitCode -ne 7 -or $receipt.stderr.tail -notlike '*controlled early exit 7*') { throw 'The early exit outcome/code/stderr was lost.' }
+                } elseif ($receipt.outcome -ne 'ReadinessNotObserved' -or $receipt.observedState -ne 'Running' -or $receipt.attempts -ne 100 -or $null -ne $receipt.exitCode -or $receipt.elapsedMilliseconds -lt 9000) { throw "Relay $Mode did not retain its unchanged refusal and pre-cleanup running state." }
+            }
+            Write-Host "Relay $Mode control passed: $($receipt.outcome), pid $($receipt.processId), cleanup $($receipt.cleanup.outcome)."
+            Write-Host ('Relay startup observation: ' + ($receipt | Select-Object * -ExcludeProperty history | ConvertTo-Json -Depth 6 -Compress))
+        } finally {
+            if ($runner -and -not $runner.HasExited) { $runner.Kill(); $runner.WaitForExit(10000) | Out-Null }
+            $marker = Join-Path $caseRoot 'child.json'
+            if (Test-Path -LiteralPath $marker) {
+                $identity = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+                $child = Get-Process -Id $identity.pid -ErrorAction SilentlyContinue
+                if ($child -and $child.StartTime.ToUniversalTime().ToFileTimeUtc() -eq $identity.creationFileTime) { [void]$child.Handle; $child.Kill(); $child.WaitForExit(10000) | Out-Null }
+            }
+        }
+    }
+    Invoke-RelayStartupControl 'exit'
+    Invoke-RelayStartupControl 'ready'
+    Invoke-RelayStartupControl 'silent'
+    Invoke-RelayStartupControl 'wrong'
+    Invoke-RelayStartupControl 'exit-write-blocked' $true
+
     # Retention: logs at any depth and top-level summaries reach the uploaded directory; key material and
     # evidence do not.
     New-Item -ItemType Directory -Path (Join-Path $ownedRun 'owned-starttls'),(Join-Path $ownedRun 'source evidence') | Out-Null
@@ -211,6 +311,11 @@ try {
         if (Test-Path -LiteralPath (Join-Path $leaf $excluded)) { throw "Failed restore qualification diagnostics copied $excluded, which is not a diagnostic." }
     }
     if ($copied -lt 5) { throw "Failed restore qualification diagnostics reported $copied copied files." }
+    foreach ($mode in 'exit','ready','silent','wrong') {
+        $relativeReceipt = Join-Path $mode 'relay.readiness.jsonl'
+        $original = [IO.File]::ReadAllText((Join-Path $ownedRun $relativeReceipt))
+        if ([IO.File]::ReadAllText((Join-Path $leaf $relativeReceipt)) -ne $original) { throw "The actual $mode relay receipt was lost or changed by diagnostic retention." }
+    }
 }
 finally {
     Remove-Item -LiteralPath $readinessFixture -Recurse -Force -ErrorAction SilentlyContinue
