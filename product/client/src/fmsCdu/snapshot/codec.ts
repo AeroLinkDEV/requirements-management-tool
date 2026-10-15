@@ -51,7 +51,9 @@ import type { Accepted, Refused, RestoreRefusal, RestoreRefusalCode, SnapshotRef
  *
  * Walk blind spots (the walks never run user code and cannot see everything): an object reachable only through an
  * own accessor (getter), an object hung on a function's own property, WeakMap/WeakSet values, and an object used as
- * another object's `[[Prototype]]`. Unit schema reviews must check for these.
+ * another object's `[[Prototype]]`. A Map, Set, Date or ArrayBuffer whose prototype was reassigned is recognised by
+ * its internal slots and refused (encode) or walked by brand (census) when it has no own properties, as such objects
+ * do; one that also carries own properties is taken for a plain object. Unit schema reviews must check for these.
  *
  * Known limit: an object *inside* registered content (for example a content entry's position record) that state
  * holds directly is encoded as a value, so after decode it is a copy, not the content's own object. Whether I2c adds
@@ -102,9 +104,9 @@ export type ContentReference = { readonly contentHash: string; readonly ident: s
 /**
  * Registered content: objects that are encoded as references to content, never as values. The registry must be a
  * bijection between content objects and references: `resolve(referenceOf(x)) === x`, and `referenceOf` gives distinct
- * objects distinct references. The codec checks both: encode refuses two objects with one reference
- * (`CONTENT_AMBIGUOUS`), and decode resolves each reference once and refuses a resolution whose own reference differs
- * (`CONTENT_MISSING`).
+ * objects distinct references. The codec checks both: encode refuses two objects with one reference, and checks once
+ * per reference that it resolves back to the object (`CONTENT_AMBIGUOUS`); decode resolves each reference once and
+ * refuses a resolution whose own reference differs (`CONTENT_MISSING`).
  */
 export type ContentRegistry = {
   readonly referenceOf: (value: object) => ContentReference | undefined;
@@ -161,14 +163,27 @@ const VIEWS: readonly ViewConstructor[] = [
   Int8Array, Uint8Array, Uint8ClampedArray, Int16Array, Uint16Array, Int32Array, Uint32Array, Float32Array, Float64Array,
   BigInt64Array, BigUint64Array, DataView,
 ];
-/** Every built-in prototype a registered class's chain may not contain (Object.prototype may only end the chain). */
+const prototypeOf = (constructor: unknown): object[] => {
+  const prototype: unknown = typeof constructor === "function" ? (constructor as { prototype?: unknown }).prototype : undefined;
+  return typeof prototype === "object" && prototype !== null ? [prototype] : [];
+};
+/**
+ * Every built-in prototype a registered class's chain may not contain (Object.prototype may only end the chain): the
+ * language intrinsics, every `Intl` constructor, and the platform classes present in both Node and browsers. Each is
+ * looked up by name and skipped where the runtime lacks it, so the rule is the same in both. Residual: a platform class
+ * not named here (a browser-only DOM class, for example) is not refused; registrations must not extend platform classes.
+ */
 const BUILT_IN_PROTOTYPES: ReadonlySet<object> = new Set<object>([
   Object.prototype, Object.getPrototypeOf(Int8Array.prototype) as object, ...VIEWS.map(view => view.prototype),
   ...["Array", "Date", "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "FinalizationRegistry", "ArrayBuffer", "SharedArrayBuffer",
     "Function", "Number", "Boolean", "String", "Symbol", "BigInt", "RegExp", "Promise", "Error", "EvalError", "RangeError",
-    "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"]
-    .map(name => (globalThis as unknown as Record<string, { prototype?: unknown } | undefined>)[name]?.prototype)
-    .filter((prototype): prototype is object => typeof prototype === "object" && prototype !== null),
+    "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError",
+    "EventTarget", "Event", "AbortController", "AbortSignal", "URL", "URLSearchParams", "Blob", "TextEncoder", "TextDecoder",
+    "Headers", "Request", "Response", "MessageChannel", "MessagePort", "BroadcastChannel"]
+    .flatMap(name => prototypeOf((globalThis as unknown as Record<string, unknown>)[name])),
+  ...(typeof Intl === "object" && Intl !== null
+    ? Object.getOwnPropertyNames(Intl).flatMap(name => prototypeOf((Intl as unknown as Record<string, unknown>)[name]))
+    : []),
 ]);
 /** The intrinsic accessors, so a subclass cannot run code while the census walks. */
 const typedArrayBuffer = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Int8Array.prototype) as object, "buffer")!.get!;
@@ -203,9 +218,10 @@ function pathText(path: readonly PathStep[]): string {
 const describe = (location: ObjectLocation) => `${location.unitId}:${pathText(location.path)}`;
 const locationKey = (unitId: string, path: readonly PathStep[]) => JSON.stringify([unitId, path]);
 
-/** Whether `links` declares that, at `path`, the holder may hold objects emitted by `owner`. */
+/** Whether `links` declares that, at `path`, the holder may hold objects emitted by `owner`. A link must name a path:
+ *  an empty one would cover every field, so it covers none (and the encoder refuses declaring it). */
 function linkCovers(links: readonly CrossOwnerLink[] | undefined, owner: string, path: readonly PathStep[]) {
-  return (links ?? []).some(link => link.owner === owner && link.path.length <= path.length &&
+  return (links ?? []).some(link => link.owner === owner && link.path.length > 0 && link.path.length <= path.length &&
     link.path.every((key, i) => {
       const step = path[i];
       return (step.kind === "key" && step.key === key) || (step.kind === "index" && String(step.index) === key);
@@ -236,17 +252,42 @@ function classRegistry(classes: readonly ClassRegistration[]) {
 }
 
 /**
+ * Whether an object with no own properties carries a built-in's internal slots (a Map, Set, Date, ArrayBuffer or other
+ * cloneable built-in whose prototype was reassigned). The structured clone algorithm (Node 17+ and every supported
+ * browser) dispatches on internal slots, never throws for an ordinary object without own properties, and runs no user
+ * code for one. It costs about a microsecond, where an exception-based brand probe (`Map.prototype.has.call` in a try)
+ * costs several, which made empty objects 25 times slower to encode.
+ */
+function branded(value: object) {
+  let clone: unknown;
+  try { clone = structuredClone(value); } catch { return true; }
+  return Object.getPrototypeOf(clone) !== Object.prototype || Reflect.ownKeys(clone as object).length !== 0;
+}
+/**
+ * Whether an object whose prototype is `Object.prototype` or `null` could be a built-in whose prototype was
+ * reassigned: such an object has no own properties. Residual (outside the contract, and not used in the code base): a
+ * reassigned built-in that also carries own properties is taken for a plain object.
+ */
+const mayHideBrand = (value: object) => Reflect.ownKeys(value).length === 0;
+
+/** A view's buffer through the intrinsic getters: DataView first, then typed arrays, whatever the prototype says. */
+function viewBuffer(value: ArrayBufferView): unknown {
+  try { return dataViewBuffer.call(value); } catch { return typedArrayBuffer.call(value); }
+}
+
+/**
  * The objects a walk continues to from `value`: a view's buffer, Map keys and values, Set entries, and the values of
- * own data properties (accessors are never called). Plain objects and arrays skip the Map/Set probes; any other
- * prototype is probed through the intrinsic `forEach`, so a Map whose prototype was changed is still walked.
+ * own data properties (accessors are never called). Plain objects and arrays skip the Map/Set probes unless they have
+ * no own properties (a built-in whose prototype was reassigned looks like that); any other prototype is probed through
+ * the intrinsic `forEach`, so a Map whose prototype was changed is still walked.
  */
 function walkChildren(value: object, push: (child: unknown) => void) {
   if (ArrayBuffer.isView(value)) {
-    push(value instanceof DataView ? dataViewBuffer.call(value) : typedArrayBuffer.call(value));
+    push(viewBuffer(value));
     return;
   }
   const proto: unknown = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null && !Array.isArray(value)) {
+  if ((proto !== Object.prototype && proto !== null && !Array.isArray(value)) || (!Array.isArray(value) && mayHideBrand(value) && branded(value))) {
     try { Map.prototype.forEach.call(value, (item: unknown, key: unknown) => { push(key); push(item); }); } catch { /* not a Map */ }
     try { Set.prototype.forEach.call(value, (item: unknown) => { push(item); }); } catch { /* not a Set */ }
   }
@@ -334,6 +375,7 @@ class Encoder {
       for (const link of unit.links ?? []) {
         const owner = order.get(link.owner);
         if (owner === undefined || owner === i) throw new Refusal("OWNERSHIP_AMBIGUOUS", `unit ${unit.unitId} declares a link to ${link.owner}, which is not another unit of this snapshot`);
+        if (link.path.length === 0) throw new Refusal("OWNERSHIP_AMBIGUOUS", `unit ${unit.unitId} declares a link to ${link.owner} with an empty path; a link must name the field it covers`);
         if (owner > i) throw new Refusal("OWNER_AFTER_HOLDER", `unit ${unit.unitId} declares a link to ${link.owner}, which comes after it; owners must precede holders`);
       }
     });
@@ -449,6 +491,9 @@ class Encoder {
       const key = contentKey(content);
       const holder = this.contentObjects.get(key);
       if (holder !== undefined && holder !== value) this.refuse("CONTENT_AMBIGUOUS", `two distinct objects share the content reference ${key}`);
+      // Once per reference: the registry must resolve it back to this very object, so a bad registry fails at capture
+      // rather than at Verify (two references resolving to one object, for example).
+      if (holder === undefined && this.content!.resolve(content) !== value) this.refuse("CONTENT_AMBIGUOUS", `the content reference ${key} does not resolve back to this object`);
       this.contentObjects.set(key, value);
       w.u8(TAG.content); w.str(this.checkedString(content.contentHash)); w.str(this.checkedString(content.ident)); w.u32(content.index);
       return;
@@ -470,6 +515,11 @@ class Encoder {
     this.seen.set(value, { unitId: this.unit.unitId, path: [...this.path] });
 
     const proto: unknown = Object.getPrototypeOf(value);
+    // A built-in whose prototype was reassigned would otherwise be taken for a plain object or class instance and
+    // lose its entries, time or bytes. Views are cheap to recognise; the others only where one could hide.
+    if (proto === Object.prototype || proto === null || !BUILT_IN_PROTOTYPES.has(proto as object)) {
+      if (ArrayBuffer.isView(value) || (mayHideBrand(value) && branded(value))) this.refuse("UNCLASSIFIED_VALUE", "a built-in object whose prototype was reassigned");
+    }
     if (proto === Object.prototype) { w.u8(TAG.object); this.properties(value); return; }
     if (proto === null) { w.u8(TAG.nullObject); this.properties(value); return; }
     if (proto === Array.prototype && Array.isArray(value)) { this.array(value as unknown[]); return; }

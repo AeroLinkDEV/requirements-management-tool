@@ -18,7 +18,8 @@ export type SnapshotRefusalCode =
    *  object authoritative state owns (configuration is rebuilt separately); or a link field's graph reaches an object
    *  the holder itself emits, or another unit emits with no declared link for that field. */
   | "UNCLASSIFIED_ALIAS"
-  /** Two distinct objects share one content reference, so decode could not keep them distinct. */
+  /** The content registry is not a bijection on this state: two distinct objects share one reference, or a reference
+   *  does not resolve back to the object that has it (two references resolving to one object, for example). */
   | "CONTENT_AMBIGUOUS"
   /** An object reachable from two units without a declared owner, a link to a unit not in the snapshot, or a duplicate
    *  unit id. */
