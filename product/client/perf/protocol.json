@@ -68,7 +68,13 @@
       "terminal": "Public t0 setup PASS is separate from 7200 successful continuation frames. Observe real overrun until ordinary public Pause and conserved cancelled epoch close; never stop-after-N or create END.",
       "heap": "Later Pause/CDP heap is contextual with actual flight-overrun/frozen-clock receipts. Retained-F7200 heap is UNAVAILABLE; no clock hold.",
       "interaction": "Alternating native PROG and LEGS page keys; retain trusted event, exact actual CDU before/after outcome and next-paint Event Timing. Threshold16ms/rounding8ms; absence is censored/unavailable, never zero or exact latency p95.",
-      "pair": "Exact owned source copies of actual7f2b53ae and5c7ec720; identical pinned observation patches only. Original/effective source, harness, overlay, build and dependencies required before capture. Permanent20b paced remains a later stage-exit gate."
+      "pair": "Exact owned source copies of actual7f2b53ae and5c7ec720; identical pinned observation patches only. Original/effective source, harness, overlay, build and dependencies required before capture. Permanent20b paced remains a later stage-exit gate.",
+      "amendments": [
+        { "id": 1, "change": "Fly at F0 by construction: the public Fly button is clicked (DOM click, isTrusted false) in the same page task that commits the finished t=0 setup, before the paused 250 ms frozen-clock interval can run; the setup report is downloaded and verified after Pause; an unobserved or failed setup is a retained refusal. The late-entry refusal is unchanged.",
+          "reason": "Each paused frozen tick advances the units' clock and runs both computers' tick; child work between Run and Fly made F0 a race (a late entry was refused in a functional session).", "prospective": true, "metricsChanged": false },
+        { "id": 2, "change": "executorLimitSeconds 2100 -> 2700 (1.5x the 1800 s nominal 1x prefix); child process cap and test timeout move together.",
+          "reason": "Busy-host 1x view-on children paced at 0.90-0.92x and used 95-97% of 2100 s; decided before any quiet or qualifying data.", "prospective": true, "metricsChanged": false }
+      ]
     },
     "capture": {
       "revision": 1,
