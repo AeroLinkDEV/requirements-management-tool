@@ -19,10 +19,8 @@ export const SNAPSHOT_COVERAGE = ["partial (kernel-only)", "partial (kernel + gr
 export type SnapshotCoverage = (typeof SNAPSHOT_COVERAGE)[number];
 
 /** The refusals of the version policy applied when a snapshot is restored (I2e). */
-export const VERSION_POLICY_CODES = [
-  "SCHEMA_NEWER", "SCHEMA_OLDER_NO_MIGRATION", "INTEGRITY", "UNIT_UNSUPPORTED", "CONFIG_MISMATCH", "CONTENT_MISSING", "COVERAGE_PARTIAL",
-] as const satisfies readonly RestoreRefusalCode[];
-export type VersionPolicyCode = (typeof VERSION_POLICY_CODES)[number];
+export type VersionPolicyCode = Extract<RestoreRefusalCode,
+  "SCHEMA_NEWER" | "SCHEMA_OLDER_NO_MIGRATION" | "INTEGRITY" | "UNIT_UNSUPPORTED" | "CONFIG_MISMATCH" | "CONTENT_MISSING" | "COVERAGE_PARTIAL">;
 
 export type UnitSchemaId = { readonly unitId: string; readonly schema: string; readonly schemaVersion: number };
 
@@ -44,7 +42,11 @@ export type ContentRef = { readonly kind: (typeof CONTENT_KINDS)[number]; readon
 
 /**
  * The qualified execution environment (D7 9.5). It names software, versions and hashes only: no host name, user name or
- * file path, and its values may not contain a path separator.
+ * file path. The header encoder refuses undeclared fields and path separators, but that is structural only: keeping
+ * host and user names out is an obligation of the record's producer (the kernel part of I2a), whose values must come
+ * from a fixed allow-list of sources (runtime version, platform and architecture, browser brands), never from host or
+ * user information. D7 9.5's database and configuration content hashes are carried in the header's `contentRefs` and
+ * `configuration`, outside this record, and are covered by the same SHA-256.
  */
 export type EnvironmentRecord = {
   readonly bundleHash: string;
@@ -110,11 +112,6 @@ const BODY_FIELDS: readonly (readonly [string, FieldType])[] = [
   ["coverage", { oneOf: SNAPSHOT_COVERAGE }], ["units", { list: UNIT_SCHEMA }], ["configuration", { list: CONFIGURATION }],
   ["contentRefs", { list: CONTENT_REF }], ["environment", ENVIRONMENT],
 ];
-const HEADER_FIELDS: readonly (readonly [string, FieldType])[] = [...BODY_FIELDS, ["sha256", "string"]];
-
-/** The sealed header's field names, in their version-1 order. */
-export const SNAPSHOT_HEADER_FIELD_ORDER: readonly string[] = HEADER_FIELDS.map(([name]) => name);
-
 class HeaderRefusal {
   readonly refusal: SnapshotRefusal;
   constructor(refusal: SnapshotRefusal) { this.refusal = refusal; }
@@ -161,30 +158,36 @@ function record(value: unknown, fields: readonly (readonly [string, FieldType])[
   }
   const out: Record<string, unknown> = {};
   for (const [name, type] of fields) {
-    if (!Object.hasOwn(source, name)) refuse("UNCLASSIFIED_PROPERTY", `${where} is missing ${name}`);
-    out[name] = canonical(source[name], type, `${where}.${name}`, noPaths);
+    const descriptor = Object.getOwnPropertyDescriptor(source, name);
+    if (descriptor === undefined) refuse("UNCLASSIFIED_PROPERTY", `${where} is missing ${name}`);
+    // Read each field exactly once, as data: an accessor could answer differently on a second read.
+    if (!("value" in descriptor!)) refuse("UNCLASSIFIED_PROPERTY", `${where}.${name} is an accessor`);
+    out[name] = canonical(descriptor!.value, type, `${where}.${name}`, noPaths);
   }
   return out;
 }
 
-function headerBytes(value: unknown, fields: readonly (readonly [string, FieldType])[]): Accepted<Uint8Array> | Refused<SnapshotRefusal> {
-  let ordered: unknown;
+/** The header body in version-1 order (read once) and its bytes. */
+function canonicalBody(body: unknown): Accepted<{ readonly ordered: SnapshotHeaderBody; readonly bytes: Uint8Array }> | Refused<SnapshotRefusal> {
+  let ordered: SnapshotHeaderBody;
   try {
-    ordered = record(value, fields, "header", false);
+    ordered = record(body, BODY_FIELDS, "header", false) as SnapshotHeaderBody;
   } catch (error) {
     if (error instanceof HeaderRefusal) return { ok: false, refusal: error.refusal };
     throw error;
   }
-  return encodeValue("header", ordered);
+  const bytes = encodeValue("header", ordered);
+  return bytes.ok ? { ok: true, value: { ordered, bytes: bytes.value } } : bytes;
 }
 
 /** The header body's bytes: its fields in version-1 order, whatever order they were given in. */
-export const encodeHeaderBody = (body: SnapshotHeaderBody) => headerBytes(body, BODY_FIELDS);
-/** The sealed header's bytes: the body's fields, then `sha256`. */
-export const encodeHeader = (header: SnapshotHeader) => headerBytes(header, HEADER_FIELDS);
+export function encodeHeaderBody(body: SnapshotHeaderBody): Accepted<Uint8Array> | Refused<SnapshotRefusal> {
+  const canonical = canonicalBody(body);
+  return canonical.ok ? { ok: true, value: canonical.value.bytes } : canonical;
+}
 
 /** What SHA-256 is taken over: u32 little-endian body length, the body's bytes, then the state bytes. */
-export function integrityInput(bodyBytes: Uint8Array, state: Uint8Array) {
+function integrityInput(bodyBytes: Uint8Array, state: Uint8Array) {
   const out = new Uint8Array(4 + bodyBytes.length + state.length);
   new DataView(out.buffer).setUint32(0, bodyBytes.length, true);
   out.set(bodyBytes, 4);
@@ -193,18 +196,20 @@ export function integrityInput(bodyBytes: Uint8Array, state: Uint8Array) {
 }
 
 /**
- * Seals captured state bytes. The body and state are copied before the hash is awaited, so nothing done during the
- * await can change what is sealed. Without WebCrypto the result is `INTEGRITY_UNAVAILABLE`.
+ * Seals captured state bytes. The body is read once and the state copied before the hash is awaited, so nothing done
+ * during the await can change what is sealed, and the header returned is the one hashed. Without WebCrypto the result
+ * is `INTEGRITY_UNAVAILABLE`.
  */
 export async function sealSnapshot(body: SnapshotHeaderBody, state: Uint8Array): Promise<Accepted<SealedSnapshot> | Refused<SnapshotRefusal>> {
-  const bodyBytes = encodeHeaderBody(body);
-  if (!bodyBytes.ok) return bodyBytes;
-  const ordered = record(body, BODY_FIELDS, "header", false) as SnapshotHeaderBody;
+  const canonical = canonicalBody(body);
+  if (!canonical.ok) return canonical;
+  const bodyBytes = canonical.value.bytes;
   const captured = state.slice();
-  const digest = await sha256(integrityInput(bodyBytes.value, captured));
+  const digest = await sha256(integrityInput(bodyBytes, captured));
   if (!digest.ok) return digest;
-  const header: SnapshotHeader = { ...ordered, sha256: digest.value };
-  const sealed = encodeHeader(header);
+  // The body's fields in version-1 order, then sha256: the sealed header's field order.
+  const header: SnapshotHeader = { ...canonical.value.ordered, sha256: digest.value };
+  const sealed = encodeValue("header", header);
   if (!sealed.ok) return sealed;
   return { ok: true, value: { header, headerBytes: sealed.value, state: captured } };
 }
