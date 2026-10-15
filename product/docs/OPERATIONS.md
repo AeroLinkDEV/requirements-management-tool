@@ -724,6 +724,53 @@ directly. In the dated 2026-08-26 #783 read-only host audit, a desktop shortcut 
 `START_AEROLINK.bat`; the scheduled tasks pointed directly to their deeper PowerShell runners. These observations
 confirm compatibility risk but do not expose credentials or claim to cover other machines.
 
+## Release package (site server)
+
+The site server (#1614) installs a signed package and never builds from source, so it needs no SDK, Node, npm,
+git or internet access. The package is built on a developer machine from protected `main`:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File product/scripts/Build-AeroLinkRelease.ps1 ^
+  -SigningCertificateThumbprint <thumbprint> -OutputDirectory <folder outside the repository>
+```
+
+It refuses unless `HEAD` equals the freshly fetched `origin/main` on a clean tree with no untracked files, and it
+checks that again after the build. Run it from a dedicated clone, because `npm ci` replaces the client's
+`node_modules`. It writes `AeroLink-<semver>+<sha>.zip` and a detached `.sig` beside it. The zip holds:
+
+- `manifest.json`: the version, source SHA, latest schema migration and the SHA-256 of every file;
+- `app\`: the self-contained `win-x64` publish of the API, with the built client in `app\wwwroot`;
+- `scripts\`: the server scripts.
+
+The version comes from `product/release/VERSION`. Any build not made by this script reports `0.0.0-dev` at
+`/health/identity`. A packaged build reports its release `version` there to every caller. It reads its source SHA
+from `app\release-identity.json`, so the host sets no `Runtime__SourceSha`. The API also runs as a Windows service
+(`UseWindowsService`), which does nothing when it is started any other way. `Invoke-AeroLinkMaintenanceCommand
+-ApiExecutable <app>\AeroLink.Api.exe` runs the maintenance host from a package as `Production`.
+
+**Signing key.** The signature is ECDSA P-256 over SHA-256 of the zip, in IEEE P1363 form. The key is a
+non-exportable CNG key behind a self-signed certificate, "AeroLink Release Signing", in the builder's
+`CurrentUser\My`. Create it once:
+
+```text
+Import-Module product/scripts/AeroLinkReleasePackage.psm1
+New-AeroLinkReleaseSigningCertificate -CertificateOutputPath product/release/release-signing.cer
+```
+
+The private key never leaves that store. Commit only the public `product/release/release-signing.cer`, which the
+owner does once, when the real key exists. No key is committed until then.
+
+**Verification on the host.** `Test-AeroLinkReleasePackage -Package <zip> -TrustedCertificate <cer> [-Destination
+<new folder>]` checks the signature before it extracts anything. It then extracts the bytes it verified and checks
+every file against the manifest, and refuses any file the manifest does not list. It refuses a missing `.sig`, a
+signature from another key and any altered byte, and removes a partly extracted tree. The host trusts only the
+certificate path that its installer gives it, never a certificate inside a package. The command runs under Windows
+PowerShell 5.1.
+
+`-SkipPostureCheck` is for development only and is refused when a CI variable is set. It builds whatever is checked
+out and records `sourcePosture: unverified-development` in the signed manifest, so such a package can never pass
+for a release.
+
 ## Microsoft Word desktop connector
 
 Run `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat` once for each Windows user who edits managed documents. It

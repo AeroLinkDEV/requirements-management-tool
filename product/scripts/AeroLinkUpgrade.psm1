@@ -62,18 +62,29 @@ function Invoke-AeroLinkMaintenanceCommand {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$ProductRoot,
+        # The source tree to `dotnet run` from. Required unless -ApiExecutable names a packaged build.
+        [string]$ProductRoot,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Arguments,
         [string]$ConnectionString,
         # The evidence tree this invocation may write to. Mandatory in practice for an isolated target.
         [string]$EvidenceRoot,
         [string]$DotnetPath = 'dotnet',
+        # A packaged release's AeroLink.Api.exe (#1614 1.6). When given, that executable runs the maintenance
+        # host directly, as Production, from its own directory: a host installed from a package has no SDK and
+        # no source to `dotnet run`. Omitted, behaviour is exactly the source-tree path below.
+        [string]$ApiExecutable,
         [int]$TimeoutSeconds = 1800
     )
     if ($ConnectionString -and -not $EvidenceRoot) {
         throw 'Invoke-AeroLinkMaintenanceCommand: an isolated database target requires an isolated -EvidenceRoot. Upgrading a clone while writing evidence into the live store is not isolation, and file writes cannot be rolled back with the transaction.'
     }
-    $project = Join-Path $ProductRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
+    if ($ApiExecutable) {
+        if (-not (Test-Path -LiteralPath $ApiExecutable -PathType Leaf)) { throw "Invoke-AeroLinkMaintenanceCommand: the API executable '$ApiExecutable' does not exist." }
+        $ApiExecutable = [IO.Path]::GetFullPath($ApiExecutable)
+    }
+    elseif (-not $ProductRoot) {
+        throw 'Invoke-AeroLinkMaintenanceCommand: -ProductRoot is required unless -ApiExecutable names a packaged build.'
+    }
     $previousConnection = $env:ConnectionStrings__AeroLink
     $previousEnvironment = $env:ASPNETCORE_ENVIRONMENT
     $previousEvidence = $env:Evidence__Root
@@ -83,12 +94,21 @@ function Invoke-AeroLinkMaintenanceCommand {
         New-Item -ItemType Directory -Path $resolvedEvidence -Force | Out-Null
         $env:Evidence__Root = $resolvedEvidence
     }
-    if (-not $env:ASPNETCORE_ENVIRONMENT) { $env:ASPNETCORE_ENVIRONMENT = 'Development' }
+    if ($ApiExecutable) { $env:ASPNETCORE_ENVIRONMENT = 'Production' }
+    elseif (-not $env:ASPNETCORE_ENVIRONMENT) { $env:ASPNETCORE_ENVIRONMENT = 'Development' }
     try {
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $startInfo.FileName = $DotnetPath
-        $startInfo.Arguments = "run --project `"$project`" --no-launch-profile -- " + ($Arguments -join ' ')
-        $startInfo.WorkingDirectory = $ProductRoot
+        if ($ApiExecutable) {
+            $startInfo.FileName = $ApiExecutable
+            $startInfo.Arguments = $Arguments -join ' '
+            $startInfo.WorkingDirectory = Split-Path -Parent $ApiExecutable
+        }
+        else {
+            $project = Join-Path $ProductRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
+            $startInfo.FileName = $DotnetPath
+            $startInfo.Arguments = "run --project `"$project`" --no-launch-profile -- " + ($Arguments -join ' ')
+            $startInfo.WorkingDirectory = $ProductRoot
+        }
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true

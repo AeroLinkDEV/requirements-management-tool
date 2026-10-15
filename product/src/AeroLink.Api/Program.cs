@@ -48,7 +48,19 @@ using System.Net;
 if (AeroLinkMaintenanceHost.IsMaintenanceInvocation(args))
     return await AeroLinkMaintenanceHost.RunAsync(args);
 
-var builder = WebApplication.CreateBuilder(args);
+// Under the Service Control Manager the working directory is System32, so a service takes its content root from
+// beside the executable. It has to be set here: WebApplicationBuilder refuses a content-root change made later
+// through builder.Host, which is what UseWindowsService would otherwise attempt. Outside SCM both are no-ops.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
+});
+builder.Host.UseWindowsService();
+// A release package (#1614 1.6) stamps the source revision it was built from beside the executable, so a
+// packaged host reports its own identity without a launcher setting Runtime__SourceSha. Added last, so it wins
+// over anything else that claims a revision for these binaries; development builds have no such file.
+builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, RuntimeIdentityEndpoints.ReleaseIdentityFileName), optional: true, reloadOnChange: false);
 var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreValidation:ReadOnly");
 var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
 if (restoreValidationReadOnly && restoreValidationToken.Length < 32)

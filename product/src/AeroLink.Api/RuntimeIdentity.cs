@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using AeroLink.Infrastructure.Persistence;
 using System.Net;
+using System.Reflection;
 
 namespace AeroLink.Api;
 
@@ -38,6 +39,25 @@ public static class RuntimeIdentityEndpoints
 {
     /// <summary>The instant this process started, fixed once so every caller sees the same value.</summary>
     public static readonly DateTimeOffset ProcessStartedAtUtc = DateTimeOffset.UtcNow;
+
+    /// <summary>The file a release build writes beside the executable to stamp <c>Runtime:SourceSha</c>.</summary>
+    public const string ReleaseIdentityFileName = "release-identity.json";
+
+    /// <summary>
+    /// The product version compiled into this assembly: the release semver from <c>product/release/VERSION</c>
+    /// for a packaged build, <c>0.0.0-dev</c> for every other build. Build metadata after '+' (the source
+    /// revision) is dropped, because the revision is reported separately and only to loopback callers.
+    /// </summary>
+    public static readonly string ProductVersion = ReadProductVersion();
+
+    private static string ReadProductVersion()
+    {
+        var informational = typeof(RuntimeIdentityEndpoints).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (string.IsNullOrWhiteSpace(informational)) return "unknown";
+        var metadata = informational.IndexOf('+');
+        return metadata >= 0 ? informational[..metadata] : informational;
+    }
 
     /// <summary>
     /// Reads the identity a launcher declared through configuration.
@@ -134,6 +154,9 @@ public static class RuntimeIdentityEndpoints
             return Results.Ok(new
             {
                 service = "AeroLink API",
+                // Not loopback-only, unlike the source revision: the release updater (#1614 1.7) confirms the
+                // promoted version at the public HTTPS name, where it is never a loopback caller.
+                version = ProductVersion,
                 sourceSha = loopback ? identity.SourceSha : null,
                 sourceShortSha = loopback ? identity.SourceShortSha : null,
                 sourceIdentity = loopback ? identity.SourceIdentity : null,
