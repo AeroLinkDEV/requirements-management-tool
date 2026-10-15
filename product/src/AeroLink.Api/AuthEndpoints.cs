@@ -18,13 +18,15 @@ public static class AuthEndpoints
 {
     public static void MapAuthEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/setup/status", async (AeroLinkDbContext db, IConfiguration configuration, CancellationToken ct) =>
+        app.MapGet("/api/setup/status", async (AeroLinkDbContext db, IConfiguration configuration, Microsoft.Extensions.Options.IOptions<WindowsSignInOptions> windows, CancellationToken ct) =>
         {
             var bootstrapRequired = !await db.UserAccounts.AsNoTracking().AnyAsync(ct);
             return Results.Ok(new
             {
                 bootstrapRequired,
-                bootstrapEnabled = bootstrapRequired && BootstrapSecret(configuration) is not null
+                bootstrapEnabled = bootstrapRequired && BootstrapSecret(configuration) is not null,
+                // #1615: the sign-in page offers Windows sign-in, and tries it on arrival, only when it is on.
+                windowsSignIn = windows.Value.Enabled
             });
         });
 
@@ -124,4 +126,22 @@ public static class AuthEndpoints
             return "The bootstrap administrator password must include uppercase, lowercase, numeric, and symbol characters.";
         return null;
     }
+}
+
+/// <summary>
+/// The AeroLink session cookie, issued the same way whichever method signed somebody in (#1615): password
+/// sign-in, Windows sign-in and the Windows link all hand the browser this cookie and nothing else.
+/// </summary>
+internal static class SessionCookies
+{
+    public static bool Secure(HttpContext http)
+    {
+        var configuration = http.RequestServices.GetRequiredService<IConfiguration>();
+        var environment = http.RequestServices.GetRequiredService<IWebHostEnvironment>();
+        return configuration.GetValue<bool?>("Identity:CookieSecure") ?? !environment.IsDevelopment();
+    }
+
+    public static void Append(HttpContext http, LoginResult result) =>
+        http.Response.Cookies.Append(IdentityService.CookieName, result.Token,
+            new CookieOptions { HttpOnly = true, Secure = Secure(http), SameSite = SameSiteMode.Lax, Expires = result.ExpiresAt, Path = "/" });
 }

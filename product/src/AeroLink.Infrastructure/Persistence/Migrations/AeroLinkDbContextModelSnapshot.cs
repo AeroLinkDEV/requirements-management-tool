@@ -2515,6 +2515,13 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)");
 
+                    b.Property<string>("AuthenticationMethod")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("");
+
                     b.Property<string>("Authority")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -3035,6 +3042,13 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("AuthenticationMethod")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("");
+
                     b.Property<string>("Detail")
                         .IsRequired()
                         .HasMaxLength(4000)
@@ -3062,6 +3076,13 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
+
+                    b.Property<string>("WindowsPrincipal")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasDefaultValue("");
 
                     b.HasKey("Id");
 
@@ -3103,6 +3124,13 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<bool>("MustChangePassword")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Local");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -3118,12 +3146,24 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("WindowsPrincipal")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("WindowsSid")
+                        .HasMaxLength(184)
+                        .HasColumnType("character varying(184)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Email");
 
                     b.HasIndex("UserName")
                         .IsUnique();
+
+                    b.HasIndex("WindowsSid")
+                        .IsUnique()
+                        .HasFilter("\"WindowsSid\" IS NOT NULL");
 
                     b.ToTable("user_accounts", (string)null);
                 });

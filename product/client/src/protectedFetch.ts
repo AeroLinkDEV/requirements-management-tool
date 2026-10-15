@@ -7,7 +7,7 @@ const address = (input: RequestInfo | URL) =>
 
 const canonical = (input: RequestInfo | URL) => new URL(address(input), window.location.origin)
 const csrfExempt = (url: URL) =>
-  url.pathname === '/api/auth/login' || url.pathname === '/api/setup/bootstrap'
+  url.pathname === '/api/auth/login' || url.pathname === '/api/auth/windows/link' || url.pathname === '/api/setup/bootstrap'
 const isApi = (url: URL) => url.pathname.startsWith('/api/')
 const acceptsBuildContext = (url: URL) => isApi(url)
   && !url.pathname.startsWith('/api/auth/')
@@ -74,7 +74,7 @@ export function installProtectedFetch() {
       response = await nativeFetch(retryInput, { ...next, headers })
     }
 
-    if (url.pathname === '/api/auth/login' && response.ok) {
+    if ((url.pathname === '/api/auth/login' || url.pathname === '/api/auth/windows/link') && response.ok) {
       // The login response establishes a new cookie. Do not make protected controls actionable until the
       // matching browser mutation token is ready for that session.
       await refreshMutationSession(url)

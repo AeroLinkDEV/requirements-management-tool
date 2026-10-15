@@ -254,6 +254,8 @@ public sealed class ProjectSetupService(
             // project manager at completion. The actual finalizer stays attributable in GrantedBy and audit.
             db.ProgramMemberships.Add(new ProgramMembership(draft.CreatorUserId, program.Id, ProgramRole.Administrator,
                 actor.UserName, now));
+            // #1615: people who signed in with Windows start as Engineer in every Program, this one included.
+            await WindowsDefaultAccess.GrantForNewProgramAsync(db, program.Id, now, ct);
             db.ProjectVerificationVocabularies.Add(ProjectVerificationVocabulary.Founding(project.Id, now));
             db.ProjectRepositoryConfigurations.Add(CreateRepositoryConfiguration(project.Id, draft, actor.UserName, now));
             AddReviewRules(project.Id, ladder, draft.ReviewRulesJson, actor.UserName, now);

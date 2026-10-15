@@ -14,6 +14,7 @@ import {
 import "./IdentitySetup.css";
 import { Icon } from "./icons";
 import { PersonAvatar } from "./People";
+import { setStaySignedOut, windowsOutcome, windowsSignInUrl } from "./windowsSignIn";
 
 export type AuthUser = {
   id: string;
@@ -37,7 +38,44 @@ export function LoginPage({
   const [setup, setSetup] = useState<{
     bootstrapRequired: boolean;
     bootstrapEnabled: boolean;
+    windowsSignIn?: boolean;
   }>();
+  // #1615: where a Windows sign-in redirected back here, if it did.
+  const [windows] = useState(() => windowsOutcome(window.location.search));
+  const startWindowsSignIn = (link: boolean) => {
+    // An explicit choice to sign in ends a "stay signed out" left by an earlier sign-out in this tab.
+    setStaySignedOut(false);
+    window.location.assign(windowsSignInUrl(api, link ? { link: true } : { returnTo: "/projects" }));
+  };
+  const linkWindows = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const f = new FormData(e.currentTarget);
+    try {
+      const response = await fetch(`${api}/api/auth/windows/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: f.get("userName"),
+          password: f.get("password"),
+          mfaCode: f.get("mfaCode") || undefined,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(body?.error || "The account could not be linked.");
+        return;
+      }
+      setStaySignedOut(false);
+      window.history.replaceState(null, "", "/");
+      onLogin(body);
+    } catch {
+      setError("AeroLink could not reach its API. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
     let active = true;
     fetch(`${api}/api/setup/status`)
@@ -82,6 +120,7 @@ export function LoginPage({
         setError(message);
         return;
       }
+      setStaySignedOut(false);
       onLogin(await response.json());
     } catch {
       setError(
@@ -169,6 +208,45 @@ export function LoginPage({
       <button disabled={busy}>
         {busy ? "Authenticating…" : "Sign in securely →"}
       </button>
+      {setup?.windowsSignIn && (
+        <div className="windowsSignIn">
+          {windows?.kind === "refused" && (
+            <div className="loginError" role="alert">{windows.message}</div>
+          )}
+          <button type="button" disabled={busy} onClick={() => startWindowsSignIn(false)}>
+            Sign in with Windows
+          </button>
+          <button type="button" className="linkButton" disabled={busy} onClick={() => startWindowsSignIn(true)}>
+            Link an existing account
+          </button>
+        </div>
+      )}
+    </form>
+  );
+  // After "Link an existing account" Windows has proved who this is; the account's own password (and second
+  // factor, when it has one) proves the right to attach that Windows logon to it. Asked once, then never again.
+  const linkForm = (
+    <form onSubmit={linkWindows}>
+      <div className="securityMark">◈</div>
+      <h2>Link your Windows sign-in</h2>
+      <p>
+        Enter the AeroLink account and password to link to the Windows logon
+        you just signed in with. After this, Windows signs you in to it.
+      </p>
+      <label>
+        Username
+        <input name="userName" autoComplete="username" required autoFocus />
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" autoComplete="current-password" required />
+      </label>
+      <label>
+        Authenticator code (if enabled)
+        <input name="mfaCode" autoComplete="one-time-code" inputMode="numeric" />
+      </label>
+      {error && <div className="loginError">{error}</div>}
+      <button disabled={busy}>{busy ? "Linking…" : "Link and sign in →"}</button>
     </form>
   );
   const setupPanel = setup?.bootstrapRequired ? (
@@ -264,6 +342,8 @@ export function LoginPage({
         </aside>
       </div>
     )
+  ) : windows?.kind === "link" && setup?.windowsSignIn ? (
+    linkForm
   ) : (
     signIn
   );

@@ -222,6 +222,8 @@ public static class WorkspaceEndpoints
                     "Activated the new project ladder before first project content.", activation.CanonicalSnapshot,
                     ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot), activation.SnapshotSchemaVersion));
                 var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, now));
+                // #1615: people who signed in with Windows start as Engineer in every Program, this one included.
+                await WindowsDefaultAccess.GrantForNewProgramAsync(db, program.Id, now, ct);
                 await db.SaveChangesAsync(ct);
                 // Every Project has its three test procedure documents from the moment it exists. The startup
                 // bootstrap backfills projects created before this existed; it cannot help a project created

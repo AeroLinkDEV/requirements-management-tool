@@ -8,7 +8,9 @@ AeroLink decisions must be attributable to authenticated people, not browser-sup
 
 ## Identity and session controls
 
-- Accounts are local and on-premises in the current implementation. A future enterprise connector may federate Active Directory or another approved identity provider without changing artifact history.
+- Accounts are local and on-premises. An account is either Local (created by an administrator or the
+  first-install bootstrap, signing in with an AeroLink password) or Windows (created by a first Windows sign-in,
+  with no AeroLink password); see *Windows sign-in* below. OIDC/SAML federation remains deferred (DEC-051).
 - Usernames are normalized, unique, and retained after an account is disabled so historic authorship remains resolvable.
 - Newly created, changed, and reset passwords are stored only as salted PBKDF2-SHA-256 derivations with 600,000 iterations. Existing hashes continue to verify at their encoded iteration count until an ordinary password change or reset; login and password confirmation do not rewrite them. Plaintext passwords are never persisted.
 - Eight consecutive failures lock an account. Successful authentication resets the failure counter.
@@ -16,6 +18,46 @@ AeroLink decisions must be attributable to authenticated people, not browser-sup
 - Account Security identifies the current session, lists retained session history, and permits a user to revoke
   other active sessions without revoking the session performing the action.
 - Material API routes require an authenticated session. Actor names supplied by clients are ignored; the server derives the actor from the session.
+
+### Windows sign-in
+
+Where `Identity:Windows:Enabled` is set ([DEC-154](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-154---windows-sign-in-on-the-company-host)),
+`GET /api/auth/windows` signs a person in with the Windows logon their browser holds:
+
+- **Proof.** Negotiate on Kestrel (Kerberos, NTLM fallback) authenticates that one route only; it is never the
+  default scheme. The route then issues the same AeroLink session cookie a password sign-in issues, so nothing
+  after sign-in depends on the method. Its challenge is an empty 401 with `WWW-Authenticate`, which no error-page
+  middleware may rewrite, and Negotiate requires an HTTP/1.1 listener.
+- **Who may sign in.** The SID decides: only a domain user SID (`S-1-5-21-a-b-c-RID`) whose domain SID is in
+  `Identity:Windows:AllowedDomainSids` and whose RID is at least 1000. Local, built-in and well-known accounts are
+  refused, as is an account the directory cannot find or that has no directory email. Refusals return to the
+  sign-in page with a reason and are audited.
+- **Accounts.** The first sign-in creates a Windows account keyed on the SID and named `DOMAIN\user`; the name
+  stays fixed if the directory later renames the person, and the display name and email are refreshed from the
+  directory on every sign-in. It has no AeroLink password, so password sign-in refuses it without counting a
+  failure. Nobody is provisioned until first-install setup has created `admin`.
+- **Default access.** A new Windows account is Engineer in every Program, and every active Windows account is
+  made Engineer in each Program created afterwards, both granted by `system.windows-provisioning`. Nothing else
+  re-grants it, so an administrator's narrowing stands.
+- **Linking.** `?intent=link` holds the proven Windows identity for five minutes in an encrypted, host-only,
+  SameSite=Strict cookie; `POST /api/auth/windows/link` then attaches it to an existing account after that
+  account's password and second factor, counting failures toward lockout. A SID already linked elsewhere is
+  refused unless it belongs to a Windows account an administrator has disabled, which is how a SID used before
+  linking is freed. A linked Local account (the administrator) keeps its own profile and signs in with Windows
+  without MFA; its password plus MFA remains the break-glass.
+- **Audit.** Every sign-in audit event records `AuthenticationMethod` (`password` or `windows`) and, for Windows,
+  the `DOMAIN\user` principal. Electronic signatures carry an `AuthenticationMethod` column for the
+  re-authentication work that follows (#1615 B2); signatures recorded before it have it empty.
+- **Startup.** Production refuses to start Windows sign-in with a scheme other than Negotiate (which keeps the
+  test scheme out of real deployments), with no allowed domain, when running as SYSTEM, or without an HTTP/1.1-only
+  listener (`SiteServer:Http1Only` or `Kestrel:EndpointDefaults:Protocols=Http1`).
+- **Residual risk.** Kestrel cannot enforce TLS channel binding, so a relayed NTLM exchange is not bound to
+  AeroLink's TLS session; see DEC-154.
+- **Browser.** With Windows sign-in on, arriving without a session goes to Windows sign-in, except in a tab that
+  signed out, which stays signed out until the person chooses to sign in again.
+
+Global administration is still the `admin` account alone: Program roles, including a Program's Administrator role,
+can be granted to Windows accounts like any other, but no route grants the global administrator to another account.
 
 The Documentation Center desktop connector never receives a reusable browser session. AeroLink issues a
 short-lived one-use launch token scoped to one document revision and mode. After redemption, the connector keeps

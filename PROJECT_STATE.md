@@ -600,6 +600,10 @@ See [Controlled Document Publication Standard](docs/product-definition/CONTROLLE
 
 The product includes local identity/session controls, scoped roles/administration, MFA/recovery support, delegations, secure approval/signature behavior, and security/audit records appropriate to the current on-premises product foundation.
 
+Windows sign-in (DEC-154, #1615), when enabled, signs people in with their domain logon through Negotiate, creates
+their account on first sign-in keyed on the Windows SID with Engineer in every Program, and lets the administrator
+link a Windows logon to `admin`. Signature re-authentication with the Windows password is separate work (#1615 B2).
+
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
 
 ## Project authority: base roles, Project Leadership, and review workflow authority

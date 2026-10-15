@@ -118,8 +118,15 @@ if (restoreValidationReadOnly)
     foreach (var worker in builder.Services.Where(x => x.ServiceType == typeof(IHostedService)).ToList())
         builder.Services.Remove(worker);
 }
-builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
+var authentication = builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, AeroLinkAuthorizationHandler>(AeroLinkAuthorizationHandler.SchemeName, _ => { });
+// #1615 Windows sign-in. Negotiate is never the default scheme: it proves who somebody is at /api/auth/windows
+// only, which then issues the ordinary AeroLink session every other route reads.
+builder.Services.Configure<WindowsSignInOptions>(builder.Configuration.GetSection(WindowsSignInOptions.Section));
+var windowsSignIn = builder.Configuration.GetSection(WindowsSignInOptions.Section).Get<WindowsSignInOptions>() ?? new WindowsSignInOptions();
+if (windowsSignIn.Enabled && windowsSignIn.Scheme == Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
+    authentication.AddNegotiate();
+if (OperatingSystem.IsWindows()) builder.Services.AddSingleton<IWindowsDirectory, ActiveDirectoryWindowsDirectory>();
 builder.Services.AddSingleton<BrowserMutationProtector>();
 builder.Services.AddSingleton<ConnectorSigningService>();
 var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 600);
@@ -151,6 +158,7 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 var app = builder.Build();
 // The certificate's imported machine key is temporary; release it with the host rather than leave it behind.
 if (siteServer is not null) app.Lifetime.ApplicationStopped.Register(siteServer.Certificate.Dispose);
+await WindowsSignInStartupGuard.EnforceAsync(app.Services, builder.Configuration, app.Environment);
 app.UseExceptionHandler();
 if (app.Environment.IsProduction()) app.UseHsts();
 // #939 stall diagnostics, opt-in. First in the pipeline so a request is tracked from the moment it arrives,
@@ -277,6 +285,9 @@ app.Use(async (context, next) =>
     // email came to return 401 to anybody who clicked it.
     var isAnonymous = path.StartsWith("/health", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase)
+        // Windows sign-in and the Windows link exist to create a session, so they cannot require one (#1615).
+        || path.Equals(WindowsSignInEndpoints.SignInPath, StringComparison.OrdinalIgnoreCase)
+        || path.Equals(WindowsSignInEndpoints.LinkPath, StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/status", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/bootstrap", StringComparison.OrdinalIgnoreCase)
         || path.StartsWith("/api/document-connector/", StringComparison.OrdinalIgnoreCase)
@@ -475,6 +486,7 @@ app.MapGet("/health/routes", (EndpointDataSource endpoints) =>
 // matches — routing resolves that by precedence — so these read in the order somebody meets the product:
 // sign in, find your work, propose a change, freeze it, verify it, release it, administer it.
 app.MapAuthEndpoints();
+app.MapWindowsSignInEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapFmsBenchTerrainEndpoints();
 app.MapFmsBenchImageryEndpoints();
