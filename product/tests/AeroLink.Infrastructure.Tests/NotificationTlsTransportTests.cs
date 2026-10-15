@@ -382,7 +382,9 @@ public sealed class NotificationTlsTransportTests
         public async Task Relay_readiness_is_observed_while_every_thread_pool_worker_is_blocked()
         {
             using var certificate = Certificate("localhost");
-            using var release = new ManualResetEventSlim();
+            // Deliberately not disposed: blockers still queued after this test returns must find a set, live event.
+            // ManualResetEventSlim allocates no kernel handle unless WaitHandle is read, so nothing leaks.
+            var release = new ManualResetEventSlim();
             var queued = ThreadPool.ThreadCount + 256; var entered = 0;
             for (var index = 0; index < queued; index++)
                 ThreadPool.UnsafeQueueUserWorkItem(_ => { Interlocked.Increment(ref entered); release.Wait(); }, null);
@@ -398,10 +400,13 @@ public sealed class NotificationTlsTransportTests
                 constructing.Start(); constructing.Join();
             }
             finally { release.Set(); }
-            // Positive control on the saturation itself: work queued ahead of any pool-scheduled read was still waiting.
-            Assert.True(enteredAtReady < queued, $"The pool drained {enteredAtReady}/{queued} blockers; saturation was not established.");
-            Assert.Null(failure);
-            await using (relay) Assert.InRange(relay!.Port, 1, 65535);
+            await using (relay)
+            {
+                // Positive control on the saturation itself: work queued ahead of any pool-scheduled read was still waiting.
+                Assert.True(enteredAtReady < queued, $"The pool drained {enteredAtReady}/{queued} blockers; saturation was not established.");
+                Assert.Null(failure);
+                Assert.InRange(relay!.Port, 1, 65535);
+            }
         }
     }
 
