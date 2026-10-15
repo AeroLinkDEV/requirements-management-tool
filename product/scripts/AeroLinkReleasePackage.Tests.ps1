@@ -45,7 +45,7 @@ try {
     $trustedCer = Export-PublicCertificate $trusted (Join-Path $root 'trusted.cer')
     $sha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
 
-    function New-Package([string]$Name, $Signer) {
+    function New-Package([string]$Name, $Signer, [string]$Posture = 'origin-main') {
         $staging = Join-Path $root "$Name-staging"
         New-Item -ItemType Directory -Path (Join-Path $staging 'app\wwwroot') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $staging 'scripts') -Force | Out-Null
@@ -53,7 +53,7 @@ try {
         [System.IO.File]::WriteAllText((Join-Path $staging 'app\wwwroot\index.html'), '<html></html>')
         [System.IO.File]::WriteAllText((Join-Path $staging 'scripts\Backup-AeroLink.ps1'), 'backup')
         return New-AeroLinkReleasePackage -StagingRoot $staging -OutputDirectory (Join-Path $root "$Name-out") `
-            -Version '1.0.0' -SourceSha $sha -LatestMigration '20261005112545_NativeNotificationProcessIdentity' -SigningCertificate $Signer
+            -Version '1.0.0' -SourceSha $sha -LatestMigration '20261005112545_NativeNotificationProcessIdentity' -SigningCertificate $Signer -SourcePosture $Posture
     }
 
     # Round trip: what the builder writes, the host accepts, and the installed tree is exactly the signed tree.
@@ -97,6 +97,15 @@ try {
     $foreign = New-Package 'foreign' $other
     Assert-Throws { Test-AeroLinkReleasePackage -Package $foreign.Package -TrustedCertificate $trustedCer } 'signature does not verify' `
         'A package signed by an untrusted key must be refused.'
+
+    # Signed by the trusted key but built with -SkipPostureCheck: a signature proves who built it, not from what.
+    $development = New-Package 'development' $trusted 'unverified-development'
+    $developmentTarget = Join-Path $root 'development-install'
+    Assert-Throws { Test-AeroLinkReleasePackage -Package $development.Package -TrustedCertificate $trustedCer -Destination $developmentTarget } "source posture is 'unverified-development'" `
+        'A package not built from protected main must be refused by default.'
+    Assert-True (-not (Test-Path -LiteralPath $developmentTarget)) 'A package refused on its posture must leave no tree behind.'
+    $allowed = Test-AeroLinkReleasePackage -Package $development.Package -TrustedCertificate $trustedCer -AllowUnverifiedDevelopment
+    Assert-True ($allowed.SourcePosture -eq 'unverified-development') 'A development installation may accept an unverified package only when it asks to.'
 
     # No signature at all.
     Remove-Item -LiteralPath $good.Signature

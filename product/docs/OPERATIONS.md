@@ -735,8 +735,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File product/scripts/Build-AeroLi
 ```
 
 It refuses unless `HEAD` equals the freshly fetched `origin/main` on a clean tree with no untracked files, and it
-checks that again after the build. Run it from a dedicated clone, because `npm ci` replaces the client's
-`node_modules`. It writes `AeroLink-<semver>+<sha>.zip` and a detached `.sig` beside it. The zip holds:
+checks that again after the build. It also refuses when a `VITE_*` environment variable is set or a
+`product/client/.env*` file exists, because Git ignores those and Vite would build them into the client. Run it
+from a dedicated clone, because `npm ci` replaces the client's `node_modules`. It writes `AeroLink-<semver>+<sha>.zip` and a detached `.sig` beside it. The zip holds:
 
 - `manifest.json`: the version, source SHA, latest schema migration and the SHA-256 of every file;
 - `app\`: the self-contained `win-x64` publish of the API, with the built client in `app\wwwroot`;
@@ -768,8 +769,16 @@ certificate path that its installer gives it, never a certificate inside a packa
 PowerShell 5.1.
 
 `-SkipPostureCheck` is for development only and is refused when a CI variable is set. It builds whatever is checked
-out and records `sourcePosture: unverified-development` in the signed manifest, so such a package can never pass
-for a release.
+out, and marks the result on every identity surface:
+
+- the version becomes `<VERSION>-dev.unverified`, in the zip name, the executable's product version and
+  `/health/identity`;
+- the loopback `sourceIdentity` becomes `<sha>+unverified-development`;
+- the signed manifest records `sourcePosture: unverified-development`.
+
+`Test-AeroLinkReleasePackage` refuses such a package unless it is given `-AllowUnverifiedDevelopment`, which only a
+development installation should pass. `VERSION` is not bumped for every build, so two `main` builds can share a
+version; the source SHA, not the version alone, identifies what is installed.
 
 ## Microsoft Word desktop connector
 

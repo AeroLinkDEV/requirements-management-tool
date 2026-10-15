@@ -23,9 +23,11 @@
         certificate's public half before the script reports success.
 
     .PARAMETER SkipPostureCheck
-        DEVELOPMENT ONLY. Builds from whatever HEAD and working tree are present, and records
-        sourcePosture 'unverified-development' in the signed manifest so the package can never pass for a release.
-        Refused when a CI environment variable is set.
+        DEVELOPMENT ONLY. Builds from whatever HEAD and working tree are present. Every identity surface says so:
+        the version becomes <VERSION>-dev.unverified (zip name, file ProductVersion, /health/identity), the
+        loopback sourceIdentity becomes <sha>+unverified-development, and the signed manifest records
+        sourcePosture 'unverified-development', which Test-AeroLinkReleasePackage refuses unless
+        -AllowUnverifiedDevelopment is passed. Refused when a CI environment variable is set.
 #>
 [CmdletBinding()]
 param(
@@ -64,7 +66,7 @@ function Assert-ReleasePosture {
 }
 
 # Output never goes inside the repository: a package there would be an untracked file that refuses the next build.
-$output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\')
+$output = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($OutputDirectory).TrimEnd('\')
 if ($output.Equals($repositoryRoot, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($repositoryRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw "Release refused: -OutputDirectory must be outside the repository ($repositoryRoot)."
 }
@@ -88,6 +90,19 @@ $sourceSha = $posture.HeadSha
 
 $version = ([IO.File]::ReadAllText((Join-Path $productRoot 'release\VERSION'))).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$') { throw "product/release/VERSION holds '$version', which is not semantic versioning." }
+$sourceIdentity = $sourceSha
+if ($SkipPostureCheck) {
+    # A development package must not carry a release's identity anywhere a person or the updater looks.
+    $version = "$version-dev.unverified"
+    $sourceIdentity = "$sourceSha+unverified-development"
+}
+
+# Ignored inputs the posture check cannot see, which Vite would bake into the shipped bundle: a VITE_* variable
+# (VITE_API_URL points every browser at another origin) or a product/client/.env* file such as .env.local.
+$viteVariables = @(Get-ChildItem Env: | Where-Object { $_.Name -like 'VITE_*' } | ForEach-Object { $_.Name })
+if ($viteVariables.Count -gt 0) { throw "Release refused: $($viteVariables -join ', ') is set, and Vite would build it into the client. Unset it." }
+$envFiles = @(Get-ChildItem -LiteralPath (Join-Path $productRoot 'client') -Force -File -Filter '.env*' | ForEach-Object { $_.Name })
+if ($envFiles.Count -gt 0) { throw "Release refused: product/client holds $($envFiles -join ', '), which Vite would build into the client. Remove it." }
 
 $migrations = @(Get-ChildItem -LiteralPath (Join-Path $productRoot 'src\AeroLink.Infrastructure\Persistence\Migrations') -File -Filter '*.cs' |
     Where-Object { $_.Name -match '^\d{14}_\w+\.cs$' } | ForEach-Object { $_.BaseName } | Sort-Object)
@@ -128,8 +143,9 @@ try {
     Copy-Item -LiteralPath (Join-Path $client 'dist') -Destination $wwwroot -Recurse
     if (-not (Test-Path -LiteralPath (Join-Path $wwwroot 'index.html'))) { throw 'The client build produced no index.html.' }
 
-    # The revision these binaries were built from, read by the API at startup (Runtime:SourceSha).
-    $identity = '{ "Runtime": { "SourceSha": "' + $sourceSha + '" } }'
+    # The revision these binaries were built from, read by the API at startup (Runtime:SourceSha and
+    # Runtime:SourceIdentity; the identity is marked for a development build).
+    $identity = '{ "Runtime": { "SourceSha": "' + $sourceSha + '", "SourceIdentity": "' + $sourceIdentity + '" } }'
     [IO.File]::WriteAllText((Join-Path $app 'release-identity.json'), $identity, (New-Object Text.UTF8Encoding($false)))
 
     # 3. The server scripts: operator modules and commands, not their test suites and not this builder.
@@ -145,7 +161,7 @@ try {
 
     # The package is not finished until the host's own verifier accepts it.
     [IO.File]::WriteAllBytes($publicCertificate, $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-    $verified = Test-AeroLinkReleasePackage -Package $package.Package -TrustedCertificate $publicCertificate
+    $verified = Test-AeroLinkReleasePackage -Package $package.Package -TrustedCertificate $publicCertificate -AllowUnverifiedDevelopment:$SkipPostureCheck
 
     $after = Get-AeroLinkRepositoryPosture -RepositoryRoot $repositoryRoot
     if ($after.HeadSha -ne $sourceSha) { throw "Release refused: HEAD moved from $sourceSha to $($after.HeadSha) during the build." }

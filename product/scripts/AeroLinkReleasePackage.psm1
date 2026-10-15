@@ -88,8 +88,13 @@ function New-AeroLinkReleaseSigningCertificate {
         [string]$Subject = 'CN=AeroLink Release Signing',
         [int]$ValidYears = 10
     )
-    if (Test-Path -LiteralPath $CertificateOutputPath) { throw "Refusing to overwrite $CertificateOutputPath." }
-    $existing = @(Get-ChildItem -LiteralPath 'Cert:\CurrentUser\My' | Where-Object { $_.Subject -eq $Subject })
+    # Resolved against the PowerShell location ($PWD), as the operator typed it, never the process directory.
+    $certificatePath = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($CertificateOutputPath)
+    if (Test-Path -LiteralPath $certificatePath) { throw "Refusing to overwrite $certificatePath." }
+    # Checked before the key exists: a key created and then not exported is stranded in the store.
+    $certificateFolder = Split-Path -Parent $certificatePath
+    if (-not (Test-Path -LiteralPath $certificateFolder -PathType Container)) { throw "The folder for $certificatePath does not exist. No key was created." }
+    $existing =@(Get-ChildItem -LiteralPath 'Cert:\CurrentUser\My' | Where-Object { $_.Subject -eq $Subject })
     if ($existing.Count -gt 0) {
         throw "CurrentUser\My already holds '$Subject' ($(($existing | ForEach-Object { $_.Thumbprint }) -join ', ')). Use that key, or remove it deliberately first."
     }
@@ -97,8 +102,8 @@ function New-AeroLinkReleaseSigningCertificate {
         -KeyAlgorithm ECDSA_nistP256 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable `
         -Provider 'Microsoft Software Key Storage Provider' -KeyUsage DigitalSignature -Type CodeSigningCert `
         -CertStoreLocation 'Cert:\CurrentUser\My' -NotAfter (Get-Date).AddYears($ValidYears)
-    [System.IO.File]::WriteAllBytes([System.IO.Path]::GetFullPath($CertificateOutputPath), $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-    return [pscustomobject]@{ Thumbprint = $certificate.Thumbprint; Subject = $certificate.Subject; CertificatePath = [System.IO.Path]::GetFullPath($CertificateOutputPath); NotAfter = $certificate.NotAfter }
+    [System.IO.File]::WriteAllBytes($certificatePath, $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+    return [pscustomobject]@{ Thumbprint = $certificate.Thumbprint; Subject = $certificate.Subject; CertificatePath = $certificatePath; NotAfter = $certificate.NotAfter }
 }
 
 function Get-AeroLinkReleaseSigningCertificate {
@@ -138,6 +143,8 @@ function New-AeroLinkReleasePackage {
     )
     if ($Version -notmatch $script:AeroLinkReleaseSemVer) { throw "Release version '$Version' is not semantic versioning (major.minor.patch[-prerelease])." }
     if ($SourceSha -notmatch '^[0-9a-f]{40}$') { throw "Source SHA '$SourceSha' is not a full lower-case commit SHA." }
+    $StagingRoot = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($StagingRoot)
+    $OutputDirectory = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
     $manifestPath = Join-Path $StagingRoot $script:AeroLinkReleaseManifestName
     if (Test-Path -LiteralPath $manifestPath) { throw "The staging tree already holds $($script:AeroLinkReleaseManifestName)." }
     $signingKey = Get-AeroLinkReleaseSigningKey -Certificate $SigningCertificate -Private
@@ -161,7 +168,7 @@ function New-AeroLinkReleasePackage {
     [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
 
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $zipPath = Join-Path ([System.IO.Path]::GetFullPath($OutputDirectory)) "AeroLink-$Version+$SourceSha.zip"
+    $zipPath = Join-Path $OutputDirectory "AeroLink-$Version+$SourceSha.zip"
     $signaturePath = "$zipPath.sig"
     foreach ($existing in @($zipPath, $signaturePath)) {
         if (Test-Path -LiteralPath $existing) { throw "Refusing to overwrite $existing." }
@@ -187,20 +194,26 @@ function Test-AeroLinkReleasePackage {
             With -Destination the verified tree is left there for installation; the directory must not exist yet,
             and it is removed again on any refusal. Without it the package is extracted to a temporary directory
             that is always removed, which makes this a pure check. Any refusal throws.
+
+            A package whose signed manifest does not record sourcePosture 'origin-main' (a -SkipPostureCheck build)
+            is refused unless -AllowUnverifiedDevelopment is passed. Signing proves who built a package, not what it
+            was built from, so the posture is checked here rather than trusted to the file name.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Package,
         [Parameter(Mandatory)][string]$TrustedCertificate,
-        [string]$Destination
+        [string]$Destination,
+        [switch]$AllowUnverifiedDevelopment
     )
-    if (-not (Test-Path -LiteralPath $Package -PathType Leaf)) { throw "Release package not found: $Package" }
-    $packagePath = (Resolve-Path -LiteralPath $Package).ProviderPath
+    $packagePath = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($Package)
+    if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) { throw "Release package not found: $packagePath" }
     $signaturePath = "$packagePath.sig"
     if (-not (Test-Path -LiteralPath $signaturePath -PathType Leaf)) { throw "Release package refused: no detached signature at $signaturePath. Unsigned packages are never installed." }
-    if (-not (Test-Path -LiteralPath $TrustedCertificate -PathType Leaf)) { throw "Trusted release certificate not found: $TrustedCertificate" }
+    $certificatePath = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($TrustedCertificate)
+    if (-not (Test-Path -LiteralPath $certificatePath -PathType Leaf)) { throw "Trusted release certificate not found: $certificatePath" }
 
-    $certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(, [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $TrustedCertificate).ProviderPath))
+    $certificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(, [System.IO.File]::ReadAllBytes($certificatePath))
     $publicKey = Get-AeroLinkReleaseSigningKey -Certificate $certificate
     $signature = [System.IO.File]::ReadAllBytes($signaturePath)
     if ($signature.Length -ne 64) { throw "Release package refused: the signature is $($signature.Length) bytes, not a 64-byte ECDSA P-256 IEEE P1363 signature." }
@@ -212,7 +225,7 @@ function Test-AeroLinkReleasePackage {
     }
 
     $temporary = [string]::IsNullOrWhiteSpace($Destination)
-    $target = if ($temporary) { Join-Path ([System.IO.Path]::GetTempPath()) ('aerolink-release-' + [Guid]::NewGuid().ToString('N')) } else { [System.IO.Path]::GetFullPath($Destination) }
+    $target = if ($temporary) { Join-Path ([System.IO.Path]::GetTempPath()) ('aerolink-release-' + [Guid]::NewGuid().ToString('N')) } else { $PSCmdlet.GetUnresolvedProviderPathFromPSPath($Destination) }
     if (Test-Path -LiteralPath $target) { throw "Refusing to extract into existing path $target. A release is verified into an empty, new directory." }
     New-Item -ItemType Directory -Path $target | Out-Null
     $succeeded = $false
@@ -228,6 +241,10 @@ function Test-AeroLinkReleasePackage {
         if ($manifest.formatVersion -ne $script:AeroLinkReleaseManifestFormat) { throw "Release package refused: manifest format $($manifest.formatVersion) is not supported." }
         if ([string]$manifest.version -notmatch $script:AeroLinkReleaseSemVer) { throw "Release package refused: manifest version '$($manifest.version)' is not semantic versioning." }
         if ([string]$manifest.sourceSha -notmatch '^[0-9a-f]{40}$') { throw 'Release package refused: the manifest carries no full source SHA.' }
+        $posture = [string]$manifest.sourcePosture
+        if ($posture -ne 'origin-main' -and -not $AllowUnverifiedDevelopment) {
+            throw "Release package refused: its source posture is '$posture', not 'origin-main'. It was not built from protected main; pass -AllowUnverifiedDevelopment only for a development installation."
+        }
         $entries = @($manifest.files)
         if ($entries.Count -eq 0) { throw 'Release package refused: the manifest lists no files.' }
 
