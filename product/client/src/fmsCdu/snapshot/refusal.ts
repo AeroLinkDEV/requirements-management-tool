@@ -12,13 +12,21 @@ export type SnapshotRefusalCode =
   /** A value the codec has no exact encoding for: a function, symbol, BigInt, unregistered class instance, accessor
    *  property, non-extensible object, non-default property attributes, an ill-formed string or an unusable buffer. */
   | "UNCLASSIFIED_VALUE"
-  /** A unit root's own property that its schema does not classify (authoritative, link, config or observer). */
+  /** A unit root's own property that its schema does not classify (authoritative, link, config, observer, derived). */
   | "UNCLASSIFIED_PROPERTY"
-  /** Serialized state reaches an object that is held outside serialized state: a unit root, or the value of a config
-   *  or observer field. Restoring it would silently split one object into two. */
+  /** Serialized state reaches an object that restore does not take from the snapshot: a unit root, or anything
+   *  reachable from a config, observer or derived field; or a link field holds an object that no declared owner
+   *  emits. Restoring it would silently split one object into two. */
   | "UNCLASSIFIED_ALIAS"
-  /** An object reachable from two units without a declared owner, or a duplicate unit id. */
+  /** An object reachable from two units without a declared owner, a link to a unit not in the snapshot, or a duplicate
+   *  unit id. */
   | "OWNERSHIP_AMBIGUOUS"
+  /** A unit declares a link to an owner that comes after it in the unit order; owners must precede holders. */
+  | "OWNER_AFTER_HOLDER"
+  /** State nested deeper than the format's declared limit (256 path steps). */
+  | "NESTING_LIMIT"
+  /** The class registry names a class twice, registers one prototype twice, or registers a built-in prototype. */
+  | "CLASS_REGISTRY_INVALID"
   /** UTC0 is not a valid whole number of epoch milliseconds. */
   | "INVALID_UTC0"
   /** SHA-256 cannot be computed here (`crypto.subtle` is absent, for example outside a secure context). */
@@ -30,11 +38,14 @@ export type SnapshotRefusalCode =
  */
 export type RestoreRefusalCode =
   /** The bytes are not the canonical encoding of any value: truncated, trailing bytes, an unknown tag, a non-canonical
-   *  NaN, keys out of ECMAScript own-key order, duplicate keys or entries, invalid UTF-8, a Date out of range. */
+   *  NaN, keys out of ECMAScript own-key order, duplicate keys or entries, invalid UTF-8, a Date or UTC0 out of range,
+   *  nesting deeper than 256 path steps. */
   | "NON_CANONICAL"
   /** A reference names no object that the decoded graph holds at that path. */
   | "REFERENCE_UNRESOLVED"
+  /** A cross-unit reference outside the holder's declared links, or a duplicate unit id. */
   | "OWNERSHIP_AMBIGUOUS"
+  | "CLASS_REGISTRY_INVALID"
   /** A registered-class encoding names a class this build does not register. */
   | "UNCLASSIFIED_VALUE"
   | "INTEGRITY_UNAVAILABLE"
