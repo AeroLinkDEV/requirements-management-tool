@@ -274,7 +274,7 @@ function Start-QualificationTlsRelay([string]$Directory) {
     }
     try {
         $python = if ($env:AEROLINK_TEST_PYTHON) { $env:AEROLINK_TEST_PYTHON } else { 'python.exe' }
-        $python = (Get-Command $python -CommandType Application -ErrorAction Stop).Source
+        $python = @(Get-Command $python -CommandType Application -ErrorAction Stop)[0].Source
         $receipt.pythonPath = $python
         if (-not (Test-Path -LiteralPath $relay -PathType Leaf)) { throw 'The shared executable TLS relay fixture is missing.' }
         $process = Start-Process -FilePath $python -ArgumentList @(('"'+$relay+'"'),('"'+$Directory+'"'),'AcceptThenDropQuit',"$smtpPort",'180') `
