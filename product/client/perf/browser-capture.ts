@@ -146,8 +146,10 @@ export function w3SessionSlots(plan: ReturnType<typeof w3PairedPlan>, repeat: nu
   if(slots.length!==4)throw new Error('W3 complete ABBA session missing')
   return slots
 }
-/** Per-slot admission before each W3 child: the manifest's source, build and dependency bytes. */
-export function w3SlotAdmission(manifest: any, _harnessNow: unknown, _sessionHarness: unknown) {
+/** Per-slot admission before each W3 child, as the W2 capture does: the harness (commit, API tree and assembly, clean)
+ * must still be the session's, then the manifest's source, build and dependency bytes. A drift refuses the slot. */
+export function w3SlotAdmission(manifest: any, harnessNow: unknown, sessionHarness: unknown) {
+  if(digest(harnessNow)!==digest(sessionHarness))throw new Error('W3 harness identity changed during the session; no later slot runs on another harness')
   admitW3Manifest(manifest,true)
 }
 /** The W3 session end record the executor writes to w3-end.json. The end re-admission outcome is recorded beside the
@@ -156,7 +158,8 @@ export function w3EndRecord(session: Record<string, unknown>, stopped: string | 
   let endAdmission: { status: 'ADMITTED' | 'REFUSED'; error: string | null }
   try { admitW3Manifest(manifest,true); endAdmission={status:'ADMITTED',error:null} }
   catch(error) { endAdmission={status:'REFUSED',error:error instanceof Error?error.message:String(error)} }
-  return {...session,stopped,endAdmission,...observed,closure:'UNPROVEN'}
+  const harnessAtEndMatches = digest(observed.harnessAtEnd) === digest(session.harness)
+  return {...session,stopped,endAdmission,...observed,harnessAtEndMatches,closure:'UNPROVEN'}
 }
 function sameFiles(a: unknown,b: unknown){return JSON.stringify(a)===JSON.stringify(b)}
 
