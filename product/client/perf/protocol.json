@@ -74,8 +74,12 @@
         { "id": 1, "change": "Fly at F0 by construction: the public Fly button is clicked (DOM click, isTrusted false) in the same page task that commits the finished t=0 setup, before the paused 250 ms frozen-clock interval can run; the setup report is downloaded and verified after Pause; an unobserved or failed setup is a retained refusal. The late-entry refusal is unchanged.",
           "reason": "Each paused frozen tick advances the units' clock and runs both computers' tick; child work between Run and Fly made F0 a race (a late entry was refused in a functional session).", "prospective": true, "metricsChanged": false },
         { "id": 2, "change": "executorLimitSeconds 2100 -> 2700 (1.5x the 1800 s nominal 1x prefix); child process cap and test timeout move together.",
-          "reason": "Busy-host 1x view-on children paced at 0.90-0.92x and used 95-97% of 2100 s; decided before any quiet or qualifying data.", "prospective": true, "metricsChanged": false }
-      ]
+          "reason": "Busy-host 1x view-on children paced at 0.90-0.92x and used 95-97% of 2100 s; decided before any quiet or qualifying data.", "prospective": true, "metricsChanged": false },
+        { "id": 3, "change": "Interaction cadence on the simulated-frame clock: interactionSchedule declares 59 PROG/LEGS keys, key i due once frame 120(i+1) has completed; a run whose schedule was not dispatched in full before F7200 is refused.",
+          "reason": "Night-1 pilot: one key per harness poll gave 827-857 keys per 1x view-off run, 677-695 per 1x view-on run and 17-19 at 64x, set by poll cost, and handlers just after a key were slower; both arms must receive identical interaction work. From operational data with no B/A look.", "prospective": true, "metricsChanged": false }
+      ],
+      "implementationFixes": "Night-1 audit (not recipe changes): in flight the child polls only a constant-size progress probe and takes the whole observation once after Pause (full in-flight snapshots stalled the paced page and cost 1x flights 7-9% of their pace); a key's CDU 'before' screen is read at dispatch, before the pointerdown that changes it, and Event Timing correlates the key interaction by interactionId with its longest native entry.",
+      "estimand64x": "At 64x the primary is bounded by the bench's 32 ms slice check: a pacing timer handler runs frames until 32 ms have passed, so its duration is about 32 ms plus one frame (night 1: p50 32.9-33.5 ms, p95 35.0-36.8 ms). It measures slicer-bounded responsiveness, not per-frame cost: a 2% change in frame cost moves it by about 0.2%. Its small run-to-run spread is not frame-cost precision; 64x C1 sensitivity to frame cost comes from achieved throughput and the slice cohort, not from this primary."
     },
     "capture": {
       "revision": 1,
