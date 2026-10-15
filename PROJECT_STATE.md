@@ -669,6 +669,13 @@ There are three supported operating modes, and they are deliberately independent
   dedicated production source. A remote-demo browser session is a view of HOME; the work-laptop repository
   and database are irrelevant to it.
 
+A fourth, the **site server** on the company host (#1614), is being built and is not yet live; production
+there waits for Windows sign-in (#1615). Its launch path is `product/scripts/Start-AeroLinkSite.ps1`, for an
+installation declared `SiteProduction` or `SiteDevelopment`, which every other launcher refuses. It runs the
+API as `Production`, serving HTTPS from Kestrel with HSTS and `__Host-` cookies, and the API refuses to start
+a site server without HTTPS, with demonstration data or accounts, or with no way to create the first
+administrator. Outside a site server, `Production` may listen on plain HTTP only on loopback.
+
 A checkout is **source**; the persistent PostgreSQL cluster, evidence, attachments and backups are an
 **installation** it points at. An ordinary clone is its own installation (`product/.local`, unchanged); a
 checkout carrying `product/.local/installation.json` uses the installation that names. This is what lets

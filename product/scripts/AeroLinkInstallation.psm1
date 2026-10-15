@@ -36,7 +36,14 @@ $script:AeroLinkInstallationPointerName = 'installation.json'
 # The one list of what an installation may declare itself to be. Every guard that protects real data compares
 # against these by equality, so a value outside the list is not a label AeroLink does not recognise - it is a
 # guard that silently stops applying. Keep this and Set-AeroLinkInstanceConfig's ValidateSet in step.
-$script:AeroLinkInstanceClassifications = @('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared')
+#
+# The two site classifications are the installations on the company site host (#1614 D4, D8). This is the one
+# list of them; Test-AeroLinkSiteClassification reads it. Only a -Mode Site read accepts one: the site launcher,
+# and the notification-authority scripts when the installation has a site declaration. Every other caller
+# refuses them, as every launcher, import and restore refused them as unknown before they existed - which is
+# what stops a HOME launcher, running Development with demonstration data, from starting against a site database.
+$script:AeroLinkSiteClassifications = @('SiteProduction', 'SiteDevelopment')
+$script:AeroLinkInstanceClassifications = @('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared') + $script:AeroLinkSiteClassifications
 
 function Get-AeroLinkInstallationPointerPath {
     <#
@@ -260,7 +267,9 @@ function Get-AeroLinkInstanceConfig {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
-        [ValidateSet('Development', 'HomeCanonical')][string]$Mode = 'Development',
+        # Site is the site-server launcher's mode: it accepts only a SiteProduction or SiteDevelopment
+        # declaration, and no other mode accepts one.
+        [ValidateSet('Development', 'HomeCanonical', 'Site')][string]$Mode = 'Development',
         [string]$InstallationRoot,
         # Mint and persist a stable instance id when this installation has none.
         [switch]$EnsureInstanceId
@@ -293,6 +302,14 @@ function Get-AeroLinkInstanceConfig {
         }
         if ($declared.PSObject.Properties['snapshot'] -and $declared.snapshot) { $snapshot = $declared.snapshot }
         if ($declared.PSObject.Properties['instanceId']) { $instanceId = [string]$declared.instanceId }
+    }
+
+    $isSite = Test-AeroLinkSiteClassification $classification
+    if ($isSite -and $Mode -ne 'Site') {
+        throw "The AeroLink installation at $($paths.InstallationRoot) is declared $classification, a site server installation. Only a site-aware caller (the site launcher, Start-AeroLinkSite.ps1) handles it; this $Mode read was refused and nothing was changed."
+    }
+    if ($Mode -eq 'Site' -and -not $isSite) {
+        throw "A Site read accepts only an installation declared SiteProduction or SiteDevelopment; the one at $($paths.InstallationRoot) is $classification. Nothing was started or changed."
     }
 
     # A stable identifier for this installation, minted once and then never changing.
@@ -334,7 +351,8 @@ function Set-AeroLinkInstanceConfig {
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
         [string]$Label,
-        [ValidateSet('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared')][string]$Classification,
+        # A literal, because ValidateSet cannot read a variable; keep it equal to $script:AeroLinkInstanceClassifications.
+        [ValidateSet('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared', 'SiteProduction', 'SiteDevelopment')][string]$Classification,
         [hashtable]$Snapshot,
         [string]$InstallationRoot
     )
@@ -363,10 +381,9 @@ function Set-AeroLinkInstanceConfig {
 # its own in instance.json instead, because two of them share one host (D8) with other applications (D3).
 $script:AeroLinkDefaultApiPort = 5080
 $script:AeroLinkDefaultPostgresPort = 54329
-$script:AeroLinkSiteClassifications = @('SiteProduction', 'SiteDevelopment')
 
 function Test-AeroLinkSiteClassification {
-    <# .SYNOPSIS Whether a classification is one of the site server classifications. The one list lives here. #>
+    <# .SYNOPSIS Whether a classification is one of the site server classifications ($script:AeroLinkSiteClassifications, at the top of this module). #>
     param([AllowNull()][AllowEmptyString()][string]$Classification)
     return ($Classification -in $script:AeroLinkSiteClassifications)
 }

@@ -10,7 +10,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNotificationAuthority.psm1') -Force
-$instance = Get-AeroLinkInstanceConfig -ProductRoot $ProductRoot -Mode Development
+# A site installation (#1614) is read in Site mode: it has its own authority root, and every other mode refuses it.
+$installationRoot = Get-AeroLinkInstallationRoot -ProductRoot $ProductRoot
+$mode = if (Get-AeroLinkSiteDeclaration -InstallationRoot $installationRoot) { 'Site' } else { 'Development' }
+$instance = Get-AeroLinkInstanceConfig -ProductRoot $ProductRoot -InstallationRoot $installationRoot -Mode $mode
 if ([string]::IsNullOrWhiteSpace([string]$instance.InstanceId)) { throw 'An existing installation identity is required.' }
 $inputPath = [IO.Path]::GetFullPath($PolicyFile)
 $inputFile = Get-Item -LiteralPath $inputPath

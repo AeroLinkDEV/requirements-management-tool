@@ -13,6 +13,7 @@ using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
 using System.Text.RegularExpressions;
+using AeroLink.Api;
 
 // Support shared by more than one endpoint module: reading the actor off the request, allocating the next
 // controlled identifier, and mapping an aggregate to the shape the browser reads.
@@ -119,7 +120,7 @@ static class IdentityHttpExtensions
     {
         scope.EnsureJoined(scope.Db, scope.ProjectId);
         _ = identity;
-        var tokenHash = IdentityService.TokenDigest(context.Request.Cookies[IdentityService.CookieName]);
+        var tokenHash = IdentityService.TokenDigest(context.SessionToken());
         if (tokenHash is null) return null;
         var now = DateTimeOffset.UtcNow;
         var session = await scope.Db.UserSessions.AsNoTracking()
