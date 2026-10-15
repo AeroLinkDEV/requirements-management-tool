@@ -168,15 +168,15 @@ test('the W3 end record survives a manifest refused at session end: the original
   }
   const manifest={schema:'aerolink.fms-w3-observation-overlay.v1',harness:{commit:'h'.repeat(40)},arms,builds,
     overlaySha256:digest({bench:sha(join(root,'observation.patch')),A:sha(join(root,'A.caller.patch')),B:sha(join(root,'B.caller.patch'))})}
-  const session={schema:'aerolink.fms-w3-paired-session.v1',id:'literal-session',closure:'UNPROVEN'},observed={harnessAtEnd:{dirtyEntries:0},coldAtEnd:'c'.repeat(64),endedAt:'2026-10-14T01:00:00.000Z',monotonicEnd:1}
+  const session={schema:'aerolink.fms-w3-paired-session.v1',id:'literal-session',harness:{dirtyEntries:0},closure:'UNPROVEN'},observed={harnessAtEnd:{dirtyEntries:0},coldAtEnd:'c'.repeat(64),endedAt:'2026-10-14T01:00:00.000Z',monotonicEnd:1}
   // A declared observation patch changes during the session: the end re-admission is refused, the record is still produced.
   writeFileSync(join(root,'A.caller.patch'),'changed\n')
   expect(w3EndRecord(session,'W3 failed run retained; no retry or later favorable substitution',manifest,observed)).toEqual({...session,stopped:'W3 failed run retained; no retry or later favorable substitution',
-    endAdmission:{status:'REFUSED',error:'W3 declared observation patches changed'},...observed,closure:'UNPROVEN'})
+    endAdmission:{status:'REFUSED',error:'W3 declared observation patches changed'},...observed,harnessAtEndMatches:true,closure:'UNPROVEN'})
   expect(w3EndRecord(session,null,manifest,observed)).toMatchObject({stopped:null,endAdmission:{status:'REFUSED',error:'W3 declared observation patches changed'}})
   // Restored bytes are admitted again.
   writeFileSync(join(root,'A.caller.patch'),'A.caller.patch\n')
-  expect(w3EndRecord(session,null,manifest,observed)).toEqual({...session,stopped:null,endAdmission:{status:'ADMITTED',error:null},...observed,closure:'UNPROVEN'})
+  expect(w3EndRecord(session,null,manifest,observed)).toEqual({...session,stopped:null,endAdmission:{status:'ADMITTED',error:null},...observed,harnessAtEndMatches:true,closure:'UNPROVEN'})
 })
 test('a W3 session archives the sealed seed and writer closure beside the cold payload, and every slot reads the archived seed',()=>{
   const root=mkdtempSync(join(process.env.TEMP ?? tmpdir(),'w3-cold-')),input=join(root,'input'),dir=join(root,'out')
