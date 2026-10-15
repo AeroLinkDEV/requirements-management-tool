@@ -46,7 +46,7 @@ function Assert-True([bool]$Condition, [string]$Message) {
 # 1. Success path: quoted mixed-case identifier preserved, numeric result parsed.
 $env:AEROLINK_FAKE_BEHAVIOR = 'success'
 $env:AEROLINK_FAKE_CAPTURE = $capturedSqlPath
-$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath
+$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath -DatabasePort 55999
 Assert-True ($result.Healthy -eq $true) 'Success path should be healthy.'
 Assert-True ($result.Count -eq 89) "Expected count 89, got $($result.Count)."
 Assert-True ($result.Detail -eq '89 applied migration(s)') "Unexpected detail: $($result.Detail)"
@@ -58,23 +58,23 @@ Assert-True ($captured -notmatch '(?i)\b(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|
 
 # 2. Nonzero native-command exit handled as failure.
 $env:AEROLINK_FAKE_BEHAVIOR = 'exit1'
-$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath
+$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath -DatabasePort 55999
 Assert-True ($result.Healthy -eq $false) 'Nonzero psql exit should be unhealthy.'
 Assert-True ($result.Detail -match 'psql exited 1') "Unexpected detail: $($result.Detail)"
 
 # 3. Malformed/non-numeric result handled as failure.
 $env:AEROLINK_FAKE_BEHAVIOR = 'bad'
-$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath
+$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath -DatabasePort 55999
 Assert-True ($result.Healthy -eq $false) 'Non-numeric output should be unhealthy.'
 Assert-True ($result.Detail -match 'non-numeric') "Unexpected detail: $($result.Detail)"
 
 # 4. Empty result handled as failure.
 $env:AEROLINK_FAKE_BEHAVIOR = 'empty'
-$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath
+$result = Get-AeroLinkMigrationCount -PsqlPath $stubPath -DatabasePort 55999
 Assert-True ($result.Healthy -eq $false) 'Empty output should be unhealthy.'
 
 # 5. Missing executable handled as failure.
-$result = Get-AeroLinkMigrationCount -PsqlPath (Join-Path $tempRoot 'missing-psql.exe')
+$result = Get-AeroLinkMigrationCount -PsqlPath (Join-Path $tempRoot 'missing-psql.exe') -DatabasePort 55999
 Assert-True ($result.Healthy -eq $false) 'Missing psql should be unhealthy.'
 Assert-True ($result.Detail -match 'not found') "Unexpected detail: $($result.Detail)"
 

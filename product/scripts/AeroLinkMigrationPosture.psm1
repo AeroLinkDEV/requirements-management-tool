@@ -17,7 +17,8 @@ function Get-AeroLinkMigrationCount {
         [Parameter(Mandatory = $true)]
         [string]$PsqlPath,
         [string]$DatabaseHost = '127.0.0.1',
-        [int]$DatabasePort = 54329,
+        [Parameter(Mandatory = $true)]
+        [int]$DatabasePort,
         [string]$DatabaseUser = 'postgres',
         [string]$DatabaseName = 'aerolink'
     )

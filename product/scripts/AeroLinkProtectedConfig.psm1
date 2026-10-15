@@ -426,5 +426,138 @@ function Remove-AeroLinkProtectedImageryKey {
     return [pscustomobject]@{ Removed = $existed; Path = $path }
 }
 
+# Site server installation secrets (#1614 1.4): the PostgreSQL application-role password the API connects with,
+# and the superuser password kept for maintenance only. The same store and the same protection as the entries
+# above - DPAPI LocalMachine with purpose entropy bound to the installation root, inheritance off - but the reader
+# is named explicitly rather than taken from whoever writes it: an elevated installer writes the application
+# password for NETWORK SERVICE, and the superuser password for Administrators alone.
+$script:ProtectedSiteSecretSchemaVersion = 1
+$script:ProtectedSiteSecretPurpose = 'site-secret'
+
+function Get-AeroLinkProtectedSiteSecretPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallationRoot,
+        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser')][string]$Name,
+        [string]$RootOverride
+    )
+    $root = if ([string]::IsNullOrWhiteSpace($RootOverride)) {
+        Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) $script:ProtectedConfigDirectoryName
+    } else {
+        if (-not [IO.Path]::IsPathRooted($RootOverride)) { throw 'The protected configuration root override must be absolute.' }
+        [IO.Path]::GetFullPath($RootOverride)
+    }
+    # One directory per secret, because each has its own reader and the directory ACL names that reader.
+    return Join-Path (Join-Path (Join-Path (Join-Path $root 'site') (Get-AeroLinkProtectedInstallationHash $InstallationRoot)) $Name) 'secret.json'
+}
+
+function Get-AeroLinkProtectedSiteSecretEntropy {
+    param([Parameter(Mandatory)][string]$InstallationRoot, [Parameter(Mandatory)][string]$Name)
+    $value = (Resolve-AeroLinkProtectedInstallationRoot $InstallationRoot) + "|AeroLink protected site secret v1|$Name"
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($value)) }
+    finally { $sha.Dispose() }
+}
+
+function Set-AeroLinkProtectedSiteSecret {
+    <#
+        .SYNOPSIS Stores one site installation secret, readable only by -ReaderSid, SYSTEM and Administrators.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallationRoot,
+        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser')][string]$Name,
+        [Parameter(Mandatory)][securestring]$Secret,
+        # The SID that reads it: the run-as identity for the application password, S-1-5-32-544 for the superuser.
+        [Parameter(Mandatory)][string]$ReaderSid,
+        [string]$RootOverride
+    )
+    $installationRoot = Resolve-AeroLinkProtectedInstallationRoot $InstallationRoot
+    try { $ReaderSid = (New-Object Security.Principal.SecurityIdentifier($ReaderSid)).Value }
+    catch { throw "The protected site secret reader must be a SID; it is '$ReaderSid'." }
+    if ($Secret.Length -le 0) { throw 'The site secret was empty; refusing to write it.' }
+    $path = Get-AeroLinkProtectedSiteSecretPath -InstallationRoot $installationRoot -Name $Name -RootOverride $RootOverride
+    $directory = Split-Path -Parent $path
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secret)
+    try {
+        $plain = [Text.Encoding]::UTF8.GetBytes([Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr))
+        try {
+            $protected = [Security.Cryptography.ProtectedData]::Protect($plain, (Get-AeroLinkProtectedSiteSecretEntropy $installationRoot $Name), [Security.Cryptography.DataProtectionScope]::LocalMachine)
+            $ciphertext = [Convert]::ToBase64String($protected)
+            [Array]::Clear($protected, 0, $protected.Length)
+        }
+        finally { [Array]::Clear($plain, 0, $plain.Length) }
+    }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    if (Test-Path -LiteralPath $directory -PathType Container) {
+        # Replacement never repairs a directory somebody else has widened.
+        Assert-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ReaderSid -Subject "protected site secret '$Name'"
+    } else {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        Set-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ReaderSid
+    }
+    $record = [ordered]@{
+        schemaVersion = $script:ProtectedSiteSecretSchemaVersion; purpose = $script:ProtectedSiteSecretPurpose; name = $Name
+        installationRootHash = Get-AeroLinkProtectedInstallationHash $installationRoot; readerSid = $ReaderSid
+        protectedSecret = $ciphertext; updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $tempPath = Join-Path $directory ('.secret.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $backupPath = Join-Path $directory ('.secret.' + [guid]::NewGuid().ToString('N') + '.bak')
+    try {
+        [IO.File]::WriteAllText($tempPath, ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+        Set-AeroLinkProtectedFileAcl -FilePath $tempPath -OwnerSid $ReaderSid
+        if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::Replace($tempPath, $path, $backupPath, $true) } else { [IO.File]::Move($tempPath, $path) }
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $backupPath -PathType Leaf) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
+    }
+    return [pscustomobject]@{ Name = $Name; Path = $path; ReaderSid = $ReaderSid }
+}
+
+function Get-AeroLinkProtectedSiteSecret {
+    <#
+        .SYNOPSIS Reads one site installation secret as the identity it was stored for. Refuses anyone else.
+        .DESCRIPTION
+            The caller must hold the reader SID in its token: the run-as identity for the application password,
+            an elevated administrator for the superuser password. A widened ACL, a record bound to another
+            installation or a missing entry is a refusal, never an empty value.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallationRoot,
+        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser')][string]$Name,
+        [string]$RootOverride
+    )
+    $installationRoot = Resolve-AeroLinkProtectedInstallationRoot $InstallationRoot
+    $path = Get-AeroLinkProtectedSiteSecretPath -InstallationRoot $installationRoot -Name $Name -RootOverride $RootOverride
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "The protected site secret '$Name' is not configured for $installationRoot." }
+    $subject = "protected site secret '$Name'"
+    try { $record = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "The $subject is unreadable or malformed; refusing to use it." }
+    if ($null -eq $record -or [int]$record.schemaVersion -ne $script:ProtectedSiteSecretSchemaVersion -or [string]$record.purpose -ne $script:ProtectedSiteSecretPurpose -or
+        [string]$record.name -ne $Name -or [string]$record.installationRootHash -ne (Get-AeroLinkProtectedInstallationHash $installationRoot) -or
+        [string]::IsNullOrWhiteSpace([string]$record.protectedSecret)) {
+        throw "The $subject identity or schema is unexpected; refusing to use it."
+    }
+    $readerSid = [string]$record.readerSid
+    Assert-AeroLinkProtectedDirectoryAcl -DirectoryPath (Split-Path -Parent $path) -OwnerSid $readerSid -Subject $subject
+    Assert-AeroLinkProtectedAcl -FilePath $path -OwnerSid $readerSid -Subject $subject
+    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $principal.IsInRole((New-Object Security.Principal.SecurityIdentifier($readerSid)))) {
+        throw "The $subject is stored for $readerSid, which this process does not hold; refusing to read it."
+    }
+    try { $protected = [Convert]::FromBase64String([string]$record.protectedSecret) }
+    catch { throw "The $subject is not valid ciphertext." }
+    try { $plain = [Security.Cryptography.ProtectedData]::Unprotect($protected, (Get-AeroLinkProtectedSiteSecretEntropy $installationRoot $Name), [Security.Cryptography.DataProtectionScope]::LocalMachine) }
+    catch { throw "The $subject could not be decrypted by this Windows installation." }
+    finally { [Array]::Clear($protected, 0, $protected.Length) }
+    try { $value = [Text.Encoding]::UTF8.GetString($plain) }
+    finally { [Array]::Clear($plain, 0, $plain.Length) }
+    if ([string]::IsNullOrEmpty($value)) { throw "The $subject is empty; refusing to use it." }
+    return $value
+}
+
 Export-ModuleMember -Function Get-AeroLinkProtectedConfigPath, Get-AeroLinkProtectedGitLabDescriptor, Get-AeroLinkProtectedGitLabRuntimeEnvironment, Set-AeroLinkProtectedGitLabConfig,
-    Get-AeroLinkProtectedImageryPath, Get-AeroLinkProtectedImageryDescriptor, Set-AeroLinkProtectedImageryKey, Remove-AeroLinkProtectedImageryKey
+    Get-AeroLinkProtectedImageryPath, Get-AeroLinkProtectedImageryDescriptor, Set-AeroLinkProtectedImageryKey, Remove-AeroLinkProtectedImageryKey,
+    Get-AeroLinkProtectedSiteSecretPath, Set-AeroLinkProtectedSiteSecret, Get-AeroLinkProtectedSiteSecret

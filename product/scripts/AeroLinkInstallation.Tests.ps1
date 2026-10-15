@@ -211,6 +211,147 @@ try {
     }
     finally { $env:AEROLINK_QUALIFICATION_API_PORT = $previousPorts[0]; $env:AEROLINK_QUALIFICATION_POSTGRES_PORT = $previousPorts[1] }
     $env:AEROLINK_INSTALLATION_ROOT = $null
+
+    # --- 11. A site server installation (#1614) declares its own ports; HOME keeps 5080/54329 ---
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
+    function Get-FreeLoopbackPort {
+        $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $probe.Start()
+        try { return $probe.LocalEndpoint.Port } finally { $probe.Stop() }
+    }
+    $siteFixture = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-site-' + [Guid]::NewGuid().ToString('N'))
+    $siteRoot = Join-Path $siteFixture 'AeroLink Production'
+    $siteAuthority = Join-Path $siteFixture 'notification-authority'
+    New-Item -ItemType Directory -Path $siteRoot -Force | Out-Null
+    $siteConfig = Join-Path $siteRoot 'instance.json'
+    $sitePlan = @()
+    try {
+        @{ classification = 'SiteProduction'; label = 'SITE PRODUCTION' } | ConvertTo-Json | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        $siteApiPort = Get-FreeLoopbackPort
+        $sitePostgresPort = Get-FreeLoopbackPort
+        while ($sitePostgresPort -eq $siteApiPort) { $sitePostgresPort = Get-FreeLoopbackPort }
+        $declared = Set-AeroLinkSiteDeclaration -InstallationRoot $siteRoot -ApiPort $siteApiPort -PostgresPort $sitePostgresPort -NotificationAuthorityRoot $siteAuthority
+        $siteEndpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $siteRoot
+        Assert-True ($siteEndpoints.Site -and $siteEndpoints.ApiPort -eq $siteApiPort -and $siteEndpoints.PostgresPort -eq $sitePostgresPort -and
+            $siteEndpoints.DeclaredApiPort -eq $siteApiPort -and $siteEndpoints.DeclaredPostgresPort -eq $sitePostgresPort) `
+            'A site installation must resolve the API and PostgreSQL ports its instance.json declares.'
+        Assert-True ($siteEndpoints.ConnectionString -eq "Host=127.0.0.1;Port=$sitePostgresPort;Database=aerolink;Username=aerolink_app") `
+            "A site installation connects as its non-superuser role on its own port, with no password in the endpoint: $($siteEndpoints.ConnectionString)"
+        Assert-True ($declared.ConnectorDeploymentId -match '^aerolink-site-[0-9a-f]{16}$') "A site declaration must carry an explicit connector deployment id; got '$($declared.ConnectorDeploymentId)'."
+        $redeclared = Set-AeroLinkSiteDeclaration -InstallationRoot $siteRoot -ApiPort $siteApiPort -PostgresPort $sitePostgresPort
+        Assert-True ($redeclared.ConnectorDeploymentId -eq $declared.ConnectorDeploymentId -and $redeclared.NotificationAuthorityRoot -eq [IO.Path]::GetFullPath($siteAuthority)) `
+            'Re-declaring a site must keep its connector deployment id and notification authority root; a new id would orphan every enrolled connector.'
+        Assert-Throws { Set-AeroLinkSiteDeclaration -InstallationRoot $siteRoot -ApiPort $siteApiPort -PostgresPort $sitePostgresPort -ConnectorDeploymentId 'aerolink-other' } 'orphan' `
+            'A site declaration must refuse to replace an existing connector deployment id.'
+
+        $runtime = Get-AeroLinkSiteRuntimeEnvironment -InstallationRoot $siteRoot
+        Assert-True ($runtime['DataProtection__KeyRingPath'] -eq (Join-Path $siteRoot 'keys\data-protection') -and $runtime['DataProtection__ApplicationName'] -eq 'AeroLink' -and
+            $runtime['DataProtection__ProtectKeysWith'] -eq 'DpapiLocalMachine' -and $runtime['Evidence__Root'] -eq (Join-Path $siteRoot 'evidence') -and
+            $runtime['Connector__SigningKeyPath'] -eq (Join-Path $siteRoot 'keys\connector\connector-signing-key.pem') -and
+            $runtime['Connector__DeploymentId'] -eq $declared.ConnectorDeploymentId -and
+            $runtime['AEROLINK_NOTIFICATION_AUTHORITY_ROOT'] -eq [IO.Path]::GetFullPath($siteAuthority) -and
+            $runtime['ConnectionStrings__AeroLink'] -notmatch 'Password') `
+            'A site API must be given installation-owned key ring, evidence, connector and notification-authority state, and no password unless asked.'
+
+        # HOME keeps exactly what it had: no site block, 5080/54329 as postgres.
+        $homeRoot = Join-Path $siteFixture 'home-installation'
+        New-Item -ItemType Directory -Path $homeRoot -Force | Out-Null
+        @{ classification = 'HomeCanonical'; label = 'HOME CANONICAL' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $homeRoot 'instance.json') -Encoding UTF8
+        $homeEndpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $homeRoot
+        Assert-True (-not $homeEndpoints.Site -and $homeEndpoints.ApiPort -eq 5080 -and $homeEndpoints.PostgresPort -eq 54329 -and $homeEndpoints.DatabaseUser -eq 'postgres') `
+            'An installation without a site block must stay on 5080/54329 as postgres.'
+
+        # A declaration that would not apply, or applies wrongly, refuses rather than being ignored.
+        $valid = Get-Content -LiteralPath $siteConfig -Raw
+        foreach ($case in @(
+            @{ Edit = { param($d) $d.classification = 'HomeCanonical' }; Pattern = 'classification'; Message = 'A site block on a HOME installation must refuse.' },
+            @{ Edit = { param($d) $d.site.postgresPort = $d.site.apiPort }; Pattern = 'same port'; Message = 'A site declaration giving both services one port must refuse.' },
+            @{ Edit = { param($d) $d.site.connectorDeploymentId = '' }; Pattern = 'connectorDeploymentId'; Message = 'A site declaration without an explicit deployment id must refuse.' },
+            @{ Edit = { param($d) $d.site.notificationAuthorityRoot = (Join-Path $siteRoot 'authority') }; Pattern = 'outside'; Message = 'A notification authority inside the installation must refuse.' })) {
+            $document = $valid | ConvertFrom-Json
+            & $case.Edit $document
+            $document | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+            Assert-Throws { Get-AeroLinkServiceEndpoints -InstallationRoot $siteRoot } $case.Pattern $case.Message
+        }
+        Set-Content -LiteralPath $siteConfig -Value $valid -Encoding UTF8
+
+        # A port somebody is listening on is refused, naming the holder.
+        $holder = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $holder.Start()
+        $busyPort = $holder.LocalEndpoint.Port
+        try {
+            Assert-Throws { Assert-AeroLinkPortAvailable -Port $busyPort -Purpose 'a test service' } "already in use by .*pid $PID" 'A listening port must be refused, naming the process that holds it.'
+            Assert-Throws { Set-AeroLinkSiteDeclaration -InstallationRoot $siteRoot -ApiPort $busyPort -PostgresPort $sitePostgresPort } 'already in use' 'A site may not declare a port another process listens on.'
+        }
+        finally { $holder.Stop() }
+        try { Assert-AeroLinkPortAvailable -Port $busyPort -Purpose 'a test service' } catch { $failures.Add("A released port must be accepted: $($_.Exception.Message)") }
+
+        # --- 12. Operator scripts read the declared port, not 5080/54329 ---
+        $env:AEROLINK_INSTALLATION_ROOT = $siteRoot
+        Assert-Throws { & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive (Join-Path $siteFixture 'absent.zip') -DisposableQualification -PostgresPort $sitePostgresPort } `
+            "persistent AeroLink PostgreSQL port $sitePostgresPort" 'Restore must fence disposable qualification off the site installation''s own declared PostgreSQL port.'
+        # Diagnostics, unprompted, probes the declared API port and the site evidence root.
+        $api = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $siteApiPort); $api.Start()
+        $diagnosticsOutput = Join-Path $siteFixture 'diagnostics.json'
+        $shell = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'powershell.exe' } else { 'pwsh' }
+        try {
+            $child = Start-Process -FilePath $shell -NoNewWindow -PassThru -RedirectStandardOutput $diagnosticsOutput -RedirectStandardError (Join-Path $siteFixture 'diagnostics.err') `
+                -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $PSScriptRoot 'Get-AeroLinkDiagnostics.ps1') + '"'), '-Json')
+            $deadline = (Get-Date).AddSeconds(90)
+            while (-not $child.HasExited -and (Get-Date) -lt $deadline) {
+                if (-not $api.Pending()) { Start-Sleep -Milliseconds 50; continue }
+                $client = $api.AcceptTcpClient()
+                try {
+                    $stream = $client.GetStream()
+                    $reader = New-Object IO.StreamReader($stream)
+                    $requestLine = $reader.ReadLine()
+                    while ($reader.ReadLine()) { }
+                    $body = if ($requestLine -match ' /health/ready ') { '{"status":"ready","database":"connected"}' } else { '{"status":"healthy"}' }
+                    $bytes = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: application/json`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n$body")
+                    $stream.Write($bytes, 0, $bytes.Length); $stream.Flush()
+                }
+                finally { $client.Close() }
+            }
+            if (-not $child.HasExited) { $child.Kill(); throw 'Diagnostics did not finish within 90 seconds.' }
+        }
+        finally { $api.Stop() }
+        $diagnostics = Get-Content -LiteralPath $diagnosticsOutput -Raw | ConvertFrom-Json
+        $apiCheck = @($diagnostics.Checks | Where-Object Name -eq 'API process')[0]
+        $evidenceCheck = @($diagnostics.Checks | Where-Object Name -eq 'Evidence root')[0]
+        Assert-True ($apiCheck.Healthy -and $apiCheck.Detail -eq "http://127.0.0.1:$siteApiPort/") "Diagnostics must probe the site's declared API port by default; got $($apiCheck | ConvertTo-Json -Compress)."
+        Assert-True ($evidenceCheck.Detail -eq (Join-Path $siteRoot 'evidence')) "Diagnostics must inspect the site's own evidence root; got '$($evidenceCheck.Detail)'."
+        $env:AEROLINK_INSTALLATION_ROOT = $null
+
+        # --- 13. Folder permissions are set by SID: program read-only to the run-as identity, data writable by it and Administrators only ---
+        $sitePlan = @(Set-AeroLinkSiteFolderAcl -InstallationRoot $siteRoot)
+        foreach ($entry in $sitePlan) {
+            $access = Get-AeroLinkDirectoryAccessBySid -Path $entry.Path
+            $writers = @($access.Rules | Where-Object { $_.Allow -and $_.CanWrite } | ForEach-Object Sid | Sort-Object -Unique)
+            $principals = @($access.Rules | ForEach-Object Sid | Sort-Object -Unique)
+            $runAs = @($access.Rules | Where-Object Sid -eq 'S-1-5-20')
+            Assert-True $access.Protected "$($entry.Path) must not inherit permissions."
+            Assert-True (-not @($access.Rules | Where-Object { -not $_.Allow }).Count) "$($entry.Path) carries a deny entry."
+            if ($entry.Kind -eq 'Data') {
+                Assert-True (($writers -join ',') -eq 'S-1-5-20,S-1-5-32-544' -and ($principals -join ',') -eq 'S-1-5-20,S-1-5-32-544') `
+                    "Data folder $($entry.Path) must be writable by the run-as identity and Administrators only; principals $($principals -join ','), writers $($writers -join ',')."
+            }
+            else {
+                Assert-True ($runAs.Count -eq 1 -and -not $runAs[0].CanWrite -and ($writers -join ',') -eq 'S-1-5-18,S-1-5-32-544' -and ($principals -join ',') -eq 'S-1-5-18,S-1-5-20,S-1-5-32-544') `
+                    "Read-only folder $($entry.Path) must be readable, not writable, by the run-as identity; principals $($principals -join ','), writers $($writers -join ',')."
+            }
+        }
+        Assert-True (@($sitePlan | Where-Object Path -eq $siteRoot).Count -eq 1 -and @($sitePlan | Where-Object Path -eq (Join-Path $siteRoot 'pgdata')).Kind -eq 'Data' -and
+            @($sitePlan | Where-Object Path -eq (Join-Path $siteRoot 'keys\data-protection')).Kind -eq 'Data') 'The installation root, cluster and key ring must all be in the permission plan.'
+        Assert-Throws { Set-AeroLinkSiteFolderAcl -InstallationRoot $homeRoot } 'site declaration' 'Folder permissions must never be applied to an installation without a site declaration.'
+    }
+    finally {
+        $env:AEROLINK_INSTALLATION_ROOT = $null
+        # This process owns every folder, so it can always hand them back to itself before removing them.
+        $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        foreach ($entry in @($sitePlan | Sort-Object { $_.Path.Length })) {
+            try { Set-AeroLinkDirectoryAccessBySid -Path $entry.Path -Grants @(@{ Sid = $me; Access = 'FullControl' }) } catch { }
+        }
+        Remove-Item -LiteralPath $siteFixture -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $siteFixture) { $failures.Add("The site fixture could not be removed: $siteFixture") }
+    }
 }
 finally {
     $env:AEROLINK_INSTALLATION_ROOT = $previousOverride

@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
     [switch]$Json,
-    [uri]$ApiBaseUri = 'http://127.0.0.1:5080',
+    # The API, database port and database user default to this installation's declared endpoints
+    # (Get-AeroLinkServiceEndpoints): 5080, 54329 and postgres everywhere except a site server installation.
+    [uri]$ApiBaseUri,
     [uri]$ClientUri,
     [string]$DatabaseHost = '127.0.0.1',
-    [int]$DatabasePort = 54329,
+    [int]$DatabasePort = 0,
     [string]$DatabaseName = 'aerolink',
-    [string]$DatabaseUser = 'postgres',
+    [string]$DatabaseUser,
     [string]$BackupRoot,
     [string]$EvidenceRoot,
     [switch]$AuthenticatedProbe,
@@ -19,11 +21,16 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
 $postgresBin = $installation.PostgresBin
 $checks = @()
+$endpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot
+$site = Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot
 
+if (-not $ApiBaseUri) { $ApiBaseUri = "http://127.0.0.1:$($endpoints.DeclaredApiPort)" }
+if (-not $DatabasePort) { $DatabasePort = $endpoints.DeclaredPostgresPort }
+if (-not $DatabaseUser) { $DatabaseUser = $endpoints.DatabaseUser }
 if (-not $ClientUri) { $ClientUri = $ApiBaseUri }
 if (-not $BackupRoot) { $BackupRoot = $installation.Backups }
 if (-not $EvidenceRoot) {
-    $EvidenceRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AeroLink\evidence'
+    $EvidenceRoot = if ($site) { $site.EvidenceRoot } else { Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'AeroLink\evidence' }
 }
 
 function Add-Check([string]$Category, [string]$Name, [bool]$Healthy, [string]$Detail) {

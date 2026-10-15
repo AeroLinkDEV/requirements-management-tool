@@ -193,6 +193,32 @@ Write-Output 'FRESH_PROCESS_PROTECTED_CONFIG_OK'
     $rotated = Set-AeroLinkProtectedImageryKey -ApiKey (ConvertTo-SecureString 'rotated-esri-key' -AsPlainText -Force) -RootOverride $imageryRoot
     Assert-True ($rotated.Fingerprint -ne $imagery.Fingerprint) 'Rotating the Esri key kept the old fingerprint.'
     Assert-True ((Remove-AeroLinkProtectedImageryKey -RootOverride $imageryRoot).Removed -and -not (Get-AeroLinkProtectedImageryDescriptor -RootOverride $imageryRoot).Configured) 'Removing the Esri key left it configured.'
+
+    # #1614 1.4: a site installation's PostgreSQL passwords. The reader is named by SID - the run-as identity for the
+    # application password - and nobody else reads it, however the file came to be readable.
+    $siteRoot = Join-Path $root 'site-programdata'
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $siteSecret = 'site-application-password-never-emitted'
+    $stored = Set-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    Assert-True ([IO.File]::ReadAllText($stored.Path) -notmatch [regex]::Escape($siteSecret)) 'The site application password was written in plain text.'
+    Assert-True ((Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -RootOverride $siteRoot) -eq $siteSecret) 'The site application password did not round-trip for its reader.'
+    $fileRules = @((Get-Acl -LiteralPath $stored.Path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique)
+    Assert-True ((Get-Acl -LiteralPath $stored.Path).AreAccessRulesProtected -and (($fileRules -join ',') -eq ((@($currentSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object) -join ','))) "The site secret is not ACL'd to exactly its reader, SYSTEM and Administrators: $($fileRules -join ',')."
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot (Join-Path $root 'another-installation') -Name 'postgres-application' -RootOverride $siteRoot } 'A site secret was read for an installation it was not stored for.'
+    # DACL section only: Set-Acl with a Get-Acl object can ask for the audit section, which needs a privilege.
+    $storedFile = [IO.FileInfo]::new($stored.Path)
+    $widened = if ($PSVersionTable.PSEdition -eq 'Desktop') { $storedFile.GetAccessControl('Access') } else { [IO.FileSystemAclExtensions]::GetAccessControl($storedFile, 'Access') }
+    $widened.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Read', 'Allow')))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $storedFile.SetAccessControl($widened) } else { [IO.FileSystemAclExtensions]::SetAccessControl($storedFile, $widened) }
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -RootOverride $siteRoot } 'A site secret whose file Users can read was still used.'
+    # A record that names another reader - here NETWORK SERVICE - is refused to this process even though it can open the file.
+    $superuser = Set-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-superuser' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    $reassigned = [IO.File]::ReadAllText($superuser.Path) | ConvertFrom-Json
+    $reassigned.readerSid = 'S-1-5-20'
+    [IO.File]::WriteAllText($superuser.Path, ($reassigned | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-superuser' -RootOverride $siteRoot } 'A site secret recorded for NETWORK SERVICE was read by another identity.'
 }
 finally {
     if (Test-Path -LiteralPath $root) {

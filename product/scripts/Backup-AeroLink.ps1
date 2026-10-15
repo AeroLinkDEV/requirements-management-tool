@@ -2,7 +2,8 @@
 param(
     [ValidateRange(0,15)][int]$RetentionDays = 15,
     [string]$Database = 'aerolink',
-    [int]$PostgresPort = 54329,
+    # Defaults to this installation's declared PostgreSQL port (Get-AeroLinkServiceEndpoints).
+    [int]$PostgresPort = 0,
     [string]$BackupRoot,
     [string]$PostgresBin,
     # The evidence tree belonging to -Database. Defaults to this installation's live evidence root, which is
@@ -18,6 +19,8 @@ $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$declaredPostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort
+if (-not $PostgresPort) { $PostgresPort = $declaredPostgresPort }
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
 $transitionLease = $null
 $backupLock = $null
@@ -36,12 +39,12 @@ $pgDump = Join-Path $PostgresBin 'pg_dump.exe'
 $storageModule = Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1'
 Import-Module $storageModule -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
-$evidence = if ($EvidenceRoot) { [IO.Path]::GetFullPath($EvidenceRoot) } else { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot }
+$evidence = if ($EvidenceRoot) { [IO.Path]::GetFullPath($EvidenceRoot) } else { Get-AeroLinkEvidenceRoot -ProductRoot $productRoot -InstallationRoot $installation.InstallationRoot }
 $instanceIdentity = Get-AeroLinkInstanceConfig -ProductRoot $productRoot
 
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 if (-not $PostgresAlreadyRunning) {
-    if ($PostgresPort -ne 54329 -or $Database -ne 'aerolink') { throw 'A non-default backup target requires -PostgresAlreadyRunning and must be isolated qualification infrastructure.' }
+    if ($PostgresPort -ne $declaredPostgresPort -or $Database -ne 'aerolink') { throw 'A non-default backup target requires -PostgresAlreadyRunning and must be isolated qualification infrastructure.' }
     $start = Invoke-AeroLinkChildScript -ScriptPath (Join-Path $PSScriptRoot 'Start-Postgres.ps1') `
         -StandardOutput (Join-Path $installation.Logs 'backup-postgres-start.stdout.log') `
         -StandardError (Join-Path $installation.Logs 'backup-postgres-start.stderr.log') `
