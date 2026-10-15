@@ -100,6 +100,21 @@ static class IdentityHttpExtensions
         return false;
     }
 
+    /// <summary>
+    /// Who may configure review workflows and approval procedures: the approval-configuration authority above,
+    /// plus any global system administrator (#1639 owner decision: approval configuration is a system power a
+    /// granted administrator holds). It applies in the Programs the administrator can see: system
+    /// administration does not by itself grant access to every Program. Assurance policy keeps the narrower
+    /// check, because it is an assurance decision rather than system configuration.
+    /// </summary>
+    public static async Task<bool> HasReviewConfigurationAuthorityAsync(this HttpContext context,
+        AeroLinkDbContext db, ProjectAuthorityResolver resolver, Guid projectId, CancellationToken ct)
+    {
+        if (context.UserAccount().IsSystemAdministrator && await context.HasProjectAccessAsync(db, projectId, ct))
+            return true;
+        return await context.HasApprovalConfigurationAuthorityAsync(db, resolver, projectId, ct);
+    }
+
     private static readonly ProgramRole[] ApprovalConfigurationAuthorities =
         [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator];
 
@@ -135,7 +150,7 @@ static class IdentityHttpExtensions
             .Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList()))
             .ToList();
         return new(user.Id, user.UserName, user.DisplayName, user.Email,
-            user.IsGlobalAdministrator, programs, user.MustChangePassword);
+            user.HoldsAuthorityOverride, programs, user.MustChangePassword, user.IsGlobalAdministrator);
     }
 
     public static async Task<bool> HasFreshProjectRoleAsync(this HttpContext context, AeroLinkDbContext db,

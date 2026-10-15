@@ -38,18 +38,33 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                 nullable: true);
 
             migrationBuilder.AddColumn<bool>(
+                name: "IsBuiltInAdministrator",
+                table: "user_accounts",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
+
+            migrationBuilder.AddColumn<bool>(
                 name: "IsGlobalAdministrator",
                 table: "user_accounts",
                 type: "boolean",
                 nullable: false,
                 defaultValue: false);
 
-            // #1639: global administration was the account named `admin`. That account keeps it, now as an
-            // attributable grant from the migration, and the grant is recorded in the security audit log the
-            // same way an in-app grant is.
+            migrationBuilder.CreateIndex(
+                name: "IX_user_accounts_single_built_in_administrator",
+                table: "user_accounts",
+                column: "IsBuiltInAdministrator",
+                unique: true,
+                filter: "\"IsBuiltInAdministrator\"");
+
+            // #1639: global administration was the account named `admin`. That account becomes the built-in
+            // administrator and keeps administration as an attributable grant from the migration, recorded in
+            // the security audit log the same way an in-app grant is.
             migrationBuilder.Sql("""
                 UPDATE user_accounts
-                SET "IsGlobalAdministrator" = TRUE,
+                SET "IsBuiltInAdministrator" = TRUE,
+                    "IsGlobalAdministrator" = TRUE,
                     "GlobalAdministratorGrantedBy" = 'system.migration',
                     "GlobalAdministratorGrantedAt" = now()
                 WHERE "UserName" = 'admin';
@@ -66,6 +81,10 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropIndex(
+                name: "IX_user_accounts_single_built_in_administrator",
+                table: "user_accounts");
+
             migrationBuilder.DropColumn(
                 name: "GlobalAdministratorGrantedAt",
                 table: "user_accounts");
@@ -80,6 +99,10 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropColumn(
                 name: "GlobalAdministratorRevokedBy",
+                table: "user_accounts");
+
+            migrationBuilder.DropColumn(
+                name: "IsBuiltInAdministrator",
                 table: "user_accounts");
 
             migrationBuilder.DropColumn(

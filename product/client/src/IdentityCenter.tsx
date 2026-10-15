@@ -14,6 +14,7 @@ import {
 import "./IdentitySetup.css";
 import { Icon } from "./icons";
 import { PersonAvatar } from "./People";
+import { isSystemAdministrator } from "./administratorCapability";
 import { setStaySignedOut, windowsOutcome, windowsSignInUrl } from "./windowsSignIn";
 
 export type AuthUser = {
@@ -21,7 +22,10 @@ export type AuthUser = {
   userName: string;
   displayName: string;
   email: string;
+  /** The built-in administrator's authority override (substitution, access to every Program). */
   isAdministrator: boolean;
+  /** #1639 system administration: accounts, grants, identity links, review configuration, diagnostics. */
+  isSystemAdministrator?: boolean;
   mustChangePassword: boolean;
   programs: { programId: string; roles: string[] }[];
 };
@@ -1154,6 +1158,7 @@ type AdminUser = {
   origin?: string;
   windowsPrincipal?: string | null;
   windowsLinked?: boolean;
+  isBuiltInAdministrator?: boolean;
   memberships: { programId: string; role: string }[];
 };
 export function AdministrationCenter({
@@ -1225,15 +1230,31 @@ export function AdministrationCenter({
     }
   };
   // #1639: global administration is a grant any account can hold. The server refuses removing the last
-  // active administrator and records each grant and revoke in the security audit log.
+  // active administrator or touching the built-in `admin` from another account, and records each grant and
+  // revoke in the security audit log.
   const setGlobalAdministrator = async (user: AdminUser) => {
     if (busy) return;
+    if (
+      !user.isGlobalAdministrator &&
+      !window.confirm(
+        `Make ${user.displayName} a global administrator? They will be able to manage accounts, roles and administrator grants, identity links, review and approval configuration, and system diagnostics. Their engineering authority in each Program does not change.`,
+      )
+    )
+      return;
     setBusy(true);
     setError("");
     try {
       await apiRequest(`${api}/api/admin/users/${user.id}/global-administrator`, {
         method: user.isGlobalAdministrator ? "DELETE" : "POST",
       });
+      if (user.isGlobalAdministrator) {
+        // A self-revoke ends this page's authority: reload so the session, navigation and page agree.
+        const me = await fetch(`${api}/api/auth/me`);
+        if (!me.ok || !isSystemAdministrator((await me.json()) as AuthUser)) {
+          window.location.reload();
+          return;
+        }
+      }
       await load();
     } catch (error) {
       recordClientOperationFailure("identity.globalAdministrator", error);
@@ -1383,7 +1404,7 @@ export function AdministrationCenter({
               />
               <div>
                 <b>{user.displayName}</b>
-                {user.isGlobalAdministrator && <small>Global system administrator</small>}
+                {user.isGlobalAdministrator && <small>{user.isBuiltInAdministrator ? "Built-in global administrator" : "Global system administrator"}</small>}
                 <small>
                   {user.userName} · {user.email}
                 </small>
@@ -1426,7 +1447,7 @@ export function AdministrationCenter({
               <button
                 className="quiet"
                 disabled={busy}
-                aria-label={`${user.isGlobalAdministrator ? "Revoke" : "Grant"} global administrator for ${user.displayName}`}
+                aria-label={`${user.isGlobalAdministrator ? "Revoke admin" : "Make admin"} for ${user.displayName}`}
                 onClick={() => setGlobalAdministrator(user)}
               >
                 {user.isGlobalAdministrator ? "Revoke admin" : "Make admin"}

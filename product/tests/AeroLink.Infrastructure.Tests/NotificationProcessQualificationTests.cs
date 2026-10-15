@@ -336,7 +336,7 @@ public sealed class NotificationProcessQualificationTests
             var program = new ProgramRecord("Owned email qualification", "NQ"); var project = new ProjectRecord(program.Id, "Owned", "Owned");
             value.project = project.Id;
             var administrator = new UserAccount(IdentityService.SystemAdministratorUserName, "Administrator", "admin@example.test", IdentityService.HashPassword("Owned!Qualification2026"), DateTimeOffset.UtcNow);
-            administrator.GrantGlobalAdministrator("test.setup", DateTimeOffset.UtcNow);
+            administrator.DesignateBuiltInAdministrator("test.setup", DateTimeOffset.UtcNow);
             db.AddRange(program, project, administrator);
             await db.SaveChangesAsync();
             var operations = scope.ServiceProvider.GetRequiredService<NotificationOperationsService>();

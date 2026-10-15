@@ -22,7 +22,7 @@ internal static class ManagedDocumentAssignmentPolicy
         if (programId is null) return false;
         var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(
             x => x.UserName == userName.Trim().ToLower() && x.State == AccountState.Active, ct);
-        if (account is null || account.IsGlobalAdministrator) return false;
+        if (account is null || account.HoldsAuthorityOverride) return false;
         var hasMembership = await db.ProgramMemberships.AsNoTracking().AnyAsync(
             x => x.UserId == account.Id && x.ProgramId == programId && x.EndedAt == null, ct);
         var delegations = await db.RoleDelegations.AsNoTracking().Where(

@@ -31,6 +31,7 @@ import {
   RequiredPasswordChange,
 } from "./IdentityCenter";
 import type { AuthUser } from "./IdentityCenter";
+import { isSystemAdministrator } from "./administratorCapability";
 import { PersonAvatar } from "./People";
 import { LadderCapability, ladderAllows, ladderEnablesArtifactKind, ladderHasAny } from "./projectLadder";
 import type { LadderLevel, ProjectLadderProjection } from "./projectLadder";
@@ -302,7 +303,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         {hasFeature(features,"Release")&&<details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Release Readiness","release","release","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","baselines","system","Configuration Baselines / Legacy Verification Bootstrap")}{hasDigitalThread&&item("Digital Thread","lifecycle","digitalThread","system","Digital Thread")}</details>}
         {!hasFeature(features,"Release")&&hasDigitalThread&&<div className="navStandalone">{item("Digital Thread","lifecycle","digitalThread","system","Digital Thread",undefined,true)}</div>}
         <div className="navStandalone">{item("FMS Test Bench","fmsCdu","fmsCdu","system","FMS Test Bench / CMA-9000 CDU",undefined,true)}</div>
-        {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","peopleAuthority")}{item("Review Workflows","reviewWorkflows","workflow","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","integrations","system","Integration Command Center")}{item("System Operations","enterprise","operations","system","System Operations / Enterprise Control")}</details>}
+        {isSystemAdministrator(user)&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","peopleAuthority")}{item("Review Workflows","reviewWorkflows","workflow","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","integrations","system","Integration Command Center")}{item("System Operations","enterprise","operations","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
     </aside>

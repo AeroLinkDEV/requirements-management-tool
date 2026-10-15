@@ -414,7 +414,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
             var administrator = new UserAccount(IdentityService.SystemAdministratorUserName,
                 administratorDisplayName, "global.admin@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
-            administrator.GrantGlobalAdministrator("test.setup", DateTimeOffset.UtcNow);
+            administrator.DesignateBuiltInAdministrator("test.setup", DateTimeOffset.UtcNow);
             db.Add(administrator);
             await db.SaveChangesAsync();
             administratorId = administrator.Id;

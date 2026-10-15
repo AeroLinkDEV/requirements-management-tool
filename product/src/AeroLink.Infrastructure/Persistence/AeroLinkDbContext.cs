@@ -1674,6 +1674,8 @@ public sealed class AeroLinkDbContext : DbContext
             b.Property(x => x.WindowsPrincipal).HasMaxLength(UserAccount.WindowsPrincipalMaxLength);
             b.HasIndex(x => x.WindowsSid).IsUnique().HasFilter("\"WindowsSid\" IS NOT NULL");
             b.Property(x => x.GlobalAdministratorGrantedBy).HasMaxLength(100); b.Property(x => x.GlobalAdministratorRevokedBy).HasMaxLength(100);
+            // At most one built-in administrator (#1639): authority override follows this marker.
+            b.HasIndex(x => x.IsBuiltInAdministrator).IsUnique().HasFilter("\"IsBuiltInAdministrator\"").HasDatabaseName("IX_user_accounts_single_built_in_administrator");
         });
         modelBuilder.Entity<ProgramMembership>(b =>
         {

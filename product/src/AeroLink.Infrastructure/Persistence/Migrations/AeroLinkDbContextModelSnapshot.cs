@@ -3132,6 +3132,9 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<bool>("IsBuiltInAdministrator")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsGlobalAdministrator")
                         .HasColumnType("boolean");
 
@@ -3174,6 +3177,11 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Email");
+
+                    b.HasIndex("IsBuiltInAdministrator")
+                        .IsUnique()
+                        .HasDatabaseName("IX_user_accounts_single_built_in_administrator")
+                        .HasFilter("\"IsBuiltInAdministrator\"");
 
                     b.HasIndex("UserName")
                         .IsUnique();

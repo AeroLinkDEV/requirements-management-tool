@@ -603,6 +603,7 @@ The product includes local identity/session controls, scoped roles/administratio
 Windows sign-in (DEC-154, #1615), when enabled, signs people in with their domain logon through Negotiate, creates
 their account on first sign-in keyed on the Windows SID with Engineer in every Program, and lets the administrator
 link a Windows logon to `admin`. Signature re-authentication with the Windows password is separate work (#1615 B2).
+Global administration is a persisted grant that an administrator gives and revokes, and each grant and revoke is recorded in the security audit (#1639). The last active administrator cannot be revoked or disabled. A granted administrator gets system administration only: accounts, roles and grants, identity links, review/approval configuration and system diagnostics. They keep their normal engineering authority. The authority override stays with the built-in `admin` bootstrap/break-glass account, as it always has. That override covers administrator substitution at signing, every review stage's candidate list, access to every Program, the self-review exemption and exclusion from document stewardship. Only `admin` itself may revoke its own grant, and no other account can disable it.
 
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
 

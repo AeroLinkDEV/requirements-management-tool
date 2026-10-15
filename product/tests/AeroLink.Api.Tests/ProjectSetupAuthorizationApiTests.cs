@@ -164,20 +164,19 @@ public sealed class ProjectSetupAuthorizationApiTests
         var configuredSource = await configuredSourceResponse.Content.ReadFromJsonAsync<JsonElement>();
         var sourceAssertionHash = configuredSource.GetProperty("assertion").GetProperty("hash").GetString();
 
-        // Administrator authority is the persisted global-administrator grant (#1639). Rename the actual draft
-        // creator and revoke its grant, preserve its source membership, and install a different current
-        // administrator so both sessions resolve authority from the database.
+        // Administrator authority is the built-in administrator's persisted marker and grant (#1639). Strip both
+        // from the actual draft creator and rename it, preserve its source membership, and install a different
+        // built-in administrator so both sessions resolve authority from the database.
         using (var demotion = factory.Services.CreateScope())
         {
             var db = demotion.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var original = await db.UserAccounts.SingleAsync(x => x.Id == originalAdministratorId);
-            original.RevokeGlobalAdministrator("test.setup", now);
             var updated = await db.UserAccounts.Where(x => x.Id == originalAdministratorId)
-                .ExecuteUpdateAsync(set => set.SetProperty(x => x.UserName, demotedName));
+                .ExecuteUpdateAsync(set => set.SetProperty(x => x.UserName, demotedName)
+                    .SetProperty(x => x.IsBuiltInAdministrator, false).SetProperty(x => x.IsGlobalAdministrator, false));
             Assert.Equal(1, updated);
             var replacement = new UserAccount("admin", "Replacement Administrator", "replacement.admin@example.test",
                 IdentityService.HashPassword(administratorPassword), now);
-            replacement.GrantGlobalAdministrator("test.setup", now);
+            replacement.DesignateBuiltInAdministrator("test.setup", now);
             db.UserAccounts.Add(replacement);
             await db.SaveChangesAsync();
         }

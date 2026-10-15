@@ -44,7 +44,7 @@ public static class ApprovalConfigurationEndpoints
 
             // Deciding how a team reviews is a configuration-management act, matching the authority the
             // workflow routes themselves already require.
-            var canManage = await http.HasApprovalConfigurationAuthorityAsync(db, authority, projectId, ct);
+            var canManage = await http.HasReviewConfigurationAuthorityAsync(db, authority, projectId, ct);
 
             var workflows = await db.ReviewWorkflows.AsNoTracking().Include(x => x.Stages)
                 .Where(x => x.ProjectId == projectId && x.State == ReviewWorkflowState.Active)
@@ -63,8 +63,8 @@ public static class ApprovalConfigurationEndpoints
             // program-scoped live-delegation set and apply the same interval rule in memory for both providers.
             delegations = delegations.Where(x => x.StartsAt <= now && x.EndsAt > now).ToList();
             var systemAdministratorIds = await db.UserAccounts.AsNoTracking()
-                .Where(x => x.State == AccountState.Active
-                            && x.IsGlobalAdministrator)
+                .Where(x => x.State == AccountState.Active)
+                .Where(UserAccount.AuthorityOverrideHolder)
                 .Select(x => x.Id).ToListAsync(ct);
             var accountIds = memberships.Select(x => x.UserId)
                 .Concat(backups.Select(x => x.BackupUserId))
@@ -173,7 +173,7 @@ public static class ApprovalConfigurationEndpoints
         IProjectLadderPolicyResolver policyResolver, ProjectAuthorityResolver authority, CancellationToken ct)
     {
         if (!await db.Projects.AsNoTracking().AnyAsync(x => x.Id == projectId, ct)) return Results.NotFound();
-        if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, projectId, ct))
+        if (!await http.HasReviewConfigurationAuthorityAsync(db, authority, projectId, ct))
             return Results.Forbid();
         var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
         if (!IsSubjectSupported(ladderPolicy, subject))

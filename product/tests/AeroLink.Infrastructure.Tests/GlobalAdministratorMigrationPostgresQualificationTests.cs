@@ -39,9 +39,12 @@ public sealed class GlobalAdministratorMigrationPostgresQualificationTests
 
         var admin = await db.UserAccounts.AsNoTracking().SingleAsync(x => x.Id == adminId);
         Assert.True(admin.IsGlobalAdministrator);
+        Assert.True(admin.IsBuiltInAdministrator);
         Assert.Equal("system.migration", admin.GlobalAdministratorGrantedBy);
         Assert.NotNull(admin.GlobalAdministratorGrantedAt);
-        Assert.False((await db.UserAccounts.AsNoTracking().SingleAsync(x => x.Id == engineerId)).IsGlobalAdministrator);
+        var engineer = await db.UserAccounts.AsNoTracking().SingleAsync(x => x.Id == engineerId);
+        Assert.False(engineer.IsGlobalAdministrator);
+        Assert.False(engineer.IsBuiltInAdministrator);
         var audit = await db.SecurityAuditEvents.AsNoTracking()
             .Where(x => x.EventType == "GlobalAdministratorGranted").ToListAsync();
         Assert.Equal(("system.migration", "admin"), (Assert.Single(audit).ActorId, audit[0].Target));

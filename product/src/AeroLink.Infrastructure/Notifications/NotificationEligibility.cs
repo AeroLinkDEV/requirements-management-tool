@@ -20,7 +20,7 @@ public sealed class NotificationEligibility(AeroLinkDbContext db, IdentityServic
             return account.IsGlobalAdministrator
                 ? new(true, "", account.Email) : new(false, "DiagnosticAuthorityRemoved");
         var program = await db.Projects.AsNoTracking().Where(x => x.Id == context.ProjectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
-        if (program is null || !account.IsGlobalAdministrator
+        if (program is null || !account.HoldsAuthorityOverride
             && !await db.ProgramMemberships.AsNoTracking().AnyAsync(x => x.UserId == account.Id && x.ProgramId == program && x.EndedAt == null, ct))
             return new(false, "ProjectAccessRemoved");
         if (deliveryPolicy && await db.NotificationPreferences.AsNoTracking().AnyAsync(x => x.Recipient == context.Recipient && !x.EmailEnabled, ct))

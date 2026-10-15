@@ -53,7 +53,64 @@ public sealed class GlobalAdministratorGrantApiTests
         using var maintainer = await LoginMaintainerAsync(factory);
 
         Assert.Equal(HttpStatusCode.Forbidden, (await maintainer.PostAsync($"/api/admin/users/{maintainerId}/global-administrator", null)).StatusCode);
+        // With `admin` not the last administrator, only the route's own guard stops a revoke by an outsider.
+        var secondId = await AddAccountAsync(factory, "second.admin");
+        Assert.Equal(HttpStatusCode.NoContent, (await administrator.PostAsync($"/api/admin/users/{secondId}/global-administrator", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await maintainer.DeleteAsync($"/api/admin/users/{secondId}/global-administrator")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await maintainer.GetAsync("/api/admin/users")).StatusCode);
+        using var scope = factory.Services.CreateScope();
+        Assert.True(await scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>().UserAccounts.AsNoTracking()
+            .Where(x => x.Id == secondId).Select(x => x.IsGlobalAdministrator).SingleAsync());
+    }
+
+    [Fact]
+    public async Task The_built_in_administrator_cannot_be_revoked_or_disabled_by_another_administrator()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(administrator);
+        var adminId = await UserIdAsync(factory, "admin");
+        var maintainerId = await AddMaintainerAsync(factory);
+        using var maintainer = await LoginMaintainerAsync(factory);
+        Assert.Equal(HttpStatusCode.NoContent, (await administrator.PostAsync($"/api/admin/users/{maintainerId}/global-administrator", null)).StatusCode);
+
+        using var revoke = await maintainer.DeleteAsync($"/api/admin/users/{adminId}/global-administrator");
+        Assert.Equal(HttpStatusCode.Conflict, revoke.StatusCode);
+        Assert.Contains("built_in_administrator_protected", await revoke.Content.ReadAsStringAsync());
+        using var disable = await maintainer.PostAsJsonAsync($"/api/admin/users/{adminId}/state", new { enabled = false });
+        Assert.Equal(HttpStatusCode.Conflict, disable.StatusCode);
+        Assert.Contains("built_in_administrator_protected", await disable.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, (await administrator.GetAsync("/api/admin/users")).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_granted_administrator_gets_system_administration_but_not_the_built_in_authority_override()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(administrator);
+        var maintainerId = await AddMaintainerAsync(factory);
+        using var maintainer = await LoginMaintainerAsync(factory);
+        Assert.Equal(HttpStatusCode.NoContent, (await administrator.PostAsync($"/api/admin/users/{maintainerId}/global-administrator", null)).StatusCode);
+        Guid projectId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new AeroLink.Domain.Programs.ProgramRecord("Override Program", "OVR");
+            var project = new AeroLink.Domain.Programs.ProjectRecord(program.Id, "Override Project", "Override Product");
+            db.AddRange(program, project);
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+        }
+
+        // Project access without membership is the override, which stays with the built-in account.
+        var configuration = $"/api/projects/{projectId}/approval-configuration";
+        Assert.Equal(HttpStatusCode.Forbidden, (await maintainer.GetAsync(configuration)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await administrator.GetAsync(configuration)).StatusCode);
+
+        var me = await maintainer.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/auth/me");
+        Assert.True(me.GetProperty("isSystemAdministrator").GetBoolean());
+        Assert.False(me.GetProperty("isAdministrator").GetBoolean());
     }
 
     [Fact]
@@ -77,11 +134,13 @@ public sealed class GlobalAdministratorGrantApiTests
         Assert.Equal(HttpStatusCode.OK, (await maintainer.GetAsync("/api/admin/users")).StatusCode);
     }
 
-    private static async Task<Guid> AddMaintainerAsync(AeroLinkApiFactory factory)
+    private static Task<Guid> AddMaintainerAsync(AeroLinkApiFactory factory) => AddAccountAsync(factory, MaintainerUserName);
+
+    private static async Task<Guid> AddAccountAsync(AeroLinkApiFactory factory, string userName)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        var account = new UserAccount(MaintainerUserName, "Host Maintainer", "host.maintainer@example.test",
+        var account = new UserAccount(userName, userName, $"{userName}@example.test",
             IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow);
         db.UserAccounts.Add(account);
         await db.SaveChangesAsync();

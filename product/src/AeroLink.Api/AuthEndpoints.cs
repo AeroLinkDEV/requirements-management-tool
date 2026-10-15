@@ -47,7 +47,7 @@ public static class AuthEndpoints
             {
                 var now = DateTimeOffset.UtcNow;
                 var administrator = new UserAccount(IdentityService.SystemAdministratorUserName, request.DisplayName, request.Email, IdentityService.HashPassword(request.Password), now);
-                administrator.GrantGlobalAdministrator("system.bootstrap", now);
+                administrator.DesignateBuiltInAdministrator("system.bootstrap", now);
                 db.UserAccounts.Add(administrator);
                 db.SecurityAuditEvents.Add(new("BootstrapAdministratorCreated", "system.bootstrap", administrator.UserName, "Success", "Created the one-time first-install global administrator.", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
                 await db.SaveChangesAsync(ct);
