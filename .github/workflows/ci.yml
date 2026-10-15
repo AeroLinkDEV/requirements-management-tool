@@ -1063,6 +1063,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkUpgrade.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Upgrade-orchestration contract failed.' }
+      - name: Validate the signed release-package contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkReleasePackage.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Release-package contract failed.' }
       - name: Validate the changed-test planner Windows contract
         shell: powershell
         run: |
