@@ -115,7 +115,7 @@ test('configured reviewer identity remains canonical from assignment through sig
   await expect(review).not.toContainText('Maya Patel')
 
   await page.getByRole('button', { name: 'Review & electronically approve' }).click()
-  await page.getByLabel('Re-enter your password').fill('AeroLink!2026')
+  await page.getByLabel('Re-enter your AeroLink password').fill('AeroLink!2026')
   await page.getByRole('button', { name: 'Sign & approve' }).click()
   await expect(review).toContainText('Approved')
 

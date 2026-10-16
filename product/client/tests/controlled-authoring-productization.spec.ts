@@ -103,7 +103,7 @@ test('Software Draft keeps downstream impact with consuming engineers before an 
   await expect(page.getByText('In review',{exact:true}).first()).toBeVisible()
   await expect(page.locator('[data-state="InReview"]').first()).toBeVisible()
   await page.getByRole('button',{name:'Review & electronically approve'}).click()
-  await page.getByLabel('Re-enter your password').fill('AeroLink!2026')
+  await page.getByLabel('Re-enter your AeroLink password').fill('AeroLink!2026')
   await page.getByRole('button',{name:'Sign & approve'}).click()
   await expect(page.getByText('Approved',{exact:true}).first()).toBeVisible()
 })
