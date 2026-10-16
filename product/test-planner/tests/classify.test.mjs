@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -486,7 +486,7 @@ test('CI isolates the readiness planner test in every classifier guard lane', ()
     assert.ok(run, `${name} must have an executable PowerShell body`)
     const script = run.replace(/^          /gm, '')
 
-  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-planner-selection-'))
+  const fixture = realpathSync.native(mkdtempSync(join(tmpdir(), 'aerolink-planner-selection-')))
   try {
     const testsRoot = join(fixture, 'product', 'test-planner', 'tests')
     const bin = join(fixture, 'bin')
