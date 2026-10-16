@@ -190,14 +190,46 @@ function Get-AeroLinkRemoteDemoCanonicalContext {
         try { $values = Import-PowerShellDataFile -LiteralPath $configPath }
         catch { throw "The canonical remote-demo configuration could not be read at '$configPath': $($_.Exception.Message)" }
     }
+    $productionSourceRoot = $null
+    $productionConfigPath = Join-Path $env:LOCALAPPDATA 'AeroLink\Production\production-source.config.psd1'
+    if (Test-Path -LiteralPath $productionConfigPath -PathType Leaf) {
+        try { $productionValues = Import-PowerShellDataFile -LiteralPath $productionConfigPath }
+        catch { throw "The canonical production-source configuration could not be read at '$productionConfigPath': $($_.Exception.Message)" }
+        if (-not $productionValues.ContainsKey('SourceRoot') -or [string]::IsNullOrWhiteSpace([string]$productionValues['SourceRoot'])) {
+            throw "The canonical production-source configuration at '$productionConfigPath' does not name SourceRoot."
+        }
+        $productionSourceRoot = [string]$productionValues['SourceRoot']
+    }
+    if ([string]::IsNullOrWhiteSpace($productionSourceRoot) -and $values -and $values.ContainsKey('AeroLinkRoot')) {
+        $productionSourceRoot = [string]$values['AeroLinkRoot']
+    }
+    if ([string]::IsNullOrWhiteSpace($productionSourceRoot) -or -not [IO.Path]::IsPathRooted($productionSourceRoot)) {
+        throw 'D6 retirement requires a canonical dedicated production source root to bind the scheduled task script path.'
+    }
+    $productionSourceRoot = [IO.Path]::GetFullPath($productionSourceRoot).TrimEnd('\')
+    $productionScriptPath = [IO.Path]::GetFullPath((Join-Path $productionSourceRoot 'product\scripts\AeroLinkRemoteDemo.ps1'))
+    if (-not (Test-Path -LiteralPath $productionScriptPath -PathType Leaf)) {
+        throw "The canonical dedicated production script was not found at '$productionScriptPath'."
+    }
     $policyPath = if ($values -and $values.ContainsKey('TrafficPolicyPath')) { [string]$values['TrafficPolicyPath'] } else { $null }
     return [pscustomobject]@{
         ScopeRoot = $root
         ConfigPath = $configPath
+        ProductionSourceRoot = $productionSourceRoot
+        ProductionScriptPath = $productionScriptPath
         TrafficPolicyPath = $policyPath
         BasicAuthSecretName = if ($values -and $values.ContainsKey('BasicAuthSecretName')) { [string]$values['BasicAuthSecretName'] } else { $null }
         VaultName = if ($values -and $values.ContainsKey('VaultName')) { [string]$values['VaultName'] } else { $null }
     }
+}
+
+function Get-AeroLinkRemoteDemoTaskScriptPath {
+    param([AllowNull()][string]$Arguments)
+    if ([string]::IsNullOrWhiteSpace($Arguments)) { return $null }
+    $match = [regex]::Match($Arguments, '(?i)(?:^|\s)-File\s+(?:"(?<quoted>[^"]+)"|(?<bare>[^\s]+))')
+    if (-not $match.Success) { return $null }
+    $raw = if ($match.Groups['quoted'].Success) { $match.Groups['quoted'].Value } else { $match.Groups['bare'].Value }
+    try { return [IO.Path]::GetFullPath($raw) } catch { return $null }
 }
 
 function Get-AeroLinkRemoteDemoExpectedTaskDefinition {
@@ -216,7 +248,8 @@ function Get-AeroLinkRemoteDemoExpectedTaskDefinition {
 function Get-AeroLinkRemoteDemoTaskInventory {
     <# Read and validate the exact owned task object before it can enter the closed retirement action set. #>
     [CmdletBinding()]
-    param()
+    param([Parameter(Mandatory)][string]$ExpectedScriptPath)
+    $expectedScript = [IO.Path]::GetFullPath($ExpectedScriptPath)
     $inventory = New-Object System.Collections.Generic.List[object]
     foreach ($name in $script:RetiredTaskNames) {
         $expected = Get-AeroLinkRemoteDemoExpectedTaskDefinition -TaskName $name
@@ -233,7 +266,8 @@ function Get-AeroLinkRemoteDemoTaskInventory {
         $exec = $xml.Task.Actions.Exec
         $arguments = [string]$exec.Arguments
         $commandMatches = [string]$exec.Command -match '(?i)(^|\\)powershell\.exe$'
-        $scriptMatches = $arguments -match '(?i)AeroLinkRemoteDemo\.ps1'
+        $taskScriptPath = Get-AeroLinkRemoteDemoTaskScriptPath -Arguments $arguments
+        $scriptMatches = $null -ne $taskScriptPath -and $taskScriptPath -ieq $expectedScript
         $actionMatches = $arguments -match [regex]::Escape("-Action $($expected.Action)")
         $scheduleMatches = $arguments -match '(?i)(^|\s)-Scheduled(\s|$)'
         if ($uri -cne $expected.Uri -or -not $commandMatches -or -not $scriptMatches -or -not $actionMatches -or -not $scheduleMatches) {
@@ -345,7 +379,7 @@ function Invoke-AeroLinkRemoteDemoRetirePlan {
         -ExpectedProductionInstanceId $ExpectedProductionInstanceId -ExpectedProductionSourceIdentity $ExpectedProductionSourceIdentity -OperatorConfirmed
     if (-not $proof.Ready) { throw $proof.Refusal }
     Assert-AeroLinkRemoteDemoNgrokStopped
-    $taskInventory = @(Get-AeroLinkRemoteDemoTaskInventory)
+    $taskInventory = @(Get-AeroLinkRemoteDemoTaskInventory -ExpectedScriptPath $context.ProductionScriptPath)
     $canonicalPlan = Get-AeroLinkRemoteDemoRetirePlan -RegisteredTaskNames @($taskInventory | ForEach-Object TaskName) `
         -ConfigPath $context.ConfigPath -TrafficPolicyPath $context.TrafficPolicyPath -BasicAuthSecretName $context.BasicAuthSecretName `
         -VaultName $context.VaultName -LocalRoot $context.ScopeRoot -GoLiveProof $proof
@@ -359,17 +393,18 @@ function Invoke-AeroLinkRemoteDemoRetirePlan {
     foreach ($action in $closedActions) {
         # Recheck the live boundary immediately before every destructive task/file mutation. A plan made while
         # ngrok was stopped or the host was healthy is not permission to proceed after either fact changes.
-        if ($action.Kind -in @('UnregisterTask', 'DeleteFile')) {
+        if ($action.Kind -in @('UnregisterTask', 'DeleteFile', 'WriteMarker')) {
             $fresh = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $ExpectedPublicHttpsOrigin `
                 -ExpectedProductionInstanceId $ExpectedProductionInstanceId -ExpectedProductionSourceIdentity $ExpectedProductionSourceIdentity -OperatorConfirmed
             if (-not $fresh.Ready) { throw $fresh.Refusal }
             Assert-AeroLinkRemoteDemoNgrokStopped
+            $proof = $fresh
         }
         switch ($action.Kind) {
             'UnregisterTask' {
                 $expected = Get-AeroLinkRemoteDemoExpectedTaskDefinition -TaskName ([string]$action.Target)
                 if ($action.Target -notin $allowedTasks -or $expected.TaskPath -ne '\') { throw "Retirement plan names an unapproved scheduled task '$($action.Target)'." }
-                $recheckedInventory = @(Get-AeroLinkRemoteDemoTaskInventory)
+                $recheckedInventory = @(Get-AeroLinkRemoteDemoTaskInventory -ExpectedScriptPath $context.ProductionScriptPath)
                 if (@($recheckedInventory | Where-Object TaskName -eq $expected.TaskName).Count -ne 1) { throw "The scheduled task '$($expected.TaskName)' changed before retirement; no task was changed for it." }
                 $current = @(Get-ScheduledTask -TaskName $expected.TaskName -ErrorAction SilentlyContinue)
                 if ($current.Count -ne 1 -or [string]$current[0].TaskPath -cne $expected.TaskPath) { throw "The scheduled task '$($expected.TaskName)' changed before retirement; no task was changed for it." }
@@ -380,14 +415,14 @@ function Invoke-AeroLinkRemoteDemoRetirePlan {
             'DeleteFile' {
                 $target = [IO.Path]::GetFullPath([string]$action.Target)
                 if ($target -notin $allowedFiles) { throw "Retirement plan names an unapproved file '$target'." }
-                $audit = Get-AeroLinkRemoteDemoTargetAudit -Path $target -LocalRoot $Plan.ScopeRoot
+                $audit = Get-AeroLinkRemoteDemoTargetAudit -Path $target -LocalRoot $context.ScopeRoot
                 if (-not $audit.Allowed) { throw $audit.Reason }
                 if ($PSCmdlet.ShouldProcess($target, 'Delete remote-demo configuration')) { if (Test-Path -LiteralPath $target -PathType Leaf) { Remove-Item -LiteralPath $target -Force } }
             }
             'WriteMarker' {
                 $target = [IO.Path]::GetFullPath([string]$action.Target)
                 if ($target -ne $allowedMarker) { throw "Retirement plan names an unapproved marker '$target'." }
-                $audit = Get-AeroLinkRemoteDemoTargetAudit -Path $target -LocalRoot $Plan.ScopeRoot
+                $audit = Get-AeroLinkRemoteDemoTargetAudit -Path $target -LocalRoot $context.ScopeRoot
                 if (-not $audit.Allowed) { throw $audit.Reason }
                 if ($PSCmdlet.ShouldProcess($target, 'Write remote-demo retirement evidence')) {
                     New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null

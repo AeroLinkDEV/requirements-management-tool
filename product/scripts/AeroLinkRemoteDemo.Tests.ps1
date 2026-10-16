@@ -398,6 +398,7 @@ $expectedOrigin = 'https://aerolink.internal.example'
 $expectedInstanceId = ([guid]::NewGuid()).ToString('D')
 $expectedSourceIdentity = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 $global:retireProofCalls = @()
+$global:retireNgrokChecks = @()
 $global:retireScheduledTaskFixtures = @()
 $global:retireTaskXml = @{}
 $global:retireUnregisterCalls = @()
@@ -410,7 +411,7 @@ function global:Invoke-RestMethod {
         instance = [pscustomobject]@{ id = $expectedInstanceId; label = 'SITE PRODUCTION'; classification = 'SiteProduction' }
     }
 }
-function global:Get-Process { [CmdletBinding()] param([string]$Name); return @() }
+function global:Get-Process { [CmdletBinding()] param([string]$Name); $global:retireNgrokChecks += $Name; return @() }
 function global:Get-ScheduledTask {
     [CmdletBinding()] param([string]$TaskName, [string]$TaskPath)
     $rows = @($global:retireScheduledTaskFixtures | Where-Object { $_.TaskName -eq $TaskName })
@@ -469,11 +470,16 @@ $applyProfile = Join-Path $tempRoot 'home-profile'
 $canonicalRoot = Join-Path $applyProfile 'AeroLink\RemoteDemo'
 $canonicalConfig = Join-Path $canonicalRoot 'remote-demo.config.psd1'
 $canonicalPolicy = Join-Path $canonicalRoot 'policy.yml'
+$productionSourceRoot = Join-Path $tempRoot 'dedicated-production'
+$expectedTaskScriptPath = Join-Path $productionSourceRoot 'product\scripts\AeroLinkRemoteDemo.ps1'
 $outsideConfig = Join-Path $tempRoot 'outside.config.psd1'
 New-Item -ItemType Directory -Path $canonicalRoot -Force | Out-Null
+New-Item -ItemType Directory -Path (Split-Path $expectedTaskScriptPath -Parent) -Force | Out-Null
+Set-Content -LiteralPath $expectedTaskScriptPath -Value '# dedicated production script fixture' -Encoding ASCII
 @"
 @{
     TrafficPolicyPath = '$canonicalPolicy'
+    AeroLinkRoot = '$productionSourceRoot'
     BasicAuthSecretName = 'aerolink-demo'
     VaultName = 'AeroLinkVault'
 }
@@ -504,12 +510,19 @@ $wrongDefinitionThrew = $false
 try { Invoke-AeroLinkRemoteDemoRetirePlan -Plan $forgedPlan -ExpectedPublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId -ExpectedProductionSourceIdentity $expectedSourceIdentity } catch { $wrongDefinitionThrew = $true }
 Assert-True ($wrongDefinitionThrew -and (Test-Path -LiteralPath $canonicalConfig) -and (Test-Path -LiteralPath $canonicalPolicy)) 'Apply must refuse an unexpected owned task definition before deleting canonical files.'
 $global:retireScheduledTaskFixtures = @([pscustomobject]@{ TaskName = 'AeroLinkRemoteDemoRecovery'; TaskPath = '\' })
-$global:retireTaskXml['AeroLinkRemoteDemoRecovery'] = '<Task><RegistrationInfo><URI>\AeroLinkRemoteDemoRecovery</URI></RegistrationInfo><Actions><Exec><Command>powershell.exe</Command><Arguments>-File "C:\AeroLinkRemoteDemo.ps1" -Action Start -Scheduled</Arguments></Exec></Actions></Task>'
+$global:retireTaskXml['AeroLinkRemoteDemoRecovery'] = '<Task><RegistrationInfo><URI>\AeroLinkRemoteDemoRecovery</URI></RegistrationInfo><Actions><Exec><Command>powershell.exe</Command><Arguments>-File "C:\Untrusted\AeroLinkRemoteDemo.ps1" -Action Start -Scheduled</Arguments></Exec></Actions></Task>'
+$wrongScriptPathThrew = $false
+try { Invoke-AeroLinkRemoteDemoRetirePlan -Plan $forgedPlan -ExpectedPublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId -ExpectedProductionSourceIdentity $expectedSourceIdentity } catch { $wrongScriptPathThrew = $true }
+Assert-True ($wrongScriptPathThrew -and (Test-Path -LiteralPath $canonicalConfig) -and (Test-Path -LiteralPath $canonicalPolicy)) 'Apply must refuse a task pointed at a same-named script outside the dedicated production source.'
+$global:retireTaskXml['AeroLinkRemoteDemoRecovery'] = "<Task><RegistrationInfo><URI>\AeroLinkRemoteDemoRecovery</URI></RegistrationInfo><Actions><Exec><Command>powershell.exe</Command><Arguments>-File `"$expectedTaskScriptPath`" -Action Start -Scheduled</Arguments></Exec></Actions></Task>"
+$global:retireProofCalls = @()
+$global:retireNgrokChecks = @()
 Invoke-AeroLinkRemoteDemoRetirePlan -Plan $forgedPlan -ExpectedPublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId `
     -ExpectedProductionSourceIdentity $expectedSourceIdentity
 Assert-True (-not (Test-Path -LiteralPath $canonicalConfig) -and -not (Test-Path -LiteralPath $canonicalPolicy) -and
     (Test-Path -LiteralPath $outsideConfig) -and (Test-Path -LiteralPath $logPath)) 'Apply must recompute canonical targets, preserve foreign files/logs, and ignore forged plan paths.'
 Assert-True (@($global:retireUnregisterCalls | Where-Object TaskPath -eq '\').Count -eq 1) 'Apply must unregister only the exact root task path.'
+Assert-True (@($global:retireProofCalls).Count -eq 10 -and @($global:retireNgrokChecks).Count -eq 5) 'Apply must recheck company-host proof and ngrok immediately before every task/file/marker mutation.'
 $retirement = Get-AeroLinkRemoteDemoRetirement -LocalRoot $canonicalRoot
 Assert-True ($null -ne $retirement -and $retirement.goLiveProof.PublicHttpsOrigin -eq $expectedOrigin -and
     $retirement.goLiveProof.Identity.Classification -eq 'SiteProduction' -and $retirement.goLiveProof.Identity.SourceIdentity -eq $expectedSourceIdentity) 'The retirement marker must preserve fresh exact-host identity/source evidence.'
