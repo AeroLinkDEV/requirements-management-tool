@@ -139,6 +139,16 @@ function Test-AeroLinkSiteUpdateHealth {
         [scriptblock]$ReadyProbe,
         [scriptblock]$IdentityProbe
     )
+    try {
+        $origin = [Uri]$BaseUri
+        if ($origin.Scheme -ne 'https' -or $origin.UserInfo -or $origin.AbsolutePath -ne '/' -or $origin.Query -or $origin.Fragment) {
+            throw "The update health URI '$BaseUri' is not a normal HTTPS origin."
+        }
+        $expectedHost = Assert-AeroLinkSiteUpdatePublicHostName -PublicHostName $origin.Host
+        if ($origin.Host -ine $expectedHost) { throw "The update health URI '$BaseUri' did not preserve the configured full-DNS host." }
+    } catch {
+        return [pscustomobject]@{ Passed = $false; Detail = $_.Exception.Message }
+    }
     $ready = if ($ReadyProbe) { [bool](& $ReadyProbe $BaseUri) } else { Test-AeroLinkReadyEndpoint -BaseUri $BaseUri }
     if (-not $ready) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS readiness failed at $BaseUri." } }
     $identity = if ($IdentityProbe) { & $IdentityProbe $BaseUri } else { Get-AeroLinkRuntimeIdentity -BaseUri $BaseUri }
@@ -150,6 +160,23 @@ function Test-AeroLinkSiteUpdateHealth {
     $actualClass = if ($instance -and $instance.PSObject.Properties['classification']) { [string]$instance.classification } else { '' }
     if ($actualId -ine $ExpectedInstanceId -or $actualClass -ine $ExpectedClassification) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS identity does not match the declared installation ($actualClass/$actualId)." } }
     return [pscustomobject]@{ Passed = $true; Detail = "Public HTTPS readiness and identity match $ExpectedSourceSha for $ExpectedClassification/$ExpectedInstanceId." }
+}
+
+function Assert-AeroLinkSiteUpdatePublicHostName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$PublicHostName)
+    $hostName = $PublicHostName.Trim().ToLowerInvariant()
+    if ($hostName -in @('localhost', 'localhost.localdomain') -or $hostName.EndsWith('.localhost', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The site update public host '$PublicHostName' is a loopback/localhost name; refusing to treat it as the production HTTPS origin."
+    }
+    $address = [Net.IPAddress]::None
+    if ([Net.IPAddress]::TryParse($hostName, [ref]$address)) {
+        throw "The site update public host '$PublicHostName' is an IP address; refusing to treat it as the production full-DNS HTTPS origin."
+    }
+    if ($hostName -notmatch '^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$') {
+        throw "The site update public host '$PublicHostName' is not a valid full-DNS HTTPS origin."
+    }
+    return $hostName
 }
 
 function Invoke-AeroLinkSiteUpdate {
@@ -175,6 +202,7 @@ function Invoke-AeroLinkSiteUpdate {
     $declaredInstanceId = if ($declared.PSObject.Properties['instanceId']) { [string]$declared.instanceId } else { '' }
     if ([string]::IsNullOrWhiteSpace($declaredInstanceId)) { throw "The installation '$InstallationRoot' has no persisted instanceId." }
     if ([string]::IsNullOrWhiteSpace($site.PublicHostName)) { throw "The installation '$InstallationRoot' has no configured full-DNS publicHostName." }
+    $publicHostName = Assert-AeroLinkSiteUpdatePublicHostName -PublicHostName $site.PublicHostName
     Assert-AeroLinkSiteServiceSid -Site $site -Role Api | Out-Null
     $layout = Get-AeroLinkServerLayout -InstallationRoot $site.InstallationRoot
     $lease = $null; $incoming = $null; $versionRoot = $null; $priorTarget = $null; $verified = $null; $clone = $null; $backupSha256 = $null
@@ -228,7 +256,7 @@ function Invoke-AeroLinkSiteUpdate {
         }
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'StartingAndCheckingPublicHealth' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified $true -Recovery 'The database was upgraded; do not start the old binary. Retain the backup and use the attended RESTORE-AEROLINK procedure.' | Out-Null
         if ($ServiceStarter) { & $ServiceStarter $site } else { Start-Service -Name $site.ServiceName -ErrorAction Stop }
-        $baseUri = "https://$($site.PublicHostName):$($site.ApiPort)"
+        $baseUri = "https://$($publicHostName):$($site.ApiPort)"
         $health = if ($HealthProver) { & $HealthProver $baseUri $verified $site } else { Test-AeroLinkSiteUpdateHealth -BaseUri $baseUri -ExpectedSourceSha $verified.SourceSha -ExpectedInstanceId $declaredInstanceId -ExpectedClassification $site.Classification }
         if (-not $health.Passed) { throw $health.Detail }
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'Completed' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified $true -Detail $health.Detail -Recovery 'No recovery action required.' | Out-Null
@@ -255,5 +283,6 @@ Export-ModuleMember -Function @(
     'Assert-AeroLinkSiteVersionRoot',
     'Set-AeroLinkSiteCurrentTarget',
     'Test-AeroLinkSiteUpdateHealth',
+    'Assert-AeroLinkSiteUpdatePublicHostName',
     'Invoke-AeroLinkSiteUpdate'
 )

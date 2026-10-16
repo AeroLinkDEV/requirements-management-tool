@@ -59,6 +59,10 @@ try {
         -ReadyProbe { param($Uri) $Uri -eq 'https://aerolink-updater.example.test:5443' } `
         -IdentityProbe { param($Uri) [pscustomobject]@{ sourceSha = ('a' * 40); instance = [pscustomobject]@{ id = $instanceId; classification = 'SiteProduction' } } }
     Assert-True ($health.Passed) 'A full-DNS readiness and identity match must pass.'
+    $httpHealth = Test-AeroLinkSiteUpdateHealth -BaseUri 'http://aerolink-updater.example.test:5443' -ExpectedSourceSha ('a' * 40) -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -ReadyProbe { $true } -IdentityProbe { $null }
+    Assert-True (-not $httpHealth.Passed -and $httpHealth.Detail -match 'HTTPS origin') 'A substituted non-HTTPS origin must fail before readiness or identity probes.'
+    Assert-Throws { Assert-AeroLinkSiteUpdatePublicHostName -PublicHostName '127.0.0.1' } 'IP address|full-DNS' 'A loopback IP must not qualify as the production HTTPS origin.'
+    Assert-Throws { Assert-AeroLinkSiteUpdatePublicHostName -PublicHostName 'localhost' } 'loopback|localhost' 'A localhost name must not qualify as the production HTTPS origin.'
     $sourceMismatch = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('a' * 40) `
         -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -ReadyProbe { $true } `
         -IdentityProbe { [pscustomobject]@{ sourceSha = ('c' * 40); instance = [pscustomobject]@{ id = $instanceId; classification = 'SiteProduction' } } }
