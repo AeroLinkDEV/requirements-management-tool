@@ -474,6 +474,33 @@ try {
         }
         finally { [IO.File]::WriteAllBytes($siteConfig, $postgresOverrideBytes) }
 
+        # #1649: the installer must define the daily verified backup against the installed version's scripts,
+        # with the API virtual account as the only task identity and the accepted fifteen-day retention. The
+        # registration override case is the regression owner: before the caller guard a qualification SID could
+        # reach Task Scheduler and receive access to the application password.
+        $backupScriptRoot = Join-Path $siteFixture 'program\current\scripts'
+        New-Item -ItemType Directory -Path $backupScriptRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $backupScriptRoot 'Invoke-AeroLinkScheduledBackup.ps1') -Value '# disposable task-definition fixture' -Encoding UTF8
+        $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot $backupScriptRoot
+        Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
+            "The site backup task must run as the API's computed virtual account with no password; got $($backupTask.Principal.UserId) $($backupTask.Principal.LogonType) $($backupTask.Principal.RunLevel)."
+        Assert-True ($backupTask.Action.Arguments -match [regex]::Escape('Invoke-AeroLinkScheduledBackup.ps1') -and
+            $backupTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot))`" -RetentionDays 15") -and
+            $backupTask.Action.Arguments -match '-NonInteractive') `
+            "The site backup task must run the versioned verified runner for exactly this installation with fifteen-day retention: $($backupTask.Action.Arguments)"
+        $slashTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot ($siteRoot.TrimEnd('\') + '\') -ScriptRoot $backupScriptRoot
+        Assert-True ($slashTask.Action.Arguments -notmatch '\\"' -and $slashTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot).TrimEnd('\'))`" -RetentionDays 15")) `
+            "A trailing backslash on the installation root must not corrupt the scheduled task arguments: $($slashTask.Action.Arguments)"
+        $backupOverrideBytes = [IO.File]::ReadAllBytes($siteConfig)
+        $backupOverride = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+        $backupOverride.site | Add-Member -NotePropertyName runAsSid -NotePropertyValue 'S-1-5-32-545' -Force
+        $backupOverride | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        try {
+            Assert-Throws { Register-AeroLinkSiteBackupTask -InstallationRoot $siteRoot -ScriptRoot $backupScriptRoot } 'override|computed' `
+                'Registering a site backup task must reject an arbitrary API SID before Task Scheduler.'
+        }
+        finally { [IO.File]::WriteAllBytes($siteConfig, $backupOverrideBytes) }
+
         # HOME keeps exactly what it had: no site block, 5080/54329 as postgres.
         $homeRoot = Join-Path $siteFixture 'home-installation'
         New-Item -ItemType Directory -Path $homeRoot -Force | Out-Null
