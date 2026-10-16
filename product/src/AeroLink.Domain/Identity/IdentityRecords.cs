@@ -502,6 +502,60 @@ public sealed class UserAccount
         var trimmed = Required(principal, nameof(principal));
         WindowsPrincipal = trimmed.Length > WindowsPrincipalMaxLength ? trimmed[..WindowsPrincipalMaxLength] : trimmed;
     }
+    /// <summary>
+    /// Global system administration (#1639): managing accounts, roles and administrator grants, identity
+    /// links, review/approval configuration and system diagnostics. It used to be the account named
+    /// <c>admin</c> and nothing else; it is now a persisted grant any account can hold, attributable to whoever
+    /// granted or revoked it. The current grant's grantor and time stay on the row after a revoke, so the
+    /// account still answers "who made this person an administrator, and who took it away"; every earlier
+    /// cycle is in the security audit log (<c>GlobalAdministratorGranted</c> / <c>GlobalAdministratorRevoked</c>).
+    ///
+    /// A granted administrator keeps their ordinary engineering authority and gains nothing over controlled
+    /// work: see <see cref="HoldsAuthorityOverride"/>.
+    /// </summary>
+    public bool IsGlobalAdministrator { get; private set; }
+
+    /// <summary>
+    /// The installation's built-in administrator: the account first-install bootstrap, the demo seed or the
+    /// #1639 migration created as <c>admin</c>. A stable marker, so nothing has to compare usernames. Only
+    /// this account may revoke its own administrator grant or disable itself (owner decision on #1639).
+    /// </summary>
+    public bool IsBuiltInAdministrator { get; private set; }
+
+    /// <summary>
+    /// Authority override: administrator substitution at signing, every review stage's candidate list,
+    /// project access without membership, the self-review exemption, and exclusion from document
+    /// stewardship. Owner decision on #1639: this stays with the built-in administrator only, as it was before
+    /// administration became grantable. It is the one place that rule is written; queries use
+    /// <see cref="AuthorityOverrideHolder"/>, which must say the same thing.
+    /// </summary>
+    public bool HoldsAuthorityOverride => IsBuiltInAdministrator && IsGlobalAdministrator;
+
+    /// <summary>The query form of <see cref="HoldsAuthorityOverride"/>.</summary>
+    public static readonly System.Linq.Expressions.Expression<Func<UserAccount, bool>> AuthorityOverrideHolder =
+        x => x.IsBuiltInAdministrator && x.IsGlobalAdministrator;
+
+    /// <summary>Marks a newly created bootstrap/seed <c>admin</c> account as the built-in administrator.</summary>
+    public void DesignateBuiltInAdministrator(string grantedBy, DateTimeOffset now)
+    {
+        IsBuiltInAdministrator = true;
+        if (!IsGlobalAdministrator) GrantGlobalAdministrator(grantedBy, now);
+    }
+    public string? GlobalAdministratorGrantedBy { get; private set; }
+    public DateTimeOffset? GlobalAdministratorGrantedAt { get; private set; }
+    public string? GlobalAdministratorRevokedBy { get; private set; }
+    public DateTimeOffset? GlobalAdministratorRevokedAt { get; private set; }
+    public void GrantGlobalAdministrator(string grantedBy, DateTimeOffset now)
+    {
+        if (IsGlobalAdministrator) throw new InvalidOperationException("The account is already a global administrator.");
+        IsGlobalAdministrator = true; GlobalAdministratorGrantedBy = Required(grantedBy, nameof(grantedBy)); GlobalAdministratorGrantedAt = now;
+        GlobalAdministratorRevokedBy = null; GlobalAdministratorRevokedAt = null;
+    }
+    public void RevokeGlobalAdministrator(string revokedBy, DateTimeOffset now)
+    {
+        if (!IsGlobalAdministrator) throw new InvalidOperationException("The account is not a global administrator.");
+        IsGlobalAdministrator = false; GlobalAdministratorRevokedBy = Required(revokedBy, nameof(revokedBy)); GlobalAdministratorRevokedAt = now;
+    }
     public void LoginSucceeded(DateTimeOffset now) { FailedLoginCount = 0; LastLoginAt = now; }
     /// <summary>
     /// A sign-in that did not prove the AeroLink password (Windows sign-in). It must not clear the password's

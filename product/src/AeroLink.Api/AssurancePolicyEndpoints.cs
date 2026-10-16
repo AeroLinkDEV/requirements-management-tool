@@ -26,7 +26,7 @@ public static class AssurancePolicyEndpoints
             ProjectAssurancePolicyService service, CancellationToken ct)
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
-            var canManage = await http.HasApprovalConfigurationAuthorityAsync(db, authority, projectId, ct);
+            var canManage = await http.HasProjectConfigurationAuthorityAsync(db, authority, projectId, ct);
             var policy = await service.ReadAsync(projectId, canManage, ct);
             return policy is null ? Results.NotFound(new { error = "The project does not exist." }) : Results.Ok(policy);
         }
@@ -36,7 +36,7 @@ public static class AssurancePolicyEndpoints
             ProjectAssurancePolicyService service, CancellationToken ct)
         {
             if (!await db.Projects.AsNoTracking().AnyAsync(x => x.Id == projectId, ct)) return Results.NotFound();
-            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, projectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, projectId, ct))
                 return Results.Forbid();
             // Assurance policy operates within the structure the ladder allows; it can require more of a step
             // that has verification, and it cannot give verification to a step that has none or take it from

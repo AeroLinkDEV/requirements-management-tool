@@ -132,7 +132,7 @@ public static class PersonnelEndpoints
                 return Results.BadRequest(new { error = "Choose at least one project role." });
             // Project leadership staffs its own project. It does not mint project administrators — that stays
             // with the global account, so nobody can promote themselves out of the authority they were given.
-            if (roles.Contains(ProgramRole.Administrator) && !actor.IsAdministrator)
+            if (roles.Contains(ProgramRole.Administrator) && !actor.IsSystemAdministrator)
                 return Results.Forbid();
             // #816: retired position roles are history, not grants. Existing rows stay readable and the
             // v2 reconciliation retires them, but a new grant resurrects a parallel accountability the
@@ -184,7 +184,7 @@ public static class PersonnelEndpoints
         {
             var actor = http.UserAccount();
             if (!await http.HasRosterAuthorityAsync(db, resolver, projectId, ct)) return Results.Forbid();
-            if (role == ProgramRole.Administrator && !actor.IsAdministrator) return Results.Forbid();
+            if (role == ProgramRole.Administrator && !actor.IsSystemAdministrator) return Results.Forbid();
             var programId = await ProgramOfAsync(db, projectId, ct);
             if (programId is null) return Results.NotFound();
             var membership = await db.ProgramMemberships

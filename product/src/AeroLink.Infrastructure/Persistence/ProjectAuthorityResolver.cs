@@ -31,7 +31,7 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
         var account = await db.UserAccounts.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == userId && x.State == AccountState.Active, ct);
         if (account is null) return ProjectAuthorityDecision.Denied;
-        if (account.UserName == IdentityService.SystemAdministratorUserName)
+        if (account.HoldsAuthorityOverride)
             return ProjectAuthorityDecision.From(ProjectAuthoritySource.AdministratorSubstitution);
         if (requirement.AllowProgramAdministratorSubstitution)
         {
@@ -361,13 +361,14 @@ public sealed class ProjectAuthorityResolver(AeroLinkDbContext db)
                 results[administrator.UserId] = ProjectAuthorityDecision.From(
                     ProjectAuthoritySource.AdministratorSubstitution, sourceId: administrator.Id);
 
-        // The installation administrator is intentionally not tied to a project row; null source identity is
-        // the honest answer and remains distinguishable from a Program Administrator membership.
-        var systemAdministratorId = await db.UserAccounts.AsNoTracking()
-            .Where(x => x.State == AccountState.Active && x.UserName == IdentityService.SystemAdministratorUserName)
-            .Select(x => (Guid?)x.Id).SingleOrDefaultAsync(ct);
-        if (systemAdministratorId is not null)
-            results[systemAdministratorId.Value] = ProjectAuthorityDecision.From(ProjectAuthoritySource.AdministratorSubstitution);
+        // A global administrator is intentionally not tied to a project row; null source identity is the honest
+        // answer and remains distinguishable from a Program Administrator membership. Since #1639 there can be
+        // more than one administrator, but only the built-in one substitutes (owner decision, #1639).
+        var systemAdministratorIds = await db.UserAccounts.AsNoTracking()
+            .Where(x => x.State == AccountState.Active).Where(UserAccount.AuthorityOverrideHolder)
+            .Select(x => x.Id).ToListAsync(ct);
+        foreach (var systemAdministratorId in systemAdministratorIds)
+            results[systemAdministratorId] = ProjectAuthorityDecision.From(ProjectAuthoritySource.AdministratorSubstitution);
 
         return results.OrderBy(x => x.Key).Select(x => new ProjectAuthorityHolder(x.Key, x.Value)).ToList();
     }

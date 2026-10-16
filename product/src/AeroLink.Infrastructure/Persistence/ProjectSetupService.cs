@@ -76,7 +76,7 @@ public sealed class ProjectSetupService(
         // for resume. Completed and in-flight setups remain discoverable so their recorded result is reachable.
         var query = db.ProjectSetupDrafts.AsNoTracking().AsQueryable()
             .Where(x => x.State != ProjectSetupState.Abandoned);
-        if (!actor.IsAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
+        if (!actor.IsSystemAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
         // SQLite cannot order DateTimeOffset values server-side. Draft discovery is an intentionally small,
         // authorized list, so materialize it and apply the same stable ordering in the application.
         return (await query.ToListAsync(ct)).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.Id).ToList();
@@ -697,7 +697,7 @@ public sealed class ProjectSetupService(
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) ? value : null;
 
     private static bool CanManage(ProjectSetupDraft draft, AuthenticatedUser actor) =>
-        actor.IsAdministrator || draft.CreatorUserId == actor.Id;
+        actor.IsSystemAdministrator || draft.CreatorUserId == actor.Id;
 
     private static void RequireManage(ProjectSetupDraft draft, AuthenticatedUser actor)
     {
@@ -712,7 +712,7 @@ public sealed class ProjectSetupService(
     private static void RequireAdministrator(AuthenticatedUser actor)
     {
         RequireAuthenticated(actor);
-        if (!actor.IsAdministrator) throw new ProjectSetupAccessException();
+        if (!actor.IsSystemAdministrator) throw new ProjectSetupAccessException();
     }
 
     private static bool IsUniqueConflict(DbUpdateException exception)

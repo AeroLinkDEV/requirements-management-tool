@@ -540,7 +540,7 @@ public sealed class ProjectSetupInceptionService(
         var authentication = await reauthentication.AuthenticateAsync(actor.Id, password, remoteAddress, DateTimeOffset.UtcNow, ct);
         if (authentication is null)
             throw new ProjectSetupInvalidException("The accepting administrator password was not confirmed.");
-        if (!actor.IsAdministrator && actor.Id != draft.CreatorUserId)
+        if (!actor.IsSystemAdministrator && actor.Id != draft.CreatorUserId)
             throw new ProjectSetupAccessException();
         var now = DateTimeOffset.UtcNow;
         BaselineImport? import = null;
@@ -757,7 +757,7 @@ public sealed class ProjectSetupInceptionService(
         RequireAuthenticated(actor);
         var draft = await db.ProjectSetupDrafts.SingleOrDefaultAsync(x => x.Id == id, ct);
         if (draft is null) return allowMissing ? null : throw new ProjectSetupNotFoundException();
-        if (!actor.IsAdministrator && draft.CreatorUserId != actor.Id) throw new ProjectSetupAccessException();
+        if (!actor.IsSystemAdministrator && draft.CreatorUserId != actor.Id) throw new ProjectSetupAccessException();
         return draft;
     }
 
@@ -1270,7 +1270,7 @@ public sealed class ProjectSetupInceptionService(
     private static void RequireAdministrator(AuthenticatedUser actor)
     {
         RequireAuthenticated(actor);
-        if (!actor.IsAdministrator) throw new ProjectSetupAccessException();
+        if (!actor.IsSystemAdministrator) throw new ProjectSetupAccessException();
     }
 
     /// <summary>

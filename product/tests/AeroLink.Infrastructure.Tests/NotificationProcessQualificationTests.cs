@@ -335,7 +335,9 @@ public sealed class NotificationProcessQualificationTests
             await db.Database.MigrateAsync();
             var program = new ProgramRecord("Owned email qualification", "NQ"); var project = new ProjectRecord(program.Id, "Owned", "Owned");
             value.project = project.Id;
-            db.AddRange(program, project, new UserAccount(IdentityService.SystemAdministratorUserName, "Administrator", "admin@example.test", IdentityService.HashPassword("Owned!Qualification2026"), DateTimeOffset.UtcNow));
+            var administrator = new UserAccount(IdentityService.SystemAdministratorUserName, "Administrator", "admin@example.test", IdentityService.HashPassword("Owned!Qualification2026"), DateTimeOffset.UtcNow);
+            administrator.DesignateBuiltInAdministrator("test.setup", DateTimeOffset.UtcNow);
+            db.AddRange(program, project, administrator);
             await db.SaveChangesAsync();
             var operations = scope.ServiceProvider.GetRequiredService<NotificationOperationsService>();
             var saved = await operations.SaveSettingsAsync(IdentityService.SystemAdministratorUserName,

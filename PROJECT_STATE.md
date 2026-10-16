@@ -606,6 +606,7 @@ link a Windows logon to `admin`. New electronic signatures use the shared B2 rea
 accounts with a durable Windows link re-enter the Windows password with persisted-principal/SID validation, while
 unlinked Local accounts use the AeroLink password. The recorded method is preserved in the signature projection;
 historical signatures retain an empty method for compatibility.
+Global administration is a persisted grant that an administrator gives and revokes, and each grant and revoke is recorded in the security audit (#1639). The last active administrator cannot be revoked or disabled. A granted administrator gets system administration only: accounts, roles and grants, identity links, review/approval configuration, assurance policy, artifact schemas, project creation and setup acceptance, and system diagnostics. Configuration applies in the Programs they can see. Creating a project makes its creator that Program's Administrator, as it always has. They keep their normal engineering authority. Showcase seeding and upgrade stay with `admin`. The authority override stays with the built-in `admin` bootstrap/break-glass account, as it always has. That override covers administrator substitution at signing, every review stage's candidate list, access to every Program, the self-review exemption and exclusion from document stewardship. Only `admin` itself may revoke its own grant, and no other account can disable it.
 
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
 
@@ -770,8 +771,8 @@ Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_B
   Production and Development site installations, including per-site virtual service identities, non-secret
   service configuration with protected secrets, certificate-key ACL setup, and a 15-day daily-backup registration
   contract.
-  The company-host site is not live or qualified: clone-validated A3 upgrade/rollback and attended host
-  qualification remain pending. HOME remote-demo retirement remains
+  The company-host site is not live or qualified: the A3 source contract now defines clone-validated package
+  upgrade and attended recovery, while host qualification remains pending. HOME remote-demo retirement remains
   an attended D6 operation only after exact SiteProduction identity/source and private full-DNS/VPN go-live proof.
 - Scale/performance claims must match measured evidence; do not turn database-client or synthetic-harness evidence into a broader browser-user claim.
 - Legacy information is not given fabricated historical precision merely because today's schema is richer.

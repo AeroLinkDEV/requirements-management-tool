@@ -195,7 +195,7 @@ public static class WorkspaceEndpoints
 
         app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, TestProcedureDocumentBootstrap procedureDocuments, ProjectLadderAuthoringService ladderAuthoring, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
-            if(!http.UserAccount().IsAdministrator)return Results.Forbid();
+            if(!http.UserAccount().IsSystemAdministrator)return Results.Forbid();
             if (await db.Programs.AnyAsync(x => x.Code == request.ProgramCode.Trim().ToUpper(), ct))
                 return Results.Conflict(new { error = "A program with that code already exists." });
             try
