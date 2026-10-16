@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.AccessControl;
 using System.Globalization;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.DataProtection.XmlEncryption;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -21,6 +23,8 @@ namespace AeroLink.Infrastructure.Persistence.Maintenance;
 /// </summary>
 public static class HomeContinuityKeyTransfer
 {
+    public const string CanonicalTargetApplicationName = "AeroLink";
+    public const string CanonicalTargetProtectionProvider = "DpapiLocalMachine";
     private static readonly XNamespace DataProtectionNamespace =
         XNamespace.Get("http://schemas.asp.net/2015/03/dataProtection");
     private static readonly XNamespace XmlEncryptionNamespace =
@@ -28,6 +32,73 @@ public static class HomeContinuityKeyTransfer
     private const string DataProtectionAssemblyPrefix = "Microsoft.AspNetCore.DataProtection,";
     private const string EncryptedXmlDecryptorPrefix =
         "Microsoft.AspNetCore.DataProtection.XmlEncryption.EncryptedXmlDecryptor, Microsoft.AspNetCore.DataProtection,";
+
+    /// <summary>
+    /// Builds a source provider against the operator-captured ring.  The maintenance host must not use its
+    /// already-composed provider here: HOME's implicit provider may be bound to a different per-user ring.
+    /// </summary>
+    public static ServiceProvider BuildSourceServices(
+        string sourceRingDirectory, string sourceApplicationDiscriminator, string sourceProtectionProvider)
+    {
+        if (string.IsNullOrWhiteSpace(sourceRingDirectory) || !Directory.Exists(sourceRingDirectory))
+            throw new DirectoryNotFoundException("The captured source Data Protection ring directory does not exist.");
+        RequireNoReparsePoints(sourceRingDirectory, "The captured source Data Protection ring");
+        if (string.IsNullOrWhiteSpace(sourceApplicationDiscriminator))
+            throw new ArgumentException("The captured source application discriminator is required.", nameof(sourceApplicationDiscriminator));
+
+        var services = new ServiceCollection();
+        var builder = services
+            .AddDataProtection()
+            .SetApplicationName(sourceApplicationDiscriminator)
+            .DisableAutomaticKeyGeneration()
+            .PersistKeysToFileSystem(new DirectoryInfo(sourceRingDirectory));
+        switch (sourceProtectionProvider.Trim())
+        {
+            case "DpapiCurrentUser":
+                if (!OperatingSystem.IsWindows())
+                    throw new PlatformNotSupportedException("DpapiCurrentUser source rings require Windows.");
+                builder.ProtectKeysWithDpapi();
+                break;
+            case CanonicalTargetProtectionProvider:
+                if (!OperatingSystem.IsWindows())
+                    throw new PlatformNotSupportedException("DpapiLocalMachine source rings require Windows.");
+                builder.ProtectKeysWithDpapi(protectToLocalMachine: true);
+                break;
+            case "Unprotected":
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"The captured source protection provider '{sourceProtectionProvider}' is unsupported. " +
+                    "Use DpapiCurrentUser, DpapiLocalMachine, or Unprotected.");
+        }
+        return services.BuildServiceProvider();
+    }
+
+    public static void ValidateDestinationConfiguration(IConfiguration configuration, string destinationRingDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var applicationName = configuration["DataProtection:ApplicationName"]?.Trim();
+        if (!string.Equals(applicationName, CanonicalTargetApplicationName, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "DataProtection:ApplicationName must be exactly 'AeroLink' before continuity apply.");
+        var configuredRing = configuration["DataProtection:KeyRingPath"]?.Trim();
+        if (string.IsNullOrWhiteSpace(configuredRing)
+            || !string.Equals(Path.GetFullPath(configuredRing), Path.GetFullPath(destinationRingDirectory), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "DataProtection:KeyRingPath must explicitly match the destination continuity ring before apply.");
+        var protector = configuration["DataProtection:ProtectKeysWith"]?.Trim();
+        if (!string.Equals(protector, CanonicalTargetProtectionProvider, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "DataProtection:ProtectKeysWith must be exactly 'DpapiLocalMachine' before continuity apply.");
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("The canonical destination Data Protection boundary requires Windows LocalMachine DPAPI.");
+        var destinationParent = Path.GetDirectoryName(Path.GetFullPath(destinationRingDirectory))
+            ?? throw new InvalidOperationException("The destination ring has no parent directory.");
+        if (!Directory.Exists(destinationParent))
+            throw new DirectoryNotFoundException("The destination Data Protection ring parent is not provisioned.");
+        RequireNoReparsePoints(destinationParent, "The destination Data Protection ring parent");
+        RequireProtectedDirectoryAcl(destinationParent, "The destination Data Protection ring parent");
+    }
 
     public static HomeContinuityPackageManifest ExportPackage(
         IKeyManager sourceKeyManager,
@@ -104,11 +175,12 @@ public static class HomeContinuityKeyTransfer
             var revocations = new List<HomeContinuityRevocationManifestEntry>();
             for (var index = 0; index < revocationElements.Length; index++)
             {
-                ValidateRevocation(revocationElements[index]);
+                var revocation = ParseRevocation(revocationElements[index]);
                 var relativeName = $"revocation-{index:D4}.xml";
                 var path = Path.Combine(stagingDirectory, relativeName);
                 WriteXmlFile(path, revocationElements[index]);
-                revocations.Add(new HomeContinuityRevocationManifestEntry(relativeName, Sha256File(path)));
+                revocations.Add(new HomeContinuityRevocationManifestEntry(
+                    relativeName, Sha256File(path), revocation.KeyId, revocation.RevocationDate));
             }
 
             var manifest = new HomeContinuityPackageManifest(
@@ -158,8 +230,11 @@ public static class HomeContinuityKeyTransfer
         if (string.IsNullOrWhiteSpace(expectedTargetApplicationName))
             throw new ArgumentException("A target application name is required.", nameof(expectedTargetApplicationName));
         ValidateBinding(expectedBinding);
+        if (!string.Equals(expectedTargetApplicationName, CanonicalTargetApplicationName, StringComparison.Ordinal))
+            throw new InvalidOperationException("Continuity can only install the canonical AeroLink application boundary.");
 
         var manifestPath = Path.Combine(packageDirectory, "manifest.json");
+        RequireNoReparsePoints(packageDirectory, "The continuity package");
         if (!string.Equals(Sha256File(manifestPath), expectedManifestSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The continuity manifest hash does not match the operator-verified handoff; nothing was installed.");
         var manifest = ReadManifest(manifestPath);
@@ -178,7 +253,9 @@ public static class HomeContinuityKeyTransfer
         {
             var path = CheckedPackageFile(packageDirectory, revocation.FileName, revocation.Sha256);
             var element = ReadXmlFile(path);
-            ValidateRevocation(element);
+            var actual = ParseRevocation(element);
+            if (actual.KeyId != revocation.KeyId || actual.RevocationDate != revocation.RevocationDate)
+                throw new InvalidOperationException("The continuity revocation metadata changed after export.");
             sourceRepository.StoreElement(element, revocation.FileName);
         }
 
@@ -188,6 +265,10 @@ public static class HomeContinuityKeyTransfer
         var sourceKeys = sourceManager.GetAllKeys().ToDictionary(x => x.KeyId);
         if (sourceKeys.Count != manifest.Keys.Count)
             throw new InvalidOperationException("The portable package did not load the expected key count.");
+        var sourceRevokedIds = sourceKeys.Values.Where(x => x.IsRevoked).Select(x => x.KeyId).ToHashSet();
+        var manifestRevokedIds = manifest.Revocations.Select(x => x.KeyId).ToHashSet();
+        if (!sourceRevokedIds.SetEquals(manifestRevokedIds))
+            throw new InvalidOperationException("The portable package revocation set does not match its certificate-unwrapped source manager.");
 
         var stagedDirectory = destinationRingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + $".continuity-stage-{manifest.PackageId:N}";
@@ -213,6 +294,10 @@ public static class HomeContinuityKeyTransfer
             }
 
             ValidateRewrappedRing(stagedDirectory, expectedTargetApplicationName, manifest);
+            WriteJsonFile(Path.Combine(stagedDirectory, "continuity-receipt.json"), new HomeContinuityApplyReceipt(
+                1, manifest.PackageId, expectedManifestSha256, manifest.SourceRingDigest,
+                expectedTargetApplicationName, CanonicalTargetProtectionProvider, manifest.Keys.Count,
+                manifest.Revocations.Count, DateTimeOffset.UtcNow));
             Directory.CreateDirectory(Path.GetDirectoryName(destinationRingDirectory)
                 ?? throw new InvalidOperationException("The destination ring has no parent directory."));
             if (Directory.Exists(destinationRingDirectory) || File.Exists(destinationRingDirectory))
@@ -259,6 +344,10 @@ public static class HomeContinuityKeyTransfer
                 throw new InvalidOperationException($"The rewrapped ring did not load key {entry.KeyId:D}.");
             EnsureMetadata(key, entry);
         }
+        var revokedIds = keys.Values.Where(x => x.IsRevoked).Select(x => x.KeyId).ToHashSet();
+        var expectedRevokedIds = manifest.Revocations.Select(x => x.KeyId).ToHashSet();
+        if (!revokedIds.SetEquals(expectedRevokedIds))
+            throw new InvalidOperationException("The rewrapped ring does not preserve the exact revocation set.");
     }
 
     private static XElement BuildEncryptedKeyElement(IKey sourceKey, EncryptedXmlInfo encrypted)
@@ -283,6 +372,8 @@ public static class HomeContinuityKeyTransfer
     {
         if (manifest.SchemaVersion != 1 || manifest.PackageId == Guid.Empty || manifest.Keys.Count == 0)
             throw new InvalidOperationException("The HOME continuity package manifest is unsupported or incomplete.");
+        if (!IsSha256(manifest.SourceRingDigest))
+            throw new InvalidOperationException("The HOME continuity package has no valid source ring digest.");
         if (!string.Equals(manifest.TargetApplicationName, targetApplicationName, StringComparison.Ordinal))
             throw new InvalidOperationException("The continuity package target application name does not match this installation.");
         if (!string.Equals(manifest.SourceApplicationDiscriminator, manifest.Binding.SourceApplicationDiscriminator, StringComparison.Ordinal)
@@ -294,7 +385,9 @@ public static class HomeContinuityKeyTransfer
             || !string.Equals(manifest.Binding.SourceProtectionProvider, expectedBinding.SourceProtectionProvider, StringComparison.Ordinal)
             || !string.Equals(manifest.Binding.VerifiedBackupId, expectedBinding.VerifiedBackupId, StringComparison.Ordinal)
             || !string.Equals(manifest.Binding.ConnectorDeploymentId, expectedBinding.ConnectorDeploymentId, StringComparison.Ordinal)
-            || !string.Equals(manifest.Binding.ConnectorKeyId, expectedBinding.ConnectorKeyId, StringComparison.Ordinal))
+            || !string.Equals(manifest.Binding.ConnectorKeyId, expectedBinding.ConnectorKeyId, StringComparison.Ordinal)
+            || !string.Equals(manifest.Binding.ConnectorPublicKeyFingerprint, expectedBinding.ConnectorPublicKeyFingerprint, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(manifest.Binding.VerifiedBackupArchiveSha256, expectedBinding.VerifiedBackupArchiveSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The continuity package is bound to a different source installation, backup, or connector identity.");
 
         var allNames = manifest.Keys.Select(x => x.FileName).Concat(manifest.Revocations.Select(x => x.FileName)).ToArray();
@@ -304,6 +397,10 @@ public static class HomeContinuityKeyTransfer
         if (manifest.Keys.Any(x => x.KeyId == Guid.Empty)
             || manifest.Keys.Select(x => x.KeyId).Distinct().Count() != manifest.Keys.Count)
             throw new InvalidOperationException("The continuity package contains an empty or duplicate key identity.");
+        if (manifest.Revocations.Any(x => x.KeyId == Guid.Empty)
+            || manifest.Revocations.Select(x => x.KeyId).Distinct().Count() != manifest.Revocations.Count
+            || manifest.Revocations.Any(x => !manifest.Keys.Any(key => key.KeyId == x.KeyId)))
+            throw new InvalidOperationException("The continuity package contains an invalid or duplicate revocation identity.");
         foreach (var key in manifest.Keys) _ = CheckedPackageFile(packageDirectory, key.FileName, key.Sha256);
         foreach (var revocation in manifest.Revocations) _ = CheckedPackageFile(packageDirectory, revocation.FileName, revocation.Sha256);
     }
@@ -334,14 +431,19 @@ public static class HomeContinuityKeyTransfer
         return keyId;
     }
 
-    private static void ValidateRevocation(XElement element)
+    private static RevocationMetadata ParseRevocation(XElement element)
     {
         if (!IsRevocationElement(element) || element.Attributes().Count() != 1
             || element.Attribute("version") is null || element.Attribute("version")!.Value != "1"
             || element.Elements().Any(x => x.Name.LocalName is not ("revocationDate" or "reason" or "key"))
             || element.Element("revocationDate") is null || element.Element("key") is null
-            || element.Elements("key").Count() != 1)
+            || element.Elements("key").Count() != 1
+            || element.Elements("revocationDate").Count() != 1
+            || element.Elements("reason").Count() > 1
+            || !DateTimeOffset.TryParse(element.Element("revocationDate")!.Value,
+                CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var revocationDate))
             throw new InvalidOperationException("The source Data Protection repository contains a malformed revocation.");
+        return new RevocationMetadata(ParseKeyId(element.Element("key")!), revocationDate);
     }
 
     private static void ValidateKeyEnvelope(XElement element, HomeContinuityKeyManifestEntry entry)
@@ -406,26 +508,48 @@ public static class HomeContinuityKeyTransfer
 
     private static void RequireDestinationRingEmpty(string path)
     {
+        RequireNoReparsePoints(Path.GetDirectoryName(Path.GetFullPath(path))
+            ?? throw new InvalidOperationException("The destination ring has no parent directory."),
+            "The destination Data Protection ring parent");
         if (File.Exists(path)) throw new InvalidOperationException("The destination Data Protection ring path is a file.");
         if (Directory.Exists(path))
             throw new InvalidOperationException("The destination Data Protection ring already exists; continuity refuses to merge or overwrite it.");
+    }
+
+    private static void RequireProtectedDirectoryAcl(string path, string description)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Continuity ACL validation requires Windows.");
+        var security = new DirectoryInfo(path).GetAccessControl();
+        if (!security.AreAccessRulesProtected)
+            throw new InvalidOperationException($"{description} inherits permissions; continuity refuses an unprotected staging boundary.");
     }
 
     private static void WriteXmlFile(string path, XElement element)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        element.Save(temp, SaveOptions.DisableFormatting);
+        using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        {
+            element.Save(stream, SaveOptions.DisableFormatting);
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temp, path);
     }
 
     private static XElement ReadXmlFile(string path) =>
         XElement.Load(path, LoadOptions.PreserveWhitespace);
 
-    private static void WriteJsonFile(string path, HomeContinuityPackageManifest manifest)
+    private static void WriteJsonFile<T>(string path, T value)
     {
         var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        File.WriteAllText(temp, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+        using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temp, path);
     }
 
@@ -451,9 +575,32 @@ public static class HomeContinuityKeyTransfer
             || string.IsNullOrWhiteSpace(binding.SourceProtectionProvider)
             || string.IsNullOrWhiteSpace(binding.VerifiedBackupId)
             || string.IsNullOrWhiteSpace(binding.ConnectorDeploymentId)
-            || string.IsNullOrWhiteSpace(binding.ConnectorKeyId))
+            || string.IsNullOrWhiteSpace(binding.ConnectorKeyId)
+            || string.IsNullOrWhiteSpace(binding.ConnectorPublicKeyFingerprint)
+            || string.IsNullOrWhiteSpace(binding.VerifiedBackupArchiveSha256)
+            || !IsSha256(binding.ConnectorPublicKeyFingerprint)
+            || !IsSha256(binding.VerifiedBackupArchiveSha256))
             throw new ArgumentException("A HOME continuity identity binding is incomplete.", nameof(binding));
     }
+
+    private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
+
+    private static void RequireNoReparsePoints(string path, string description)
+    {
+        var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var current = full;
+        while (!string.IsNullOrEmpty(current))
+        {
+            if (Directory.Exists(current)
+                && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException($"{description} uses a reparse point at '{current}'.");
+            var parent = Directory.GetParent(current)?.FullName;
+            if (string.Equals(parent, current, StringComparison.OrdinalIgnoreCase)) break;
+            current = parent ?? string.Empty;
+        }
+    }
+
+    private sealed record RevocationMetadata(Guid KeyId, DateTimeOffset RevocationDate);
 
     private sealed class MemoryXmlRepository : IXmlRepository
     {
@@ -470,7 +617,9 @@ public sealed record HomeContinuityIdentityBinding(
     string SourceProtectionProvider,
     string VerifiedBackupId,
     string ConnectorDeploymentId,
-    string ConnectorKeyId);
+    string ConnectorKeyId,
+    string ConnectorPublicKeyFingerprint = "",
+    string VerifiedBackupArchiveSha256 = "");
 
 public sealed record HomeContinuityKeyManifestEntry(
     Guid KeyId,
@@ -480,7 +629,19 @@ public sealed record HomeContinuityKeyManifestEntry(
     string FileName,
     string Sha256);
 
-public sealed record HomeContinuityRevocationManifestEntry(string FileName, string Sha256);
+public sealed record HomeContinuityRevocationManifestEntry(
+    string FileName, string Sha256, Guid KeyId, DateTimeOffset RevocationDate);
+
+public sealed record HomeContinuityApplyReceipt(
+    int SchemaVersion,
+    Guid PackageId,
+    string ManifestSha256,
+    string SourceRingDigest,
+    string TargetApplicationName,
+    string TargetProtectionProvider,
+    int KeyCount,
+    int RevocationCount,
+    DateTimeOffset AppliedAt);
 
 public sealed record HomeContinuityPackageManifest(
     int SchemaVersion,

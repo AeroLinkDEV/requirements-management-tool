@@ -21,6 +21,48 @@ namespace AeroLink.Infrastructure.Tests;
 /// </summary>
 public sealed class HomeContinuityTests
 {
+    [Fact]
+    public void Source_provider_is_bound_to_the_captured_ring_and_discriminator()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-source-ring-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string application = "captured-source-discriminator";
+            using (var original = BuildFileServices(root, application))
+            {
+                var created = original.GetRequiredService<IKeyManager>()
+                    .CreateNewKey(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+                Assert.NotEqual(Guid.Empty, created.KeyId);
+            }
+
+            using var captured = HomeContinuityKeyTransfer.BuildSourceServices(root, application, "Unprotected");
+            var keys = captured.GetRequiredService<IKeyManager>().GetAllKeys();
+            Assert.Single(keys);
+            Assert.Equal(application, captured.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.DataProtection.DataProtectionOptions>>().Value.ApplicationDiscriminator);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Destination_boundary_requires_canonical_application_ring_and_protector()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-destination-{Guid.NewGuid():N}");
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["DataProtection:ApplicationName"] = "WrongApplication",
+            ["DataProtection:KeyRingPath"] = root,
+            ["DataProtection:ProtectKeysWith"] = "DpapiLocalMachine",
+        }).Build();
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            HomeContinuityKeyTransfer.ValidateDestinationConfiguration(configuration, root));
+        Assert.Contains("AeroLink", error.Message, StringComparison.Ordinal);
+    }
+
     [WindowsFact]
     public void Certificate_wrapped_ring_preserves_identity_and_legacy_payload_reads_without_plaintext_files()
     {
@@ -48,7 +90,7 @@ public sealed class HomeContinuityTests
             using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
             var binding = new HomeContinuityIdentityBinding(
                 "source-installation", sourceApplication, targetApplication, "DpapiCurrentUser",
-                "verified-backup-hash", "connector-deployment", "connector-key");
+                new string('a', 64), "connector-deployment", "connector-key", new string('b', 64), new string('a', 64));
             var manifest = HomeContinuityKeyTransfer.ExportPackage(
                 sourceManager, repository, certificate, binding, package);
             var manifestHash = Sha256File(Path.Combine(package, "manifest.json"));
@@ -59,6 +101,7 @@ public sealed class HomeContinuityTests
             Assert.Equal(manifest.PackageId, applied.PackageId);
             Assert.Equal(2, applied.Keys.Count);
             Assert.Single(applied.Revocations);
+            Assert.Equal(revoked.KeyId, Assert.Single(manifest.Revocations).KeyId);
             Assert.DoesNotContain(Directory.EnumerateFiles(package, "*.xml"),
                 path => File.ReadAllText(path).Contains("<masterKey", StringComparison.Ordinal));
             Assert.DoesNotContain(Directory.EnumerateFiles(destination, "*.xml"),

@@ -854,7 +854,8 @@ dotnet AeroLink.Api.dll maintenance home-continuity export `
   --source-installation <source-installation-id> `
   --source-discriminator <captured-source-discriminator> `
   --source-protection <captured-provider> `
-  --verified-backup <verified-backup-id-or-sha> `
+  --verified-backup <verified-backup-sha256> `
+  --verified-backup-archive <verified-home-backup.zip> `
   --connector-deployment <connector-deployment-id> `
   --connector-key <connector-key-id> `
   --target-application AeroLink `
@@ -862,22 +863,42 @@ dotnet AeroLink.Api.dll maintenance home-continuity export `
   --source-ring D:\captured\source-key-ring
 ```
 
-Export reads descriptors in memory and writes only certificate-wrapped envelopes plus a manifest containing exact
-key IDs, dates, revocations, source discriminator/provider and binding identities. The destination operator carries
-the package through the existing verified backup/evidence channel, records the manifest SHA-256, and independently
-checks that it belongs to the same final backup. Certificate encryption provides confidentiality; the verified
-backup identity and operator-recorded manifest hash provide the provenance check.
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity apply `
+  --package D:\transfer\aerolink-home-continuity-package `
+  --destination-ring 'C:\AeroLink\AeroLink Production\keys\data-protection' `
+  --source-installation <source-installation-id> `
+  --source-discriminator <captured-source-discriminator> `
+  --source-protection <captured-provider> `
+  --verified-backup <verified-backup-sha256> `
+  --verified-backup-archive-sha256 <verified-backup-sha256> `
+  --connector-deployment <connector-deployment-id> `
+  --connector-key <connector-key-id> `
+  --connector-public-fingerprint <connector-public-fingerprint-sha256> `
+  --manifest-sha256 <operator-recorded-manifest-sha256> `
+  --certificate D:\transfer\destination-transport.pfx
+```
 
-`--source-ring` is required when the current source provider uses its implicit per-user repository (`XmlRepository`
-is not explicitly configured). It must be the exact operator-captured ring directory; the command does not infer a
-HOME path. The export checks that its key metadata and revocation set match the live source key manager. An explicit
-configured `DataProtection:KeyRingPath` supplies the repository directly.
+Export constructs a separate source Data Protection provider against the exact captured ring, discriminator and
+captured protection mode; it never combines a separately supplied ring with the maintenance host's default manager.
+It verifies the final HOME backup archive and its SHA-256 sidecar, reads the connector PEM only in memory to record
+its public fingerprint/key ID, and writes only certificate-wrapped envelopes plus a manifest containing exact key
+IDs, dates, revocations, source discriminator/provider and binding identities. The destination operator carries the
+package through the existing verified backup/evidence channel, records the manifest SHA-256, and independently
+checks the package, final-backup SHA-256 and connector public fingerprint as one attended handoff. Certificate
+encryption provides confidentiality; it does not replace that operator-trusted provenance channel.
 
-Before apply, the destination must explicitly configure `DataProtection:ApplicationName=AeroLink` and the target
-`DataProtection:KeyRingPath`. Apply requires the exact source binding and manifest hash, rejects malformed or
-unexpected XML and any pre-existing destination ring, decrypts the certificate envelopes only in memory, rewraps
-them with LocalMachine DPAPI in a staging directory, validates key metadata/revocations, and atomically installs the
-new ring. A failed or mixed transfer leaves the source and destination untouched. The destination certificate
+`--source-ring` is always the exact operator-captured ring directory; the command does not infer a HOME path or use
+the maintenance host's default provider. The source provider is constructed with the captured discriminator and
+protection mode, and the export checks that its key metadata and revocation set match that same captured repository.
+
+Before apply, the destination must explicitly configure exactly `DataProtection:ApplicationName=AeroLink`, the
+target `DataProtection:KeyRingPath`, and `DataProtection:ProtectKeysWith=DpapiLocalMachine`; all three are checked
+before staging. Apply requires the exact source binding, final-backup SHA-256 and manifest hash, rejects malformed or
+unexpected XML, reparse-point parents and any pre-existing destination ring, decrypts the certificate envelopes only
+in memory, rewraps them with LocalMachine DPAPI in a staging directory, validates key metadata and the exact
+revocation set, records a durable continuity receipt beside the installed ring, and atomically installs the new
+ring. A failed or mixed transfer leaves the source and destination untouched. The destination certificate
 private key stays on the destination and must be transferred/imported through the existing attended certificate and
 ACL procedure; it is never placed in the package or repository.
 

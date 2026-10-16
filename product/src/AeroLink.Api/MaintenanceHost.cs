@@ -1,14 +1,12 @@
+using AeroLink.ConnectorProtocol;
 using AeroLink.Domain.Identity;
 using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Persistence;
 using AeroLink.Infrastructure.Persistence.Maintenance;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.DataProtection.KeyManagement;
-using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 
@@ -38,13 +36,15 @@ namespace AeroLink.Api;
 ///
 ///   maintenance home-continuity export --package &lt;new-directory&gt; --source-installation &lt;id&gt;
 ///       --source-discriminator &lt;exact-value&gt; --source-protection &lt;provider&gt; --verified-backup &lt;id&gt;
-///       --connector-deployment &lt;id&gt; --connector-key &lt;id&gt; --target-application &lt;name&gt;
+///       --connector-deployment &lt;id&gt; --connector-key &lt;id&gt; --target-application AeroLink
+///       --verified-backup-archive &lt;verified-backup.zip&gt;
 ///       --certificate &lt;public-cert.pem|cer&gt; [--source-ring &lt;captured-directory&gt;]
 ///       Exports an identity-bound, certificate-wrapped ring package without printing key material.
 ///
 ///   maintenance home-continuity apply --package &lt;directory&gt; --destination-ring &lt;new-directory&gt;
 ///       --source-installation &lt;id&gt; --source-discriminator &lt;exact-value&gt; --source-protection &lt;provider&gt;
-///       --verified-backup &lt;id&gt; --connector-deployment &lt;id&gt; --connector-key &lt;id&gt; --manifest-sha256 &lt;hash&gt;
+///       --verified-backup &lt;sha256&gt; --connector-deployment &lt;id&gt; --connector-key &lt;id&gt;
+///       --connector-public-fingerprint &lt;sha256&gt; --verified-backup-archive-sha256 &lt;sha256&gt; --manifest-sha256 &lt;hash&gt;
 ///       --certificate &lt;cert.pem|pfx&gt; [--certificate-key &lt;private-key.pem&gt;]
 ///       Rewraps the package with LocalMachine DPAPI and refuses a pre-existing destination ring.
 /// </summary>
@@ -63,8 +63,8 @@ public static class AeroLinkMaintenanceHost
             Console.WriteLine("  maintenance analyze [--json]");
             Console.WriteLine("  maintenance upgrade [--apply]");
             Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
-            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <id> --connector-deployment <id> --connector-key <id> --target-application <name> --certificate <public-cert.pem|cer> [--source-ring <captured-directory>]");
-            Console.WriteLine("  maintenance home-continuity apply --package <directory> --destination-ring <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <id> --connector-deployment <id> --connector-key <id> --manifest-sha256 <hash> --certificate <cert.pem|pfx> [--certificate-key <private-key.pem>]");
+            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory>");
+            Console.WriteLine("  maintenance home-continuity apply --package <directory> --destination-ring <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256> --manifest-sha256 <hash> --certificate <cert.pem|pfx> [--certificate-key <private-key.pem>]");
             return 0;
         }
 
@@ -315,26 +315,25 @@ public static class AeroLinkMaintenanceHost
         var sourceDiscriminator = RequiredValue(args, "--source-discriminator");
         var sourceProtection = RequiredValue(args, "--source-protection");
         var verifiedBackup = RequiredValue(args, "--verified-backup");
+        var verifiedBackupArchive = RequiredValue(args, "--verified-backup-archive");
         var connectorDeployment = RequiredValue(args, "--connector-deployment");
         var connectorKey = RequiredValue(args, "--connector-key");
         var targetApplication = RequiredValue(args, "--target-application");
         var certificatePath = RequiredValue(args, "--certificate");
-        var sourceRingPath = OptionalValue(args, "--source-ring");
-
-        var actualDiscriminator = services.GetRequiredService<IOptions<DataProtectionOptions>>().Value.ApplicationDiscriminator;
-        if (!string.Equals(actualDiscriminator, sourceDiscriminator, StringComparison.Ordinal))
-            return Fail("The supplied source discriminator does not match the current host; continuity refuses to guess or export the wrong source ring.");
-        var repository = services.GetRequiredService<IOptions<KeyManagementOptions>>().Value.XmlRepository
-            ?? (!string.IsNullOrWhiteSpace(sourceRingPath) && Directory.Exists(sourceRingPath)
-                ? new FileSystemXmlRepository(new DirectoryInfo(sourceRingPath), NullLoggerFactory.Instance)
-                : null);
-        if (repository is null)
-            return Fail("The current Data Protection provider has no explicit XML repository; supply the exact captured source ring with --source-ring.");
+        var sourceRingPath = RequiredValue(args, "--source-ring");
+        if (!string.Equals(targetApplication, HomeContinuityKeyTransfer.CanonicalTargetApplicationName, StringComparison.Ordinal))
+            return Fail("The continuity destination application must be exactly 'AeroLink'.");
+        var backupHash = VerifySourceBackup(verifiedBackupArchive, verifiedBackup, sourceInstallation);
+        var connectorFingerprint = ReadConnectorPublicFingerprint(services.GetRequiredService<IConfiguration>(), connectorKey);
+        using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
+        var sourceManager = sourceServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
+        var sourceRepository = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(
+            new DirectoryInfo(sourceRingPath), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
         using var certificate = LoadCertificate(certificatePath, keyPath: null, requirePrivateKey: false);
         var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator, targetApplication,
-            sourceProtection, verifiedBackup, connectorDeployment, connectorKey);
+            sourceProtection, backupHash, connectorDeployment, connectorKey, connectorFingerprint, backupHash);
         var manifest = HomeContinuityKeyTransfer.ExportPackage(
-            services.GetRequiredService<IKeyManager>(), repository, certificate, binding, package);
+            sourceManager, sourceRepository, certificate, binding, package);
         Console.WriteLine($"HOME CONTINUITY PACKAGE EXPORTED: {manifest.PackageId:D}");
         Console.WriteLine($"Keys: {manifest.Keys.Count}; revocations: {manifest.Revocations.Count}");
         Console.WriteLine($"Manifest SHA-256: {Sha256File(Path.Combine(package, "manifest.json"))}");
@@ -351,25 +350,29 @@ public static class AeroLinkMaintenanceHost
         var sourceDiscriminator = RequiredValue(args, "--source-discriminator");
         var sourceProtection = RequiredValue(args, "--source-protection");
         var verifiedBackup = RequiredValue(args, "--verified-backup");
+        var verifiedBackupArchiveHash = RequiredValue(args, "--verified-backup-archive-sha256");
         var connectorDeployment = RequiredValue(args, "--connector-deployment");
         var connectorKey = RequiredValue(args, "--connector-key");
+        var connectorFingerprint = RequiredValue(args, "--connector-public-fingerprint");
         var manifestSha256 = RequiredValue(args, "--manifest-sha256");
         var certificatePath = RequiredValue(args, "--certificate");
         var certificateKeyPath = OptionalValue(args, "--certificate-key");
 
         var configuration = services.GetRequiredService<IConfiguration>();
-        var targetApplication = configuration["DataProtection:ApplicationName"]?.Trim();
-        if (string.IsNullOrWhiteSpace(targetApplication))
-            return Fail("DataProtection:ApplicationName must be the explicit destination application name before continuity apply.");
-        var configuredRing = configuration["DataProtection:KeyRingPath"]?.Trim();
-        if (!string.IsNullOrWhiteSpace(configuredRing)
-            && !string.Equals(Path.GetFullPath(configuredRing), Path.GetFullPath(destinationRing), StringComparison.OrdinalIgnoreCase))
-            return Fail("The destination ring does not match DataProtection:KeyRingPath; continuity refuses a mixed installation.");
+        try { HomeContinuityKeyTransfer.ValidateDestinationConfiguration(configuration, destinationRing); }
+        catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException)
+        { return Fail(ex.Message); }
+        if (!string.Equals(verifiedBackup, verifiedBackupArchiveHash, StringComparison.OrdinalIgnoreCase))
+            return Fail("--verified-backup and --verified-backup-archive-sha256 must identify the same verified archive.");
+        if (!IsSha256(connectorFingerprint))
+            return Fail("--connector-public-fingerprint must be a SHA-256 fingerprint.");
 
         using var certificate = LoadCertificate(certificatePath, certificateKeyPath, requirePrivateKey: true);
         var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator,
-            targetApplication, sourceProtection, verifiedBackup, connectorDeployment, connectorKey);
-        var applied = HomeContinuityKeyTransfer.ApplyPackage(package, destinationRing, certificate, targetApplication, binding, manifestSha256);
+            HomeContinuityKeyTransfer.CanonicalTargetApplicationName, sourceProtection, verifiedBackup,
+            connectorDeployment, connectorKey, connectorFingerprint, verifiedBackupArchiveHash);
+        var applied = HomeContinuityKeyTransfer.ApplyPackage(package, destinationRing, certificate,
+            HomeContinuityKeyTransfer.CanonicalTargetApplicationName, binding, manifestSha256);
         Console.WriteLine($"HOME CONTINUITY RING INSTALLED: {applied.PackageId:D}");
         Console.WriteLine($"Keys: {applied.Keys.Count}; revocations: {applied.Revocations.Count}");
         Console.WriteLine("Destination key files were rewrapped with LocalMachine DPAPI; no source file was modified.");
@@ -409,6 +412,50 @@ public static class AeroLinkMaintenanceHost
         using var stream = File.OpenRead(path);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
     }
+
+    private static string VerifySourceBackup(string archivePath, string expectedHash, string expectedSourceInstallation)
+    {
+        if (!File.Exists(archivePath) || !Path.GetExtension(archivePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            throw new FileNotFoundException("The verified HOME backup archive is missing or is not a ZIP archive.", archivePath);
+        var sidecar = archivePath + ".sha256";
+        if (!File.Exists(sidecar)) throw new InvalidOperationException("The verified HOME backup archive has no SHA-256 sidecar.");
+        var actual = Sha256File(archivePath).ToLowerInvariant();
+        var sidecarHash = (File.ReadAllText(sidecar).Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "").ToLowerInvariant();
+        if (!IsSha256(actual) || !string.Equals(actual, sidecarHash, StringComparison.Ordinal)
+            || !string.Equals(actual, expectedHash.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The verified HOME backup archive, sidecar, and supplied identity do not agree.");
+        using var zip = ZipFile.OpenRead(archivePath);
+        var entry = zip.GetEntry("manifest.json") ?? throw new InvalidOperationException("The verified HOME backup has no manifest.");
+        using var reader = new StreamReader(entry.Open());
+        using var document = JsonDocument.Parse(reader.ReadToEnd());
+        if (!document.RootElement.TryGetProperty("FormatVersion", out var version) || version.GetInt32() != 2
+            || !document.RootElement.TryGetProperty("Instance", out var instance)
+            || !instance.TryGetProperty("Classification", out var classification)
+            || !string.Equals(classification.GetString(), "HomeCanonical", StringComparison.Ordinal)
+            || !instance.TryGetProperty("InstanceId", out var instanceId)
+            || string.IsNullOrWhiteSpace(instanceId.GetString()))
+            throw new InvalidOperationException("The verified HOME backup manifest is not a HomeCanonical format-2 archive.");
+        if (!string.Equals(instanceId.GetString(), expectedSourceInstallation, StringComparison.Ordinal))
+            throw new InvalidOperationException("The verified HOME backup instance identity does not match --source-installation.");
+        return actual;
+    }
+
+    private static string ReadConnectorPublicFingerprint(IConfiguration configuration, string expectedKeyId)
+    {
+        var keyPath = configuration["Connector:SigningKeyPath"];
+        if (string.IsNullOrWhiteSpace(keyPath))
+            keyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AeroLink", "keys", "connector-signing-key.pem");
+        if (!File.Exists(keyPath)) throw new FileNotFoundException("The source connector signing key is missing.", keyPath);
+        using var key = ECDsa.Create();
+        key.ImportFromPem(File.ReadAllText(keyPath));
+        var fingerprint = ConnectorLaunchProtocol.PublicKeyFingerprint(key.ExportSubjectPublicKeyInfoPem());
+        if (!string.Equals(expectedKeyId, fingerprint[..24], StringComparison.Ordinal))
+            throw new InvalidOperationException("The supplied connector key ID does not match the source signing key.");
+        return fingerprint;
+    }
+
+    private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
 
     private static string? OptionalValue(string[] args, string name)
     {
