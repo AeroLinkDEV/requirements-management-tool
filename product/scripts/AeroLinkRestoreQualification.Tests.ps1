@@ -484,6 +484,29 @@ try {
     $attachmentCount = (& (Join-Path $PostgresBin 'psql.exe') -h 127.0.0.1 -p $pgPort -U postgres -d aerolink_restore_validation -tA -c 'SELECT count(*) FROM controlled_attachments;').Trim()
     if ([int]$attachmentCount -lt 1) { throw 'The isolated restore qualified no controlled attachments.' }
 
+    # Primary cleanup owner: the maintenance host invokes Restore-AeroLink with a completed journal and no archive.
+    # The old entry point verified -BackupArchive before reaching its cleanup branch, so this exact boundary failed
+    # before it could remove the operation-owned target. A child process is used because the production cleanup path
+    # exits successfully after its terminal journal write; this remains the real script boundary, with no test seam.
+    $cleanupScript = Join-Path $PSScriptRoot 'Restore-AeroLink.ps1'
+    $cleanupEngine = (Get-Command powershell.exe -ErrorAction Stop).Source
+    $cleanupStdout = Join-Path $continuityOwnerRoot 'cleanup.stdout.log'
+    $cleanupStderr = Join-Path $continuityOwnerRoot 'cleanup.stderr.log'
+    $cleanupArguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $cleanupScript),
+        '-TargetDatabase','aerolink_restore_validation','-PostgresPort',"$pgPort",'-PostgresBin',('"{0}"' -f $PostgresBin),
+        '-CleanupContinuityOperation','-ContinuityOperationJournalPath',('"{0}"' -f $continuityJournal),
+        '-ContinuityOperationId',"$continuityOperationId")
+    $cleanupProcess = Start-Process -FilePath $cleanupEngine -ArgumentList $cleanupArguments -RedirectStandardOutput $cleanupStdout -RedirectStandardError $cleanupStderr -WindowStyle Hidden -PassThru
+    [void]$cleanupProcess.Handle
+    $cleanupProcess.WaitForExit()
+    if ($cleanupProcess.ExitCode -ne 0) { throw "The real continuity cleanup authority failed with exit code $($cleanupProcess.ExitCode)." }
+    $cleanupJournal = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $continuityJournal -Raw)
+    if ([string]$cleanupJournal.Status -ne 'cleaned' -or [string]$cleanupJournal.Phase -ne 'cleanup-complete') { throw 'The real continuity cleanup authority did not persist a cleaned terminal journal.' }
+    $cleanupReceipt = "$continuityJournal.receipt.json"
+    if (-not (Test-Path -LiteralPath $cleanupReceipt -PathType Leaf)) { throw 'The real continuity cleanup authority did not persist its diagnostic receipt.' }
+    if ((Invoke-QualificationSql 'postgres' "SELECT count(*) FROM pg_database WHERE datname='aerolink_restore_validation';").Trim() -ne '0') { throw 'Continuity cleanup left its operation-owned database behind.' }
+    if (Test-Path -LiteralPath $isolatedEvidence) { throw 'Continuity cleanup left its operation-owned evidence behind.' }
+
     $faults=@('BeforeDatabaseRestore','AfterDatabaseRestore','AfterEvidenceCopy','AfterPreActivationValidation','AfterOriginalDatabaseRename','AfterDatabaseActivation','AfterEvidenceActivation','AfterActivationValidation','BeforeRestart','AfterRestart')
     foreach($phase in $faults){
         [IO.File]::WriteAllText(($authorityPath+'.generation'),$g1,[Text.UTF8Encoding]::new($false))

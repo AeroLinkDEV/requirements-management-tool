@@ -357,24 +357,26 @@ function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory
         -ApiExecutable (Get-AeroLinkProgramLayout -ProductRoot $productRoot).ApiExecutable })
 }
 
-& (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive -InstallationRoot $(if ($site) { $site.InstallationRoot } else { '' }) | Out-Host
-if ($site) {
-    # Which installation the archive came from, decided from its own (just verified) manifest before anything is
-    # revoked, backed up or renamed, so a wrong archive is refused while nothing has changed.
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archiveZip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $BackupArchive).Path)
-    try {
-        $manifestEntry = $archiveZip.GetEntry('manifest.json')
-        if (-not $manifestEntry) { throw 'The archive has no manifest.json.' }
-        $manifestReader = New-Object IO.StreamReader($manifestEntry.Open())
-        try { $archiveManifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
-    }
-    finally { $archiveZip.Dispose() }
-    $archiveInstance = if ($archiveManifest.PSObject.Properties['Instance'] -and $archiveManifest.Instance) { $archiveManifest.Instance } else { $null }
-    $archiveClassification = if ($archiveInstance) { [string]$archiveInstance.Classification } else { 'unrecorded' }
-    Write-Host "Archive taken from: $archiveClassification$(if ($archiveInstance) { " ($([string]$archiveInstance.Label))" })." -ForegroundColor Cyan
-    if ($production -and $archiveClassification -ne $site.Classification -and -not $AllowArchiveFromOtherClassification) {
-        throw "This archive was taken from a $archiveClassification installation, not $($site.Classification). D8 keeps test and production data apart; to restore HOME's archive into the site on purpose (Phase 3), add -AllowArchiveFromOtherClassification. Nothing was changed."
+if (-not $CleanupContinuityOperation) {
+    & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive -InstallationRoot $(if ($site) { $site.InstallationRoot } else { '' }) | Out-Host
+    if ($site) {
+        # Which installation the archive came from, decided from its own (just verified) manifest before anything is
+        # revoked, backed up or renamed, so a wrong archive is refused while nothing has changed.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archiveZip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $BackupArchive).Path)
+        try {
+            $manifestEntry = $archiveZip.GetEntry('manifest.json')
+            if (-not $manifestEntry) { throw 'The archive has no manifest.json.' }
+            $manifestReader = New-Object IO.StreamReader($manifestEntry.Open())
+            try { $archiveManifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
+        }
+        finally { $archiveZip.Dispose() }
+        $archiveInstance = if ($archiveManifest.PSObject.Properties['Instance'] -and $archiveManifest.Instance) { $archiveManifest.Instance } else { $null }
+        $archiveClassification = if ($archiveInstance) { [string]$archiveInstance.Classification } else { 'unrecorded' }
+        Write-Host "Archive taken from: $archiveClassification$(if ($archiveInstance) { " ($([string]$archiveInstance.Label))" })." -ForegroundColor Cyan
+        if ($production -and $archiveClassification -ne $site.Classification -and -not $AllowArchiveFromOtherClassification) {
+            throw "This archive was taken from a $archiveClassification installation, not $($site.Classification). D8 keeps test and production data apart; to restore HOME's archive into the site on purpose (Phase 3), add -AllowArchiveFromOtherClassification. Nothing was changed."
+        }
     }
 }
 if ($production) {
