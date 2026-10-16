@@ -89,7 +89,7 @@ company-host site is live, supported or qualified by this source change. The ele
 existing release before backup/stop/switch/migration. New retained release directories use the signed
 `<version>+<full source SHA>` identity; an existing version-only directory is reused only for an exact
 byte-identical repair. The A3 updater source contract below owns later
-clone-validated package upgrades and attended recovery; no company-host site is live, supported or qualified by this
+clone-validated package upgrades, rollback and attended recovery; no company-host site is live, supported or qualified by this
 source change. None of this changes HOME, laptop or demo installations, which remain on their existing ports, per-user
 key ring and trust-mode development cluster.
 

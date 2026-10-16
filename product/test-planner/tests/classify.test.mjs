@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -466,14 +466,85 @@ test('backend-core-domain runs every hosted contract test file', () => {
   assert.match(backendCore, /No hosted test-contracts test files were found/)
 })
 
-test('CI runs every planner test file directory-driven', () => {
+test('CI isolates the readiness planner test in every classifier guard lane', () => {
   const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
   const plannerStart = workflow.indexOf('product/test-planner/tests')
   assert.notEqual(plannerStart, -1)
   const plannerJob = workflow.slice(Math.max(0, plannerStart - 500), plannerStart + 1000)
   assert.match(plannerJob, /Get-ChildItem\s+-LiteralPath\s+product\/test-planner\/tests\s+-Filter\s+'\*\.test\.mjs'/)
-  assert.match(plannerJob, /node\s+--test\s+\$tests/)
   assert.match(plannerJob, /No planner tests were found/)
+
+  const lanes = [
+    ['Verify the changed-area classifier and its workflow contract', 'Refuse a test project that no job runs'],
+    ['Verify the changed-area classifier guards (client changes)', 'Mark test complete'],
+  ]
+  for (const [name, nextName] of lanes) {
+    const start = workflow.indexOf(`      - name: ${name}`)
+    const end = workflow.indexOf(`      - name: ${nextName}`, start)
+    assert.ok(start >= 0 && end > start, `${name} must remain a bounded workflow step`)
+    const run = workflow.slice(start, end).match(/        run: \|\n([\s\S]*)/)?.[1]
+    assert.ok(run, `${name} must have an executable PowerShell body`)
+    const script = run.replace(/^          /gm, '')
+
+  const fixture = realpathSync.native(mkdtempSync(join(tmpdir(), 'aerolink-planner-selection-')))
+  try {
+    const testsRoot = join(fixture, 'product', 'test-planner', 'tests')
+    const bin = join(fixture, 'bin')
+    const calls = join(fixture, 'node-calls.txt')
+    const runner = join(fixture, 'run-planner-step.ps1')
+    const nodeStub = [
+      '@echo off',
+      '>> "%NODE_CALLS%" echo %*',
+      'if "%NODE_EXIT%"=="" exit /b 0',
+      'exit /b %NODE_EXIT%',
+      '',
+    ].join('\r\n')
+    const names = ['classify.test.mjs', 'full-ci-readiness-dispatch.test.mjs', 'future-planner.test.mjs']
+    mkdirSync(testsRoot, { recursive: true })
+    mkdirSync(bin, { recursive: true })
+    for (const name of names) writeFileSync(join(testsRoot, name), '')
+    writeFileSync(join(bin, 'node.cmd'), nodeStub)
+    writeFileSync(runner, script)
+
+    const execute = (nodeExit = '') => {
+      try {
+        execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', runner], {
+          cwd: fixture,
+          env: { ...process.env, NODE_CALLS: calls, NODE_EXIT: nodeExit, PATH: `${bin};${process.env.PATH}` },
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+        return { status: 0, stderr: '' }
+      } catch (error) {
+        return { status: error.status, stderr: String(error.stderr ?? '') }
+      }
+    }
+    const expected = [
+      `--test ${join(testsRoot, 'full-ci-readiness-dispatch.test.mjs')}`,
+      `--test ${join(testsRoot, 'classify.test.mjs')} ${join(testsRoot, 'future-planner.test.mjs')}`,
+    ]
+    assert.deepEqual(execute(), { status: 0, stderr: '' }, `${name} should complete the fixture run`)
+    assert.deepEqual(readFileSync(calls, 'utf8').trim().split(/\r?\n/), expected,
+      `${name} must isolate readiness and run every other discovered file exactly once`)
+
+    writeFileSync(calls, '')
+    const missing = join(testsRoot, 'full-ci-readiness-dispatch.test.mjs')
+    rmSync(missing)
+    const missingResult = execute()
+    assert.notEqual(missingResult.status, 0, `${name} must fail closed when readiness is missing`)
+    assert.match(missingResult.stderr, /not found exactly once/)
+    assert.equal(readFileSync(calls, 'utf8'), '', `${name} must refuse missing readiness before starting node`)
+
+    writeFileSync(join(testsRoot, 'full-ci-readiness-dispatch.test.mjs'), '')
+    writeFileSync(calls, '')
+    const nodeFailure = execute('9')
+    assert.notEqual(nodeFailure.status, 0, `${name} must fail when readiness exits nonzero`)
+    assert.deepEqual(readFileSync(calls, 'utf8').trim().split(/\r?\n/), [expected[0]],
+      `${name} must stop before the ordinary planner process after readiness failure`)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+  }
 })
 
 test('every area pattern is anchored so a lookalike path cannot match', () => {

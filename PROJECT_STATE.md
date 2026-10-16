@@ -769,7 +769,7 @@ Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_B
   service configuration with protected secrets, certificate-key ACL setup, and a 15-day daily-backup registration
   contract.
   The company-host site is not live or qualified: the A3 source contract now defines clone-validated package
-  upgrade and attended recovery, while host qualification remains pending. HOME remote-demo retirement remains
+  upgrade/rollback and attended recovery, while host qualification remains pending. HOME remote-demo retirement remains
   an attended D6 operation only after exact SiteProduction identity/source and private full-DNS/VPN go-live proof.
 - Scale/performance claims must match measured evidence; do not turn database-client or synthetic-harness evidence into a broader browser-user claim.
 - Legacy information is not given fabricated historical precision merely because today's schema is richer.
