@@ -146,16 +146,17 @@ key ring and trust-mode development cluster.
   refuses a folder somebody else already owns. The installation root and `program` are read-only to the API's
   account; the PostgreSQL binaries are read and execute for Users, because initdb and pg_ctl run with
   Administrators deny-only; `pgdata` is writable by the PostgreSQL account and Administrators only; every other
-  data folder (evidence, key ring, connector key, logs, backups and restore space) by the API's account and
-  Administrators only. Permissions are written and read by SID, never by parsing `icacls`, `schtasks` or `netsh`
-  text. Creating and locking `C:\AeroLink` itself is the installer's job (#1614 1.7).
+  data folder (evidence, connector key, logs, backups and restore space) by the API's account and Administrators
+  only; the key ring additionally grants SYSTEM full control for its machine-protected key material. Permissions
+  are written and read by SID, never by parsing `icacls`, `schtasks` or `netsh` text. Creating and locking
+  `C:\AeroLink` itself is the installer's job (#1614 1.7).
 - **Daily site backup.** The installer requests a versioned `Invoke-AeroLinkScheduledBackup.ps1` runner under
   `\AeroLink\`, using the API virtual account with no interactive password, a daily trigger (02:00 by default),
   start-when-available/ignore-overlap settings, and local retention of 15 days. The registration path refuses a
   missing runner before changing Task Scheduler and fails closed on registration refusal. The site-aware runner
-  and final #1649/B1/admin integration are still pending; this is the source contract, not evidence that a task
-  has been registered on the company host. The existing current-user workstation schedule below remains a
-  separate HOME/laptop convenience mode.
+  and B1/admin integration are present in the current source through #1649 and #1615 B1; this remains the source
+  contract, not evidence that a task has been registered on the company host. The existing current-user workstation
+  schedule below remains a separate HOME/laptop convenience mode.
 - **Readiness.** Unless `-NoStart` is supplied, the installer starts PostgreSQL and the API and invokes
   `Test-AeroLinkHost.ps1`. That check is read-only and reports `PASS`, `WARN`, `FAIL` and `SKIP`; a `FAIL` makes
   the result failed, while any `SKIP` makes the final qualification state `INCOMPLETE - rerun elevated before
