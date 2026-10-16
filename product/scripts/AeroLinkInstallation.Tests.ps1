@@ -491,6 +491,11 @@ try {
         $slashTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot ($siteRoot.TrimEnd('\') + '\') -ScriptRoot $backupScriptRoot
         Assert-True ($slashTask.Action.Arguments -notmatch '\\"' -and $slashTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot).TrimEnd('\'))`" -RetentionDays 15")) `
             "A trailing backslash on the installation root must not corrupt the scheduled task arguments: $($slashTask.Action.Arguments)"
+        # Authoring gate: production registration must refuse a missing versioned runner before Task Scheduler.
+        # The immutable pre-fix witness reaches Register-ScheduledTask with that runner absent; the task-definition
+        # assertions above cannot see this registration boundary, and the production guard needs no test-only seam.
+        Assert-Throws { Register-AeroLinkSiteBackupTask -InstallationRoot $siteRoot -ScriptRoot (Join-Path $siteFixture 'program\current\missing-scripts') } 'runner does not exist' `
+            'Registration must reject a missing versioned backup runner before touching Task Scheduler.'
         $backupOverrideBytes = [IO.File]::ReadAllBytes($siteConfig)
         $backupOverride = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
         $backupOverride.site | Add-Member -NotePropertyName runAsSid -NotePropertyValue 'S-1-5-32-545' -Force

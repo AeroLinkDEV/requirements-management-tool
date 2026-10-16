@@ -844,6 +844,10 @@ function Register-AeroLinkSiteBackupTask {
     if ($site.RunAsSid -ne (Get-AeroLinkServiceSid -ServiceName $site.ServiceName)) {
         throw "The declared API SID $($site.RunAsSid) is an override, not NT SERVICE\$($site.ServiceName). Remove runAsSid from the site declaration before registering the backup task."
     }
+    $runner = Join-Path ([IO.Path]::GetFullPath($ScriptRoot)) 'Invoke-AeroLinkScheduledBackup.ps1'
+    if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
+        throw "The site backup task runner does not exist at '$runner'; refusing before Task Scheduler registration."
+    }
     if (-not (Test-AeroLinkElevatedAdministrator)) { throw 'Registering the site backup task requires an elevated administrator.' }
     $definition = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $InstallationRoot -ScriptRoot $ScriptRoot -At $At
     $task = New-ScheduledTask -Action $definition.Action -Trigger $definition.Trigger -Principal $definition.Principal `

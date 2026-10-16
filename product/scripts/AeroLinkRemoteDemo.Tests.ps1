@@ -383,6 +383,55 @@ foreach ($marker in $markers) {
 $partialLines = @(($overlapText -split "`r?`n") | Where-Object { $_ -and $_ -notmatch '^\d{4}-\d{2}-\d{2}T[^]]+\] overlap-\d+-[0-9a-f]{32}$' })
 Assert-True ($partialLines.Count -eq 0) "Overlapping appends produced $($partialLines.Count) partial or interleaved line(s)."
 
+# --- #1614 D6: retiring the remote demo once the company host is live ---
+# Authoring gate: the regression is premature HOME destruction when ngrok is merely stopped. Existing tests only
+# covered the process check and path filtering; they did not require live SiteProduction readiness plus attendance.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemoRetirement.psm1') -Force
+$retireRoot = Join-Path $tempRoot 'retire'
+New-Item -ItemType Directory -Path $retireRoot -Force | Out-Null
+$retireConfig = Join-Path $retireRoot 'remote-demo.config.psd1'
+$retirePolicy = Join-Path $retireRoot 'policy.yml'
+$foreignPolicy = Join-Path $tempRoot 'elsewhere-policy.yml'
+ $foreignConfig = Join-Path $tempRoot 'elsewhere.config.psd1'
+foreach ($file in @($retireConfig, $retirePolicy, $foreignPolicy, $foreignConfig)) { Set-Content -LiteralPath $file -Value 'x' -Encoding ASCII }
+$goLiveProof = [pscustomobject]@{
+    Ready = $true; OperatorConfirmed = $true; PublicHttpsOrigin = 'https://aerolink.company.example:5443'
+    ObservedAtUtc = (Get-Date).ToUniversalTime().ToString('o'); ReadyStatus = 'ready'; ReadyDatabase = 'connected'
+    Identity = [pscustomobject]@{ Mode = 'SITE-PRODUCTION'; Classification = 'SiteProduction'; InstanceId = ([guid]::NewGuid().ToString()); InstanceLabel = 'SITE PRODUCTION' }
+}
+$preGoLive = Get-AeroLinkRemoteDemoRetirePlan -RegisteredTaskNames @('AeroLinkRemoteDemoRecovery') `
+    -ConfigPath $retireConfig -TrafficPolicyPath $retirePolicy -LocalRoot $retireRoot
+Assert-True ($preGoLive.Refused -and @($preGoLive.Actions).Count -eq 0 -and $preGoLive.Refusal -match 'go-live|confirmation') `
+    'Retire must refuse before any action when no verified company-host go-live proof is supplied.'
+$invalidOrigin = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin 'http://aerolink.company.example' -OperatorConfirmed
+Assert-True (-not $invalidOrigin.Ready -and $invalidOrigin.Refusal -match 'HTTPS') 'The D6 proof must reject a non-HTTPS company-host origin.'
+$plan = Get-AeroLinkRemoteDemoRetirePlan -RegisteredTaskNames @('AeroLinkRemoteDemoRecovery', 'AeroLinkProductionSourceReconcile', 'SomethingElse') `
+    -ConfigPath $retireConfig -TrafficPolicyPath $retirePolicy -BasicAuthSecretName 'aerolink-demo' -VaultName 'AeroLinkVault' -LocalRoot $retireRoot -GoLiveProof $goLiveProof
+$kinds = @($plan.Actions | ForEach-Object { "$($_.Kind)|$(Split-Path $_.Target -Leaf)" })
+Assert-True (-not $plan.Refused -and ($kinds -join ';') -eq 'UnregisterTask|AeroLinkRemoteDemoRecovery;UnregisterTask|AeroLinkProductionSourceReconcile;DeleteFile|remote-demo.config.psd1;DeleteFile|policy.yml;WriteMarker|retired.json') `
+    "Retire removes exactly the demo's two tasks, its config and its policy, then marks it retired: $($kinds -join '; ')"
+Assert-True ((@($plan.Operator) -join ' ') -match "Remove-Secret -Name 'aerolink-demo' -Vault 'AeroLinkVault'") 'Retire names the vault secret for the operator rather than deleting it.'
+Assert-True (@($plan.Launchers) -contains 'REDEPLOY_AEROLINK_PRODUCTION.bat' -and @($plan.Launchers) -contains 'START_AEROLINK_REMOTE_DEMO.bat') 'Retire lists every launcher the gate turns into a retired notice.'
+$foreign = Get-AeroLinkRemoteDemoRetirePlan -ConfigPath $retireConfig -TrafficPolicyPath $foreignPolicy -LocalRoot $retireRoot -GoLiveProof $goLiveProof
+Assert-True ($foreign.Refused -and @($foreign.Actions).Count -eq 0 -and (Test-Path -LiteralPath $foreignPolicy)) 'A traffic policy outside the demo''s folder refuses the whole plan and remains untouched.'
+$foreignConfigPlan = Get-AeroLinkRemoteDemoRetirePlan -ConfigPath $foreignConfig -TrafficPolicyPath $retirePolicy -LocalRoot $retireRoot -GoLiveProof $goLiveProof
+Assert-True ($foreignConfigPlan.Refused -and @($foreignConfigPlan.Actions).Count -eq 0 -and (Test-Path -LiteralPath $foreignConfig)) 'A configuration outside the demo''s folder refuses the whole plan and remains untouched.'
+$running = Get-AeroLinkRemoteDemoRetirePlan -ConfigPath $retireConfig -LocalRoot $retireRoot -NgrokRunning $true -GoLiveProof $goLiveProof
+Assert-True ($running.Refused -and $running.Refusal -match 'Stop the remote demo first') 'Retire refuses while ngrok is running.'
+$threw = $false
+try { Invoke-AeroLinkRemoteDemoRetirePlan -Plan $running } catch { $threw = $true }
+Assert-True $threw 'A refused retire plan cannot be applied.'
+Assert-True ($null -eq (Get-AeroLinkRemoteDemoRetirement -LocalRoot $retireRoot)) 'Until retired, the demo reports no retirement.'
+# Applying a plan with no tasks: files deleted, marker written, and the marker is what the launchers read.
+$logPath = Join-Path $retireRoot 'logs\remote-demo.log'
+New-Item -ItemType Directory -Path (Split-Path $logPath -Parent) -Force | Out-Null
+Set-Content -LiteralPath $logPath -Value 'retirement evidence' -Encoding ASCII
+$fileOnly = Get-AeroLinkRemoteDemoRetirePlan -ConfigPath $retireConfig -TrafficPolicyPath $retirePolicy -LocalRoot $retireRoot -GoLiveProof $goLiveProof
+Invoke-AeroLinkRemoteDemoRetirePlan -Plan $fileOnly
+Assert-True (-not (Test-Path -LiteralPath $retireConfig) -and -not (Test-Path -LiteralPath $retirePolicy) -and (Test-Path -LiteralPath $foreignPolicy) -and (Test-Path -LiteralPath $logPath)) 'Retire deletes the demo''s config and policy, and preserves foreign files and logs.'
+$retirement = Get-AeroLinkRemoteDemoRetirement -LocalRoot $retireRoot
+Assert-True ($null -ne $retirement -and $retirement.goLiveProof.PublicHttpsOrigin -eq $goLiveProof.PublicHttpsOrigin -and $retirement.goLiveProof.Identity.Classification -eq 'SiteProduction') 'After Retire the marker preserves the public HTTPS and production identity evidence.'
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Remote-demo operator regression FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
