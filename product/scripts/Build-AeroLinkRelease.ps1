@@ -137,6 +137,10 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $app 'AeroLink.Api.exe'))) { throw 'dotnet publish produced no AeroLink.Api.exe.' }
     # A Production package carries no Development settings (demo data, insecure cookies and webhooks).
     Remove-Item -LiteralPath (Join-Path $app 'appsettings.Development.json') -ErrorAction SilentlyContinue
+    # What the publish actually ships, not what the project asked for: refuses a vulnerable Pkcs copy and reads the
+    # bundled runtime for the manifest.
+    $runtime = Assert-AeroLinkReleaseRuntime -AppRoot $app
+    Write-Host "Bundled runtime: $($runtime.Frameworks -join ', '); System.Security.Cryptography.Pkcs $($runtime.PkcsFileVersion)"
 
     $wwwroot = Join-Path $app 'wwwroot'
     if (Test-Path -LiteralPath $wwwroot) { throw 'dotnet publish produced a wwwroot of its own; the package would mix two clients.' }
@@ -157,7 +161,7 @@ try {
     # 4-6. Manifest, zip, detached signature.
     Write-Host '==> manifest, zip and signature'
     $package = New-AeroLinkReleasePackage -StagingRoot $staging -OutputDirectory $output -Version $version -SourceSha $sourceSha `
-        -LatestMigration $latestMigration -SigningCertificate $certificate -SourcePosture $sourcePosture
+        -LatestMigration $latestMigration -SigningCertificate $certificate -SourcePosture $sourcePosture -BundledRuntime $runtime.Frameworks
 
     # The package is not finished until the host's own verifier accepts it.
     [IO.File]::WriteAllBytes($publicCertificate, $certificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
