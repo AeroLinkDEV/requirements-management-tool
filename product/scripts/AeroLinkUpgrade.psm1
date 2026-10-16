@@ -254,6 +254,9 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         [scriptblock]$CleanupRunner,
         # Stands current AeroLink up against the UPGRADED clone and proves it works there.
         [scriptblock]$CurrentCodeValidator,
+        # The site updater uses this hook to switch the package into current immediately before the real
+        # maintenance command. That prevents an old binary from being started against a changed schema.
+        [scriptblock]$BeforeRealUpgrade,
         [int]$ValidationApiPort = 5093
     )
     $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot
@@ -366,6 +369,7 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         }
     }
 
+    if ($BeforeRealUpgrade) { & $BeforeRealUpgrade }
     Write-Host '      Upgrading the local database...' -ForegroundColor Cyan
     $realUpgrade = if ($UpgradeRunner) { & $UpgradeRunner $null $null $ApiExecutable } else {
         $action = { Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -ApiExecutable $ApiExecutable -Arguments @('maintenance', 'upgrade', '--apply') -DotnetPath $DotnetPath }
@@ -374,12 +378,12 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
     if ($realUpgrade.ExitCode -ne 0) {
         $reason = if ($realUpgrade.StdOut) { ($realUpgrade.StdOut -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 12) -join ' ' } else { $realUpgrade.StdErr }
         return [pscustomobject]@{
-            Validated = $true; Applied = $false; Archive = $archive
+            Validated = $true; Applied = $false; DatabaseModified = $true; Archive = $archive
             Detail = "The upgrade passed on the isolated copy but failed on the local database. The verified pre-upgrade backup is retained at $archive. $reason"
         }
     }
     return [pscustomobject]@{
-        Validated = $true; Applied = $true; Archive = $archive
+        Validated = $true; Applied = $true; DatabaseModified = $true; Archive = $archive
         Detail = "The upgrade was validated on an isolated copy and then applied. The pre-upgrade backup is retained at $archive."
     }
 }
