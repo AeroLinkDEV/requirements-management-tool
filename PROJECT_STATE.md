@@ -736,7 +736,13 @@ When the source discriminator differs from canonical `AeroLink`, the exact captu
 temporary legacy read provider for existing durable payloads; new values use the canonical provider. Immutable
 notification history, controlled signatures and evidence are not rewritten. Sessions and other time-limited tokens
 are reissued, while connector key/deployment identity and certificate private-key ACLs remain separate attended
-transfer and qualification steps.
+transfer and qualification steps. Before export, the read-only compatibility reader must restore the verified backup
+into an owned disposable database and unprotect the complete compiled catalog of durable protected fields in memory.
+It emits only IDs, ciphertext digests, counts and pass/fail statuses, binds the source and reader identities plus the
+ring/configuration/discriminator/archive evidence, and requires an unchanged ring digest. A candidate discriminator
+is compatibility evidence only; serialized decryptors remain authoritative and unknown Windows DPAPI scope is not
+guessed. Incomplete, conflicting or unsupported categories refuse transfer, while ephemeral tokens and external
+protected stores remain reissue/separate attended gates.
 
 See [product/docs/OPERATIONS.md](product/docs/OPERATIONS.md) and [docs/REMOTE_DEMO_OPERATOR.md](docs/REMOTE_DEMO_OPERATOR.md).
 

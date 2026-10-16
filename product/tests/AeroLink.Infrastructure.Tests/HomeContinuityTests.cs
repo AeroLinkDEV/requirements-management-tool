@@ -1,16 +1,23 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.AccessControl;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Xml.Linq;
+using AeroLink.Domain.Integrations;
+using AeroLink.Domain.Identity;
+using AeroLink.Domain.Programs;
 using AeroLink.ConnectorProtocol;
+using AeroLink.Infrastructure.Persistence;
 using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Tests;
 
@@ -65,6 +72,108 @@ public sealed class HomeContinuityTests
             HomeContinuityKeyTransfer.ValidateDestinationConfiguration(configuration, root));
         Assert.Contains("AeroLink", error.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Authoring gate: this owns the complete source-compatible catalog contract. The regression is a reader
+    /// that accepts a caller-selected subset or emits a successful result without unprotecting every durable
+    /// field. Existing transfer tests only exercise a synthetic purpose and do not query the restored schema;
+    /// this owner crosses the real EF entities, exact purposes, prefix classification, and no-write boundary.
+    /// </summary>
+    [Fact]
+    public async Task Compatibility_reader_unprotects_complete_catalog_without_writing_ring_or_secrets()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-compatibility-reader-{Guid.NewGuid():N}");
+        var ring = Path.Combine(root, "ring");
+        var contentRoot = Path.Combine(root, "content");
+        Directory.CreateDirectory(contentRoot);
+        var executable = Environment.ProcessPath!;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        try
+        {
+            Directory.CreateDirectory(ring);
+            const string discriminator = "captured-source-content-root";
+            using (var seedServices = BuildFileServices(ring, discriminator))
+            {
+                var seedManager = seedServices.GetRequiredService<IKeyManager>();
+                var created = seedManager.CreateNewKey(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+                Assert.NotEqual(Guid.Empty, created.KeyId);
+            }
+
+            using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(ring, discriminator, "Unprotected");
+            var sourceProvider = sourceServices.GetRequiredService<IDataProtectionProvider>();
+            var mfa = "dp:v1:" + sourceProvider.CreateProtector("AeroLink.Identity.MfaSecret.v1").Protect("synthetic-mfa-secret");
+            var webhook = sourceProvider.CreateProtector("AeroLink.Webhooks.SigningSecret.v1").Protect("synthetic-webhook-secret");
+            var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var user = new UserAccount("compatibility", "Compatibility", "compatibility@example.test", "password-hash", DateTimeOffset.UtcNow);
+            db.UserAccounts.Add(user);
+            db.UserMfaEnrollments.Add(new UserMfaEnrollment(user.Id, mfa, "test", DateTimeOffset.UtcNow));
+            var program = new ProgramRecord("Compatibility", "COMPAT");
+            var project = new ProjectRecord(program.Id, "Compatibility project", "AeroLink");
+            db.Programs.Add(program);
+            db.Projects.Add(project);
+            db.WebhookSubscriptions.Add(new WebhookSubscription(project.Id, "test", "https://example.test/hook", "[]", webhook, "test", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+
+            var binding = CompatibilityBinding(root, ring, contentRoot, executable,
+                HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring), discriminator);
+            var before = HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring);
+            var receipt = await HomeContinuityCompatibilityReader.ProbeAsync(db, sourceServices, binding);
+            var after = HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring);
+
+            Assert.Equal(HomeContinuityCompatibilityReader.CompatibilityProof, receipt.Status);
+            Assert.Equal(HomeContinuityCompatibilityReader.ProtectedFieldCatalog.Count, receipt.ProtectedCategories.Count);
+            Assert.Equal(before, receipt.RingManifestSha256Before);
+            Assert.Equal(after, receipt.RingManifestSha256After);
+            Assert.Equal("passed", receipt.ProtectedCategories.Single(x => x.Definition.Category == "mfa-secret").Status);
+            Assert.Equal("passed", receipt.ProtectedCategories.Single(x => x.Definition.Category == "webhook-secret").Status);
+            Assert.All(receipt.ProtectedCategories.Where(x => x.Definition.Category is not "mfa-secret" and not "webhook-secret"),
+                category => Assert.Equal(HomeContinuityCompatibilityReader.NotApplicable, category.Status));
+            Assert.DoesNotContain("synthetic-mfa-secret", JsonSerializer.Serialize(receipt), StringComparison.Ordinal);
+            Assert.Contains(receipt.ReissueCategories, x => x.StartsWith("user_sessions.TokenHash", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Compatibility_reader_refuses_persistent_database_port_before_reads()
+    {
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite("Data Source=:memory:").Options;
+        using var db = new AeroLinkDbContext(options);
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            HomeContinuityCompatibilityReader.AssertDisposableRestoredDatabase(db, "aerolink_restore_validation", 54329));
+        Assert.Contains("54329", error.Message, StringComparison.Ordinal);
+    }
+
+    private static HomeContinuityCompatibilityBinding CompatibilityBinding(
+        string root, string ring, string contentRoot, string executable, string ringDigest, string discriminator) =>
+        new(
+            "source-installation",
+            Guid.NewGuid(),
+            Process.GetCurrentProcess().Id,
+            Process.GetCurrentProcess().StartTime.ToUniversalTime(),
+            executable,
+            Sha256File(executable),
+            contentRoot,
+            "S-1-5-21-123-456-789-1001",
+            new string('a', 64),
+            ring,
+            ringDigest,
+            discriminator,
+            HomeContinuityCompatibilityReader.UnknownProtectionScope,
+            "Unprotected",
+            "verified-backup-1",
+            new string('b', 64),
+            "aerolink_restore_validation",
+            55928,
+            new string('c', 64),
+            HomeContinuityCompatibilityReader.ExplicitRingRead,
+            HomeContinuityCompatibilityReader.ExternalProtectedCategories.ToDictionary(x => x, _ => "absent"));
 
     [WindowsFact]
     public void Receipt_bound_abort_refuses_mismatch_and_cleans_only_the_owned_empty_stage()

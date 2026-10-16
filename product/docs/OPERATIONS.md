@@ -864,6 +864,28 @@ the transfer must never infer it from a guessed HOME path or application name.
 
 The maintenance executable provides the bounded transfer boundary:
 
+Before exporting, run the read-only compatibility probe against the verified backup restored into an owned,
+disposable database. The probe owns a compiled catalog of every durable protected field and purpose; callers cannot
+provide a partial canary list. It reads and unprotects the genuine restored ciphertexts in memory, reports only
+record identifiers, ciphertext digests, counts and pass/fail status, and verifies that the key-ring digest is unchanged
+before and after the read. The receipt also binds the source installation, instance, process/image tuple, source
+content/configuration/SID, discriminator and provider evidence, verified archive, disposable restore and reader
+identity. `candidate-discriminator-compatibility` is compatibility evidence, never a claim that the reader is the old
+process; serialized decryptors remain authoritative and an unknown Windows DPAPI scope stays unknown. Missing,
+conflicting or unsupported categories refuse the proof. Browser/session/antiforgery and other time-limited tokens are
+reissued or classified not applicable. Connector, notification-authority and other external protected stores remain
+separate attended gates.
+
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity probe `
+  --binding D:\transfer\home-compatibility-binding.json `
+  --receipt D:\transfer\home-compatibility-receipt.json
+```
+
+Only a `compatibility-proof` receipt is eligible for transfer. A metadata-only, unproven, refused or incomplete
+receipt blocks source retirement and HOME wipe. The probe is read-only and does not qualify the implicit Windows
+profile fallback or the real source values; those remain attended evidence requirements.
+
 ```powershell
 dotnet AeroLink.Api.dll maintenance home-continuity export `
   --package D:\transfer\aerolink-home-continuity-package `
@@ -876,7 +898,8 @@ dotnet AeroLink.Api.dll maintenance home-continuity export `
   --connector-key <connector-key-id> `
   --target-application AeroLink `
   --certificate D:\transfer\destination-transport.cer `
-  --source-ring D:\captured\source-key-ring
+  --source-ring D:\captured\source-key-ring `
+  --compatibility-receipt D:\transfer\home-compatibility-receipt.json
 ```
 
 ```powershell
@@ -897,6 +920,8 @@ dotnet AeroLink.Api.dll maintenance home-continuity apply `
 
 Export constructs a separate source Data Protection provider against the exact captured ring, discriminator and
 captured protection mode; it never combines a separately supplied ring with the maintenance host's default manager.
+The export refuses unless the complete compatibility-proof receipt is bound to this source installation,
+discriminator, ring and verified backup; a candidate compatibility proof never claims old-process identity.
 It verifies the final HOME backup archive and its SHA-256 sidecar, reads the connector PEM only in memory to record
 its public fingerprint/key ID, and writes an RSA-CMS certificate-encrypted connector envelope alongside the
 certificate-wrapped Data Protection descriptors. The package manifest contains exact key IDs, dates, revocations,

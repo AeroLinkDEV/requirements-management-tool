@@ -5,6 +5,7 @@ using AeroLink.Infrastructure.Persistence;
 using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using System.Data.Common;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -39,7 +40,7 @@ namespace AeroLink.Api;
 ///       --source-discriminator &lt;exact-value&gt; --source-protection &lt;provider&gt; --verified-backup &lt;id&gt;
 ///       --connector-deployment &lt;id&gt; --connector-key &lt;id&gt; --target-application AeroLink
 ///       --verified-backup-archive &lt;verified-backup.zip&gt;
-///       --certificate &lt;public-cert.pem|cer&gt; [--source-ring &lt;captured-directory&gt;]
+///       --certificate &lt;public-cert.pem|cer&gt; --source-ring &lt;captured-directory&gt; --compatibility-receipt &lt;receipt.json&gt;
 ///       Exports an identity-bound, certificate-wrapped ring package without printing key material.
 ///
 ///   maintenance home-continuity apply --package &lt;directory&gt; --destination-ring &lt;new-directory&gt;
@@ -55,6 +56,10 @@ namespace AeroLink.Api;
 ///       --verified-backup &lt;sha256&gt; --connector-deployment &lt;id&gt; --connector-key &lt;id&gt;
 ///       --connector-public-fingerprint &lt;sha256&gt; --verified-backup-archive-sha256 &lt;sha256&gt;
 ///       Completes or compensates only the exact receipt-bound partial transfer; mismatches refuse all cleanup.
+///
+///   maintenance home-continuity probe --binding &lt;binding.json&gt; --receipt &lt;receipt.json&gt;
+///       Reads only an already restored disposable database and a frozen source ring. The compiled
+///       protected-field catalog cannot be supplied or narrowed by the caller.
 /// </summary>
 public static class AeroLinkMaintenanceHost
 {
@@ -71,9 +76,10 @@ public static class AeroLinkMaintenanceHost
             Console.WriteLine("  maintenance analyze [--json]");
             Console.WriteLine("  maintenance upgrade [--apply]");
             Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
-            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory>");
+            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory> --compatibility-receipt <receipt.json>");
             Console.WriteLine("  maintenance home-continuity apply --package <directory> --destination-ring <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256> --manifest-sha256 <hash> --certificate <cert.pem|pfx> [--certificate-key <private-key.pem>]");
             Console.WriteLine("  maintenance home-continuity recover --action complete|abort --package <directory> --destination-ring <directory> --package-id <guid> --manifest-sha256 <hash> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256>");
+            Console.WriteLine("  maintenance home-continuity probe --binding <binding.json> --receipt <receipt.json>");
             return 0;
         }
 
@@ -314,8 +320,39 @@ public static class AeroLinkMaintenanceHost
             "export" => await ExportHomeContinuityAsync(services, args),
             "apply" => await ApplyHomeContinuityAsync(services, args),
             "recover" => await RecoverHomeContinuityAsync(services, args),
-            _ => Fail("Use 'maintenance home-continuity export', 'maintenance home-continuity apply' or 'maintenance home-continuity recover'."),
+            "probe" => await ProbeHomeContinuityAsync(services, args),
+            _ => Fail("Use 'maintenance home-continuity export', 'maintenance home-continuity apply', 'maintenance home-continuity recover' or 'maintenance home-continuity probe'."),
         };
+    }
+
+    private static async Task<int> ProbeHomeContinuityAsync(IServiceProvider services, string[] args)
+    {
+        var bindingPath = RequiredValue(args, "--binding");
+        var receiptPath = RequiredValue(args, "--receipt");
+        if (!File.Exists(bindingPath)) return Fail("The compatibility binding file does not exist.");
+        var binding = JsonSerializer.Deserialize<HomeContinuityCompatibilityBinding>(
+            await File.ReadAllTextAsync(bindingPath), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        if (binding is null) return Fail("The compatibility binding file is invalid.");
+        HomeContinuityCompatibilityReader.ValidateBinding(binding);
+        using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(
+            binding.SourceRingDirectory, binding.SourceDiscriminator, binding.SourceProviderSelection);
+        try
+        {
+            var db = services.GetRequiredService<AeroLinkDbContext>();
+            var receipt = await HomeContinuityCompatibilityReader.ProbeAsync(db, sourceServices, binding);
+            var directory = Path.GetDirectoryName(Path.GetFullPath(receiptPath));
+            if (string.IsNullOrWhiteSpace(directory)) return Fail("The compatibility receipt path has no directory.");
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(receiptPath, JsonSerializer.Serialize(receipt,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+            Console.WriteLine($"HOME CONTINUITY COMPATIBILITY STATUS: {receipt.Status}");
+            Console.WriteLine($"Protected categories: {receipt.ProtectedCategories.Count}; external categories: {receipt.ExternalCategories.Count}");
+            return receipt.Status == HomeContinuityCompatibilityReader.CompatibilityProof ? 0 : 2;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DbException)
+        {
+            return Fail($"HOME continuity compatibility probe refused: {ex.Message}");
+        }
     }
 
     private static async Task<int> ExportHomeContinuityAsync(IServiceProvider services, string[] args)
@@ -331,9 +368,17 @@ public static class AeroLinkMaintenanceHost
         var targetApplication = RequiredValue(args, "--target-application");
         var certificatePath = RequiredValue(args, "--certificate");
         var sourceRingPath = RequiredValue(args, "--source-ring");
+        var compatibilityReceiptPath = RequiredValue(args, "--compatibility-receipt");
         if (!string.Equals(targetApplication, HomeContinuityKeyTransfer.CanonicalTargetApplicationName, StringComparison.Ordinal))
             return Fail("The continuity destination application must be exactly 'AeroLink'.");
         var backupHash = VerifySourceBackup(verifiedBackupArchive, verifiedBackup, sourceInstallation);
+        var compatibilityReceipt = ReadCompatibilityReceipt(compatibilityReceiptPath);
+        if (!string.Equals(compatibilityReceipt.Status, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal)
+            || !string.Equals(compatibilityReceipt.Binding.SourceInstallationId, sourceInstallation, StringComparison.Ordinal)
+            || !string.Equals(compatibilityReceipt.Binding.VerifiedBackupArchiveSha256, backupHash, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(compatibilityReceipt.Binding.SourceDiscriminator, sourceDiscriminator, StringComparison.Ordinal)
+            || !string.Equals(Path.GetFullPath(compatibilityReceipt.Binding.SourceRingDirectory), Path.GetFullPath(sourceRingPath), StringComparison.OrdinalIgnoreCase))
+            return Fail("The continuity export requires a complete compatibility-proof receipt bound to this source ring, installation, discriminator and verified backup.");
         var configuration = services.GetRequiredService<IConfiguration>();
         var connector = ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation);
         using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
@@ -351,6 +396,14 @@ public static class AeroLinkMaintenanceHost
         Console.WriteLine("Key descriptors and protected values were not printed or written in plaintext.");
         await Task.CompletedTask;
         return 0;
+    }
+
+    private static HomeContinuityCompatibilityReceipt ReadCompatibilityReceipt(string path)
+    {
+        if (!File.Exists(path)) throw new InvalidOperationException("The compatibility receipt file does not exist.");
+        var receipt = JsonSerializer.Deserialize<HomeContinuityCompatibilityReceipt>(
+            File.ReadAllText(path), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        return receipt ?? throw new InvalidOperationException("The compatibility receipt file is invalid.");
     }
 
     private static async Task<int> ApplyHomeContinuityAsync(IServiceProvider services, string[] args)
