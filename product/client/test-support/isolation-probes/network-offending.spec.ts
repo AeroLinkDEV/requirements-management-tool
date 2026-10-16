@@ -53,4 +53,5 @@ test('a fulfilled forbidden request still fails fixture teardown', async ({ page
   await page.goto('/')
   expect(await page.evaluate(() => fetch('/api/mocked').then(response => response.json()).catch(() => null))).toEqual({ mocked: true })
   expect(nativeServer.apiHits).toBe(0)
+  console.log('mocked-response proof: fulfilled response verified; API=0')
 })
