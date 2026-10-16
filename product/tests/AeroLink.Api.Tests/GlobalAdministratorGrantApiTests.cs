@@ -81,6 +81,12 @@ public sealed class GlobalAdministratorGrantApiTests
         Assert.Equal(HttpStatusCode.Conflict, disable.StatusCode);
         Assert.Contains("built_in_administrator_protected", await disable.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.OK, (await administrator.GetAsync("/api/admin/users")).StatusCode);
+
+        // The built-in account may disable itself once another active administrator exists.
+        using var selfDisable = await administrator.PostAsJsonAsync($"/api/admin/users/{adminId}/state", new { enabled = false });
+        Assert.Equal(HttpStatusCode.NoContent, selfDisable.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await administrator.GetAsync("/api/admin/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await maintainer.GetAsync("/api/admin/users")).StatusCode);
     }
 
     [Fact]
@@ -179,13 +185,17 @@ public sealed class GlobalAdministratorGrantApiTests
     }
 
     [Fact]
-    public async Task The_last_active_administrator_cannot_be_revoked_even_by_themselves()
+    public async Task The_last_active_administrator_cannot_be_revoked_or_disabled_even_by_themselves()
     {
         using var factory = new AeroLinkApiFactory();
         using var administrator = factory.CreateClient();
         await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(administrator);
         var adminId = await UserIdAsync(factory, "admin");
 
+        using var selfDisable = await administrator.PostAsJsonAsync($"/api/admin/users/{adminId}/state", new { enabled = false });
+        Assert.Equal(HttpStatusCode.Conflict, selfDisable.StatusCode);
+        Assert.Contains("last_global_administrator", await selfDisable.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, (await administrator.GetAsync("/api/admin/users")).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await administrator.DeleteAsync($"/api/admin/users/{adminId}/global-administrator")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await administrator.GetAsync("/api/admin/users")).StatusCode);
 

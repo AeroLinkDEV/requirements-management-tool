@@ -84,8 +84,8 @@ public static class AdministrationEndpoints
             // #1639: the session said administrator before this transaction began; a revoke committed since
             // then must win, or a disable racing a revoke can leave no active administrator.
             if (!await StillAdministersAsync(db, actor.Id, ct)) return Results.Forbid();
-            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound(); if (user.Id == actor.Id && !request.Enabled) return Results.BadRequest(new { error = "You cannot disable your own active account." });
-            if (!request.Enabled && user.IsBuiltInAdministrator)
+            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound(); if (user.Id == actor.Id && !request.Enabled && !user.IsBuiltInAdministrator) return Results.BadRequest(new { error = "You cannot disable your own active account." });
+            if (!request.Enabled && user.IsBuiltInAdministrator && user.Id != actor.Id)
                 return BuiltInAdministratorProtected();
             if (!request.Enabled && user.IsGlobalAdministrator && user.State == AccountState.Active && !await OtherActiveAdministratorExistsAsync(db, user.Id, ct))
                 return LastAdministrator();
