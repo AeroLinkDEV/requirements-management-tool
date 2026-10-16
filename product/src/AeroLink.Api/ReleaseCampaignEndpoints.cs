@@ -300,7 +300,7 @@ public static class ReleaseCampaignEndpoints
             catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Results.Conflict(new { error = "The release campaign changed concurrently. Reload before cancelling review.", code = "release_campaign_conflict" }); }
         });
 
-        app.MapPost("/api/release-campaigns/{id:guid}/approve", async (Guid id, ReleaseSignatureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ReleaseExecutionService execution, CancellationToken ct) =>
+        app.MapPost("/api/release-campaigns/{id:guid}/approve", async (Guid id, ReleaseSignatureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, SignatureReauthenticationService reauthentication, ReleaseExecutionService execution, CancellationToken ct) =>
         {
             var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
             await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
@@ -315,7 +315,9 @@ public static class ReleaseCampaignEndpoints
             var currentHash=await execution.ComputeRecordedReviewManifestHashAsync(id,ct);
             if(!string.Equals(currentHash,campaign.ReleaseHash,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{error="The release package changed after review began. Cancel and restart release review against the current manifest.",code="release_manifest_changed",reviewedManifestHash=campaign.ReleaseHash,currentManifestHash=currentHash});
-            var actor = freshActor; if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+            var actor = freshActor; var authentication = await reauthentication.AuthenticateAsync(actor.Id, request.Password,
+                http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct);
+            if (authentication is null) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
             var programId = await db.Projects.AsNoTracking().Where(x => x.Id == campaign.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
             try
             {
@@ -341,12 +343,13 @@ public static class ReleaseCampaignEndpoints
                 var position = active.Position;
                 var complete = campaign.Approve(actor.UserName, now);
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ReleaseCampaign", campaign.Id, campaign.Name, "ApproveRelease", request.Meaning, campaign.ReleaseHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
-                    reviewStepPosition: position, reviewCycle: active.Cycle, rationale: request.Rationale ?? ""));
+                    reviewStepPosition: position, reviewCycle: active.Cycle, rationale: request.Rationale ?? "",
+                    authenticationMethod: authentication.AuthenticationMethod));
                 await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Ok(new { complete, manifestHash = campaign.ReleaseHash });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Results.Conflict(new { error = "The release approval changed concurrently. Reload the release package before deciding.", code = "approval_step_conflict" }); }
-        });
+        }).RequireRateLimiting("signature-authentication");
 
         app.MapPost("/api/release-campaigns/{id:guid}/release", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ReleaseReadinessService readiness, ReleaseExecutionService execution, CancellationToken ct) =>
         {

@@ -20,13 +20,13 @@ internal static class NotificationOperationsEndpoints
             => await CommandAsync(http, () => operations.ControlAsync(http.UserAccount().UserName, request, ct)));
         group.MapGet("/notifications/operations/{operationKey:guid}", async (Guid operationKey, string family, HttpContext http, NotificationOperationsService operations, CancellationToken ct) =>
         {
-            if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+            if (!http.UserAccount().IsSystemAdministrator) return Results.Forbid();
             var receipt = await operations.LookupAsync(http.UserAccount().UserName, family, operationKey, ct);
             return receipt is null ? Results.NotFound() : Results.Ok(receipt);
         });
         group.MapGet("/notifications/generations/{id:guid}/attempts", async (Guid id, HttpContext http, AeroLinkDbContext db, NotificationInstallationAuthority authority, int page = 1, int pageSize = 25, CancellationToken ct = default) =>
         {
-            if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+            if (!http.UserAccount().IsSystemAdministrator) return Results.Forbid();
             if (!await db.NotificationDeliveryGenerations.AnyAsync(x => x.Id == id, ct)) return Results.NotFound();
             page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
             var total = await db.NotificationPhysicalAttempts.CountAsync(x => x.GenerationId == id, ct);
@@ -38,7 +38,7 @@ internal static class NotificationOperationsEndpoints
     }
     private static async Task<IResult> CommandAsync(HttpContext http, Func<Task<NotificationOperationReceipt>> command)
     {
-        if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+        if (!http.UserAccount().IsSystemAdministrator) return Results.Forbid();
         try { return Results.Ok(await command()); }
         catch (NotificationOperationConflictException ex) { return Results.Conflict(new { error = ex.Message, code = "operation_conflict" }); }
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "Notification state changed; recover the original operation or refresh.", code = "stale_version" }); }
@@ -48,7 +48,7 @@ internal static class NotificationOperationsEndpoints
         NotificationSettingsResolver resolver, NotificationInstallationAuthority authority, int page = 1, int pageSize = 25,
         string? state = null, int heldPage = 1, int heldPageSize = 25, CancellationToken ct = default)
     {
-        if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+        if (!http.UserAccount().IsSystemAdministrator) return Results.Forbid();
         page = Math.Clamp(page, 1, 1_000_000); pageSize = Math.Clamp(pageSize, 1, 100);
         heldPage = Math.Clamp(heldPage, 1, 1_000_000); heldPageSize = Math.Clamp(heldPageSize, 1, 100);
         var effective = await resolver.ResolveAsync(ct);

@@ -51,7 +51,29 @@ function Get-AeroLinkInstallationPointerPath {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ProductRoot)
-    return Join-Path (Join-Path $ProductRoot '.local') $script:AeroLinkInstallationPointerName
+    $root = [IO.Path]::GetFullPath($ProductRoot).TrimEnd('\', '/')
+    # A signed site release is laid out as <installation>\program\versions\<version>.
+    # Its installation pointer is mutable installation metadata, so it belongs beside versions,
+    # outside the signed release tree. Source checkouts keep the historical product\\.local path.
+    $versionsRoot = Split-Path $root -Parent
+    $programRoot = Split-Path $versionsRoot -Parent
+    $isSignedVersionRoot = ([string]::Equals((Split-Path $versionsRoot -Leaf), 'versions', [StringComparison]::OrdinalIgnoreCase)) -and
+        ([string]::Equals((Split-Path $programRoot -Leaf), 'program', [StringComparison]::OrdinalIgnoreCase)) -and
+        (Test-Path -LiteralPath (Join-Path $root 'manifest.json') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $root 'app\AeroLink.Api.exe') -PathType Leaf)
+    $currentParent = Split-Path $root -Parent
+    $currentItem = if ([string]::Equals((Split-Path $root -Leaf), 'current', [StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals((Split-Path $currentParent -Leaf), 'program', [StringComparison]::OrdinalIgnoreCase)) {
+        Get-Item -LiteralPath $root -Force -ErrorAction SilentlyContinue
+    } else { $null }
+    $isCurrentAlias = $null -ne $currentItem -and $currentItem.PSIsContainer -and
+        -not [string]::IsNullOrWhiteSpace([string]$currentItem.Target)
+    $pointerRoot = if ($isSignedVersionRoot) {
+        $programRoot
+    } elseif ($isCurrentAlias) {
+        $currentParent
+    } else { $root }
+    return Join-Path (Join-Path $pointerRoot '.local') $script:AeroLinkInstallationPointerName
 }
 
 function Get-AeroLinkInstallationRoot {
@@ -163,11 +185,11 @@ function Set-AeroLinkInstallationPointer {
     if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
         throw "Refusing to point at an installation root that does not exist: $resolved"
     }
-    $localRoot = Join-Path $ProductRoot '.local'
-    if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) {
-        New-Item -ItemType Directory -Path $localRoot -Force | Out-Null
-    }
     $pointerPath = Get-AeroLinkInstallationPointerPath -ProductRoot $ProductRoot
+    $pointerDirectory = Split-Path -Parent $pointerPath
+    if (-not (Test-Path -LiteralPath $pointerDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $pointerDirectory -Force | Out-Null
+    }
     [pscustomobject]@{
         installationRoot = $resolved
         note             = $Note

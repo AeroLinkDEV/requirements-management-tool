@@ -41,7 +41,9 @@ if ($site) {
 }
 $declaredPostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort
 if (-not $PostgresPort) { $PostgresPort = $declaredPostgresPort }
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
+# Keep an already-loaded transition module when the updater invokes this helper in-process so the helper
+# can reuse the updater's authenticated outer lease. A fresh process still imports the module normally.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1')
 $transitionLease = $null
 $backupLock = $null
 $operationError = $null

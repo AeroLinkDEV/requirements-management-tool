@@ -109,7 +109,8 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         var account = new UserAccount("pg-finalizer", "PG Finalizer", "pg-finalizer@example.test", "fixture-hash", DateTimeOffset.UtcNow);
         db.Add(account);
         await db.SaveChangesAsync();
-        var actor = new AuthenticatedUser(account.Id, account.UserName, account.DisplayName, account.Email, true, []);
+        var actor = new AuthenticatedUser(account.Id, account.UserName, account.DisplayName, account.Email,
+            IsAdministrator: true, Programs: [], IsSystemAdministrator: true);
         var service = scope.ServiceProvider.GetRequiredService<ProjectSetupService>();
         var draft = await service.CreateAsync(actor, "Durable Finalization", CancellationToken.None);
         var rules = ProjectSetupReviewRules.SuggestedJson("{}", draft.ProjectId);

@@ -182,6 +182,23 @@ try {
         "The clone's evidence must live under the isolated restore-validation tree, not the live evidence store. It was: $($cloneEvidence[0])"
     Assert-True ($evidenceRoots[-1] -eq '') 'The real upgrade uses the installation''s own evidence root, not an isolated one.'
 
+    # Authoring gate: the package executable is the identity under test for a site update. The regression is a
+    # clone path that accidentally rebuilds source or validates with a stale binary; existing ordering tests do
+    # not observe executable propagation. The runner seams record the production boundary without starting a host.
+    $packageExecutable = 'C:\AeroLink\AeroLink Production\program\versions\2.0.0\app\AeroLink.Api.exe'
+    $seenExecutables = [System.Collections.Generic.List[string]]::new()
+    $packageUpgrade = { param($ConnectionString, $EvidenceRoot, $Executable) $seenExecutables.Add("upgrade:$Executable"); [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' } }.GetNewClosure()
+    $packageAnalysis = { param($ConnectionString, $EvidenceRoot, $Executable) $seenExecutables.Add("analysis:$Executable"); [pscustomobject]@{ Status = 'current'; Analysis = $null; ExitCode = 0; Detail = '' } }.GetNewClosure()
+    $packageReadiness = { param($ConnectionString, $Executable) $seenExecutables.Add("readiness:$Executable"); [pscustomobject]@{ Passed = $true; Detail = 'package executable proved the clone' } }.GetNewClosure()
+    $packageResult = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -ApiExecutable $packageExecutable `
+        -BackupRunner $backup -RestoreRunner $restore -UpgradeRunner $packageUpgrade -AnalysisRunner $packageAnalysis `
+        -CleanupRunner $cleanup -CurrentCodeValidator $packageReadiness
+    Assert-True ($packageResult.Applied -and $seenExecutables.Count -eq 4 -and
+        @($seenExecutables | Where-Object { $_ -eq "upgrade:$packageExecutable" }).Count -eq 2 -and
+        @($seenExecutables | Where-Object { $_ -eq "analysis:$packageExecutable" }).Count -eq 1 -and
+        @($seenExecutables | Where-Object { $_ -eq "readiness:$packageExecutable" }).Count -eq 1) `
+        'A clone-validated upgrade must propagate the explicitly verified package executable through clone upgrade, analysis, readiness and real upgrade.'
+
     # --- 6b. The analyzer says current, but current AeroLink cannot serve the upgraded copy ---
     #
     # "Analyzer-current" means the schema and semantic markers line up; it does not mean the application
@@ -209,6 +226,16 @@ try {
     Assert-True ($steps -notcontains 'upgrade:real') 'A failed clone upgrade must leave the real database untouched.'
     Assert-True (($steps | Where-Object { $_ -like 'cleanup:*' }).Count -eq 1) 'The disposable copy is cleaned up even when validation fails.'
     Assert-True ($failed.Detail -match 'never touched and is unchanged') 'The failure must state plainly that the real database is unchanged.'
+
+    # Cleanup is part of the clone safety gate. A generated database/evidence tree that cannot be removed must
+    # refuse before the real upgrade rather than continue with a dirty validation boundary.
+    $steps.Clear()
+    $cleanupFailure = { param($Database) $steps.Add("cleanup-failed:$Database"); throw 'fixture cleanup refusal' }.GetNewClosure()
+    Assert-Throws {
+        Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $restore `
+            -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanupFailure -CurrentCodeValidator $cloneHealthy
+    } 'cleanup failed|generated validation copy' 'A clone cleanup refusal must fail closed before real mutation.'
+    Assert-True ($steps -notcontains 'upgrade:real') 'A clone cleanup refusal must leave the real database untouched.'
 
     # --- 8. The clone upgrades but is still not current: also refuses ---
     $steps.Clear()

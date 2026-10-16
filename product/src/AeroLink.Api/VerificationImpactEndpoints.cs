@@ -2577,7 +2577,7 @@ public static class VerificationImpactEndpoints
                     : Results.BadRequest(new { error = ex.Message, code = ex.Code });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        });
+        }).RequireRateLimiting("signature-authentication");
 
         app.MapPost("/api/test-change-reviews/{id:guid}/return", async (Guid id, ReturnTestChangeReviewRequest request,
             HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>

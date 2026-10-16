@@ -29,7 +29,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 accountId = account.Id;
             }
             var actor = new AuthenticatedUser(accountId, "pg-identical-upload-owner", "PG Identical Upload Owner",
-                "pg-identical-upload-owner@example.test", true, []);
+                "pg-identical-upload-owner@example.test", IsAdministrator: true, Programs: [], IsSystemAdministrator: true);
             Guid draftId;
             long expectedVersion;
             await using (var setupScope = provider.CreateAsyncScope())
@@ -84,7 +84,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             using var provider = SetupProvider(connection);
             var (accountId, sourceBaselineId) = await SeedNativeSourceAsync(provider);
             var actor = new AuthenticatedUser(accountId, "pg-source-race-owner", "PG Source Race Owner",
-                "pg-source-race-owner@example.test", true, []);
+                "pg-source-race-owner@example.test", IsAdministrator: true, Programs: [], IsSystemAdministrator: true);
             Guid draftId;
             long expectedVersion;
             await using (var setupScope = provider.CreateAsyncScope())
@@ -160,7 +160,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 accountId = account.Id;
             }
             var actor = new AuthenticatedUser(accountId, "pg-mapping-race-owner", "PG Mapping Race Owner",
-                "pg-mapping-race-owner@example.test", true, []);
+                "pg-mapping-race-owner@example.test", IsAdministrator: true, Programs: [], IsSystemAdministrator: true);
             Guid draftId;
             ProjectSetupSourceView source;
             long configuredVersion;

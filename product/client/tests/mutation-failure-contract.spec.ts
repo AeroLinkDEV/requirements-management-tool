@@ -140,7 +140,7 @@ test('a rejected approval preserves signature input and records no approval evid
   await page.getByRole('button', { name: 'Review & electronically approve' }).click()
   const dialog = page.locator('.signatureModal')
   await expect(dialog).toBeVisible()
-  await dialog.getByLabel('Re-enter your password').fill('AeroLink!2026')
+  await dialog.getByLabel('Re-enter your AeroLink password').fill('AeroLink!2026')
   await page.route(`**/api/change-requests/${draft.id}/approve`, route => route.fulfill({
     status: 403,
     contentType: 'application/json',
@@ -150,7 +150,7 @@ test('a rejected approval preserves signature input and records no approval evid
   await dialog.getByRole('button', { name: 'Sign & approve' }).click()
   await expect(page.getByRole('alert')).toContainText('Approver authority is no longer active')
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByLabel('Re-enter your password')).toHaveValue('AeroLink!2026')
+  await expect(dialog.getByLabel('Re-enter your AeroLink password')).toHaveValue('AeroLink!2026')
   await expect(dialog.getByRole('button', { name: 'Sign & approve' })).toBeEnabled()
   await page.unroute(`**/api/change-requests/${draft.id}/approve`)
 

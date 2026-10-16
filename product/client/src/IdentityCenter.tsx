@@ -14,6 +14,7 @@ import {
 import "./IdentitySetup.css";
 import { Icon } from "./icons";
 import { PersonAvatar } from "./People";
+import { isSystemAdministrator } from "./administratorCapability";
 import { setStaySignedOut, windowsOutcome, windowsSignInUrl } from "./windowsSignIn";
 
 export type AuthUser = {
@@ -21,8 +22,12 @@ export type AuthUser = {
   userName: string;
   displayName: string;
   email: string;
+  /** The built-in administrator's authority override (substitution, access to every Program). */
   isAdministrator: boolean;
+  /** #1639 system administration: accounts, grants, identity links, review configuration, diagnostics. */
+  isSystemAdministrator?: boolean;
   mustChangePassword: boolean;
+  windowsLinked?: boolean;
   programs: { programId: string; roles: string[] }[];
 };
 export function LoginPage({
@@ -1154,6 +1159,7 @@ type AdminUser = {
   origin?: string;
   windowsPrincipal?: string | null;
   windowsLinked?: boolean;
+  isBuiltInAdministrator?: boolean;
   memberships: { programId: string; role: string }[];
 };
 export function AdministrationCenter({
@@ -1199,6 +1205,12 @@ export function AdministrationCenter({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: user.state !== "Active" }),
       });
+      // A successful disable of the built-in active row can only be that account disabling itself; the server
+      // revoked its sessions, so leave the stale administrator shell the same way self-revoke does.
+      if (user.isBuiltInAdministrator && user.state === "Active") {
+        window.location.reload();
+        return;
+      }
       await load();
     } catch (error) {
       recordClientOperationFailure("identity.account.state", error);
@@ -1220,6 +1232,40 @@ export function AdministrationCenter({
     } catch (error) {
       recordClientOperationFailure("identity.windows.unlink", error);
       setError(operationError(error, "The Windows logon was not unlinked."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // #1639: global administration is a grant any account can hold. The server refuses removing the last
+  // active administrator or touching the built-in `admin` from another account, and records each grant and
+  // revoke in the security audit log.
+  const setGlobalAdministrator = async (user: AdminUser) => {
+    if (busy) return;
+    if (
+      !user.isGlobalAdministrator &&
+      !window.confirm(
+        `Make ${user.displayName} a global administrator? They will be able to manage accounts, roles and administrator grants, identity links, review and approval configuration, and system diagnostics. Their engineering authority in each Program does not change.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`${api}/api/admin/users/${user.id}/global-administrator`, {
+        method: user.isGlobalAdministrator ? "DELETE" : "POST",
+      });
+      if (user.isGlobalAdministrator) {
+        // A self-revoke ends this page's authority: reload so the session, navigation and page agree.
+        const me = await fetch(`${api}/api/auth/me`);
+        if (!me.ok || !isSystemAdministrator((await me.json()) as AuthUser)) {
+          window.location.reload();
+          return;
+        }
+      }
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.globalAdministrator", error);
+      setError(operationError(error, "Global administrator was not changed."));
     } finally {
       setBusy(false);
     }
@@ -1365,7 +1411,7 @@ export function AdministrationCenter({
               />
               <div>
                 <b>{user.displayName}</b>
-                {user.isGlobalAdministrator && <small>Global system administrator</small>}
+                {user.isGlobalAdministrator && <small>{user.isBuiltInAdministrator ? "Built-in global administrator" : "Global system administrator"}</small>}
                 <small>
                   {user.userName} · {user.email}
                 </small>
@@ -1405,6 +1451,14 @@ export function AdministrationCenter({
                   Unlink Windows
                 </button>
               )}
+              <button
+                className="quiet"
+                disabled={busy}
+                aria-label={`${user.isGlobalAdministrator ? "Revoke admin" : "Make admin"} for ${user.displayName}`}
+                onClick={() => setGlobalAdministrator(user)}
+              >
+                {user.isGlobalAdministrator ? "Revoke admin" : "Make admin"}
+              </button>
             </div>
           </article>
         ))}
@@ -1548,11 +1602,13 @@ function CreateAccount({ api, onDone }: { api: string; onDone: () => void }) {
 export function SignatureDialog({
   title,
   meaning,
+  windowsLinked = false,
   onCancel,
   onSign,
 }: {
   title: string;
   meaning: string;
+  windowsLinked?: boolean;
   onCancel: () => void;
   onSign: (password: string, meaning: string) => Promise<void>;
 }) {
@@ -1574,7 +1630,7 @@ export function SignatureDialog({
           <textarea value={meaning} readOnly />
         </label>
         <label>
-          Re-enter your password
+          Re-enter your {windowsLinked ? "Windows" : "AeroLink"} password
           <input
             type="password"
             value={password}

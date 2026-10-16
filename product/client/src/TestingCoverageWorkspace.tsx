@@ -1224,7 +1224,7 @@ export default function TestingCoverageWorkspace({ api, projectId, releaseId, re
             <label>{reviewDecision.action === 'approve' ? 'Approval rationale' : 'Rationale'}<textarea name="rationale" required autoFocus /></label>
             {reviewDecision.action === 'approve' && <>
               <label>Signature meaning<input name="meaning" defaultValue="I approve this exact test change request review stage." required /></label>
-              <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
+              <label>{user.windowsLinked ? "Windows password" : "AeroLink password"}<input name="password" type="password" autoComplete="current-password" required /></label>
             </>}
             <div className="decisionActions">
               <button type="button" className="quiet" disabled={busy} onClick={() => setReviewDecision(undefined)}>Cancel</button>

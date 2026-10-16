@@ -1726,6 +1726,7 @@ export default function ChangeRequestWorkspace({
         <SignatureDialog
           title={`Approve ${scr.displayNumber}`}
           meaning="I approve this exact change request revision and its proposed requirement changes as suitable for controlled progression."
+          windowsLinked={user.windowsLinked}
           onCancel={() => setSigning(false)}
           onSign={async (password, meaning) => {
             const ok = await call("approve", { password, meaning, rationale: approvalRationale.trim(), expectedVersion: scr.version });

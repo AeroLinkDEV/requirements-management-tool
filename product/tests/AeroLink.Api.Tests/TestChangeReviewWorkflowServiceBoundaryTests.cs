@@ -26,7 +26,8 @@ public sealed class TestChangeReviewWorkflowServiceBoundaryTests
             TestChangeReviewDiscipline.System, "SYSCR-00001", DateTimeOffset.UtcNow, authorId: "author");
         review.RecordTestChangeRequired("author", DateTimeOffset.UtcNow);
         var service = new TestChangeReviewWorkflowService(db, new IdentityService(db),
-            new VerificationImpactService(db), new WorkflowAuthorityService(db));
+            new VerificationImpactService(db), new WorkflowAuthorityService(db),
+            new SignatureReauthenticationService(db));
         var actor = new AuthenticatedUser(Guid.NewGuid(), "author", "Author", "author@example.test", false, []);
 
         var refusal = await Assert.ThrowsAsync<TestChangeReviewWorkflowException>(() => service.SubmitAsync(review,
@@ -90,7 +91,8 @@ public sealed class TestChangeReviewWorkflowServiceBoundaryTests
         await db.SaveChangesAsync();
 
         var service = new TestChangeReviewWorkflowService(db, new IdentityService(db),
-            new VerificationImpactService(db), new WorkflowAuthorityService(db));
+            new VerificationImpactService(db), new WorkflowAuthorityService(db),
+            new SignatureReauthenticationService(db));
         var authorActor = new AuthenticatedUser(author.Id, author.UserName, author.DisplayName,
             author.Email, false, []);
         var approverActor = new AuthenticatedUser(approver.Id, approver.UserName, approver.DisplayName,

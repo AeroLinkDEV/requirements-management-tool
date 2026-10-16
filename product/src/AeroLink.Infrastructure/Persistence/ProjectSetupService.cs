@@ -76,7 +76,7 @@ public sealed class ProjectSetupService(
         // for resume. Completed and in-flight setups remain discoverable so their recorded result is reachable.
         var query = db.ProjectSetupDrafts.AsNoTracking().AsQueryable()
             .Where(x => x.State != ProjectSetupState.Abandoned);
-        if (!actor.IsAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
+        if (!actor.IsSystemAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
         // SQLite cannot order DateTimeOffset values server-side. Draft discovery is an intentionally small,
         // authorized list, so materialize it and apply the same stable ordering in the application.
         return (await query.ToListAsync(ct)).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.Id).ToList();
@@ -192,7 +192,7 @@ public sealed class ProjectSetupService(
 
     public async Task<ProjectSetupFinalizationResult> FinalizeAsync(Guid draftId, AuthenticatedUser actor,
         long expectedVersion, string operationKey, CancellationToken ct, string? password = null,
-        string? sourceAssertionHash = null, bool sourceAssertionAccepted = false)
+        string? sourceAssertionHash = null, bool sourceAssertionAccepted = false, string remoteAddress = "local")
     {
         // Draft management is intentionally broader than project creation: the creator can save, read, and
         // resume their draft, while only a currently authenticated AeroLink administrator may create the
@@ -282,7 +282,7 @@ public sealed class ProjectSetupService(
                 var effectivePolicy = new ResolvedProjectLadderPolicy(
                     ProjectLadderResolver.Resolve(ladder, LegacyLadderPolicy.Instance), LegacyLadderPolicy.Instance);
                 await inception!.MaterializeAsync(draft, project, inceptionBaseline, actor, password,
-                    sourceAssertionHash, sourceAssertionAccepted, effectivePolicy, ct);
+                    sourceAssertionHash, sourceAssertionAccepted, effectivePolicy, ct, remoteAddress);
                 // The accepted source is the history of inception. The newly created build is a separate,
                 // explicitly In-Work context that points at the materialized target baseline.
                 db.SoftwareBuilds.Add(new SoftwareBuild(project.Id, release.Id, inceptionBaseline.Id,
@@ -697,7 +697,7 @@ public sealed class ProjectSetupService(
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) ? value : null;
 
     private static bool CanManage(ProjectSetupDraft draft, AuthenticatedUser actor) =>
-        actor.IsAdministrator || draft.CreatorUserId == actor.Id;
+        actor.IsSystemAdministrator || draft.CreatorUserId == actor.Id;
 
     private static void RequireManage(ProjectSetupDraft draft, AuthenticatedUser actor)
     {
@@ -712,7 +712,7 @@ public sealed class ProjectSetupService(
     private static void RequireAdministrator(AuthenticatedUser actor)
     {
         RequireAuthenticated(actor);
-        if (!actor.IsAdministrator) throw new ProjectSetupAccessException();
+        if (!actor.IsSystemAdministrator) throw new ProjectSetupAccessException();
     }
 
     private static bool IsUniqueConflict(DbUpdateException exception)

@@ -168,12 +168,6 @@ if (Test-Path -LiteralPath (Join-Path $root 'instance.json') -PathType Leaf) { $
 if ($existing -and $existing.PSObject.Properties['classification'] -and [string]$existing.classification -ne $identity.Classification) {
     throw "$root is declared $($existing.classification), not $($identity.Classification). Nothing was changed."
 }
-if (-not $existing -or -not $existing.PSObject.Properties['classification']) {
-    Set-AeroLinkInstanceConfig -ProductRoot $productLookup -InstallationRoot $root -Label $identity.Label -Classification $identity.Classification | Out-Null
-}
-$site = Set-AeroLinkSiteDeclaration -InstallationRoot $root -ApiPort $ApiPort -PostgresPort $PostgresPort -PublicHostName $PublicHostName
-if (-not (Test-AeroLinkServiceSidMatchesAccount -Site $site)) { throw "The declaration's runAsSid is an override; a real installation runs as NT SERVICE\$($site.ServiceName). Remove it first." }
-Assert-AeroLinkSiteServiceSid -Site $site -Role Postgres | Out-Null
 $layout = Get-AeroLinkServerLayout -InstallationRoot $root
 
 Step 'Release: verify against the installed trusted certificate'
@@ -222,6 +216,14 @@ if (-not $previousTarget) {
     Write-Host "    current -> $($verified.Version) ($($verified.SourceSha))"
 }
 else { Write-Host "    current -> $($verified.Version) ($($verified.SourceSha)); existing exact release retained" }
+
+Step "Declaration: persist $($identity.Classification) only after release preflight"
+if (-not $existing -or -not $existing.PSObject.Properties['classification']) {
+    Set-AeroLinkInstanceConfig -ProductRoot $productLookup -InstallationRoot $root -Label $identity.Label -Classification $identity.Classification | Out-Null
+}
+$site = Set-AeroLinkSiteDeclaration -InstallationRoot $root -ApiPort $ApiPort -PostgresPort $PostgresPort -PublicHostName $PublicHostName
+if (-not (Test-AeroLinkServiceSidMatchesAccount -Site $site)) { throw "The declaration's runAsSid is an override; a real installation runs as NT SERVICE\$($site.ServiceName). Remove it first." }
+Assert-AeroLinkSiteServiceSid -Site $site -Role Postgres | Out-Null
 
 Step 'Installation pointer'
 Set-AeroLinkInstallationPointer -ProductRoot $versionRoot -InstallationRoot $root -Note "AeroLink site server $Name (#1614): this program belongs to the installation named here." | Out-Null

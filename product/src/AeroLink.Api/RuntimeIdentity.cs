@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -45,8 +46,18 @@ public sealed record AeroLinkRuntimeIdentity(
 
 public static class RuntimeIdentityEndpoints
 {
-    /// <summary>The instant this process started, fixed once so every caller sees the same value.</summary>
-    public static readonly DateTimeOffset ProcessStartedAtUtc = DateTimeOffset.UtcNow;
+    /// <summary>
+    /// The operating system's creation instant for this process, fixed once so every caller sees the same
+    /// value. The updater joins this public observation to the exact service PID and image it owns; a timestamp
+    /// captured when the endpoint was first loaded would describe startup timing rather than the process identity.
+    /// </summary>
+    public static readonly DateTimeOffset ProcessStartedAtUtc = ReadProcessStartedAtUtc();
+
+    private static DateTimeOffset ReadProcessStartedAtUtc()
+    {
+        using var process = Process.GetCurrentProcess();
+        return process.StartTime.ToUniversalTime();
+    }
 
     /// <summary>The file a release build writes beside the executable to stamp <c>Runtime:SourceSha</c>.</summary>
     public const string ReleaseIdentityFileName = "release-identity.json";

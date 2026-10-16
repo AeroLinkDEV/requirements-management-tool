@@ -28,8 +28,6 @@
     "POST /api/enterprise-requirements/import-mappings",
     "POST /api/enterprise-requirements/import/preview",
     "POST /api/enterprise-requirements/notifications/{}/read",
-    "POST /api/enterprise-requirements/schemas",
-    "POST /api/enterprise-requirements/schemas/{}/fields",
     "POST /api/enterprise-requirements/specifications",
     "POST /api/enterprise-requirements/specifications/{}/sections",
     "POST /api/enterprise-requirements/{}/assignments",

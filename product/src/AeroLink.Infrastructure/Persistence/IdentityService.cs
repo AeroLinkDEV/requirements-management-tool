@@ -7,7 +7,20 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs, bool MustChangePassword = false);
+/// <summary>
+/// The signed-in person as every request sees them.
+///
+/// Since #1639 there are two administrator capabilities, and they are deliberately separate:
+/// <list type="bullet">
+/// <item><see cref="IsAdministrator"/> is the <b>authority override</b> (<see cref="UserAccount.HoldsAuthorityOverride"/>):
+/// substitution at signing, project access without membership, the self-review exemption. Only the built-in
+/// <c>admin</c> account holds it, exactly as before administration became grantable.</item>
+/// <item><see cref="IsSystemAdministrator"/> is <b>system administration</b> (<see cref="UserAccount.IsGlobalAdministrator"/>):
+/// accounts, roles, administrator grants, identity links, review/approval configuration and system
+/// diagnostics. Every granted administrator holds it, and so does <c>admin</c>.</item>
+/// </list>
+/// </summary>
+public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs, bool MustChangePassword = false, bool IsSystemAdministrator = false, bool WindowsLinked = false);
 public sealed record UserProgramAccess(Guid ProgramId, IReadOnlyList<string> Roles);
 public sealed record LoginResult(AuthenticatedUser User, string Token, DateTimeOffset ExpiresAt);
 /// <summary>A session, or the refusal code the sign-in page explains (#1615).</summary>
@@ -27,6 +40,11 @@ public sealed class IdentityService
         _mfaProtector = (continuity?.CreateProtector("AeroLink.Identity.MfaSecret.v1")
             ?? (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1"));
     }
+    /// <summary>
+    /// The bootstrap/break-glass account's name, used only to create it. Since #1639 no authority check compares
+    /// it: the account is marked <see cref="UserAccount.IsBuiltInAdministrator"/> when it is created
+    /// (first-install bootstrap, the demo seed, or the #1639 migration for an existing database).
+    /// </summary>
     public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
     {
@@ -256,7 +274,7 @@ public sealed class IdentityService
     {
         var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId && x.State == AccountState.Active, ct);
         if (account is null) return false;
-        if (account.UserName == SystemAdministratorUserName) return true;
+        if (account.HoldsAuthorityOverride) return true;
         // The same implication as the overload above. Two copies of this check exist and both are reached
         // from live authorization paths, so a rule applied to only one of them is a rule that holds by luck.
         var accepted = MembershipAnswerableRoles(role);
@@ -311,7 +329,8 @@ public sealed class IdentityService
         // Ended memberships are retained as history and must never reach a session's authority set.
         var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id && x.EndedAt == null).ToListAsync(ct);
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
-        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs, user.MustChangePassword);
+        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.HoldsAuthorityOverride, programs,
+            user.MustChangePassword, IsSystemAdministrator: user.IsGlobalAdministrator, WindowsLinked: user.WindowsSid is not null);
     }
     public static string? TokenDigest(string? token) => string.IsNullOrWhiteSpace(token)?null:Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
     public static string CreateMfaSecret()=>Base32Encode(RandomNumberGenerator.GetBytes(20));
@@ -419,6 +438,7 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
             if (!users.TryGetValue(person.User, out var user))
             {
                 user = new(person.User, person.Name, person.Email, demoPasswordHash, now);
+                if (person.User == IdentityService.SystemAdministratorUserName) user.DesignateBuiltInAdministrator("system.bootstrap", now);
                 db.UserAccounts.Add(user);
                 users[person.User] = user;
             }

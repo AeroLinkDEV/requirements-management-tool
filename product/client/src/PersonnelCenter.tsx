@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AuthUser } from './IdentityCenter'
+import { isSystemAdministrator } from './administratorCapability'
 import PortalHeader from './PortalHeader'
 import { apiRequest, operationError } from './apiClient'
 import { PersonAvatar } from './People'
@@ -175,7 +176,7 @@ export default function PersonnelCenter({
     return map
   }, [leadership])
   const canManage = data?.canManage ?? false
-  const isGlobalAdmin = user.isAdministrator
+  const isGlobalAdmin = isSystemAdministrator(user)
   const vacancies = leadership.filter(position => !position.primary).length
 
   const run = async (operation: () => Promise<void>, success: string, fallback: string) => {

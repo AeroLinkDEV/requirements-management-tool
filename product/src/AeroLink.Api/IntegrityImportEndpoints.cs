@@ -25,14 +25,16 @@ public static class IntegrityImportEndpoints
             { return Results.BadRequest(new { error = ex.Message }); }
         }).DisableAntiforgery();
         app.MapPost("/api/problem-reports/integrity-import/commit", async (HttpContext http, AeroLinkDbContext db, IdentityService identity,
-            IntegrityImportService service, IConfiguration configuration, CancellationToken ct) =>
+            SignatureReauthenticationService reauthentication, IntegrityImportService service, IConfiguration configuration, CancellationToken ct) =>
         {
             try
             {
                 var form = await ReadAsync(http, db, identity, configuration, ct);
                 if (form.Refusal is not null) return form.Refusal;
                 var actor = http.UserAccount();
-                if (!await identity.ConfirmPasswordAsync(actor.Id, form.Form!["password"].ToString(), ct))
+                var authentication = await reauthentication.AuthenticateAsync(actor.Id, form.Form!["password"].ToString(),
+                    http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct);
+                if (authentication is null)
                     return Results.Json(new { error = "Signature confirmation failed." }, statusCode: 401);
                 if (!Guid.TryParse(form.Form!["operationId"], out var operationId))
                     return Results.BadRequest(new { error = "An import operation identity is required." });
@@ -40,7 +42,8 @@ public static class IntegrityImportEndpoints
                     form.Form["previewHash"].ToString(), actor, http.Connection.RemoteIpAddress?.ToString() ?? "local",
                     async scope => await http.HasFreshProjectRoleAsync(db, identity, scope, ct,
                         ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator)
-                        && (await ProjectFeatureService.EffectiveAsync(db, form.ProjectId, ct)).HasFlag(ProjectFeature.ProblemReports), ct));
+                        && (await ProjectFeatureService.EffectiveAsync(db, form.ProjectId, ct)).HasFlag(ProjectFeature.ProblemReports), ct,
+                    authentication.AuthenticationMethod));
             }
             catch (Exception ex) when (ex is IntegrityImportConflict or ManagedDocumentStorageConflictException)
             { return Results.Conflict(new { error = ex.Message, code = "integrity_import_conflict" }); }
@@ -48,7 +51,7 @@ public static class IntegrityImportEndpoints
             { return Results.Conflict(new { error = "Another import changed the destination. Retry the same operation or review again.", code = "integrity_import_concurrency" }); }
             catch (Exception ex) when (ex is DomainException or JsonException or InvalidDataException)
             { return Results.BadRequest(new { error = ex.Message }); }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery().RequireRateLimiting("signature-authentication");
         app.MapGet(Root + "/batches", async (Guid projectId, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             if (!await AuthorizedAsync(http, db, identity, projectId, ct)) return Results.Forbid();

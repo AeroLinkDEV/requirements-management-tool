@@ -1276,11 +1276,13 @@ public static class ChangeRequestEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/change-requests/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, ProblemReportLinkService problemReports, CancellationToken ct) =>
+        app.MapPost("/api/change-requests/{id:guid}/approve", async (Guid id, SignatureRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, SignatureReauthenticationService reauthentication, VerificationImpactService verificationImpact, DownstreamImpactService downstreamImpact, ProblemReportLinkService problemReports, CancellationToken ct) =>
         {
             var scr = await repository.GetAsync(id, ChangeRequestLoadShape.ReviewDecision, ct); if (scr is null) return Results.NotFound();
             if (request.ExpectedVersion is not null && scr.Version != request.ExpectedVersion) return Results.Conflict(new { error = "The review advanced after this page was loaded. Refresh before acting.", code = "stale_version" });
-            var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+            var actor = http.UserAccount(); var authentication = await reauthentication.AuthenticateAsync(actor.Id, request.Password,
+                http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct);
+            if (authentication is null) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
             var programId = await db.Projects.Where(x => x.Id == scr.ProjectId).Join(db.Programs, x => x.ProgramId, x => x.Id, (_, p) => p.Id).SingleAsync(ct);
             // A configured workflow freezes stage authority on the active step, so no generic Approver gate
             // applies there. A cycle without a recorded workflow is the legacy single-independent-Approver
@@ -1319,7 +1321,8 @@ public static class ChangeRequestEndpoints
                     reviewStepPosition: activeStep.Position, rationale: request.Rationale ?? "",
                     authoritySource: activeStep.AuthoritySource?.ToString() ?? "",
                     workflowId: cycle.WorkflowId, workflowVersion: cycle.WorkflowVersion,
-                    authoritySourceId: activeStep.AuthoritySourceId));
+                    authoritySourceId: activeStep.AuthoritySourceId,
+                    authenticationMethod: authentication.AuthenticationMethod));
                 // Approval is what settles the engineering decision, so verification work is raised here rather than
                 // waiting for baseline inclusion. Saved in the same unit of work as the approval itself.
                 await verificationImpact.RaiseForApprovedChangeRequestAsync(scr, now, ct, actor.UserName);
@@ -1329,7 +1332,7 @@ public static class ChangeRequestEndpoints
                 return Results.Ok(ApiMap.ChangeRequestDetail(scr));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        });
+        }).RequireRateLimiting("signature-authentication");
 
         app.MapPost("/api/change-requests/{id:guid}/request-changes", async (Guid id, RequestChangesRequest request, HttpContext http, IChangeRequestRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
@@ -1386,7 +1389,7 @@ public static class ChangeRequestEndpoints
                     x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion,
                     x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Rationale,
                     isLegacyAuthoritySource = string.IsNullOrWhiteSpace(x.AuthoritySource),
-                    x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt,
+                    x.Meaning, x.ContentHash, x.UserName, x.DisplayName, x.SignedAt, x.AuthenticationMethod,
                     signatureStatus = status.Status,
                     isSuperseded = status.IsSuperseded,
                     supersession = status.Supersession

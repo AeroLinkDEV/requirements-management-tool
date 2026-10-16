@@ -17,14 +17,14 @@ public static class AdministrationEndpoints
     {
         app.MapGet("/api/admin/users", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+            if (!http.UserAccount().IsSystemAdministrator) return Results.Forbid();
             var users = await db.UserAccounts.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(ct); var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.EndedAt == null).ToListAsync(ct);
-            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.UserName == IdentityService.SystemAdministratorUserName, origin = x.Origin.ToString(), windowsPrincipal = x.WindowsSid != null ? x.WindowsPrincipal : null, windowsLinked = x.WindowsSid != null, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
+            return Results.Ok(users.Select(x => new { x.Id, x.UserName, x.DisplayName, x.Email, state = x.State.ToString(), x.LastLoginAt, x.CreatedAt, isGlobalAdministrator = x.IsGlobalAdministrator, isBuiltInAdministrator = x.IsBuiltInAdministrator, origin = x.Origin.ToString(), windowsPrincipal = x.WindowsSid != null ? x.WindowsPrincipal : null, windowsLinked = x.WindowsSid != null, memberships = memberships.Where(m => m.UserId == x.Id).Select(m => new { m.ProgramId, role = m.Role.ToString() }) }));
         });
 
         app.MapPost("/api/admin/users", async (CreateUserRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); var userName = request.UserName.Trim().ToLowerInvariant(); if (await db.UserAccounts.AnyAsync(x => x.UserName == userName, ct)) return Results.Conflict(new { error = "Username already exists." });
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid(); var userName = request.UserName.Trim().ToLowerInvariant(); if (await db.UserAccounts.AnyAsync(x => x.UserName == userName, ct)) return Results.Conflict(new { error = "Username already exists." });
             try { var user = new UserAccount(userName, request.DisplayName, request.Email, IdentityService.HashPassword(request.TemporaryPassword), DateTimeOffset.UtcNow);user.RequirePasswordChange(user.PasswordHash); db.UserAccounts.Add(user); db.SecurityAuditEvents.Add(new("AccountCreated", actor.UserName, userName, "Success", $"Created account for {request.DisplayName}; password rotation is required.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow)); await db.SaveChangesAsync(ct); return Results.Created($"/api/admin/users/{user.Id}", new { user.Id, user.UserName, user.DisplayName, user.MustChangePassword }); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
@@ -34,7 +34,7 @@ public static class AdministrationEndpoints
         // recorded with, and this change is itself attributable here.
         app.MapPatch("/api/admin/users/{id:guid}/identity", async (Guid id, UpdateIdentityRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid();
             var account = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (account is null) return Results.NotFound();
             var displayName = (request.DisplayName ?? account.DisplayName).Trim();
             var email = (request.Email ?? account.Email).Trim();
@@ -50,7 +50,7 @@ public static class AdministrationEndpoints
         });
         app.MapPost("/api/admin/users/{id:guid}/memberships", async (Guid id, GrantRoleRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid(); if (!await db.UserAccounts.AnyAsync(x => x.Id == id, ct) || !await db.Programs.AnyAsync(x => x.Id == request.ProgramId, ct)) return Results.NotFound();
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid(); if (!await db.UserAccounts.AnyAsync(x => x.Id == id, ct) || !await db.Programs.AnyAsync(x => x.Id == request.ProgramId, ct)) return Results.NotFound();
             if (await db.ProgramMemberships.AnyAsync(x => x.UserId == id && x.ProgramId == request.ProgramId && x.Role == request.Role && x.EndedAt == null, ct)) return Results.Conflict(new { error = "That Program role is already assigned." });
             // #816: the retired position roles are history, not grants. A new grant resurrects a parallel
             // accountability the leadership position now owns, and on a database that has not yet run the v2
@@ -67,7 +67,7 @@ public static class AdministrationEndpoints
 
         app.MapDelete("/api/admin/users/{id:guid}/memberships/{programId:guid}/{role}", async (Guid id, Guid programId, ProgramRole role, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid();
             // Ended, not deleted: the roster has to be able to say who held this role during a period that has
             // already passed, which a removed row cannot answer.
             var membership = await db.ProgramMemberships.SingleOrDefaultAsync(x => x.UserId == id && x.ProgramId == programId && x.Role == role && x.EndedAt == null, ct); if (membership is null) return Results.NotFound();
@@ -79,9 +79,16 @@ public static class AdministrationEndpoints
 
         app.MapPost("/api/admin/users/{id:guid}/state", async (Guid id, SetAccountStateRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid();
             await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound(); if (user.Id == actor.Id && !request.Enabled) return Results.BadRequest(new { error = "You cannot disable your own active account." });
+            // #1639: the session said administrator before this transaction began; a revoke committed since
+            // then must win, or a disable racing a revoke can leave no active administrator.
+            if (!await StillAdministersAsync(db, actor.Id, ct)) return Results.Forbid();
+            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound(); if (user.Id == actor.Id && !request.Enabled && !user.IsBuiltInAdministrator) return Results.BadRequest(new { error = "You cannot disable your own active account." });
+            if (!request.Enabled && user.IsBuiltInAdministrator && user.Id != actor.Id)
+                return BuiltInAdministratorProtected();
+            if (!request.Enabled && user.IsGlobalAdministrator && user.State == AccountState.Active && !await OtherActiveAdministratorExistsAsync(db, user.Id, ct))
+                return LastAdministrator();
             var now = DateTimeOffset.UtcNow; var revokedSessions = 0;
             if (request.Enabled) user.Enable();
             else
@@ -94,9 +101,46 @@ public static class AdministrationEndpoints
             db.SecurityAuditEvents.Add(new(request.Enabled ? "AccountEnabled" : "AccountDisabled", actor.UserName, user.UserName, "Success", $"Account state set to {(request.Enabled ? "Active" : "Disabled")}; revoked {revokedSessions} outstanding session(s).", http.Connection.RemoteIpAddress?.ToString() ?? "local", now)); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
         });
 
+        // #1639: global administration is a persisted, attributable grant rather than the account named
+        // `admin`. Each route re-reads the actor's own grant inside a serializable transaction, so a grant,
+        // revoke or disable racing another administrator's change cannot act on authority that was already
+        // taken away, and the last-administrator checks below read the committed state.
+        app.MapPost("/api/admin/users/{id:guid}/global-administrator", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            if (!await StillAdministersAsync(db, actor.Id, ct)) return Results.Forbid();
+            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound();
+            if (user.IsGlobalAdministrator) return Results.Conflict(new { error = "This person is already a global administrator." });
+            var now = DateTimeOffset.UtcNow;
+            user.GrantGlobalAdministrator(actor.UserName, now);
+            db.SecurityAuditEvents.Add(new("GlobalAdministratorGranted", actor.UserName, user.UserName, "Success", $"Granted global administrator to {user.DisplayName}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
+        });
+
+        app.MapDelete("/api/admin/users/{id:guid}/global-administrator", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid();
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            if (!await StillAdministersAsync(db, actor.Id, ct)) return Results.Forbid();
+            var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound();
+            if (!user.IsGlobalAdministrator) return Results.Conflict(new { error = "This person is not a global administrator." });
+            // Owner decision on #1639: the built-in administrator is Sean's break-glass and linked account, and
+            // only that account may give up its own grant.
+            if (user.IsBuiltInAdministrator && user.Id != actor.Id) return BuiltInAdministratorProtected();
+            // The actor is an active administrator, so revoking somebody else always leaves one. The refusal is
+            // reached by revoking the last active administrator — in practice, yourself when nobody else is left.
+            if (user.State == AccountState.Active && !await OtherActiveAdministratorExistsAsync(db, id, ct))
+                return LastAdministrator();
+            var now = DateTimeOffset.UtcNow;
+            user.RevokeGlobalAdministrator(actor.UserName, now);
+            db.SecurityAuditEvents.Add(new("GlobalAdministratorRevoked", actor.UserName, user.UserName, "Success", $"Revoked global administrator from {user.DisplayName}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.NoContent();
+        });
+
         app.MapPost("/api/admin/users/{id:guid}/reset-password",async(Guid id,ResetPasswordRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {
-            var actor=http.UserAccount();if(!actor.IsAdministrator)return Results.Forbid();try{var user=await db.UserAccounts.SingleOrDefaultAsync(x=>x.Id==id,ct);if(user is null)return Results.NotFound();
+            var actor=http.UserAccount();if(!actor.IsSystemAdministrator)return Results.Forbid();try{var user=await db.UserAccounts.SingleOrDefaultAsync(x=>x.Id==id,ct);if(user is null)return Results.NotFound();
             // #1615: a Windows account proves itself to the domain only. An AeroLink password would outlive its
             // directory account, make it lockable by guessing, and let it sign where its Windows password is required.
             if(user.Origin==AccountOrigin.Windows)return Results.Conflict(new{error="This account signs in with Windows and has no AeroLink password.",code="windows_account"});
@@ -109,7 +153,7 @@ public static class AdministrationEndpoints
         // other identity than its SID; disabling it is the tool there.
         app.MapPost("/api/admin/users/{id:guid}/windows/unlink", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            var actor = http.UserAccount(); if (!actor.IsAdministrator) return Results.Forbid();
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator) return Results.Forbid();
             var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.Id == id, ct); if (user is null) return Results.NotFound();
             if (user.Origin == AccountOrigin.Windows)
                 return Results.Conflict(new { error = "A Windows account is its Windows logon. Disable the account instead.", code = "windows_account" });
@@ -126,7 +170,7 @@ public static class AdministrationEndpoints
 
         app.MapPost("/api/delegations", async (CreateDelegationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
-            var actor = http.UserAccount(); if (request.DelegatorUserId != actor.Id && !actor.IsAdministrator) return Results.Forbid(); if (request.DelegatorUserId == request.DelegateUserId) return Results.BadRequest(new { error = "A person cannot delegate a role to themselves." });
+            var actor = http.UserAccount(); if (request.DelegatorUserId != actor.Id && !actor.IsSystemAdministrator) return Results.Forbid(); if (request.DelegatorUserId == request.DelegateUserId) return Results.BadRequest(new { error = "A person cannot delegate a role to themselves." });
             var activeUsers=await db.UserAccounts.AsNoTracking().Where(x=>(x.Id==request.DelegatorUserId||x.Id==request.DelegateUserId)&&x.State==AccountState.Active).Select(x=>x.Id).ToListAsync(ct);
             if(activeUsers.Count!=2)return Results.BadRequest(new{error="Both delegation participants must be active AeroLink users."});
             var members=await db.ProgramMemberships.AsNoTracking().Where(x=>x.ProgramId==request.ProgramId&&x.EndedAt==null&&(x.UserId==request.DelegatorUserId||x.UserId==request.DelegateUserId)).Select(x=>x.UserId).Distinct().ToListAsync(ct);
@@ -156,7 +200,7 @@ public static class AdministrationEndpoints
             var actor = http.UserAccount();
             var now = DateTimeOffset.UtcNow;
             var delegations = await db.RoleDelegations.AsNoTracking()
-                .Where(x => actor.IsAdministrator || x.DelegatorUserId == actor.Id || x.DelegateUserId == actor.Id)
+                .Where(x => actor.IsSystemAdministrator || x.DelegatorUserId == actor.Id || x.DelegateUserId == actor.Id)
                 .ToListAsync(ct);
             var programIds = delegations.Select(x => x.ProgramId).Distinct().ToList();
             var userIds = delegations.SelectMany(x => new[] { x.DelegatorUserId, x.DelegateUserId }).Distinct().ToList();
@@ -179,14 +223,14 @@ public static class AdministrationEndpoints
                 x.CreatedAt,
                 x.RevokedAt,
                 status = x.RevokedAt is not null ? "Revoked" : x.EndsAt <= now ? "Expired" : x.StartsAt > now ? "Future" : "Active",
-                canRevoke = x.RevokedAt is null && x.EndsAt > now && (actor.IsAdministrator || actor.Id == x.DelegatorUserId)
+                canRevoke = x.RevokedAt is null && x.EndsAt > now && (actor.IsSystemAdministrator || actor.Id == x.DelegatorUserId)
             }));
         });
 
         app.MapDelete("/api/delegations/{id:guid}", async (Guid id, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var delegation = await db.RoleDelegations.SingleOrDefaultAsync(x => x.Id == id, ct); if (delegation is null) return Results.NotFound();
-            var actor = http.UserAccount(); if (!actor.IsAdministrator && actor.Id != delegation.DelegatorUserId) return Results.Forbid();
+            var actor = http.UserAccount(); if (!actor.IsSystemAdministrator && actor.Id != delegation.DelegatorUserId) return Results.Forbid();
             if (delegation.RevokedAt is not null) return Results.NoContent();
             delegation.Revoke(DateTimeOffset.UtcNow);
             db.SecurityAuditEvents.Add(new("DelegationRevoked", actor.UserName, delegation.DelegateUserId.ToString(), "Success", $"Revoked delegated {delegation.Role} authority for program {delegation.ProgramId}.", http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
@@ -197,7 +241,7 @@ public static class AdministrationEndpoints
         // the same split the managed-document audit uses. PostgreSQL keeps ordering and limiting in the database.
         app.MapGet("/api/admin/security-audit", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {
-            if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+            if (!http.UserAccount().IsSystemAdministrator) return Results.Forbid();
             var events = db.SecurityAuditEvents.AsNoTracking();
             return Results.Ok(db.Database.IsNpgsql()
                 ? await events.OrderByDescending(x => x.OccurredAt).Take(1000).ToListAsync(ct)
@@ -216,6 +260,24 @@ public static class AdministrationEndpoints
     /// Personnel page, which is exactly the reassurance nobody should be given. Only their last remaining role
     /// ending removes them; losing one of several roles does not.
     /// </summary>
+    private static Task<bool> StillAdministersAsync(AeroLinkDbContext db, Guid actorId, CancellationToken ct) =>
+        db.UserAccounts.AnyAsync(x => x.Id == actorId && x.IsGlobalAdministrator && x.State == AccountState.Active, ct);
+
+    private static Task<bool> OtherActiveAdministratorExistsAsync(AeroLinkDbContext db, Guid userId, CancellationToken ct) =>
+        db.UserAccounts.AnyAsync(x => x.Id != userId && x.IsGlobalAdministrator && x.State == AccountState.Active, ct);
+
+    private static IResult LastAdministrator() => Results.Conflict(new
+    {
+        error = "The last active global administrator cannot be revoked or disabled. Grant another person global administrator first.",
+        code = "last_global_administrator",
+    });
+
+    private static IResult BuiltInAdministratorProtected() => Results.Conflict(new
+    {
+        error = "The built-in administrator account can be changed only by itself.",
+        code = "built_in_administrator_protected",
+    });
+
     internal static async Task EndBackupsForEndedMembershipAsync(AeroLinkDbContext db, Guid userId, Guid programId,
         Guid justEndedMembershipId, ProgramRole endedRole, string actor, CancellationToken ct)
     {

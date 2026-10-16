@@ -200,7 +200,7 @@ test('review signature dialog exposes and submits the exact frozen intent', asyn
   const dialog = page.getByRole('dialog', { name: 'Documentation Center action' })
   await dialog.getByLabel('Meaning').fill('I confirm this exact submitted snapshot is technically complete.')
   await dialog.getByLabel('Rationale').fill('The formal scope, working file, and relationship manifest are acceptable.')
-  await dialog.getByLabel('Password').fill('AeroLink!2026')
+  await dialog.getByLabel('AeroLink password').fill('AeroLink!2026')
   await dialog.getByRole('button', { name: 'Sign and approve' }).click()
   await expect(page.getByText(/was approved/)).toBeVisible()
   await page.reload({ waitUntil: 'load' })

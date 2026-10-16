@@ -44,7 +44,7 @@ public static class WorkflowEndpoints
             ProjectAuthorityResolver authority, CancellationToken ct) =>
         {
             // Deciding how a team reviews is a configuration-management act, not an authoring one.
-            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, request.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, request.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -70,7 +70,7 @@ public static class WorkflowEndpoints
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -102,7 +102,7 @@ public static class WorkflowEndpoints
         {
             var current = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (current is null) return Results.NotFound();
-            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, current.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, current.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -128,7 +128,7 @@ public static class WorkflowEndpoints
         {
             var workflow = await db.ReviewWorkflows.Include(x => x.Stages).SingleOrDefaultAsync(x => x.Id == id, ct);
             if (workflow is null) return Results.NotFound();
-            if (!await http.HasApprovalConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
+            if (!await http.HasProjectConfigurationAuthorityAsync(db, authority, workflow.ProjectId, ct))
                 return Results.Forbid();
             try
             {
@@ -175,15 +175,16 @@ public static class WorkflowEndpoints
                 .ToDictionary(x => x.Id, x => (x.UserName, x.DisplayName));
             var rolesByUser = programMembers.GroupBy(x => x.Id)
                 .ToDictionary(x => x.Key, x => x.Select(member => member.Role).ToList());
-            // The installation administrator is intentionally not required to hold a Program membership.
+            // The built-in administrator is intentionally not required to hold a Program membership.
             // ResolveHoldersAsync includes that substitution because the signing gate does; load the account
-            // alongside the scoped roster so the projection can actually name the holder it reports.
-            var systemAdministrator = await db.UserAccounts.AsNoTracking()
-                .Where(x => x.State == AccountState.Active
-                            && x.UserName == IdentityService.SystemAdministratorUserName)
+            // alongside the scoped roster so the projection can actually name the holder it reports. A granted
+            // administrator substitutes nowhere (#1639) and appears only through their own roles.
+            var systemAdministrators = await db.UserAccounts.AsNoTracking()
+                .Where(x => x.State == AccountState.Active)
+                .Where(UserAccount.AuthorityOverrideHolder)
                 .Select(x => new { x.Id, x.UserName, x.DisplayName })
-                .SingleOrDefaultAsync(ct);
-            if (systemAdministrator is not null)
+                .ToListAsync(ct);
+            foreach (var systemAdministrator in systemAdministrators)
                 accountById[systemAdministrator.Id] =
                     (systemAdministrator.UserName, systemAdministrator.DisplayName);
 
