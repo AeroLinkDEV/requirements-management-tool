@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Domain.Identity;
+using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,11 +13,20 @@ public sealed record LoginResult(AuthenticatedUser User, string Token, DateTimeO
 /// <summary>A session, or the refusal code the sign-in page explains (#1615).</summary>
 public sealed record WindowsSignInOutcome(LoginResult? Session, string? RefusalCode);
 
-public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvider? dataProtection = null)
+public sealed class IdentityService
 {
     private const string ProtectedMfaPrefix = "dp:v1:";
     private const int NewPasswordIterations = 600_000;
-    private readonly IDataProtector _mfaProtector = (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1");
+    private readonly AeroLinkDbContext db;
+    private readonly IDataProtector _mfaProtector;
+
+    public IdentityService(AeroLinkDbContext db, IDataProtectionProvider? dataProtection = null,
+        HomeContinuityDataProtection? continuity = null)
+    {
+        this.db = db;
+        _mfaProtector = (continuity?.CreateProtector("AeroLink.Identity.MfaSecret.v1")
+            ?? (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1"));
+    }
     public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
     {

@@ -723,6 +723,17 @@ validated on an isolated restored copy before the real database is touched; a mo
 conflict is reported in seconds with the affected records and the supported operator decisions, and
 AeroLink makes no authority decision itself.
 
+HOME continuity across a user or machine boundary is an attended maintenance operation. The source captures
+its actual Data Protection application discriminator and provider, and exports key descriptors in memory into
+certificate-wrapped envelopes bound to the verified backup and connector identities. The destination requires the
+operator-verified manifest hash and exact binding, rewraps the descriptors with LocalMachine DPAPI in a fresh
+staging ring, validates key IDs/dates/revocations, and atomically installs it without overwriting an existing ring.
+When the source discriminator differs from canonical `AeroLink`, the exact captured value can be configured as a
+temporary legacy read provider for existing durable payloads; new values use the canonical provider. Immutable
+notification history, controlled signatures and evidence are not rewritten. Sessions and other time-limited tokens
+are reissued, while connector key/deployment identity and certificate private-key ACLs remain separate attended
+transfer and qualification steps.
+
 See [product/docs/OPERATIONS.md](product/docs/OPERATIONS.md) and [docs/REMOTE_DEMO_OPERATOR.md](docs/REMOTE_DEMO_OPERATOR.md).
 
 ## Testing and quality gates

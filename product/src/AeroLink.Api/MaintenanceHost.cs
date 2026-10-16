@@ -2,7 +2,14 @@ using AeroLink.Domain.Identity;
 using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Persistence;
 using AeroLink.Infrastructure.Persistence.Maintenance;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 
 namespace AeroLink.Api;
@@ -28,6 +35,18 @@ namespace AeroLink.Api;
 ///                       --person &lt;guid&gt; --legacy-backup &lt;guid&gt; --operator &lt;reference&gt;
 ///                       [--expect-primary &lt;guid|none&gt;] [--apply]
 ///       Dry run unless --apply is given. Preconditions are re-read immediately before any write.
+///
+///   maintenance home-continuity export --package &lt;new-directory&gt; --source-installation &lt;id&gt;
+///       --source-discriminator &lt;exact-value&gt; --source-protection &lt;provider&gt; --verified-backup &lt;id&gt;
+///       --connector-deployment &lt;id&gt; --connector-key &lt;id&gt; --target-application &lt;name&gt;
+///       --certificate &lt;public-cert.pem|cer&gt; [--source-ring &lt;captured-directory&gt;]
+///       Exports an identity-bound, certificate-wrapped ring package without printing key material.
+///
+///   maintenance home-continuity apply --package &lt;directory&gt; --destination-ring &lt;new-directory&gt;
+///       --source-installation &lt;id&gt; --source-discriminator &lt;exact-value&gt; --source-protection &lt;provider&gt;
+///       --verified-backup &lt;id&gt; --connector-deployment &lt;id&gt; --connector-key &lt;id&gt; --manifest-sha256 &lt;hash&gt;
+///       --certificate &lt;cert.pem|pfx&gt; [--certificate-key &lt;private-key.pem&gt;]
+///       Rewraps the package with LocalMachine DPAPI and refuses a pre-existing destination ring.
 /// </summary>
 public static class AeroLinkMaintenanceHost
 {
@@ -44,6 +63,8 @@ public static class AeroLinkMaintenanceHost
             Console.WriteLine("  maintenance analyze [--json]");
             Console.WriteLine("  maintenance upgrade [--apply]");
             Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
+            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <id> --connector-deployment <id> --connector-key <id> --target-application <name> --certificate <public-cert.pem|cer> [--source-ring <captured-directory>]");
+            Console.WriteLine("  maintenance home-continuity apply --package <directory> --destination-ring <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <id> --connector-deployment <id> --connector-key <id> --manifest-sha256 <hash> --certificate <cert.pem|pfx> [--certificate-key <private-key.pem>]");
             return 0;
         }
 
@@ -100,6 +121,7 @@ public static class AeroLinkMaintenanceHost
             "analyze" => await AnalyzeAsync(scope.ServiceProvider, args),
             "upgrade" => await UpgradeAsync(scope.ServiceProvider, args),
             "resolve" => await ResolveAsync(scope.ServiceProvider, args),
+            "home-continuity" => await HomeContinuityAsync(scope.ServiceProvider, args),
             _ => Fail($"Unknown maintenance command '{command}'. Run 'maintenance help'."),
         };
     }
@@ -274,4 +296,126 @@ public static class AeroLinkMaintenanceHost
             _ => 22,
         };
     }
+
+    private static async Task<int> HomeContinuityAsync(IServiceProvider services, string[] args)
+    {
+        var operation = args.Length > 2 ? args[2].ToLowerInvariant() : "help";
+        return operation switch
+        {
+            "export" => await ExportHomeContinuityAsync(services, args),
+            "apply" => await ApplyHomeContinuityAsync(services, args),
+            _ => Fail("Use 'maintenance home-continuity export' or 'maintenance home-continuity apply'."),
+        };
+    }
+
+    private static async Task<int> ExportHomeContinuityAsync(IServiceProvider services, string[] args)
+    {
+        var package = RequiredValue(args, "--package");
+        var sourceInstallation = RequiredValue(args, "--source-installation");
+        var sourceDiscriminator = RequiredValue(args, "--source-discriminator");
+        var sourceProtection = RequiredValue(args, "--source-protection");
+        var verifiedBackup = RequiredValue(args, "--verified-backup");
+        var connectorDeployment = RequiredValue(args, "--connector-deployment");
+        var connectorKey = RequiredValue(args, "--connector-key");
+        var targetApplication = RequiredValue(args, "--target-application");
+        var certificatePath = RequiredValue(args, "--certificate");
+        var sourceRingPath = OptionalValue(args, "--source-ring");
+
+        var actualDiscriminator = services.GetRequiredService<IOptions<DataProtectionOptions>>().Value.ApplicationDiscriminator;
+        if (!string.Equals(actualDiscriminator, sourceDiscriminator, StringComparison.Ordinal))
+            return Fail("The supplied source discriminator does not match the current host; continuity refuses to guess or export the wrong source ring.");
+        var repository = services.GetRequiredService<IOptions<KeyManagementOptions>>().Value.XmlRepository
+            ?? (!string.IsNullOrWhiteSpace(sourceRingPath) && Directory.Exists(sourceRingPath)
+                ? new FileSystemXmlRepository(new DirectoryInfo(sourceRingPath), NullLoggerFactory.Instance)
+                : null);
+        if (repository is null)
+            return Fail("The current Data Protection provider has no explicit XML repository; supply the exact captured source ring with --source-ring.");
+        using var certificate = LoadCertificate(certificatePath, keyPath: null, requirePrivateKey: false);
+        var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator, targetApplication,
+            sourceProtection, verifiedBackup, connectorDeployment, connectorKey);
+        var manifest = HomeContinuityKeyTransfer.ExportPackage(
+            services.GetRequiredService<IKeyManager>(), repository, certificate, binding, package);
+        Console.WriteLine($"HOME CONTINUITY PACKAGE EXPORTED: {manifest.PackageId:D}");
+        Console.WriteLine($"Keys: {manifest.Keys.Count}; revocations: {manifest.Revocations.Count}");
+        Console.WriteLine($"Manifest SHA-256: {Sha256File(Path.Combine(package, "manifest.json"))}");
+        Console.WriteLine("Key descriptors and protected values were not printed or written in plaintext.");
+        await Task.CompletedTask;
+        return 0;
+    }
+
+    private static async Task<int> ApplyHomeContinuityAsync(IServiceProvider services, string[] args)
+    {
+        var package = RequiredValue(args, "--package");
+        var destinationRing = RequiredValue(args, "--destination-ring");
+        var sourceInstallation = RequiredValue(args, "--source-installation");
+        var sourceDiscriminator = RequiredValue(args, "--source-discriminator");
+        var sourceProtection = RequiredValue(args, "--source-protection");
+        var verifiedBackup = RequiredValue(args, "--verified-backup");
+        var connectorDeployment = RequiredValue(args, "--connector-deployment");
+        var connectorKey = RequiredValue(args, "--connector-key");
+        var manifestSha256 = RequiredValue(args, "--manifest-sha256");
+        var certificatePath = RequiredValue(args, "--certificate");
+        var certificateKeyPath = OptionalValue(args, "--certificate-key");
+
+        var configuration = services.GetRequiredService<IConfiguration>();
+        var targetApplication = configuration["DataProtection:ApplicationName"]?.Trim();
+        if (string.IsNullOrWhiteSpace(targetApplication))
+            return Fail("DataProtection:ApplicationName must be the explicit destination application name before continuity apply.");
+        var configuredRing = configuration["DataProtection:KeyRingPath"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredRing)
+            && !string.Equals(Path.GetFullPath(configuredRing), Path.GetFullPath(destinationRing), StringComparison.OrdinalIgnoreCase))
+            return Fail("The destination ring does not match DataProtection:KeyRingPath; continuity refuses a mixed installation.");
+
+        using var certificate = LoadCertificate(certificatePath, certificateKeyPath, requirePrivateKey: true);
+        var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator,
+            targetApplication, sourceProtection, verifiedBackup, connectorDeployment, connectorKey);
+        var applied = HomeContinuityKeyTransfer.ApplyPackage(package, destinationRing, certificate, targetApplication, binding, manifestSha256);
+        Console.WriteLine($"HOME CONTINUITY RING INSTALLED: {applied.PackageId:D}");
+        Console.WriteLine($"Keys: {applied.Keys.Count}; revocations: {applied.Revocations.Count}");
+        Console.WriteLine("Destination key files were rewrapped with LocalMachine DPAPI; no source file was modified.");
+        await Task.CompletedTask;
+        return 0;
+    }
+
+    private static X509Certificate2 LoadCertificate(string path, string? keyPath, bool requirePrivateKey)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException("The continuity transport certificate is missing.", path);
+        var certificate = string.IsNullOrWhiteSpace(keyPath)
+            ? IsPkcs12(path)
+                ? X509CertificateLoader.LoadPkcs12FromFile(path, ReadOnlySpan<char>.Empty,
+                    X509KeyStorageFlags.EphemeralKeySet, Pkcs12LoaderLimits.Defaults)
+                : X509CertificateLoader.LoadCertificateFromFile(path)
+            : X509Certificate2.CreateFromPemFile(path, keyPath);
+        if (requirePrivateKey && !certificate.HasPrivateKey)
+        {
+            certificate.Dispose();
+            throw new InvalidOperationException("The destination continuity certificate must include its private key.");
+        }
+        if (!requirePrivateKey && certificate.HasPrivateKey)
+        {
+            certificate.Dispose();
+            throw new InvalidOperationException("The export continuity certificate must be public-only; keep its private key on the destination.");
+        }
+        return certificate;
+    }
+
+    private static bool IsPkcs12(string path) =>
+        Path.GetExtension(path).Equals(".pfx", StringComparison.OrdinalIgnoreCase)
+        || Path.GetExtension(path).Equals(".p12", StringComparison.OrdinalIgnoreCase)
+        || Path.GetExtension(path).Equals(".pkcs12", StringComparison.OrdinalIgnoreCase);
+
+    private static string Sha256File(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
+    }
+
+    private static string? OptionalValue(string[] args, string name)
+    {
+        var index = Array.FindIndex(args, x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    }
+
+    private static string RequiredValue(string[] args, string name) =>
+        OptionalValue(args, name) ?? throw new ArgumentException($"{name} is required.");
 }

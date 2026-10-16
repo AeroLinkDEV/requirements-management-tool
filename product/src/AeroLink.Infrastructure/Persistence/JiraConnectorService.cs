@@ -6,6 +6,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Content;
 using AeroLink.Domain.Integrations;
+using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -146,10 +147,23 @@ public sealed class JiraClient(IHttpClientFactory factory, ILogger<JiraClient> l
 /// somebody takes, attributed to them, and it happens once: a second push finds the existing link and does
 /// nothing, because two issues for one change request is worse than none.
 /// </summary>
-public sealed class JiraConnectorService(AeroLinkDbContext db, IJiraClient client,
-    IDataProtectionProvider dataProtection, IConfiguration configuration)
+public sealed class JiraConnectorService
 {
-    private readonly IDataProtector _protector = dataProtection.CreateProtector("AeroLink.Jira.ApiToken.v1");
+    private readonly AeroLinkDbContext db;
+    private readonly IJiraClient client;
+    private readonly IConfiguration configuration;
+    private readonly IDataProtector _protector;
+
+    public JiraConnectorService(AeroLinkDbContext db, IJiraClient client,
+        IDataProtectionProvider dataProtection, IConfiguration configuration,
+        HomeContinuityDataProtection? continuity = null)
+    {
+        this.db = db;
+        this.client = client;
+        this.configuration = configuration;
+        _protector = continuity?.CreateProtector("AeroLink.Jira.ApiToken.v1")
+            ?? dataProtection.CreateProtector("AeroLink.Jira.ApiToken.v1");
+    }
 
     public string Protect(string token) => _protector.Protect(token);
     private string Unprotect(string protectedToken) => _protector.Unprotect(protectedToken);

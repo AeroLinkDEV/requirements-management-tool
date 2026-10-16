@@ -838,6 +838,57 @@ can block protected delivery evidence and credentials; it does not fail unrelate
 not make old ciphertext compatible with a new ring. Do not clear or replace keys to make mail qualification
 pass. Installation send authority remains separate from key/database/configuration recovery.
 
+#### Attended HOME Data Protection continuity
+
+Moving the HOME installation across a user or machine boundary requires an attended continuity transfer before
+the source is retired. The source operator must capture the actual
+`IOptions<DataProtectionOptions>.ApplicationDiscriminator`, XML repository/provider, source installation identity,
+connector deployment/key identity and the exact verified-backup identity. The discriminator is source-derived;
+the transfer must never infer it from a guessed HOME path or application name.
+
+The maintenance executable provides the bounded transfer boundary:
+
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity export `
+  --package D:\transfer\aerolink-home-continuity-package `
+  --source-installation <source-installation-id> `
+  --source-discriminator <captured-source-discriminator> `
+  --source-protection <captured-provider> `
+  --verified-backup <verified-backup-id-or-sha> `
+  --connector-deployment <connector-deployment-id> `
+  --connector-key <connector-key-id> `
+  --target-application AeroLink `
+  --certificate D:\transfer\destination-transport.cer `
+  --source-ring D:\captured\source-key-ring
+```
+
+Export reads descriptors in memory and writes only certificate-wrapped envelopes plus a manifest containing exact
+key IDs, dates, revocations, source discriminator/provider and binding identities. The destination operator carries
+the package through the existing verified backup/evidence channel, records the manifest SHA-256, and independently
+checks that it belongs to the same final backup. Certificate encryption provides confidentiality; the verified
+backup identity and operator-recorded manifest hash provide the provenance check.
+
+`--source-ring` is required when the current source provider uses its implicit per-user repository (`XmlRepository`
+is not explicitly configured). It must be the exact operator-captured ring directory; the command does not infer a
+HOME path. The export checks that its key metadata and revocation set match the live source key manager. An explicit
+configured `DataProtection:KeyRingPath` supplies the repository directly.
+
+Before apply, the destination must explicitly configure `DataProtection:ApplicationName=AeroLink` and the target
+`DataProtection:KeyRingPath`. Apply requires the exact source binding and manifest hash, rejects malformed or
+unexpected XML and any pre-existing destination ring, decrypts the certificate envelopes only in memory, rewraps
+them with LocalMachine DPAPI in a staging directory, validates key metadata/revocations, and atomically installs the
+new ring. A failed or mixed transfer leaves the source and destination untouched. The destination certificate
+private key stays on the destination and must be transferred/imported through the existing attended certificate and
+ACL procedure; it is never placed in the package or repository.
+
+When the captured source discriminator differs from canonical `AeroLink`, set the attended temporary
+`DataProtection:LegacyApplicationName` to that exact captured value. AeroLink protects new durable values with the
+canonical provider and reads existing purpose-specific values through the exact legacy provider until those values
+are deliberately reprotected. This preserves MFA, webhook, Jira and notification compatibility without rewriting
+immutable notification history. Sessions, antiforgery and other time-limited tokens are reissued. Connector signing
+key material, deployment ID, external protected configuration, certificate private-key ACLs and final backup
+verification remain separate attended transfer steps; the current database backup does not contain all of them.
+
 Each concrete generation freezes protected destination, MIME, Message-ID, Date, body hash, template/content
 policy and original admission window. Known transient refusal retries use approximately 30, 60, then 120
 minute delays with bounded stable jitter, at most 14 known transient failures and a 24-hour horizon. Correcting
