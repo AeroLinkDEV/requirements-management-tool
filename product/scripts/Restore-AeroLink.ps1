@@ -102,11 +102,19 @@ if ($site -and $production -and -not $DisposableQualification) {
 
 function Invoke-Fault([string]$Phase) { if ($FaultInjection -eq $Phase) { throw "Injected restore fault at $Phase." } }
 function Invoke-Psql([string]$Database, [string]$Sql) {
-    return (Invoke-AeroLinkWithPostgresAccess $suAccess {
-        $output = & (Join-Path $bin 'psql.exe') -w -h 127.0.0.1 -p $PostgresPort -U $suUser -d $Database -v ON_ERROR_STOP=1 -tA -c $Sql
-        if ($LASTEXITCODE -ne 0) { throw "PostgreSQL command failed against database '$Database'." }
+    # The access helper executes its action in a child scope. Capture every command value explicitly so cleanup
+    # queries cannot silently lose their database or SQL text when they cross that boundary.
+    $queryBin = [string]$bin
+    $queryPort = [int]$PostgresPort
+    $queryUser = [string]$suUser
+    $queryDatabase = [string]$Database
+    $querySql = [string]$Sql
+    $psqlAction = {
+        $output = & (Join-Path $queryBin 'psql.exe') -w -h 127.0.0.1 -p $queryPort -U $queryUser -d $queryDatabase -v ON_ERROR_STOP=1 -tA -c $querySql
+        if ($LASTEXITCODE -ne 0) { throw "PostgreSQL command failed against database '$queryDatabase'." }
         $output
-    })
+    }.GetNewClosure()
+    return (Invoke-AeroLinkWithPostgresAccess $suAccess $psqlAction)
 }
 function Remove-Database([string]$Database) {
     [void](Invoke-Psql 'postgres' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();")
@@ -246,7 +254,9 @@ function Assert-ContinuityOwnedPath([string]$Path, [string]$Root, [string]$Descr
 }
 
 function Get-ContinuityDatabaseOid([string]$Database) {
-    $value = ([string](Invoke-Psql 'postgres' "SELECT oid::text FROM pg_database WHERE datname = '$Database';")).Trim()
+    $rawValue = Invoke-Psql 'postgres' "SELECT oid::text FROM pg_database WHERE datname = '$Database';"
+    if ($null -eq $rawValue) { return $null }
+    $value = ([string]$rawValue).Trim()
     if ([string]::IsNullOrWhiteSpace($value)) { return $null }
     if ($value -notmatch '^\d+$') { throw "The continuity database identity is malformed." }
     $value
