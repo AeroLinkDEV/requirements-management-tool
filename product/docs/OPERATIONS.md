@@ -854,6 +854,169 @@ can block protected delivery evidence and credentials; it does not fail unrelate
 not make old ciphertext compatible with a new ring. Do not clear or replace keys to make mail qualification
 pass. Installation send authority remains separate from key/database/configuration recovery.
 
+#### Attended HOME Data Protection continuity
+
+Moving the HOME installation across a user or machine boundary requires an attended continuity transfer before
+the source is retired. The source operator must capture the actual
+`IOptions<DataProtectionOptions>.ApplicationDiscriminator`, XML repository/provider, source installation identity,
+connector deployment/key identity and the exact verified-backup identity. The discriminator is source-derived;
+the transfer must never infer it from a guessed HOME path or application name.
+
+The maintenance executable provides the bounded transfer boundary:
+
+Before exporting, run the read-only compatibility probe against the verified backup restored into an owned,
+disposable database. The probe owns a compiled catalog of every durable protected field and purpose; callers cannot
+provide a partial canary list. It reads and unprotects the genuine restored ciphertexts in memory, reports only
+record identifiers, ciphertext digests, counts and pass/fail status, and verifies that the key-ring digest is unchanged
+before and after the read. The receipt also binds the source installation, instance, process/image tuple, source
+content/configuration/SID, discriminator and provider evidence, verified archive, disposable restore and reader
+identity. `candidate-discriminator-compatibility` is compatibility evidence, never a claim that the reader is the old
+process; serialized decryptors remain authoritative and an unknown Windows DPAPI scope stays unknown. Missing,
+conflicting or unsupported categories refuse the proof. Browser/session/antiforgery and other time-limited tokens are
+reissued or classified not applicable. Connector, notification-authority and other external protected stores remain
+separate attended gates.
+
+Create the restore proof with the existing restore authority before invoking the maintenance probe. The archive,
+database name, disposable PostgreSQL port and restore-script identity are recorded by the script and the proof is
+write-once under the installation's restore-validation root; the probe refuses an ambient database, a missing proof,
+or a proof that does not bind the verified archive and attachment inventory.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\product\scripts\Restore-AeroLink.ps1 `
+  -BackupArchive D:\transfer\verified-home-backup.zip `
+  -TargetDatabase aerolink_restore_validation `
+  -PostgresPort <disposable-postgres-port-not-54329> `
+  -PostgresBin D:\pgsql\bin `
+  -DisposableQualification -SkipCurrentCodeValidation `
+  -RequireFreshTarget `
+  -ContinuityReceiptPath 'C:\AeroLink\AeroLink Development\restore-validation\aerolink_restore_validation.continuity.json'
+```
+
+The probe's `metadata-captured`, `no-applicable-values`, `legacy-plaintext-present`, `unproven` and `refused`
+statuses are evidence of the corresponding boundary only and cannot authorize export. `compatibility-proof` is
+available only after the complete catalog passes against the owned restored PostgreSQL database; the export command
+re-executes that probe inline, so an edited receipt status or binding cannot substitute for the current archive,
+restore, ring and reader checks. A legacy plaintext field is reported and carried with its existing behavior, but it
+does not become a cryptographic compatibility proof.
+
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity probe `
+  --binding D:\transfer\home-compatibility-binding.json `
+  --receipt D:\transfer\home-compatibility-receipt.json
+```
+
+An inline `compatibility-proof`, `no-applicable-values`, or `legacy-plaintext-present` result can produce a bounded
+ring package. The latter two are explicitly non-cryptographic inventory outcomes: every actual Data Protection
+ciphertext still has to pass, and an empty or legacy field is never turned into a synthetic canary. Any
+`metadata-captured`, unproven, refused or incomplete result blocks package creation. Every export first creates an
+operation-owned fresh restore, records its PostgreSQL listener/process/data-root and tool identities, retains redacted
+child evidence, runs the complete probe, and removes only the operation-owned database and staging paths before the
+package is published. The operation journal remains as the recovery receipt if cleanup is ambiguous. None of these
+statuses authorizes source retirement or HOME wipe; the implicit Windows profile fallback, real source values,
+connector/protected-config transfer and physical D5 steps remain attended evidence requirements.
+
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity export `
+  --package D:\transfer\aerolink-home-continuity-package `
+  --source-installation <source-installation-id> `
+  --source-discriminator <captured-source-discriminator> `
+  --source-protection <captured-provider> `
+  --verified-backup <verified-backup-sha256> `
+  --verified-backup-archive <verified-home-backup.zip> `
+  --connector-deployment <connector-deployment-id> `
+  --connector-key <connector-key-id> `
+  --target-application AeroLink `
+  --certificate D:\transfer\destination-transport.cer `
+  --source-ring D:\captured\source-key-ring `
+  --compatibility-receipt D:\transfer\home-compatibility-receipt.json `
+  --restore-postgres-bin 'C:\AeroLink\PostgreSQL\bin'
+```
+
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity apply `
+  --package D:\transfer\aerolink-home-continuity-package `
+  --destination-ring 'C:\AeroLink\AeroLink Production\keys\data-protection' `
+  --source-installation <source-installation-id> `
+  --source-discriminator <captured-source-discriminator> `
+  --source-protection <captured-provider> `
+  --verified-backup <verified-backup-sha256> `
+  --verified-backup-archive-sha256 <verified-backup-sha256> `
+  --connector-deployment <connector-deployment-id> `
+  --connector-key <connector-key-id> `
+  --connector-public-fingerprint <connector-public-fingerprint-sha256> `
+  --manifest-sha256 <operator-recorded-manifest-sha256> `
+  --certificate D:\transfer\destination-transport.pfx
+```
+
+Export constructs a separate source Data Protection provider against the exact captured ring, discriminator and
+captured protection mode; it never combines a separately supplied ring with the maintenance host's default manager.
+The export refuses unless the complete compatibility-proof receipt is bound to this source installation,
+discriminator, ring and verified backup; a candidate compatibility proof never claims old-process identity.
+It verifies the final HOME backup archive and its SHA-256 sidecar, reads the connector PEM only in memory to record
+its public fingerprint/key ID, and writes an RSA-CMS certificate-encrypted connector envelope alongside the
+certificate-wrapped Data Protection descriptors. The package manifest contains exact key IDs, dates, revocations,
+source discriminator/provider, connector deployment/key/path identity and binding identities; the connector private
+PEM is never written to the package in plaintext. The destination operator carries the
+package through the existing verified backup/evidence channel, records the manifest SHA-256, and independently
+checks the package, final-backup SHA-256 and connector public fingerprint as one attended handoff. Certificate
+encryption provides confidentiality; it does not replace that operator-trusted provenance channel.
+
+`--source-ring` is always the exact operator-captured ring directory; the command does not infer a HOME path or use
+the maintenance host's default provider. The source provider is constructed with the captured discriminator and
+protection mode, and the export checks that its key metadata and revocation set match that same captured repository.
+
+Before apply, the destination must explicitly configure exactly `DataProtection:ApplicationName=AeroLink`, the
+target `DataProtection:KeyRingPath`, and `DataProtection:ProtectKeysWith=DpapiLocalMachine`; all three are checked
+before staging. The maintenance runtime must also expose the declared installation root, connector path, effective
+deployment ID and API service SID; source export checks those values against the actual configured source key, while
+apply refuses a connector path outside the destination root or a pre-existing connector key/non-empty ring. A fresh A2 `-NoStart`
+installation may already contain the canonical empty key-ring directory: apply accepts it only when it has no
+entries, no reparse point and exactly the protected API-Modify plus SYSTEM/Administrators-FullControl ACL; it never
+merges or replaces an existing key. Apply requires the exact source binding, final-backup SHA-256 and manifest hash,
+rejects malformed or unexpected XML, reparse-point parents and any non-empty destination ring or connector key,
+decrypts certificate envelopes only in memory, rewraps the Data Protection descriptors with LocalMachine DPAPI in a
+staging directory, validates key metadata, the exact revocation set and connector public identity, then publishes the
+new ring and connector key under a durable receipt outside the ring. A pending receipt refuses unattended
+commissioning after a crash or partial publish. An attended recovery must supply the recorded package ID, manifest
+digest, installation root, service SID and identity binding; it may complete only a fully hashed connector publish or
+abort only an exactly hashed, owned partial stage (including a receipt-bound partial publish into the preprovisioned
+empty ring). Any mismatch refuses cleanup. An abort writes a terminal receipt,
+keeps normal commissioning refused until a new transfer completes, and permits a later explicit apply to consume only
+that validated empty abort boundary. The destination certificate private key stays on the destination and must be
+transferred/imported through the existing attended certificate and ACL procedure; it is never placed in the package
+or repository.
+
+For an interrupted apply, stop the site and use the same package and recorded values:
+
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity recover `
+  --action complete `
+  --package D:\transfer\aerolink-home-continuity-package `
+  --destination-ring 'C:\AeroLink\AeroLink Production\keys\data-protection' `
+  --package-id <pending-package-guid> `
+  --manifest-sha256 <pending-manifest-sha256> `
+  --source-installation <source-installation-id> `
+  --source-discriminator <captured-source-discriminator> `
+  --source-protection <captured-provider> `
+  --verified-backup <verified-backup-sha256> `
+  --verified-backup-archive-sha256 <verified-backup-sha256> `
+  --connector-deployment <connector-deployment-id> `
+  --connector-key <connector-key-id> `
+  --connector-public-fingerprint <connector-public-fingerprint-sha256>
+```
+
+Use `--action abort` only after reviewing the receipt. It refuses a completed ring, unexpected files, missing
+authenticated hashes or any path/identity mismatch; an in-progress partial publish is cleaned only when its exact
+receipt-owned hashes verify. It does not provide an arbitrary cleanup switch.
+
+When the captured source discriminator differs from canonical `AeroLink`, set the attended temporary
+`DataProtection:LegacyApplicationName` to that exact captured value. AeroLink protects new durable values with the
+canonical provider and reads existing purpose-specific values through the exact legacy provider until those values
+are deliberately reprotected. This preserves MFA, webhook, Jira and notification compatibility without rewriting
+immutable notification history. Sessions, antiforgery and other time-limited tokens are reissued. Connector
+enrollment/trust, external protected configuration, certificate private-key ACLs and final backup verification remain
+separate attended transfer steps; the current database backup does not contain all of them.
+
 Each concrete generation freezes protected destination, MIME, Message-ID, Date, body hash, template/content
 policy and original admission window. Known transient refusal retries use approximately 30, 60, then 120
 minute delays with bounded stable jitter, at most 14 known transient failures and a 24-hour horizon. Correcting
@@ -1475,6 +1638,12 @@ the verified shadow pair is moved into place, and download/inventory checks run 
 Any failure through activation or restart stops the service and restores the prior database/evidence pair. The
 retained pair is deliberately not deleted automatically; an operator dispositions it only after the restored
 deployment completes its site acceptance period.
+
+HOME continuity export reuses that restore authority with a fresh unique `restore` database and a write-once proof
+under the installation's `restore-validation` root. The retained compatibility receipt supplies source context only;
+export refuses to treat its status or restored database as authority, and performs the complete protected-field
+catalog probe again against the fresh archive restore in a read-only transaction before writing a package. The
+explicit PostgreSQL binary root is part of the command binding, and an existing fresh-target database is refused.
 
 For an isolated drill, use a database name containing `restore`, `validation`, or `test`; its evidence target must
 remain under `product\.local\restore-validation`. `AeroLinkRestoreQualification.Tests.ps1` exercises the

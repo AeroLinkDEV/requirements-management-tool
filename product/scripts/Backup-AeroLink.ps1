@@ -65,7 +65,7 @@ $evidence = if ($EvidenceRoot) { [IO.Path]::GetFullPath($EvidenceRoot) } elseif 
 $instanceIdentity = if ($site) {
     # Read from the declaration itself: the HOME reader's modes do not admit a site installation.
     $declared = Get-Content -LiteralPath $site.ConfigPath -Raw | ConvertFrom-Json
-    [pscustomobject]@{ Label = $(if ($declared.PSObject.Properties['label']) { [string]$declared.label } else { $site.Classification }); Classification = $site.Classification }
+    [pscustomobject]@{ Label = $(if ($declared.PSObject.Properties['label']) { [string]$declared.label } else { $site.Classification }); Classification = $site.Classification; InstanceId = [string]$declared.instanceId }
 } else { Get-AeroLinkInstanceConfig -ProductRoot $productRoot }
 
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
@@ -114,7 +114,7 @@ try {
         # asserted by whoever imports it. Without this the HOME->laptop refresh had nothing to check: any
         # valid AeroLink archive could be imported and labelled HOME CANONICAL on the importer's say-so.
         # Non-secret: the operator-declared label and classification, nothing more.
-        Instance = [ordered]@{ Label = $instanceIdentity.Label; Classification = $instanceIdentity.Classification }
+        Instance = [ordered]@{ Label = $instanceIdentity.Label; Classification = $instanceIdentity.Classification; InstanceId = $instanceIdentity.InstanceId }
         Database = [ordered]@{ Name = $Database; Dump = 'aerolink-postgresql.dump'; SnapshotCompletedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }
         Storage = [ordered]@{ Scheme = 'filesystem-v1'; SourceRoot = $evidence; ArchiveRoot = 'evidence'; ObjectCount = $archiveEvidence.ReferencedObjects; AttachmentCount = $archiveEvidence.ReferencedAttachments; ReferencedBytes = $archiveEvidence.VerifiedBytes; UnreferencedObjectCount = $archiveEvidence.UnreferencedObjects.Count; UnreferencedObjects = @($archiveEvidence.UnreferencedObjects) }
         AttachmentInventory = 'attachment-inventory.json'

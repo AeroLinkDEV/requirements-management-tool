@@ -17,6 +17,7 @@ using System.Text;
 using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Diagnostics;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
 using System.Text.Json;
@@ -74,6 +75,8 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.W
 // #1614: a site server is Production over HTTPS from Kestrel, or it does not start. Every other launch is left as
 // it was, except that Production may no longer listen on plain HTTP anywhere but loopback.
 var siteServer = SiteServerHosting.Configure(builder);
+if (siteServer is not null)
+    HomeContinuityKeyTransfer.RequireNoPendingContinuity(builder.Configuration);
 // Secure cookies take the __Host- prefix, which stops plain-HTTP origins, Domain= cookies from other hosts and
 // path-scoped cookies from planting or shadowing them. A declared site also carries its persisted instance identity
 // in every cookie name, so two AeroLink installations on one host cannot consume each other's sessions, antiforgery

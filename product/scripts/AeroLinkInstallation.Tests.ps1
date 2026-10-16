@@ -467,6 +467,7 @@ try {
         $runtime = Get-AeroLinkSiteRuntimeEnvironment -InstallationRoot $siteRoot
         Assert-True ($runtime['DataProtection__KeyRingPath'] -eq (Join-Path $siteRoot 'keys\data-protection') -and $runtime['DataProtection__ApplicationName'] -eq 'AeroLink' -and
             $runtime['DataProtection__ProtectKeysWith'] -eq 'DpapiLocalMachine' -and $runtime['Evidence__Root'] -eq (Join-Path $siteRoot 'evidence') -and
+            $runtime['SiteServer__InstallationRoot'] -eq [IO.Path]::GetFullPath($siteRoot) -and $runtime['SiteServer__ServiceSid'] -eq $declared.RunAsSid -and
             $runtime['Connector__SigningKeyPath'] -eq (Join-Path $siteRoot 'keys\connector\connector-signing-key.pem') -and
             $runtime['Connector__DeploymentId'] -eq $declared.ConnectorDeploymentId -and
             $runtime['AEROLINK_NOTIFICATION_AUTHORITY_ROOT'] -eq [IO.Path]::GetFullPath($siteAuthority) -and

@@ -602,7 +602,10 @@ The product includes local identity/session controls, scoped roles/administratio
 
 Windows sign-in (DEC-154, #1615), when enabled, signs people in with their domain logon through Negotiate, creates
 their account on first sign-in keyed on the Windows SID with Engineer in every Program, and lets the administrator
-link a Windows logon to `admin`. New electronic signatures use the shared B2 reauthentication boundary (DEC-155): accounts with a durable Windows link re-enter the Windows password with persisted-principal/SID validation, while unlinked Local accounts use the AeroLink password. The recorded method is preserved in the signature projection; historical signatures retain an empty method for compatibility.
+link a Windows logon to `admin`. New electronic signatures use the shared B2 reauthentication boundary (DEC-155):
+accounts with a durable Windows link re-enter the Windows password with persisted-principal/SID validation, while
+unlinked Local accounts use the AeroLink password. The recorded method is preserved in the signature projection;
+historical signatures retain an empty method for compatibility.
 Global administration is a persisted grant that an administrator gives and revokes, and each grant and revoke is recorded in the security audit (#1639). The last active administrator cannot be revoked or disabled. A granted administrator gets system administration only: accounts, roles and grants, identity links, review/approval configuration, assurance policy, artifact schemas, project creation and setup acceptance, and system diagnostics. Configuration applies in the Programs they can see. Creating a project makes its creator that Program's Administrator, as it always has. They keep their normal engineering authority. Showcase seeding and upgrade stay with `admin`. The authority override stays with the built-in `admin` bootstrap/break-glass account, as it always has. That override covers administrator substitution at signing, every review stage's candidate list, access to every Program, the self-review exemption and exclusion from document stewardship. Only `admin` itself may revoke its own grant, and no other account can disable it.
 
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
@@ -723,6 +726,28 @@ host that reuses the same migration authorities startup runs. A deterministic up
 validated on an isolated restored copy before the real database is touched; a modelled controlled-data
 conflict is reported in seconds with the affected records and the supported operator decisions, and
 AeroLink makes no authority decision itself.
+
+HOME continuity across a user or machine boundary is an attended maintenance operation. The source captures
+its actual Data Protection application discriminator and provider, and exports key descriptors in memory into
+certificate-wrapped envelopes bound to the verified backup and connector identities. The destination requires the
+operator-verified manifest hash and exact binding, rewraps the descriptors with LocalMachine DPAPI in a fresh
+staging ring, validates key IDs/dates/revocations, and atomically installs it without overwriting an existing ring.
+When the source discriminator differs from canonical `AeroLink`, the exact captured value can be configured as a
+temporary legacy read provider for existing durable payloads; new values use the canonical provider. Immutable
+notification history, controlled signatures and evidence are not rewritten. Sessions and other time-limited tokens
+are reissued, while connector key/deployment identity and certificate private-key ACLs remain separate attended
+transfer and qualification steps. Export invokes the existing restore authority to create a fresh uniquely named
+owned disposable database, then unprotects the complete compiled catalog of durable protected fields in memory.
+The existing restore authority emits a write-once proof under the restore-validation root after archive and attachment
+verification; the reader binds that fresh proof to the archive, database, restore script and source instance before
+using a read-only transaction. It emits only IDs, ciphertext digests, counts and pass/fail statuses, binds the source
+and reader identities plus the ring/configuration/discriminator/archive evidence, and requires an unchanged ring
+digest. A retained compatibility receipt is diagnostic context only; export re-runs this probe inline against the
+fresh owned restore, so a mutable receipt status cannot authorize transfer. A
+candidate discriminator is compatibility evidence only; serialized decryptors remain authoritative and unknown
+Windows DPAPI scope is not guessed. Incomplete, conflicting or unsupported categories refuse transfer, while
+no-applicable and legacy-plaintext results remain non-proof statuses, ephemeral tokens and external protected stores
+remain reissue/separate attended gates.
 
 See [product/docs/OPERATIONS.md](product/docs/OPERATIONS.md) and [docs/REMOTE_DEMO_OPERATOR.md](docs/REMOTE_DEMO_OPERATOR.md).
 

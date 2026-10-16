@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Integrations;
+using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -18,9 +19,18 @@ public sealed record AuthenticatedServiceIdentity(Guid Id, Guid ProjectId, strin
     public bool HasScope(string scope) => Scopes.Contains("*") || Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
 }
 
-public sealed class IntegrationSecurityService(AeroLinkDbContext db, IDataProtectionProvider dataProtection)
+public sealed class IntegrationSecurityService
 {
-    private readonly IDataProtector _webhookProtector = dataProtection.CreateProtector("AeroLink.Webhooks.SigningSecret.v1");
+    private readonly AeroLinkDbContext db;
+    private readonly IDataProtector _webhookProtector;
+
+    public IntegrationSecurityService(AeroLinkDbContext db, IDataProtectionProvider dataProtection,
+        HomeContinuityDataProtection? continuity = null)
+    {
+        this.db = db;
+        _webhookProtector = continuity?.CreateProtector("AeroLink.Webhooks.SigningSecret.v1")
+            ?? dataProtection.CreateProtector("AeroLink.Webhooks.SigningSecret.v1");
+    }
 
     public async Task<IssuedServiceCredential> CreateIdentityAsync(Guid projectId, string name, IReadOnlyCollection<string> scopes, string actor, DateTimeOffset now, CancellationToken ct)
     {

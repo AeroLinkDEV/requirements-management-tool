@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -96,6 +97,40 @@ public sealed class SiteServerProfileTests : IDisposable
         settings["SiteServer:Certificate:KeyPath"] = other.Key;
         using var factory = Host(settings);
         AssertRefused(factory, $"does not cover '{PublicHost}'");
+    }
+
+    [Fact]
+    public void A_site_server_refuses_commissioning_while_HOME_continuity_is_pending()
+    {
+        // Authoring gate: the ring and connector publish are separate filesystem operations. The credible
+        // regression is normal startup accepting a durable marker after a crash, which would commission a
+        // partial move; apply-only refusal does not protect this boundary.
+        var keyRing = Directory.CreateTempSubdirectory("aerolink-continuity-pending-").FullName;
+        var marker = keyRing + ".continuity-pending.json";
+        File.WriteAllText(marker, JsonSerializer.Serialize(new
+        {
+            SchemaVersion = 1,
+            PackageId = Guid.Parse("22222222-2222-4222-8222-222222222222"),
+            ManifestSha256 = new string('a', 64),
+            DestinationInstallationRoot = keyRing + "-installation",
+            DestinationRingPath = keyRing,
+            DestinationConnectorPath = keyRing + "-connector.pem",
+            DestinationServiceSid = "S-1-5-80-1234",
+            Phase = "staged",
+            RecordedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
+        }));
+        try
+        {
+            var settings = ValidSite();
+            settings["DataProtection:KeyRingPath"] = keyRing;
+            using var factory = Host(settings);
+            AssertRefused(factory, "Site commissioning is refused until an attended recovery completes");
+        }
+        finally
+        {
+            try { if (File.Exists(marker)) File.Delete(marker); } catch { }
+            try { if (Directory.Exists(keyRing)) Directory.Delete(keyRing, recursive: true); } catch { }
+        }
     }
 
     [Theory]

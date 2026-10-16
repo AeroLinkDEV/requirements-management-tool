@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$BackupArchive,
+    [string]$BackupArchive,
     [string]$TargetDatabase = 'aerolink_restore_validation',
     [string]$EvidenceTarget,
     # Defaults to this installation's declared PostgreSQL port (Get-AeroLinkServiceEndpoints).
@@ -8,6 +8,10 @@ param(
     [string]$PostgresBin,
     [int]$ValidationApiPort = 5091,
     [switch]$DisposableQualification,
+    # A continuity export owns a fresh restore database. When supplied, an existing target is a refusal rather
+    # than a disposable object to replace; this prevents a caller-controlled or stale restore from becoming the
+    # export's database authority.
+    [switch]$RequireFreshTarget,
     # Restore the archive's own state and validate the archive itself, but do NOT stand up current AeroLink
     # against the result.
     #
@@ -20,6 +24,18 @@ param(
     #
     # Ignored for a production restore, which always validates.
     [switch]$SkipCurrentCodeValidation,
+    # HOME continuity only: write a one-time, source-owned proof after the verified disposable restore and
+    # attachment/current-code checks complete. The maintenance reader binds this proof to the archive and live
+    # database before it reads any protected values.
+    [string]$ContinuityReceiptPath,
+    # HOME continuity export: an operation-owned journal. The journal is created by the maintenance host,
+    # updated by this restore authority, and retained as a redacted recovery receipt after cleanup.
+    [string]$ContinuityOperationJournalPath,
+    [string]$ContinuityOperationId,
+    [string]$ContinuityApiAssemblyPath,
+    [string]$ContinuityApiAssemblySha256,
+    [switch]$RetainContinuityRestore,
+    [switch]$CleanupContinuityOperation,
     [switch]$AllowProductionRestore,
     [string]$Confirmation,
     [ValidateSet('','BeforeDatabaseRestore','AfterDatabaseRestore','AfterEvidenceCopy','AfterPreActivationValidation','AfterOriginalDatabaseRename','AfterDatabaseActivation','AfterEvidenceActivation','AfterActivationValidation','BeforeRestart','AfterRestart')]
@@ -86,19 +102,33 @@ if ($site -and $production -and -not $DisposableQualification) {
 
 function Invoke-Fault([string]$Phase) { if ($FaultInjection -eq $Phase) { throw "Injected restore fault at $Phase." } }
 function Invoke-Psql([string]$Database, [string]$Sql) {
-    return (Invoke-AeroLinkWithPostgresAccess $suAccess {
-        $output = & (Join-Path $bin 'psql.exe') -w -h 127.0.0.1 -p $PostgresPort -U $suUser -d $Database -v ON_ERROR_STOP=1 -tA -c $Sql
-        if ($LASTEXITCODE -ne 0) { throw "PostgreSQL command failed against database '$Database'." }
+    # The access helper executes its action in a child scope. Capture every command value explicitly so cleanup
+    # queries cannot silently lose their database or SQL text when they cross that boundary.
+    $queryBin = [string]$bin
+    $queryPort = [int]$PostgresPort
+    $queryUser = [string]$suUser
+    $queryDatabase = [string]$Database
+    $querySql = [string]$Sql
+    $psqlAction = {
+        $output = & (Join-Path $queryBin 'psql.exe') -w -h 127.0.0.1 -p $queryPort -U $queryUser -d $queryDatabase -v ON_ERROR_STOP=1 -tA -c $querySql
+        if ($LASTEXITCODE -ne 0) { throw "PostgreSQL command failed against database '$queryDatabase'." }
         $output
-    })
+    }.GetNewClosure()
+    return (Invoke-AeroLinkWithPostgresAccess $suAccess $psqlAction)
 }
 function Remove-Database([string]$Database) {
     [void](Invoke-Psql 'postgres' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();")
     $code = Invoke-AeroLinkWithPostgresAccess $suAccess { & (Join-Path $bin 'dropdb.exe') -w -h 127.0.0.1 -p $PostgresPort -U $suUser --if-exists $Database | Out-Host; $LASTEXITCODE }
     if ($code -ne 0) { throw "Could not remove disposable database '$Database'." }
 }
+function Assert-DatabaseAbsent([string]$Database) {
+    $answer = ([string](Invoke-Psql 'postgres' "SELECT COUNT(*) FROM pg_database WHERE datname = '$Database';")).Trim()
+    if ($answer -ne '0') { throw "The fresh restore target database '$Database' already exists; refusing to replace it." }
+}
 function New-RestoredDatabase([string]$Database, [string]$Dump) {
-    Remove-Database $Database
+    # A continuity restore claims a fresh name by CREATE DATABASE itself. The preflight check remains a
+    # useful early refusal, but it is not the mutation boundary: never drop a target that appeared after it.
+    if (-not $RequireFreshTarget) { Remove-Database $Database }
     if (-not $site) {
         & (Join-Path $bin 'createdb.exe') -w -h 127.0.0.1 -p $PostgresPort -U postgres $Database
         if ($LASTEXITCODE -ne 0) { throw "Could not create restore database '$Database'." }
@@ -141,6 +171,148 @@ SELECT
     # And the role can write, as the role: a table of its own, inserted into, inside a transaction thrown away.
     [void](Invoke-Psql $Database "BEGIN; SET LOCAL ROLE `"$appRole`"; CREATE TABLE aerolink_restore_write_probe (id int); INSERT INTO aerolink_restore_write_probe VALUES (1); ROLLBACK;")
 }
+
+function Get-ContinuityProcessIdentity([int]$ProcessId) {
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction Stop
+    if (-not $process -or [string]::IsNullOrWhiteSpace([string]$process.ExecutablePath)) {
+        throw "The PostgreSQL listener process identity could not be read."
+    }
+    $started = (Get-Process -Id $ProcessId -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')
+    $image = [IO.Path]::GetFullPath([string]$process.ExecutablePath)
+    if (-not (Test-Path -LiteralPath $image -PathType Leaf)) { throw "The PostgreSQL listener image is missing." }
+    [ordered]@{
+        ProcessId = $ProcessId
+        ProcessStartedUtc = $started
+        ImagePath = $image
+        ImageSha256 = (Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+
+function Get-ContinuityToolIdentities {
+    $tools = [ordered]@{}
+    foreach ($name in 'createdb.exe','pg_restore.exe','psql.exe','dropdb.exe') {
+        $path = [IO.Path]::GetFullPath((Join-Path $bin $name))
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "The continuity PostgreSQL tool '$name' is missing." }
+        $version = ((& $path --version 2>&1 | Out-String).Trim())
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) { throw "The continuity PostgreSQL tool '$name' did not report a version." }
+        $tools[$name] = [ordered]@{
+            Path = $path
+            Sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            Version = $version
+        }
+    }
+    $tools
+}
+
+function Get-ContinuityRuntimeIdentity {
+    if (-not $ContinuityOperationJournalPath) { return $null }
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $PostgresPort -ErrorAction Stop)
+    if ($listeners.Count -ne 1) { throw "The continuity PostgreSQL port must have exactly one loopback listener." }
+    $listenerPid = [int]$listeners[0].OwningProcess
+    $dataDirectory = ([string](Invoke-Psql 'postgres' "SELECT current_setting('data_directory');")).Trim()
+    if ([string]::IsNullOrWhiteSpace($dataDirectory)) { throw 'PostgreSQL did not report its data directory.' }
+    $dataDirectory = [IO.Path]::GetFullPath($dataDirectory)
+    $postmasterPidPath = Join-Path $dataDirectory 'postmaster.pid'
+    if (-not (Test-Path -LiteralPath $postmasterPidPath -PathType Leaf)) { throw 'The PostgreSQL postmaster.pid file is missing.' }
+    $pidLines = @(Get-Content -LiteralPath $postmasterPidPath -ErrorAction Stop)
+    if ($pidLines.Count -lt 1 -or [int]$pidLines[0] -ne $listenerPid) { throw 'The loopback listener and postmaster.pid identities do not agree.' }
+    $identity = Get-ContinuityProcessIdentity $listenerPid
+    [ordered]@{
+        ListenerAddress = '127.0.0.1'
+        ListenerPort = [int]$PostgresPort
+        Postmaster = $identity
+        DataDirectory = $dataDirectory
+        PostmasterPidPath = [IO.Path]::GetFullPath($postmasterPidPath)
+        PostmasterPidSha256 = (Get-FileHash -LiteralPath $postmasterPidPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        Tools = Get-ContinuityToolIdentities
+        CapturedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+}
+
+function Write-ContinuityJournal([string]$Status, [string]$Phase, [hashtable]$Updates = @{}) {
+    if (-not $script:continuityJournalState) { return }
+    $script:continuityJournalState.Status = $Status
+    $script:continuityJournalState.Phase = $Phase
+    $script:continuityJournalState.UpdatedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    foreach ($entry in $Updates.GetEnumerator()) { $script:continuityJournalState[$entry.Key] = $entry.Value }
+    $json = $script:continuityJournalState | ConvertTo-Json -Depth 12
+    $temporaryJournal = "$ContinuityOperationJournalPath.writing-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        [IO.File]::WriteAllText($temporaryJournal, $json, [Text.UTF8Encoding]::new($false))
+        if ([IO.File]::Exists($ContinuityOperationJournalPath)) { [IO.File]::Replace($temporaryJournal, $ContinuityOperationJournalPath, [NullString]::Value) }
+        else { [IO.File]::Move($temporaryJournal, $ContinuityOperationJournalPath) }
+    } finally { if (Test-Path -LiteralPath $temporaryJournal) { Remove-Item -LiteralPath $temporaryJournal -Force } }
+}
+
+function Assert-ContinuityOwnedPath([string]$Path, [string]$Root, [string]$Description) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $full = [IO.Path]::GetFullPath($Path)
+    $prefix = [IO.Path]::GetFullPath($Root).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $full.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "$Description is outside its declared operation root." }
+    if ((Test-Path -LiteralPath $full) -and ((Get-Item -LiteralPath $full).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "$Description is a reparse point." }
+    $full
+}
+
+function Get-ContinuityDatabaseOid([string]$Database) {
+    $rawValue = Invoke-Psql 'postgres' "SELECT oid::text FROM pg_database WHERE datname = '$Database';"
+    if ($null -eq $rawValue) { return $null }
+    $value = ([string]$rawValue).Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    if ($value -notmatch '^\d+$') { throw "The continuity database identity is malformed." }
+    $value
+}
+
+function Write-ContinuityDiagnosticReceipt {
+    if (-not $script:continuityJournalState) { return }
+    $receiptPath = "$ContinuityOperationJournalPath.receipt.json"
+    if (Test-Path -LiteralPath $receiptPath) { return $receiptPath }
+    $temporaryReceipt = "$receiptPath.writing-$([Guid]::NewGuid().ToString('N'))"
+    try {
+        [IO.File]::WriteAllText($temporaryReceipt, ($script:continuityJournalState | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporaryReceipt -Destination $receiptPath
+    } finally { if (Test-Path -LiteralPath $temporaryReceipt) { Remove-Item -LiteralPath $temporaryReceipt -Force } }
+    $receiptPath
+}
+
+function Invoke-ContinuityOwnedCleanup {
+    if (-not $script:continuityJournalState) { throw 'The continuity operation journal was not loaded.' }
+    $target = [string]$script:continuityJournalState.TargetDatabase
+    $createdOid = [string]$script:continuityJournalState.CreatedDatabaseOid
+    $createdByOperation = [bool]$script:continuityJournalState.CreatedByOperation
+    $phase = [string]$script:continuityJournalState.Phase
+    if (-not $createdByOperation -and $phase -in @('database-creation','database-created','evidence-staging','restore-complete')) {
+        Write-ContinuityJournal 'recovery-required' 'cleanup-ambiguous' @{ CleanupDisposition = 'The operation reached database mutation without an ownership OID; target and staging were preserved.' }
+        throw "The continuity database ownership is ambiguous; recovery is required at $ContinuityOperationJournalPath."
+    }
+    if ($createdByOperation -and [string]::IsNullOrWhiteSpace($createdOid)) {
+        Write-ContinuityJournal 'recovery-required' 'cleanup-ambiguous' @{ CleanupDisposition = 'The operation claimed database creation without recording an OID; target preserved.' }
+        throw "The continuity database ownership is ambiguous; recovery is required at $ContinuityOperationJournalPath."
+    }
+    if ($createdByOperation) {
+        $currentOid = Get-ContinuityDatabaseOid $target
+        if ($currentOid -and $currentOid -ne $createdOid) {
+            Write-ContinuityJournal 'recovery-required' 'cleanup-ambiguous' @{ CleanupDisposition = 'The target database OID changed; target preserved.' }
+            throw "The continuity database OID changed; recovery is required at $ContinuityOperationJournalPath."
+        }
+        if ($currentOid) { Remove-Database $target }
+        if (Get-ContinuityDatabaseOid $target) {
+            Write-ContinuityJournal 'recovery-required' 'cleanup-failed' @{ CleanupDisposition = 'The owned database remained after drop.' }
+            throw "The owned continuity database could not be removed; recovery is required at $ContinuityOperationJournalPath."
+        }
+    }
+    $validationRoot = [IO.Path]::GetFullPath([string]$script:continuityJournalState.RestoreValidationRoot)
+    $workRoot = [IO.Path]::GetFullPath([string]$script:continuityJournalState.RestoreWorkRoot)
+    foreach ($item in @(
+        @{ Path = [string]$script:continuityJournalState.ProofPath; Root = $validationRoot; Description = 'The continuity proof' },
+        @{ Path = [string]$script:continuityJournalState.EvidencePath; Root = $validationRoot; Description = 'The continuity evidence' },
+        @{ Path = [string]$script:continuityJournalState.IncomingPath; Root = $validationRoot; Description = 'The continuity incoming evidence' },
+        @{ Path = [string]$script:continuityJournalState.TemporaryPath; Root = $workRoot; Description = 'The continuity temporary restore' }
+    )) {
+        $path = Assert-ContinuityOwnedPath $item.Path $item.Root $item.Description
+        if ($path -and (Test-Path -LiteralPath $path)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $path) -Recurse -Force }
+    }
+}
+
 function Rename-Database([string]$From, [string]$To) {
     [void](Invoke-Psql 'postgres' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$From' AND pid <> pg_backend_pid();")
     [void](Invoke-Psql 'postgres' "ALTER DATABASE `"$From`" RENAME TO `"$To`";")
@@ -195,24 +367,26 @@ function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory
         -ApiExecutable (Get-AeroLinkProgramLayout -ProductRoot $productRoot).ApiExecutable })
 }
 
-& (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive -InstallationRoot $(if ($site) { $site.InstallationRoot } else { '' }) | Out-Host
-if ($site) {
-    # Which installation the archive came from, decided from its own (just verified) manifest before anything is
-    # revoked, backed up or renamed, so a wrong archive is refused while nothing has changed.
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archiveZip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $BackupArchive).Path)
-    try {
-        $manifestEntry = $archiveZip.GetEntry('manifest.json')
-        if (-not $manifestEntry) { throw 'The archive has no manifest.json.' }
-        $manifestReader = New-Object IO.StreamReader($manifestEntry.Open())
-        try { $archiveManifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
-    }
-    finally { $archiveZip.Dispose() }
-    $archiveInstance = if ($archiveManifest.PSObject.Properties['Instance'] -and $archiveManifest.Instance) { $archiveManifest.Instance } else { $null }
-    $archiveClassification = if ($archiveInstance) { [string]$archiveInstance.Classification } else { 'unrecorded' }
-    Write-Host "Archive taken from: $archiveClassification$(if ($archiveInstance) { " ($([string]$archiveInstance.Label))" })." -ForegroundColor Cyan
-    if ($production -and $archiveClassification -ne $site.Classification -and -not $AllowArchiveFromOtherClassification) {
-        throw "This archive was taken from a $archiveClassification installation, not $($site.Classification). D8 keeps test and production data apart; to restore HOME's archive into the site on purpose (Phase 3), add -AllowArchiveFromOtherClassification. Nothing was changed."
+if (-not $CleanupContinuityOperation) {
+    & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive -InstallationRoot $(if ($site) { $site.InstallationRoot } else { '' }) | Out-Host
+    if ($site) {
+        # Which installation the archive came from, decided from its own (just verified) manifest before anything is
+        # revoked, backed up or renamed, so a wrong archive is refused while nothing has changed.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archiveZip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $BackupArchive).Path)
+        try {
+            $manifestEntry = $archiveZip.GetEntry('manifest.json')
+            if (-not $manifestEntry) { throw 'The archive has no manifest.json.' }
+            $manifestReader = New-Object IO.StreamReader($manifestEntry.Open())
+            try { $archiveManifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
+        }
+        finally { $archiveZip.Dispose() }
+        $archiveInstance = if ($archiveManifest.PSObject.Properties['Instance'] -and $archiveManifest.Instance) { $archiveManifest.Instance } else { $null }
+        $archiveClassification = if ($archiveInstance) { [string]$archiveInstance.Classification } else { 'unrecorded' }
+        Write-Host "Archive taken from: $archiveClassification$(if ($archiveInstance) { " ($([string]$archiveInstance.Label))" })." -ForegroundColor Cyan
+        if ($production -and $archiveClassification -ne $site.Classification -and -not $AllowArchiveFromOtherClassification) {
+            throw "This archive was taken from a $archiveClassification installation, not $($site.Classification). D8 keeps test and production data apart; to restore HOME's archive into the site on purpose (Phase 3), add -AllowArchiveFromOtherClassification. Nothing was changed."
+        }
     }
 }
 if ($production) {
@@ -240,7 +414,67 @@ if ($PostgresPort -eq $persistentPostgresPort -and -not $site) { & (Join-Path $P
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot -InstallationRoot $restoreInstallationRoot
 if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
+$continuityReceipt = $null
+if ($ContinuityReceiptPath) {
+    $continuityReceipt = [IO.Path]::GetFullPath($ContinuityReceiptPath)
+    $restoreValidationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation) + [IO.Path]::DirectorySeparatorChar
+    if (-not ($continuityReceipt.StartsWith($restoreValidationRoot, [StringComparison]::OrdinalIgnoreCase))) {
+        throw 'The HOME continuity restore proof must remain under the installation restore-validation root.'
+    }
+    if (Test-Path -LiteralPath $continuityReceipt) { throw 'The HOME continuity restore proof already exists; proofs are write-once.' }
+    $continuityParent = Split-Path -Parent $continuityReceipt
+    New-Item -ItemType Directory -Path $continuityParent -Force | Out-Null
+}
 $bin = [IO.Path]::GetFullPath($PostgresBin)
+$script:continuityJournalState = $null
+$continuityApiAssembly = $null
+if ($ContinuityOperationJournalPath) {
+    if ([string]::IsNullOrWhiteSpace($ContinuityOperationId)) { throw 'A continuity operation ID is required when an operation journal is supplied.' }
+    $ContinuityOperationJournalPath = [IO.Path]::GetFullPath($ContinuityOperationJournalPath)
+    $journalRoot = [IO.Path]::GetFullPath($installation.RestoreValidation) + [IO.Path]::DirectorySeparatorChar
+    if (-not $ContinuityOperationJournalPath.StartsWith($journalRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The continuity operation journal must remain under restore-validation.' }
+    if (-not (Test-Path -LiteralPath $ContinuityOperationJournalPath -PathType Leaf)) { throw 'The continuity operation journal does not exist.' }
+    $script:continuityJournalState = [ordered]@{}
+    $loadedJournal = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $ContinuityOperationJournalPath -Raw)
+    foreach ($property in $loadedJournal.PSObject.Properties) { $script:continuityJournalState[$property.Name] = $property.Value }
+    if ([string]$script:continuityJournalState.OperationId -ne $ContinuityOperationId) { throw 'The continuity operation journal ID does not match the requested operation.' }
+    if ([string]$script:continuityJournalState.Status -in @('cleaned','recovery-required')) { throw 'The continuity operation journal is already terminal.' }
+    if (-not $CleanupContinuityOperation -and [string]$script:continuityJournalState.TargetDatabase -ne $TargetDatabase) { throw 'The continuity operation target database does not match its journal.' }
+    if (-not $CleanupContinuityOperation) {
+        if ([string]::IsNullOrWhiteSpace($ContinuityApiAssemblyPath) -or [string]::IsNullOrWhiteSpace($ContinuityApiAssemblySha256)) { throw 'The continuity API entry assembly identity is required for a fresh operation.' }
+        $continuityApiAssembly = [IO.Path]::GetFullPath($ContinuityApiAssemblyPath)
+        if (-not (Test-Path -LiteralPath $continuityApiAssembly -PathType Leaf)) { throw 'The continuity API entry assembly is missing.' }
+        $actualApiAssemblySha256 = (Get-FileHash -LiteralPath $continuityApiAssembly -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualApiAssemblySha256 -ne $ContinuityApiAssemblySha256.ToLowerInvariant()) { throw 'The continuity API entry assembly hash does not match the supplied identity.' }
+    }
+    if ($CleanupContinuityOperation) {
+        try {
+            $cleanupRuntimeBefore = Get-ContinuityRuntimeIdentity
+            Invoke-ContinuityOwnedCleanup
+            $cleanupRuntimeAfter = Get-ContinuityRuntimeIdentity
+            Write-ContinuityJournal 'cleanup-verified' 'cleanup-diagnostic-pending' @{ CleanupDisposition = 'Physical cleanup was verified; the redacted diagnostic receipt is being written before terminal completion.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json"; CleanupRuntimeBefore = $cleanupRuntimeBefore; CleanupRuntimeAfter = $cleanupRuntimeAfter }
+            $diagnosticReceipt = Write-ContinuityDiagnosticReceipt
+            if ([string]::IsNullOrWhiteSpace([string]$diagnosticReceipt) -or -not (Test-Path -LiteralPath ([string]$diagnosticReceipt) -PathType Leaf)) { throw 'The continuity cleanup diagnostic receipt could not be verified.' }
+            Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'Only the operation-owned database and staging paths were removed.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json"; CleanupRuntimeBefore = $cleanupRuntimeBefore; CleanupRuntimeAfter = $cleanupRuntimeAfter }
+            exit 0
+        }
+        catch {
+            if ([string]$script:continuityJournalState.Status -ne 'cleaned') {
+                try { Write-ContinuityJournal 'recovery-required' 'cleanup-failed' @{ CleanupDisposition = 'The cleanup child failed before it could prove a cleaned terminal state; attended recovery is required.'; Failure = 'Cleanup failed; details are intentionally redacted.' } } catch { }
+                try { [void](Write-ContinuityDiagnosticReceipt) } catch { }
+            }
+            throw "The continuity cleanup requires attended recovery at $ContinuityOperationJournalPath."
+        }
+    }
+    $continuityRuntimeBefore = Get-ContinuityRuntimeIdentity
+    Write-ContinuityJournal 'running' 'restore-started' @{
+        ChildProcess = [ordered]@{ ProcessId = $PID; ProcessStartedUtc = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o'); ImagePath = [IO.Path]::GetFullPath($PSCommandPath); ImageSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+        RuntimeBefore = $continuityRuntimeBefore
+        PostgreSqlBinRoot = $bin
+        PostgreSqlBinRootSha256 = (Get-FileHash -LiteralPath (Join-Path $bin 'psql.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+if ([string]::IsNullOrWhiteSpace($BackupArchive)) { throw '-BackupArchive is required for a restore operation.' }
 $archive = (Resolve-Path -LiteralPath $BackupArchive).Path
 $restoreRoot = $installation.RestoreWork; New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
 $temporary = Join-Path $restoreRoot ([Guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $temporary | Out-Null
@@ -249,16 +483,39 @@ $restoreDatabase = if ($production) { "aerolink_restore_stage_$token" } else { $
 $oldDatabase = "aerolink_pre_restore_$token"
 $failedDatabase = "aerolink_failed_restore_$token"
 $resolvedTarget = $null; $incoming = $null; $retained = $null
+$continuityDatabaseCreated = $false; $continuityDatabaseOid = $null
+$preserveContinuityRecovery = $false
 $originalDatabaseRenamed = $false; $databaseActivated = $false; $evidenceActivated = $false; $activationPassed = $false
 
 try {
+    if ($RequireFreshTarget) { Assert-DatabaseAbsent $restoreDatabase }
+    if ($ContinuityOperationJournalPath) {
+        Write-ContinuityJournal 'running' 'archive-expansion' @{
+            TargetDatabase = $restoreDatabase
+            RestoreValidationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation)
+            RestoreWorkRoot = [IO.Path]::GetFullPath($installation.RestoreWork)
+            ProofPath = $continuityReceipt
+            ArchivePath = $archive
+            ArchiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            RestoreScriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            TemporaryPath = $temporary
+            PostgresPort = [int]$PostgresPort
+        }
+    }
     Expand-AeroLinkBackupArchive -ArchivePath $archive -DestinationDirectory $temporary
     $manifest = ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $temporary 'manifest.json') -Raw)
     $archiveInventoryObject = ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $temporary ([string]$manifest.AttachmentInventory)) -Raw)
     $archiveInventory = @($archiveInventoryObject | ForEach-Object { $_ })
     $dump = Join-Path $temporary ([string]$manifest.Database.Dump)
     Invoke-Fault 'BeforeDatabaseRestore'
+    if ($ContinuityOperationJournalPath) { Write-ContinuityJournal 'running' 'database-creation' @{} }
     New-RestoredDatabase $restoreDatabase $dump
+    if ($ContinuityOperationJournalPath) {
+        $continuityDatabaseCreated = $true
+        $continuityDatabaseOid = Get-ContinuityDatabaseOid $restoreDatabase
+        if ([string]::IsNullOrWhiteSpace($continuityDatabaseOid)) { throw 'The fresh continuity database was created but its PostgreSQL identity could not be read.' }
+        Write-ContinuityJournal 'running' 'database-created' @{ CreatedByOperation = $true; CreatedDatabaseOid = $continuityDatabaseOid }
+    }
     Invoke-Fault 'AfterDatabaseRestore'
 
     $restoredInventory = @(Invoke-AeroLinkWithPostgresAccess $suAccess { Get-AeroLinkAttachmentInventory -Psql (Join-Path $bin 'psql.exe') -Database $restoreDatabase -Port $PostgresPort -User $suUser })
@@ -272,10 +529,12 @@ try {
     $resolvedTarget = [IO.Path]::GetFullPath($EvidenceTarget)
     $validationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation) + [IO.Path]::DirectorySeparatorChar
     if (-not $production -and -not ($resolvedTarget + [IO.Path]::DirectorySeparatorChar).StartsWith($validationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'The isolated evidence target must remain under the installation restore-validation root.' }
+    if ($ContinuityOperationJournalPath -and (Test-Path -LiteralPath $resolvedTarget)) { throw 'The fresh continuity evidence target already exists; refusing to replace it.' }
     $parent = Split-Path $resolvedTarget -Parent; New-Item -ItemType Directory -Path $parent -Force | Out-Null
     $incoming = Join-Path $parent ('.restore-incoming-' + $token)
     if (Test-Path -LiteralPath $incoming) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $incoming) -Recurse -Force }
     New-Item -ItemType Directory -Path $incoming -Force | Out-Null
+    if ($ContinuityOperationJournalPath) { Write-ContinuityJournal 'running' 'evidence-staging' @{ EvidencePath = $resolvedTarget; IncomingPath = $incoming; EvidenceOwned = $true } }
     if (Test-Path -LiteralPath $evidenceSource) { Copy-AeroLinkEvidenceTree -Source $evidenceSource -Destination $incoming }
     [void](Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $incoming)
     Invoke-Fault 'AfterEvidenceCopy'
@@ -325,6 +584,42 @@ try {
     elseif ($deferCurrentCode) { $countText = 'Program table not present yet (pre-migration restore; current-code validation deferred)' }
     else { throw "The restore summary expected the Program table in database '$TargetDatabase', but it is absent and current-code validation was not deferred." }
     $verified = Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $resolvedTarget
+    if ($continuityReceipt) {
+        $continuityProof = [ordered]@{
+            FormatVersion = 1
+            ArchivePath = $archive
+            ArchiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            InstanceId = if ($manifest.Instance -and $manifest.Instance.InstanceId) { [string]$manifest.Instance.InstanceId } else { $null }
+            ApplicationSourceSha = if ($manifest.Application -and $manifest.Application.SourceSha) { [string]$manifest.Application.SourceSha } else { $null }
+            DatabaseName = [string]$TargetDatabase
+            DatabaseOid = $continuityDatabaseOid
+            PostgresPort = [int]$PostgresPort
+            OperationId = $ContinuityOperationId
+            OperationJournalPath = if ($ContinuityOperationJournalPath) { [IO.Path]::GetFullPath($ContinuityOperationJournalPath) } else { $null }
+            ApiEntryAssemblyPath = $continuityApiAssembly
+            ApiEntryAssemblySha256 = $ContinuityApiAssemblySha256
+            InstallationRoot = [IO.Path]::GetFullPath($installation.InstallationRoot)
+            RestoreValidationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation)
+            CompletedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+            RestoreScriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            CurrentCodeValidationDeferred = [bool]$deferCurrentCode
+            AttachmentInventoryVerified = $true
+            PostgresRuntimeBefore = $continuityRuntimeBefore
+            PostgresRuntimeAfter = if ($ContinuityOperationJournalPath) { Get-ContinuityRuntimeIdentity } else { $null }
+            PostgresToolIdentities = if ($ContinuityOperationJournalPath) { Get-ContinuityToolIdentities } else { $null }
+        }
+        $json = $continuityProof | ConvertTo-Json -Depth 8
+        $proofStream = [IO.File]::Open($continuityReceipt, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $writer = New-Object IO.StreamWriter($proofStream, [Text.UTF8Encoding]::new($false), 4096, $true)
+            try { $writer.Write($json); $writer.Flush() } finally { $writer.Dispose() }
+        } finally { $proofStream.Dispose() }
+        Write-Host "HOME continuity disposable restore proof: $continuityReceipt" -ForegroundColor Green
+    }
+    if ($ContinuityOperationJournalPath) {
+        $continuityRuntimeAfter = Get-ContinuityRuntimeIdentity
+        Write-ContinuityJournal 'completed' 'restore-complete' @{ RuntimeAfter = $continuityRuntimeAfter; ProofPath = $continuityReceipt; EvidencePath = $resolvedTarget; IncomingPath = $incoming; TemporaryPath = $temporary; CreatedDatabaseOid = $continuityDatabaseOid; CreatedByOperation = $continuityDatabaseCreated }
+    }
     Write-Host "Restore verified in database '$TargetDatabase': $countText, $($verified.ReferencedAttachments) attachment row(s), $($verified.ReferencedObjects) object(s), $($verified.VerifiedBytes) byte(s), $($finalDownloads.ManagedDocumentDownloads) API download(s). Evidence root: $resolvedTarget" -ForegroundColor Green
     if ($production) { Write-Host "Rollback retained as database '$oldDatabase'$(if($retained){" and evidence '$retained'"})." -ForegroundColor Yellow }
 }
@@ -349,11 +644,28 @@ catch {
         try { Start-AeroLinkAfterRestore }
         catch { throw "Restore failed: $($failure.Exception.Message). The original database/evidence pair was retained but AeroLink restart failed: $($_.Exception.Message)." }
     }
+    if ($ContinuityOperationJournalPath) {
+        try {
+            $preserveContinuityRecovery = $true
+            Write-ContinuityJournal 'failed' 'restore-failed' @{ Failure = 'The restore authority refused the operation; details are intentionally redacted.'; CreatedDatabaseOid = $continuityDatabaseOid; CreatedByOperation = $continuityDatabaseCreated; EvidencePath = $resolvedTarget; IncomingPath = $incoming; TemporaryPath = $temporary }
+            if ($continuityDatabaseCreated) { Invoke-ContinuityOwnedCleanup; Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'Only the operation-owned database and staging paths were removed.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json" } }
+            else { Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'The target was not created by this operation; it was preserved.' } }
+            [void](Write-ContinuityDiagnosticReceipt)
+            $preserveContinuityRecovery = $false
+        }
+        catch {
+            if ($script:continuityJournalState.Status -ne 'recovery-required') { Write-ContinuityJournal 'recovery-required' 'cleanup-failed' @{ CleanupDisposition = 'Cleanup could not prove exclusive ownership; target and recovery paths were preserved.' } }
+            try { [void](Write-ContinuityDiagnosticReceipt) } catch { }
+            throw "Restore failed and product-owned cleanup requires attended recovery at $ContinuityOperationJournalPath."
+        }
+    }
     throw $failure
 }
 finally {
-    if ($incoming -and (Test-Path -LiteralPath $incoming)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $incoming) -Recurse -Force }
-    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $temporary) -Recurse -Force }
+    if (-not $preserveContinuityRecovery) {
+        if ($incoming -and (Test-Path -LiteralPath $incoming)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $incoming) -Recurse -Force }
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $temporary) -Recurse -Force }
+    }
     if ($production -and -not $databaseActivated) {
         try { Remove-Database $restoreDatabase } catch { }
     }

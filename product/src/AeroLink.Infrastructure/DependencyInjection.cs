@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.DataProtection;
 using AeroLink.Domain.Contracts;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -152,6 +153,11 @@ public static class DependencyInjection
         services.AddScoped<ReqIfExchangeService>();
         services.AddScoped<EnterpriseWorkspaceSeeder>();
         services.AddScoped<TestProcedureDocumentBootstrap>();
+        // HOME continuity may supply the exact source discriminator captured by the attended transfer.
+        // New values still use the destination provider; consumers use the compatibility wrapper only to
+        // read old ciphertext while the source ring remains present in the destination ring.
+        services.AddSingleton(provider => HomeContinuityDataProtection.Create(
+            provider.GetRequiredService<IDataProtectionProvider>(), configuration));
         return services;
     }
 }

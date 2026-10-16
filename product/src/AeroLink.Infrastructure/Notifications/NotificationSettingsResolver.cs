@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Notifications;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -78,9 +79,14 @@ public sealed class NotificationInstallationAuthority(IConfiguration configurati
     public static string Hash(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }
 
-public sealed class NotificationContentProtection(IDataProtectionProvider provider)
+public sealed class NotificationContentProtection
 {
-    private readonly IDataProtector protector = provider.CreateProtector("AeroLink.Notifications.ProtectedEvidence.v1");
+    private readonly IDataProtector protector;
+    public NotificationContentProtection(IDataProtectionProvider provider, HomeContinuityDataProtection? continuity = null)
+    {
+        protector = continuity?.CreateProtector("AeroLink.Notifications.ProtectedEvidence.v1")
+            ?? provider.CreateProtector("AeroLink.Notifications.ProtectedEvidence.v1");
+    }
     public string Protect(string value) => value.Length == 0 ? "" : protector.Protect(value);
     public string Unprotect(string value) => value.Length == 0 ? "" : protector.Unprotect(value);
     public static string AddressHash(string value) => NotificationInstallationAuthority.Hash(value.Trim().ToLowerInvariant());
