@@ -23,6 +23,7 @@ using System.Text.Json;
 using System.Diagnostics;
 using System.Data;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
@@ -61,6 +62,9 @@ builder.Host.UseWindowsService();
 // packaged host reports its own identity without a launcher setting Runtime__SourceSha. Added last, so it wins
 // over anything else that claims a revision for these binaries; development builds have no such file.
 builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, RuntimeIdentityEndpoints.ReleaseIdentityFileName), optional: true, reloadOnChange: false);
+// A site server's service (#1614 1.8) reads its database password and bootstrap secret from the protected store
+// itself, as its own account; they are never in the service's environment. Nothing happens without a site root.
+SiteProtectedSecrets.AddTo(builder.Configuration);
 var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreValidation:ReadOnly");
 var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
 if (restoreValidationReadOnly && restoreValidationToken.Length < 32)
@@ -71,20 +75,17 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.W
 // it was, except that Production may no longer listen on plain HTTP anywhere but loopback.
 var siteServer = SiteServerHosting.Configure(builder);
 // Secure cookies take the __Host- prefix, which stops plain-HTTP origins, Domain= cookies from other hosts and
-// path-scoped cookies from planting or shadowing them. It does not isolate them from another application on the
-// same host name (a site server shares one): cookies are not isolated by port, so that application receives and
-// can overwrite them. The owner accepted that risk on 15 Oct 2026 (#1614 D3); a dedicated DNS alias removes it.
-// See SessionCookie.
-// Resolved from the built configuration, the same as the sign-in endpoint always read it, so a source added after
-// this line (a host's own configuration callbacks run at Build) still decides it.
-builder.Services.AddSingleton(services => new SessionCookie(SessionCookie.SecureFrom(
-    services.GetRequiredService<IConfiguration>(), services.GetRequiredService<IHostEnvironment>())));
+// path-scoped cookies from planting or shadowing them. A declared site also carries its persisted instance identity
+// in every cookie name, so two AeroLink installations on one host cannot consume each other's sessions, antiforgery
+// confirmations or Windows-link tickets. Resolve the owner through DI after the host's final configuration layers
+// are present; this matters to hosted tests and to any composition host that adds settings during Build.
+builder.Services.AddSingleton<SessionCookie>(services => SessionCookie.FromConfiguration(
+    services.GetRequiredService<IConfiguration>(), services.GetRequiredService<IHostEnvironment>(), siteServer is not null));
 builder.Services.AddAntiforgery(options =>
 {
     // Prefixed only where AeroLink terminates TLS itself. Antiforgery decides Secure from the request, and with
     // SecurePolicy=Always it refuses any request that did not arrive over HTTPS - which is every request behind a
     // TLS-terminating proxy, where Identity:CookieSecure is also true. A site server always sees HTTPS.
-    options.Cookie.Name = siteServer is not null ? SessionCookie.SecurePrefix + "AeroLink.PreferenceConfirmation" : "AeroLink.PreferenceConfirmation";
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.HttpOnly = true;
     if (siteServer is not null)
@@ -93,6 +94,7 @@ builder.Services.AddAntiforgery(options =>
         options.Cookie.Path = "/";
     }
 });
+builder.Services.AddOptions<AntiforgeryOptions>().Configure<SessionCookie>((options, cookie) => options.Cookie.Name = cookie.AntiforgeryName);
 // A year, this host name only: the other applications on a shared site host send their own HSTS, and their
 // subdomains are not AeroLink's to pin. Sent only on HTTPS and never for localhost or loopback addresses.
 builder.Services.AddHsts(options =>
@@ -159,6 +161,10 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 }));
 
 var app = builder.Build();
+// Force the shared owner and antiforgery options to resolve during startup, so a malformed declared-site identity
+// refuses the service before it can accept a request rather than on the first request that happens to use a cookie.
+_ = app.Services.GetRequiredService<SessionCookie>();
+_ = app.Services.GetRequiredService<IOptions<AntiforgeryOptions>>().Value;
 // The certificate's imported machine key is temporary; release it with the host rather than leave it behind.
 if (siteServer is not null) app.Lifetime.ApplicationStopped.Register(siteServer.Certificate.Dispose);
 await WindowsSignInStartupGuard.EnforceAsync(app.Services, builder.Configuration, app.Environment);
@@ -200,6 +206,14 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (seedDemoAccounts && !app.Environment.IsDevelopment() && !allowDemoAccounts)
         throw new InvalidOperationException("Demo identity seeding is disabled outside Development. Set Identity:AllowDemoAccounts only for an explicitly isolated non-production showcase.");
     var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+    // A site's API service depends on its PostgreSQL service, but "started" is not "accepting connections": at boot
+    // the cluster may still be recovering. Wait for it, briefly, instead of failing into the SCM's restart delay.
+    if (!string.IsNullOrWhiteSpace(builder.Configuration[SiteProtectedSecrets.InstallationRootKey]))
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Clamp(builder.Configuration.GetValue<int?>("SiteServer:DatabaseWaitSeconds") ?? 120, 0, 600));
+        while (!await db.Database.CanConnectAsync() && DateTimeOffset.UtcNow < deadline)
+            await Task.Delay(TimeSpan.FromSeconds(2));
+    }
     if (restoreValidationReadOnly)
     {
         if (!await db.Database.CanConnectAsync())

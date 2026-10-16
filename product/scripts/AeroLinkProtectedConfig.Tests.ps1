@@ -212,6 +212,19 @@ Write-Output 'FRESH_PROCESS_PROTECTED_CONFIG_OK'
     $widened.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Read', 'Allow')))
     if ($PSVersionTable.PSEdition -eq 'Desktop') { $storedFile.SetAccessControl($widened) } else { [IO.FileSystemAclExtensions]::SetAccessControl($storedFile, $widened) }
     Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -RootOverride $siteRoot } 'A site secret whose file Users can read was still used.'
+
+    # The installer writes one additional site secret only for the first administrator. Before this contract, the
+    # committed module rejected api-bootstrap at ValidateSet binding and the installer could not complete a clean
+    # first install; this owns the production store/read/remove behavior rather than testing an implementation seam.
+    $bootstrapInstall = Join-Path $root 'bootstrap-installation'
+    $bootstrapSecret = 'bootstrap-secret-never-emitted'
+    $bootstrap = Set-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $bootstrapSecret -AsPlainText -Force) -RootOverride $siteRoot
+    Assert-True ([IO.File]::ReadAllText($bootstrap.Path) -notmatch [regex]::Escape($bootstrapSecret)) 'The API bootstrap secret was written in plain text.'
+    Assert-True ((Get-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -RootOverride $siteRoot) -eq $bootstrapSecret) 'The API bootstrap secret did not round-trip for its reader.'
+    $removedBootstrap = Remove-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -RootOverride $siteRoot
+    Assert-True ($removedBootstrap.Removed -and -not (Test-Path -LiteralPath $bootstrap.Path -PathType Leaf)) 'Removing the consumed API bootstrap secret left it configured.'
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -RootOverride $siteRoot } 'A consumed API bootstrap secret must no longer be readable.'
     # An installer stores the application password for the API's virtual account, which it is not (D2 revised). The
     # first write must succeed for such a writer and leave the file and directory readable by exactly that account,
     # SYSTEM and Administrators - the writer keeps nothing.

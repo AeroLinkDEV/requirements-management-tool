@@ -15,6 +15,10 @@
                  Ask for production to be redeployed to origin/main now, inside the
                  Monday-Friday 08:00-18:00 Eastern hold (DEC-149), and start the
                  installed reconciliation task to do it.
+      Retire     #1614 D6, once the company host is live: remove the remote demo's
+                 scheduled tasks and configuration for good. Preview by default;
+                 -Apply acts. Afterwards every other action prints that the demo
+                 was retired (AeroLinkRemoteDemoRetirement.psm1).
 #>
 [CmdletBinding()]
 param(
@@ -24,12 +28,23 @@ param(
     # exact topology it took down and the policy that governs putting it back. Handing off to Start instead
     # meant the child could only guess, and its guess was "start the whole demo" - which republished a tunnel
     # an operator had deliberately stopped.
-    [ValidateSet('Start', 'Stop', 'Status', 'Configure', 'Reconcile', 'Continue', 'RequestRedeploy')]
+    [ValidateSet('Start', 'Stop', 'Status', 'Configure', 'Reconcile', 'Continue', 'RequestRedeploy', 'Retire')]
     [string]$Action,
     [ValidateSet('Preview', 'Install', 'Status', 'Remove')]
     [string]$ConfigureAction = 'Preview',
     [switch]$IncludeLocalStack,
-    [switch]$Scheduled
+    [switch]$Scheduled,
+    # Retire only: act on the plan instead of previewing it.
+    [switch]$Apply,
+    # Retire only: the public HTTPS origin of the live SiteProduction host. The gate probes its existing health
+    # endpoints immediately before any HOME task/configuration removal. This must be the configured full-DNS
+    # company origin, not a discovered redirect or a loopback stand-in.
+    [string]$CompanyHostPublicHttpsOrigin,
+    # Retire only: configured production identity/source expected at that exact company origin.
+    [string]$CompanyHostExpectedInstanceId,
+    [string]$CompanyHostExpectedSourceIdentity,
+    # Retire only: explicit attended confirmation that the company host is live and HOME may be retired.
+    [switch]$ConfirmCompanyHostGoLive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +53,40 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkProductionSource.psm1')
 
 $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $localDemoRoot = Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo'
+
+# #1614 D6: retired once the company host is live. Decided before the configuration is read, because Retire removes it.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemoRetirement.psm1') -Force
+if ($Action -eq 'Retire') {
+    $goLiveProof = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $CompanyHostPublicHttpsOrigin `
+        -ExpectedProductionInstanceId $CompanyHostExpectedInstanceId -ExpectedProductionSourceIdentity $CompanyHostExpectedSourceIdentity `
+        -OperatorConfirmed:$ConfirmCompanyHostGoLive
+    $retireConfig = $null
+    try { $retireConfig = Get-AeroLinkRemoteDemoConfig } catch { }
+    $registered = @(@('AeroLinkRemoteDemoRecovery', 'AeroLinkProductionSourceReconcile') | Where-Object { Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue })
+    $plan = Get-AeroLinkRemoteDemoRetirePlan -RegisteredTaskNames $registered -ConfigPath (Get-AeroLinkRemoteDemoConfigPath) -LocalRoot $localDemoRoot `
+        -TrafficPolicyPath $(if ($retireConfig) { [string]$retireConfig.TrafficPolicyPath } else { $null }) `
+        -BasicAuthSecretName $(if ($retireConfig -and $retireConfig.PSObject.Properties['BasicAuthSecretName']) { [string]$retireConfig.BasicAuthSecretName } else { $null }) `
+        -VaultName $(if ($retireConfig -and $retireConfig.PSObject.Properties['VaultName']) { [string]$retireConfig.VaultName } else { $null }) `
+        -NgrokRunning (@(Get-Process -Name 'ngrok' -ErrorAction SilentlyContinue).Count -gt 0) `
+        -GoLiveProof $goLiveProof
+    Write-Host 'AeroLink remote demo retirement (#1614 D6)' -ForegroundColor Cyan
+    if ($plan.Refused) { Write-Host "  Refused: $($plan.Refusal)" -ForegroundColor Red; exit 1 }
+    foreach ($item in $plan.Actions) { Write-Host "  $($item.Kind): $($item.Target)" }
+    Write-Host "  Launchers that will then print 'retired': $($plan.Launchers -join ', ')" -ForegroundColor DarkGray
+    foreach ($note in $plan.Operator) { Write-Host "  Afterwards: $note" -ForegroundColor Yellow }
+    if (-not $Apply) { Write-Host 'Preview only; nothing was changed. Run again with -Apply to retire the remote demo.' -ForegroundColor Yellow; exit 0 }
+    Invoke-AeroLinkRemoteDemoRetirePlan -Plan $plan -ExpectedPublicHttpsOrigin $CompanyHostPublicHttpsOrigin `
+        -ExpectedProductionInstanceId $CompanyHostExpectedInstanceId -ExpectedProductionSourceIdentity $CompanyHostExpectedSourceIdentity
+    Write-Host 'The remote demo is retired.' -ForegroundColor Green
+    exit 0
+}
+$retirement = Get-AeroLinkRemoteDemoRetirement -LocalRoot $localDemoRoot
+# Continue is the second half of a source transition already under way; it is left to finish.
+if ($retirement -and $Action -ne 'Continue') {
+    Write-Host "The AeroLink remote demo was retired on $($retirement.retiredAtUtc) (#1614 D6): AeroLink runs on the company host now." -ForegroundColor Yellow
+    Write-Host 'This launcher no longer starts, stops, reconciles or redeploys anything. See product/docs/OPERATIONS.md.' -ForegroundColor Yellow
+    exit 1
+}
 
 # The task must be registered against the DEDICATED production source, not against whichever checkout this
 # script happens to have been started from. Before #881 this used $moduleRoot unconditionally, which is how

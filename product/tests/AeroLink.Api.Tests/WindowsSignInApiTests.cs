@@ -149,7 +149,19 @@ public sealed class WindowsSignInApiTests
         Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
 
         using var linking = host.Client();
-        Assert.Equal("/?windows=link", await SignInAsync(linking, sid, @"CMC\smccarthy", intent: "link"));
+        using (var linkRequest = new HttpRequestMessage(HttpMethod.Get, "/api/auth/windows?intent=link"))
+        {
+            linkRequest.Headers.Add(TestWindowsHandler.SidHeader, sid);
+            linkRequest.Headers.Add(TestWindowsHandler.NameHeader, @"CMC\smccarthy");
+            using var linkResponse = await linking.SendAsync(linkRequest);
+            Assert.Equal(HttpStatusCode.Redirect, linkResponse.StatusCode);
+            Assert.Equal("/?windows=link", linkResponse.Headers.Location!.OriginalString);
+            var linkCookie = Assert.Single(linkResponse.Headers.GetValues("Set-Cookie"));
+            // The test host is deliberately non-secure; this preserves the historical non-site Windows-link name
+            // while the site profile owns the persisted identity suffix.
+            Assert.StartsWith("AeroLink.WindowsLink=", linkCookie);
+            Assert.DoesNotContain("domain=", linkCookie, StringComparison.OrdinalIgnoreCase);
+        }
         using (var noSecondFactor = await linking.PostAsJsonAsync("/api/auth/windows/link", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword }))
             Assert.Equal(HttpStatusCode.Unauthorized, noSecondFactor.StatusCode);
         using (var linked = await linking.PostAsJsonAsync("/api/auth/windows/link", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword, mfaCode = SecurityBoundaryTests.Totp(secret, DateTimeOffset.UtcNow) }))

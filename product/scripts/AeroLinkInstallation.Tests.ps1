@@ -73,6 +73,36 @@ try {
     Assert-True ($productionPaths.PostgresData -eq (Join-Path $canonicalInstallation 'pgdata')) `
         'The relocated checkout must address the canonical cluster, not one of its own.'
 
+    # A signed site release is immutable. Its installation pointer belongs beside the version tree,
+    # and pointer creation must not create a mutable .local directory inside the signed release.
+    $signedSiteRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-signed-site-' + [Guid]::NewGuid().ToString('N'))
+    $fixtures.Add($signedSiteRoot)
+    $signedVersionRoot = Join-Path $signedSiteRoot 'program\versions\1.2.3'
+    New-Item -ItemType Directory -Path (Join-Path $signedVersionRoot 'app') -Force | Out-Null
+    '{}' | Set-Content -LiteralPath (Join-Path $signedVersionRoot 'manifest.json') -Encoding UTF8
+    '' | Set-Content -LiteralPath (Join-Path $signedVersionRoot 'app\AeroLink.Api.exe') -Encoding ASCII
+    $signedPointer = Set-AeroLinkInstallationPointer -ProductRoot $signedVersionRoot -InstallationRoot $signedSiteRoot
+    $expectedSignedPointer = Join-Path $signedSiteRoot 'program\.local\installation.json'
+    Assert-True ($signedPointer -eq [IO.Path]::GetFullPath($expectedSignedPointer) -and
+        (Test-Path -LiteralPath $expectedSignedPointer -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $signedVersionRoot '.local'))) `
+        'A signed release pointer must be written beside program\versions, never inside the immutable version tree.'
+    $currentAlias = Join-Path $signedSiteRoot 'program\current'
+    New-Item -ItemType Junction -Path $currentAlias -Target $signedVersionRoot -Force | Out-Null
+    $currentPointer = Set-AeroLinkInstallationPointer -ProductRoot $currentAlias -InstallationRoot $signedSiteRoot
+    Assert-True ($currentPointer -eq [IO.Path]::GetFullPath($expectedSignedPointer) -and
+        (Test-Path -LiteralPath $expectedSignedPointer -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $currentAlias '.local'))) `
+        'The real program\current junction must share the program-level pointer and never receive a sidecar inside the signed release tree.'
+    $ambiguousRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-ambiguous-release-' + [Guid]::NewGuid().ToString('N'))
+    $fixtures.Add($ambiguousRoot)
+    New-Item -ItemType Directory -Path (Join-Path $ambiguousRoot 'app') -Force | Out-Null
+    '{}' | Set-Content -LiteralPath (Join-Path $ambiguousRoot 'manifest.json') -Encoding UTF8
+    '' | Set-Content -LiteralPath (Join-Path $ambiguousRoot 'app\AeroLink.Api.exe') -Encoding ASCII
+    $ambiguousPointer = Set-AeroLinkInstallationPointer -ProductRoot $ambiguousRoot -InstallationRoot $signedSiteRoot
+    Assert-True ($ambiguousPointer -eq [IO.Path]::GetFullPath((Join-Path $ambiguousRoot '.local\installation.json'))) `
+        'A manifest and API executable outside program\versions must not trigger signed-release pointer relocation.'
+
     # --- 3. Relocation changes nothing about installation IDENTITY. This is acceptance 66-70. ---
     $canonicalIdentity = Get-AeroLinkInstallationIdentity -ProductRoot $canonicalProduct
     $productionIdentity = Get-AeroLinkInstallationIdentity -ProductRoot $productionProduct
@@ -152,6 +182,15 @@ try {
     Assert-True ($firstRead.InstanceId -notmatch [regex]::Escape($env:COMPUTERNAME)) 'The instance identifier must identify without describing the machine.'
     Assert-True ((Get-AeroLinkInstanceConfig -ProductRoot (New-FixtureProductRoot -WithLocal) -Mode Development -EnsureInstanceId).InstanceId -ne $firstRead.InstanceId) `
         'Two installations must not share an identifier.'
+
+    # Site classifications are part of the same read/write authority as HOME and local modes. The installer writes
+    # both values, and every subsequent guard must read them back rather than rejecting an otherwise valid site.
+    foreach ($siteClassification in @('SiteProduction', 'SiteDevelopment')) {
+        $siteIdentity = New-FixtureProductRoot -WithLocal
+        Set-AeroLinkInstanceConfig -ProductRoot $siteIdentity -Label $siteClassification -Classification $siteClassification | Out-Null
+        $readSiteIdentity = Get-AeroLinkInstanceConfig -ProductRoot $siteIdentity -Mode Site
+        Assert-True ($readSiteIdentity.Classification -eq $siteClassification) "The $siteClassification classification must survive the shared instance write/read path."
+    }
 
     # A classification outside the supported set fails closed.
     #
@@ -311,6 +350,8 @@ try {
 
     # --- 11. A site server installation (#1614) declares its own ports; HOME keeps 5080/54329 ---
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteServer.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkNotificationAuthority.psm1') -Force
     function Get-FreeLoopbackPort {
         $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $probe.Start()
         try { return $probe.LocalEndpoint.Port } finally { $probe.Stop() }
@@ -339,6 +380,13 @@ try {
             $declared.RunAsSid -eq (Get-AeroLinkServiceSid 'AeroLink-Production') -and $declared.PostgresRunAsSid -eq (Get-AeroLinkServiceSid 'AeroLink-Production-PostgreSQL') -and
             $declared.RunAsSid -ne $declared.PostgresRunAsSid) `
             "A site must default to its own API and PostgreSQL virtual accounts; got $($declared.RunAsAccount) $($declared.RunAsSid) / $($declared.PostgresRunAsAccount) $($declared.PostgresRunAsSid)."
+        Assert-True (Assert-AeroLinkSiteServiceSid -Site $declared -Role Api) 'The production API binding must be the computed virtual service SID.'
+        Assert-True (Assert-AeroLinkSiteServiceSid -Site $declared -Role Postgres) 'The production PostgreSQL binding must be the computed virtual service SID.'
+        Assert-Throws {
+            Assert-AeroLinkSiteServiceSid -Site ([pscustomobject]@{
+                ServiceName = 'AeroLink-Production'; RunAsSid = 'S-1-5-32-545'
+            }) -Role Api
+        } 'override|computed' 'An arbitrary Users SID must not authorize a production ACL writer.'
         Assert-True ((Get-AeroLinkServiceSid 'TrustedInstaller') -eq 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') 'The service SID must match the documented NT SERVICE\TrustedInstaller SID.'
         $translated = (New-Object Security.Principal.NTAccount('NT SERVICE', 'EventLog')).Translate([Security.Principal.SecurityIdentifier]).Value
         Assert-True ((Get-AeroLinkServiceSid 'EventLog') -eq $translated) "The computed service SID must equal Windows' own for an installed service; Windows says $translated."
@@ -349,6 +397,47 @@ try {
         Assert-True ($redeclared.ConnectorDeploymentId -eq $declared.ConnectorDeploymentId -and $redeclared.NotificationAuthorityRoot -eq [IO.Path]::GetFullPath($siteAuthority) -and
             (Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json).instanceId -eq $instanceId) `
             'Re-declaring a site must keep its connector deployment id, instance id and notification authority root; a new id would orphan every enrolled connector.'
+
+        # A copied Production declaration must not silently reuse the Development cookie namespace.
+        $duplicateFixture = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-duplicate-site-' + [Guid]::NewGuid().ToString('N'))
+        $fixtures.Add($duplicateFixture)
+        $duplicateProduction = Join-Path $duplicateFixture 'AeroLink Production'
+        $duplicateDevelopment = Join-Path $duplicateFixture 'AeroLink Development'
+        New-Item -ItemType Directory -Path $duplicateProduction, $duplicateDevelopment -Force | Out-Null
+        $duplicateId = [Guid]::NewGuid().ToString('D')
+        @{ classification = 'SiteProduction'; instanceId = $duplicateId } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateProduction 'instance.json') -Encoding UTF8
+        @{ classification = 'SiteDevelopment'; instanceId = "{$duplicateId}" } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Encoding UTF8
+        $duplicateBefore = Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw
+        $duplicateApiPort = Get-FreeLoopbackPort
+        $duplicatePostgresPort = Get-FreeLoopbackPort
+        while ($duplicatePostgresPort -eq $duplicateApiPort) { $duplicatePostgresPort = Get-FreeLoopbackPort }
+        Assert-Throws {
+            Set-AeroLinkSiteDeclaration -InstallationRoot $duplicateDevelopment -ApiPort $duplicateApiPort -PostgresPort $duplicatePostgresPort
+        } 'distinct persisted instance ids|cookie namespaces' `
+            'A site declaration must refuse a copied sibling instanceId before changing the declaration.'
+        Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $duplicateBefore) `
+            'A duplicate instanceId refusal must leave the existing declaration bytes unchanged.'
+        @{ classification = 'SiteDevelopment'; instanceId = 'not-a-guid' } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Encoding UTF8
+        $invalidBefore = Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw
+        Assert-Throws {
+            Set-AeroLinkSiteDeclaration -InstallationRoot $duplicateDevelopment -ApiPort $duplicateApiPort -PostgresPort $duplicatePostgresPort
+        } 'not a valid GUID' 'A non-empty invalid instanceId must be rejected before declaration writes.'
+        Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $invalidBefore) `
+            'An invalid instanceId refusal must leave declaration bytes unchanged.'
+        @{ classification = 'SiteProduction'; instanceId = 'also-not-a-guid' } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateProduction 'instance.json') -Encoding UTF8
+        @{ classification = 'SiteDevelopment'; instanceId = ([Guid]::NewGuid().ToString('D')) } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Encoding UTF8
+        $malformedSiblingBefore = Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw
+        Assert-Throws {
+            Set-AeroLinkSiteDeclaration -InstallationRoot $duplicateDevelopment -ApiPort $duplicateApiPort -PostgresPort $duplicatePostgresPort
+        } 'sibling site declaration.*invalid instanceId' `
+            'A declared sibling with a malformed instanceId must be rejected before the target declaration is written.'
+        Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $malformedSiblingBefore) `
+            'A malformed sibling identity refusal must leave the target declaration bytes unchanged.'
         # #1614 1.9 (D7): the daily verified backup runs as the installation's own API account, never a person.
         $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
         Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
@@ -383,6 +472,110 @@ try {
             $runtime['AEROLINK_NOTIFICATION_AUTHORITY_ROOT'] -eq [IO.Path]::GetFullPath($siteAuthority) -and
             $runtime['ConnectionStrings__AeroLink'] -notmatch 'Password') `
             'A site API must be given installation-owned key ring, evidence, connector and notification-authority state, and no password unless asked.'
+
+        # A machine certificate key may arrive with a broad inherited grant. The installer must replace that DACL,
+        # not add the API SID beside Users. This uses only a disposable file; the machine certificate store is not
+        # touched by the contract test.
+        $certificateKeyRoot = Join-Path $siteFixture 'certificate-key'
+        $fixtures.Add($certificateKeyRoot)
+        New-Item -ItemType Directory -Path $certificateKeyRoot -Force | Out-Null
+        $certificateKey = Join-Path $certificateKeyRoot 'private-key'
+        [IO.File]::WriteAllText($certificateKey, 'temporary private-key fixture')
+        $broad = Get-Acl -LiteralPath $certificateKey
+        $broad.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),
+            [Security.AccessControl.FileSystemRights]::Read,
+            [Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $certificateKey -AclObject $broad
+        Set-AeroLinkCertificatePrivateKeyAcl -Path $certificateKey -Sid $declared.RunAsSid | Out-Null
+        $certificateAcl = Get-Acl -LiteralPath $certificateKey
+        $certificateRules = @($certificateAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        $certificateRuleSids = @($certificateRules | ForEach-Object IdentityReference | ForEach-Object Value | Sort-Object -Unique)
+        Assert-True ($certificateAcl.AreAccessRulesProtected -and ($certificateRuleSids -join ',') -eq ((@($declared.RunAsSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object -Unique) -join ',')) `
+            'The certificate private-key DACL must be protected and contain only the API, SYSTEM and Administrators.'
+        Assert-True (-not @($certificateRules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' }).Count) `
+            'A pre-existing Users grant must not survive certificate private-key ACL hardening.'
+
+        # #1647: both independent notification-authority files must be readable by the site API SID while retaining
+        # the owner/SYSTEM/Administrators write boundary. The authority is outside the installation and disposable.
+        $siteSource = Join-Path $siteFixture 'source'
+        New-Item -ItemType Directory -Path $siteSource -Force | Out-Null
+        Set-AeroLinkInstallationPointer -ProductRoot $siteSource -InstallationRoot $siteRoot | Out-Null
+        $authorityResult = Revoke-AeroLinkNotificationSendGeneration -ProductRoot $siteSource
+        $authorityPath = Get-AeroLinkNotificationAuthorityPath -InstanceId $instanceId -InstallationRoot $siteRoot
+        foreach ($authorityFile in @($authorityPath, "$authorityPath.generation")) {
+            $authorityAcl = Get-Acl -LiteralPath $authorityFile
+            $authorityRules = @($authorityAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+            $siteRead = @($authorityRules | Where-Object { $_.IdentityReference.Value -eq $declared.RunAsSid -and $_.AccessControlType -eq 'Allow' })
+            Assert-True ($authorityAcl.AreAccessRulesProtected -and $siteRead.Count -eq 1 -and
+                ($siteRead[0].FileSystemRights -band [Security.AccessControl.FileSystemRights]::Read) -eq [Security.AccessControl.FileSystemRights]::Read) `
+                "The site API must read the notification authority file '$authorityFile'."
+            Assert-True (-not @($authorityRules | Where-Object { $_.IdentityReference.Value -in @('S-1-5-32-545', 'S-1-5-11', 'S-1-1-0') }).Count) `
+                "The notification authority file '$authorityFile' must not grant broad Users/Authenticated Users/Everyone access."
+        }
+
+        # A disposable declaration may carry an override for low-level qualification, but a production authority
+        # revoke must refuse before replacing either authority file. This is the fail-before proof for #1647's
+        # caller boundary: the old caller-supplied SID path would have written a Users read ACE here.
+        $validSiteConfigBytes = [IO.File]::ReadAllBytes($siteConfig)
+        $authorityBefore = [IO.File]::ReadAllBytes($authorityPath)
+        $generationBefore = [IO.File]::ReadAllBytes("$authorityPath.generation")
+        $overriddenSite = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+        $overriddenSite.site | Add-Member -NotePropertyName runAsSid -NotePropertyValue 'S-1-5-32-545' -Force
+        $overriddenSite | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        try {
+            Assert-Throws { Revoke-AeroLinkNotificationSendGeneration -ProductRoot $siteSource } 'override|computed' `
+                'Notification authority provisioning must reject an arbitrary Users SID before writing.'
+            Assert-True (([IO.File]::ReadAllBytes($authorityPath) -join ',') -eq ($authorityBefore -join ',') -and
+                ([IO.File]::ReadAllBytes("$authorityPath.generation") -join ',') -eq ($generationBefore -join ',')) `
+                'A rejected notification authority SID must leave both authority files unchanged.'
+        }
+        finally { [IO.File]::WriteAllBytes($siteConfig, $validSiteConfigBytes) }
+
+        # The PostgreSQL bootstrap is another production caller that writes installation folders and protected
+        # secrets. Its guard must run before it even inspects the binary path when the declaration names an override.
+        $postgresOverrideBytes = [IO.File]::ReadAllBytes($siteConfig)
+        $postgresOverride = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+        $postgresOverride.site | Add-Member -NotePropertyName postgresRunAsSid -NotePropertyValue 'S-1-5-32-545' -Force
+        $postgresOverride | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        try {
+            Assert-Throws {
+                Initialize-AeroLinkSitePostgres -InstallationRoot $siteRoot -PostgresBin (Join-Path $siteFixture 'no-postgres')
+            } 'override|computed' 'PostgreSQL bootstrap must reject an arbitrary SID before folder or secret writes.'
+        }
+        finally { [IO.File]::WriteAllBytes($siteConfig, $postgresOverrideBytes) }
+
+        # #1649: the installer must define the daily verified backup against the installed version's scripts,
+        # with the API virtual account as the only task identity and the accepted fifteen-day retention. The
+        # registration override case is the regression owner: before the caller guard a qualification SID could
+        # reach Task Scheduler and receive access to the application password.
+        $backupScriptRoot = Join-Path $siteFixture 'program\current\scripts'
+        New-Item -ItemType Directory -Path $backupScriptRoot -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $backupScriptRoot 'Invoke-AeroLinkScheduledBackup.ps1') -Value '# disposable task-definition fixture' -Encoding UTF8
+        $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot $backupScriptRoot
+        Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
+            "The site backup task must run as the API's computed virtual account with no password; got $($backupTask.Principal.UserId) $($backupTask.Principal.LogonType) $($backupTask.Principal.RunLevel)."
+        Assert-True ($backupTask.Action.Arguments -match [regex]::Escape('Invoke-AeroLinkScheduledBackup.ps1') -and
+            $backupTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot))`" -RetentionDays 15") -and
+            $backupTask.Action.Arguments -match '-NonInteractive') `
+            "The site backup task must run the versioned verified runner for exactly this installation with fifteen-day retention: $($backupTask.Action.Arguments)"
+        $slashTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot ($siteRoot.TrimEnd('\') + '\') -ScriptRoot $backupScriptRoot
+        Assert-True ($slashTask.Action.Arguments -notmatch '\\"' -and $slashTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot).TrimEnd('\'))`" -RetentionDays 15")) `
+            "A trailing backslash on the installation root must not corrupt the scheduled task arguments: $($slashTask.Action.Arguments)"
+        # Authoring gate: production registration must refuse a missing versioned runner before Task Scheduler.
+        # The immutable pre-fix witness reaches Register-ScheduledTask with that runner absent; the task-definition
+        # assertions above cannot see this registration boundary, and the production guard needs no test-only seam.
+        Assert-Throws { Register-AeroLinkSiteBackupTask -InstallationRoot $siteRoot -ScriptRoot (Join-Path $siteFixture 'program\current\missing-scripts') } 'runner does not exist' `
+            'Registration must reject a missing versioned backup runner before touching Task Scheduler.'
+        $backupOverrideBytes = [IO.File]::ReadAllBytes($siteConfig)
+        $backupOverride = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+        $backupOverride.site | Add-Member -NotePropertyName runAsSid -NotePropertyValue 'S-1-5-32-545' -Force
+        $backupOverride | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        try {
+            Assert-Throws { Register-AeroLinkSiteBackupTask -InstallationRoot $siteRoot -ScriptRoot $backupScriptRoot } 'override|computed' `
+                'Registering a site backup task must reject an arbitrary API SID before Task Scheduler.'
+        }
+        finally { [IO.File]::WriteAllBytes($siteConfig, $backupOverrideBytes) }
 
         # HOME keeps exactly what it had: no site block, 5080/54329 as postgres.
         $homeRoot = Join-Path $siteFixture 'home-installation'
@@ -454,10 +647,11 @@ try {
             Cluster  = @{ Principals = @('S-1-5-32-544', $postgresSid); Writers = @('S-1-5-32-544', $postgresSid) }
             Data     = @{ Principals = @('S-1-5-32-544', $apiSid); Writers = @('S-1-5-32-544', $apiSid) }
         }
+        $keyRingData = @{ Principals = @('S-1-5-18', 'S-1-5-32-544', $apiSid); Writers = @('S-1-5-18', 'S-1-5-32-544', $apiSid) }
         $sitePlan = @(Set-AeroLinkSiteFolderAcl -InstallationRoot $siteRoot)
         foreach ($entry in $sitePlan) {
             $access = Get-AeroLinkDirectoryAccessBySid -Path $entry.Path
-            $want = $expected[$entry.Kind]
+            $want = if ($entry.Path -eq $declared.KeyRingPath) { $keyRingData } else { $expected[$entry.Kind] }
             $writers = @($access.Rules | Where-Object { $_.Allow -and $_.CanWrite } | ForEach-Object Sid | Sort-Object -Unique)
             $principals = @($access.Rules | ForEach-Object Sid | Sort-Object -Unique)
             Assert-True $access.Protected "$($entry.Path) must not inherit permissions."
@@ -480,12 +674,275 @@ try {
         $env:AEROLINK_INSTALLATION_ROOT = $null
         # This process owns every folder, so it can always hand them back to itself before removing them.
         $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $certificateCleanup = Join-Path $siteFixture 'certificate-key'
+        if (Test-Path -LiteralPath $certificateCleanup -PathType Container) {
+            $certificateFile = Join-Path $certificateCleanup 'private-key'
+            if (Test-Path -LiteralPath $certificateFile -PathType Leaf) {
+                $certificateFileAcl = Get-Acl -LiteralPath $certificateFile
+                $certificateFileAcl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+                    [Security.Principal.SecurityIdentifier]::new($me), [Security.AccessControl.FileSystemRights]::FullControl,
+                    [Security.AccessControl.AccessControlType]::Allow))
+                $certificateAccess = [Security.AccessControl.AccessControlSections]::Access
+                $certificateDacl = [Security.AccessControl.FileSecurity]::new()
+                $certificateDacl.SetSecurityDescriptorSddlForm($certificateFileAcl.GetSecurityDescriptorSddlForm($certificateAccess), $certificateAccess)
+                if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.File]::SetAccessControl($certificateFile, $certificateDacl) }
+                else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($certificateFile), $certificateDacl) }
+            }
+            Set-AeroLinkDirectoryAccessBySid -Path $certificateCleanup -Grants @(@{ Sid = $me; Access = 'FullControl' })
+        }
         foreach ($entry in @($sitePlan | Sort-Object { $_.Path.Length })) {
             try { Set-AeroLinkDirectoryAccessBySid -Path $entry.Path -Grants @(@{ Sid = $me; Access = 'FullControl' }) } catch { }
         }
         Remove-Item -LiteralPath $siteFixture -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $siteFixture) { $failures.Add("The site fixture could not be removed: $siteFixture") }
     }
+
+    # --- 13. The site server installer's pure parts (#1614 1.7, 1.8, 1.10): names, plans, the service, the parsers ---
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteServer.psm1') -Force
+    $server = Get-AeroLinkServerIdentity -Name Production -MachineRoot 'C:\AeroLink'
+    Assert-True ($server.InstallationRoot -eq 'C:\AeroLink\AeroLink Production' -and $server.Classification -eq 'SiteProduction' -and
+        $server.ServiceName -eq 'AeroLink-Production' -and $server.PostgresServiceName -eq 'AeroLink-Production-PostgreSQL') `
+        "D8 names: one root, classification and service pair per installation; got $($server.InstallationRoot) $($server.ServiceName) $($server.PostgresServiceName)."
+    Assert-True ((Get-AeroLinkServerIdentity -Name Development).ServiceName -eq 'AeroLink-Development') 'The Development installation has its own services.'
+
+    # The machine roots are locked before anything is created inside them: no write for Users.
+    $rootPlan = @(Get-AeroLinkServerRootPlan -MachineRoot 'C:\AeroLink' -ProgramDataRoot 'C:\ProgramData\AeroLink')
+    Assert-True ($rootPlan.Count -eq 2 -and $rootPlan[0].Path -eq 'C:\AeroLink' -and $rootPlan[1].Path -eq 'C:\ProgramData\AeroLink') 'Both machine roots are in the lock plan.'
+    foreach ($entry in $rootPlan) {
+        $grantText = (@($entry.Grants | ForEach-Object { "$($_.Sid)=$($_.Access)" }) | Sort-Object) -join ';'
+        Assert-True ($grantText -eq 'S-1-5-18=FullControl;S-1-5-32-544=FullControl;S-1-5-32-545=Read') "$($entry.Path) is writable only by Administrators and SYSTEM: $grantText"
+    }
+
+    $layout = Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2.3'
+    Assert-True ($layout.VersionRoot -eq 'C:\AeroLink\AeroLink Production\program\versions\1.2.3' -and $layout.Current -eq 'C:\AeroLink\AeroLink Production\program\current' -and
+        $layout.ApiExecutable -eq 'C:\AeroLink\AeroLink Production\program\current\app\AeroLink.Api.exe' -and $layout.TrustedCertificate -eq 'C:\AeroLink\AeroLink Production\trust\release-signing.cer') `
+        'The layout: versions\<version>, a current junction, the API under current\app, the trusted certificate under trust\.'
+    $identityLayout = Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2.3' -SourceSha ('b' * 40)
+    Assert-True ($identityLayout.VersionRoot -eq ('C:\AeroLink\AeroLink Production\program\versions\1.2.3+' + ('b' * 40)) -and
+        $identityLayout.VersionDirectory -eq ('1.2.3+' + ('b' * 40))) `
+        'A verified release directory must include the full source identity while the legacy version-only layout remains available.'
+    Assert-Throws { Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2/3' -SourceSha ('b' * 40) } 'safe semantic' `
+        'A version path component outside semantic-version syntax must be refused.'
+    Assert-Throws { Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2.3' -SourceSha ('b' * 39) } 'full 40-character' `
+        'A release directory identity must carry a full source SHA.'
+
+    # --- 13a. A2 entry-point release preflight (#1614): exact identity/idempotence and no unsafe update path ---
+    # Authoring gate: this protects the observable refusal boundary before backup, service stop, junction switch,
+    # migration, or trust promotion. The credible regressions are the pre-fix version-only reuse and update branch;
+    # existing installation tests never execute Install-AeroLinkServer.ps1 because it is elevated and mutates host
+    # services. These assertions extract the production functions and inspect the production release block, with no
+    # test-only production seam. The immutable pre-fix execution witness is retained at host-move\installer-a2-entrypoint-audit-20261016.
+    $installerPath = Join-Path $PSScriptRoot 'Install-AeroLinkServer.ps1'
+    $installerTokens = $null; $installerParseErrors = $null
+    $installerAst = [System.Management.Automation.Language.Parser]::ParseFile($installerPath, [ref]$installerTokens, [ref]$installerParseErrors)
+    Assert-True (@($installerParseErrors).Count -eq 0) 'Install-AeroLinkServer.ps1 must parse for its focused release contracts.'
+    foreach ($helperName in @('Get-AeroLinkReleaseTreeFingerprint', 'Compare-AeroLinkRetainedRelease', 'Assert-AeroLinkInstallReleasePreflight')) {
+        $helperAst = $installerAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $helperName }, $true)
+        Assert-True ($null -ne $helperAst) "Installer helper $helperName must remain source-visible for its release contract fixture."
+        if ($helperAst) { . ([scriptblock]::Create($helperAst.Extent.Text)) }
+    }
+    $installerFixture = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-installer-release-contract-' + [Guid]::NewGuid().ToString('N'))
+    $fixtures.Add($installerFixture)
+    $incoming = Join-Path $installerFixture 'incoming'
+    $retained = Join-Path $installerFixture 'versions\1.0.0'
+    $different = Join-Path $installerFixture 'versions\0.9.0'
+    New-Item -ItemType Directory -Path $incoming, $retained, $different -Force | Out-Null
+    'payload' | Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -NoNewline
+    'payload' | Set-Content -LiteralPath (Join-Path $retained 'app.bin') -NoNewline
+    $payloadHash = (Get-FileHash -LiteralPath (Join-Path $incoming 'app.bin') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $manifest = [ordered]@{ formatVersion = 1; version = '1.0.0'; sourceSha = ('a' * 40); files = @(@{ path = 'app.bin'; sha256 = $payloadHash }) } | ConvertTo-Json -Depth 5
+    $manifest | Set-Content -LiteralPath (Join-Path $incoming 'manifest.json') -NoNewline
+    $manifest | Set-Content -LiteralPath (Join-Path $retained 'manifest.json') -NoNewline
+    $verifiedRelease = [pscustomobject]@{ Version = '1.0.0'; SourceSha = ('a' * 40) }
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -CurrentTarget $different -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'A2 refuses' `
+        'A2 must refuse a different current release before backup, service stop, junction switch, or migration.'
+    try { Assert-AeroLinkInstallReleasePreflight -CurrentTarget $retained -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease; $sameRelease = $true } catch { $sameRelease = $false }
+    Assert-True $sameRelease 'An exact signed identity and byte-identical retained tree must be idempotently reusable.'
+    Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -Value 'changed' -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'cannot be reused' `
+        'A same-version release with changed bytes must fail closed before reuse.'
+    Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -Value 'payload' -NoNewline
+    'extra' | Set-Content -LiteralPath (Join-Path $retained 'extra.bin') -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'extra file' `
+        'A retained release with extra content must fail closed before reuse.'
+    Remove-Item -LiteralPath $retained -Recurse -Force
+    'not-a-directory' | Set-Content -LiteralPath $retained -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'not a directory' `
+        'A release path occupied by a file must fail closed before replacement.'
+    Remove-Item -LiteralPath $retained -Force
+    New-Item -ItemType Directory -Path $retained -Force | Out-Null
+    'payload' | Set-Content -LiteralPath (Join-Path $retained 'app.bin') -NoNewline
+    $manifest | Set-Content -LiteralPath (Join-Path $retained 'manifest.json') -NoNewline
+    $newSha = ('b' * 40)
+    $safeA = Join-Path $installerFixture ('program\versions\1.0.0+' + ('a' * 40))
+    $safeB = Join-Path $installerFixture ('program\versions\1.0.0+' + $newSha)
+    $safeLayoutA = Get-AeroLinkServerLayout -InstallationRoot $installerFixture -Version '1.0.0' -SourceSha ('a' * 40)
+    $safeLayoutB = Get-AeroLinkServerLayout -InstallationRoot $installerFixture -Version '1.0.0' -SourceSha $newSha
+    Assert-True ($safeLayoutA.VersionRoot -eq $safeA -and $safeLayoutB.VersionRoot -eq $safeB -and $safeA -ne $safeB) `
+        'Same-version releases with different verified source identities must resolve to distinct safe targets.'
+    $selectedLegacy = Assert-AeroLinkInstallReleasePreflight -CurrentTarget $retained -VersionRoot $safeLayoutA.VersionRoot -LegacyVersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease
+    Assert-True ($selectedLegacy -eq [IO.Path]::GetFullPath($retained)) `
+        'An exact byte-identical legacy version directory may be reused for an A2 repair.'
+    $otherVerified = [pscustomobject]@{ Version = '1.0.0'; SourceSha = $newSha }
+    $beforeTarget = [IO.Path]::GetFullPath($retained)
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -CurrentTarget $beforeTarget -VersionRoot $safeLayoutB.VersionRoot -LegacyVersionRoot $retained -IncomingRoot $incoming -Verified $otherVerified } 'A2 refuses' `
+        'A same-version different-source release must refuse while the original current target remains selected.'
+    Assert-True ($beforeTarget -eq [IO.Path]::GetFullPath($retained)) 'A refused source collision must leave the original target unchanged.'
+    New-Item -ItemType Directory -Path $safeLayoutB.VersionRoot -Force | Out-Null
+    $otherManifest = [ordered]@{ formatVersion = 1; version = '1.0.0'; sourceSha = $newSha; files = @(@{ path = 'app.bin'; sha256 = $payloadHash }) } | ConvertTo-Json -Depth 5
+    $otherManifest | Set-Content -LiteralPath (Join-Path $safeLayoutB.VersionRoot 'manifest.json') -NoNewline
+    'payload' | Set-Content -LiteralPath (Join-Path $safeLayoutB.VersionRoot 'app.bin') -NoNewline
+    Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -Value 'different-source' -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $safeLayoutB.VersionRoot -IncomingRoot $incoming -Verified $otherVerified } 'cannot be reused' `
+        'A retained identity directory with different bytes must refuse instead of being overwritten.'
+    $installerSource = [IO.File]::ReadAllText($installerPath)
+    $releaseStart = $installerSource.IndexOf('$layout = Get-AeroLinkServerLayout -InstallationRoot $root')
+    $pointerStart = $installerSource.IndexOf("Step 'Installation pointer'")
+    $releaseBlock = if ($releaseStart -ge 0 -and $pointerStart -gt $releaseStart) { $installerSource.Substring($releaseStart, $pointerStart - $releaseStart) } else { '' }
+    $offeredVerifyOffset = $releaseBlock.IndexOf('Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $TrustedCertificate')
+    $trustPromotionOffset = $releaseBlock.IndexOf('Copy-Item -LiteralPath $TrustedCertificate -Destination $layout.TrustedCertificate')
+    Assert-True ($offeredVerifyOffset -ge 0 -and $trustPromotionOffset -gt $offeredVerifyOffset) `
+        'The offered package must verify before an installed trust certificate can be promoted.'
+    $releasePreflightOffset = $installerSource.IndexOf('Assert-AeroLinkInstallReleasePreflight -CurrentTarget')
+    $instanceMutationOffset = $installerSource.IndexOf('Set-AeroLinkInstanceConfig -ProductRoot $productLookup')
+    $declarationMutationOffset = $installerSource.IndexOf('$site = Set-AeroLinkSiteDeclaration -InstallationRoot $root')
+    Assert-True ($releasePreflightOffset -ge 0 -and $instanceMutationOffset -gt $releasePreflightOffset -and
+        $declarationMutationOffset -gt $releasePreflightOffset) `
+        'The installer must complete release identity and trust preflight before mutating instance or site declarations.'
+    Assert-True ($releaseBlock -notmatch 'Stop-Service -Name \$site\.ServiceName|Backup-AeroLink\.ps1|\(Get-Item -LiteralPath \$layout\.Current\)\.Delete\(\)') `
+        'The A2 entry point must not perform the A3 backup, stop, or junction replacement transition.'
+    Assert-True ($installerSource -match 'Installs or repairs one AeroLink site server installation') `
+        'The installer synopsis must describe the A2 fresh-install/repair boundary.'
+
+    # The API service, as data: the executable itself (UseWindowsService), as the virtual account, after PostgreSQL.
+    $fakeSite = [pscustomobject]@{ ServiceName = 'AeroLink-Production'; PostgresServiceName = 'AeroLink-Production-PostgreSQL'; Classification = 'SiteProduction'
+        RunAsAccount = 'NT SERVICE\AeroLink-Production'; RunAsSid = (Get-AeroLinkServiceSid 'AeroLink-Production') }
+    $environment = [ordered]@{ 'SiteServer__Enabled' = 'true'; 'ASPNETCORE_URLS' = $null; 'ConnectionStrings__AeroLink' = 'Host=127.0.0.1;Port=55432;Database=aerolink;Username=aerolink_app'; 'ASPNETCORE_ENVIRONMENT' = 'Production' }
+    $service = New-AeroLinkApiServiceDefinition -Site $fakeSite -CurrentProgram $layout.Current -Environment $environment
+    Assert-True ($service.PathName -eq '"C:\AeroLink\AeroLink Production\program\current\app\AeroLink.Api.exe"' -and $service.StartName -eq 'NT SERVICE\AeroLink-Production' -and
+        $service.DelayedAutoStart -and ($service.Dependencies -join ',') -eq 'AeroLink-Production-PostgreSQL' -and ($service.FailureActions -join ',') -eq 'restart/60000,restart/60000,restart/60000') `
+        "The API service runs current\app\AeroLink.Api.exe as its virtual account, delayed-automatic, after its cluster, restarted on failure: $($service.PathName) $($service.StartName)"
+    Assert-True (($service.Environment -join ';') -eq 'ASPNETCORE_ENVIRONMENT=Production;ConnectionStrings__AeroLink=Host=127.0.0.1;Port=55432;Database=aerolink;Username=aerolink_app;SiteServer__Enabled=true') `
+        "The service environment is the composed settings, sorted, without empty entries: $($service.Environment -join ' | ')"
+    Assert-Throws { New-AeroLinkApiServiceDefinition -Site $fakeSite -CurrentProgram $layout.Current -Environment ([ordered]@{ 'ConnectionStrings__AeroLink' = 'Host=x;Username=a;Password=secret' }) } 'may not carry a secret' `
+        'A password in the connection string must never reach the service key.'
+    Assert-Throws { New-AeroLinkApiServiceDefinition -Site $fakeSite -CurrentProgram $layout.Current -Environment ([ordered]@{ 'Identity__BootstrapSecret' = 'abc' }) } 'may not carry a secret' `
+        'The bootstrap secret must never reach the service key.'
+    Assert-True (Test-AeroLinkServiceSidMatchesAccount -Site $fakeSite) 'A declaration with the computed virtual-account SID is installable.'
+    Assert-True (-not (Test-AeroLinkServiceSidMatchesAccount -Site ([pscustomobject]@{ ServiceName = 'AeroLink-Production'; RunAsSid = 'S-1-5-21-1-2-3-1001' }))) 'A runAsSid override is not installable.'
+
+    # Host-check parsers.
+    $goodHba = "# AeroLink`r`n# TYPE DATABASE USER ADDRESS METHOD`r`nhost    all       all   127.0.0.1/32  scram-sha-256`r`n"
+    Assert-True ((ConvertFrom-AeroLinkPgHba -Text $goodHba).Passed) 'Loopback SCRAM only passes.'
+    Assert-True ((ConvertFrom-AeroLinkPgHba -Text 'host all all 127.0.0.1 255.255.255.255 scram-sha-256').Passed) 'An address-and-mask loopback rule is loopback.'
+    $trustHba = ConvertFrom-AeroLinkPgHba -Text ($goodHba + "host all all 127.0.0.1/32 trust`r`n")
+    Assert-True (-not $trustHba.Passed -and $trustHba.WeakRules.Count -eq 1) 'A trust rule fails the check.'
+    Assert-True (-not (ConvertFrom-AeroLinkPgHba -Text ($goodHba + "host all all ::1/128 scram-sha-256`r`nlocal all all scram-sha-256`r`n")).Passed) 'IPv6 loopback and local rules are outside the site''s single loopback rule.'
+    Assert-True (-not (ConvertFrom-AeroLinkPgHba -Text '').Passed) 'An empty pg_hba admits nothing and is not a pass.'
+    $conf = "listen_addresses = 'localhost'`r`n#listen_addresses = '*'`r`nport = 5432`r`nlisten_addresses = '127.0.0.1'`r`nport = 55432   # AeroLink`r`n"
+    Assert-True ((Get-AeroLinkPostgresSetting -Text $conf -Name 'listen_addresses') -eq '127.0.0.1' -and (Get-AeroLinkPostgresSetting -Text $conf -Name 'port') -eq '55432') `
+        'The last uncommented postgresql.conf assignment wins, quoted or not.'
+    $policyText = "[Unicode]`r`nUnicode=yes`r`n[Privilege Rights]`r`nSeServiceLogonRight = *S-1-5-80-0,*S-1-5-20`r`nSeBatchLogonRight = *S-1-5-32-544`r`n"
+    $holders = Get-AeroLinkUserRightSids -Text $policyText -Right 'SeServiceLogonRight'
+    Assert-True (($holders -join ',') -eq 'S-1-5-80-0,S-1-5-20' -and (Test-AeroLinkServiceLogonRight -Holders $holders -ServiceSid $fakeSite.RunAsSid).Allowed) 'NT SERVICE\ALL SERVICES in the policy admits the virtual account.'
+    Assert-True (-not (Test-AeroLinkServiceLogonRight -Holders @('S-1-5-20') -ServiceSid $fakeSite.RunAsSid -ServiceAccount 'NT SERVICE\AeroLink-Production').Allowed) 'A policy without ALL SERVICES or the account predicts error 1069.'
+    Assert-True ($null -eq (Get-AeroLinkUserRightSids -Text "[Privilege Rights]`r`nSeBatchLogonRight = *S-1-5-32-544`r`n" -Right 'SeServiceLogonRight') -and
+        (Test-AeroLinkServiceLogonRight -Holders $null -ServiceSid $fakeSite.RunAsSid).Allowed) 'No policy for the right means the Windows default, which admits services.'
+
+    # --- 14. Host readiness false-ready contracts: token groups, exact DACLs, listener ancestry, backups ---
+    # The old helper-boundary fail-before is retained externally at host-move\hostcheck-edf4a0fe-evidence-20261015\probe-fail-before-helper-boundary-edf4a0fe.txt.
+    $hostCheckPath = Join-Path $PSScriptRoot 'Test-AeroLinkHost.ps1'
+    $hostCheckTokens = $null; $hostCheckParseErrors = $null
+    $hostCheckAst = [System.Management.Automation.Language.Parser]::ParseFile($hostCheckPath, [ref]$hostCheckTokens, [ref]$hostCheckParseErrors)
+    Assert-True (@($hostCheckParseErrors).Count -eq 0) 'HostCheck source must parse for its focused readiness contracts.'
+    foreach ($helperName in @('Test-AeroLinkHostServiceLogonRight', 'Get-AeroLinkHostAclRuleKey', 'Test-AeroLinkHostExactProtectedDacl',
+                              'Test-AeroLinkHostPostgresDataRootArgument', 'Test-AeroLinkHostPostgresListenerOwnership', 'Test-AeroLinkHostVerifiedBackup')) {
+        $helperAst = $hostCheckAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $helperName }, $true)
+        Assert-True ($null -ne $helperAst) "HostCheck helper $helperName must remain source-visible for its contract fixture."
+        if ($helperAst) { . ([scriptblock]::Create($helperAst.Extent.Text)) }
+    }
+    function New-HostCheckFixtureAclRule {
+        param([string]$Sid, [int]$Rights, [object]$Type, [object]$Inheritance, [object]$Propagation, [bool]$Inherited)
+        [pscustomobject]@{ IdentityReference = [pscustomobject]@{ Value = $Sid }; FileSystemRights = $Rights; AccessControlType = $Type; InheritanceFlags = $Inheritance; PropagationFlags = $Propagation; IsInherited = $Inherited }
+    }
+    function New-HostCheckFixtureAcl {
+        param([bool]$Protected, [object[]]$Rules)
+        $acl = [pscustomobject]@{ AreAccessRulesProtected = $Protected; Rules = $Rules }
+        $acl | Add-Member -MemberType ScriptMethod -Name GetAccessRules -Value { param($IncludeExplicit, $IncludeInherited, $TargetType) return $this.Rules }
+        return $acl
+    }
+    $tokenGroups = @('S-1-5-80-0', 'S-1-5-6', 'S-1-5-11', 'S-1-1-0')
+    foreach ($denyGroup in $tokenGroups) {
+        $decision = Test-AeroLinkHostServiceLogonRight -AllowHolders @('S-1-5-80-0') -DenyHolders @($denyGroup) -ServiceSid 'S-1-5-80-1' -ServiceAccount 'NT SERVICE\AeroLink-Production' -EffectiveTokenGroups $tokenGroups -EffectiveTokenGroupsKnown:$true
+        Assert-True (-not $decision.Allowed -and $decision.Complete) "Applicable deny group $denyGroup must override an allowed service right."
+    }
+    $unknown = Test-AeroLinkHostServiceLogonRight -AllowHolders $null -DenyHolders @() -ServiceSid 'S-1-5-80-1' -EffectiveTokenGroups @() -EffectiveTokenGroupsKnown:$false
+    Assert-True (-not $unknown.Allowed -and -not $unknown.Complete) 'Unknown effective token membership must remain incomplete, never an allow.'
+
+    $none = [Security.AccessControl.InheritanceFlags]::None
+    $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $noPropagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    $deny = [Security.AccessControl.AccessControlType]::Deny
+    $read = [int]([Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Synchronize)
+    $modify = [int]([Security.AccessControl.FileSystemRights]::Modify -bor [Security.AccessControl.FileSystemRights]::Synchronize)
+    $full = [int][Security.AccessControl.FileSystemRights]::FullControl
+    $certExpected = @(
+        @{ Sid = 'S-1-5-80-1'; Rights = $read; Type = $allow; Inheritance = $none; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-18'; Rights = $full; Type = $allow; Inheritance = $none; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-32-544'; Rights = $full; Type = $allow; Inheritance = $none; Propagation = $noPropagation; Inherited = $false }
+    )
+    $certRules = @($certExpected | ForEach-Object { New-HostCheckFixtureAclRule $_.Sid $_.Rights $_.Type $_.Inheritance $_.Propagation $_.Inherited })
+    Assert-True ((Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true $certRules) -ExpectedRules $certExpected).Passed) 'The exact protected certificate-key DACL must pass.'
+    Assert-True (-not (Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true @($certRules + (New-HostCheckFixtureAclRule 'S-1-5-6' $read $allow $none $noPropagation $false))) -ExpectedRules $certExpected).Passed) 'A wildcard service allow on the certificate key must fail.'
+    Assert-True (-not (Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true @($certRules + (New-HostCheckFixtureAclRule 'S-1-5-11' $read $deny $none $noPropagation $false))) -ExpectedRules $certExpected).Passed) 'A broad certificate-key deny must fail.'
+    $keyExpected = @(
+        @{ Sid = 'S-1-5-80-1'; Rights = $modify; Type = $allow; Inheritance = $inherit; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-18'; Rights = $full; Type = $allow; Inheritance = $inherit; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-32-544'; Rights = $full; Type = $allow; Inheritance = $inherit; Propagation = $noPropagation; Inherited = $false }
+    )
+    $keyRules = @($keyExpected | ForEach-Object { New-HostCheckFixtureAclRule $_.Sid $_.Rights $_.Type $_.Inheritance $_.Propagation $_.Inherited })
+    Assert-True ((Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true $keyRules) -ExpectedRules $keyExpected).Passed) 'The exact protected key-ring DACL must pass.'
+    Assert-True (-not (Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true @($keyRules + (New-HostCheckFixtureAclRule 'S-1-5-80-99' $modify $allow $inherit $noPropagation $false))) -ExpectedRules $keyExpected).Passed) 'A neighboring service allow on the key ring must fail.'
+
+    $postgresExe = 'C:\AeroLink\Production\postgresql\pgsql\bin\postgres.exe'; $dataRoot = 'C:\AeroLink\Production\pgdata'
+    $goodListener = [pscustomobject]@{ ProcessId = 100; ParentProcessId = 200; ExecutablePath = $postgresExe; CommandLine = '"' + $postgresExe + '" -D "' + $dataRoot + '"' }
+    $serviceProcess = [pscustomobject]@{ ProcessId = 200; ParentProcessId = 4; ExecutablePath = 'C:\AeroLink\Production\postgresql\pgsql\bin\pg_ctl.exe'; CommandLine = 'pg_ctl.exe runservice -D "' + $dataRoot + '"' }
+    $goodOwnership = Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess $goodListener -ServiceProcessId 200 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)
+    Assert-True $goodOwnership.Passed 'A postgres.exe listener with exact data root and declared service ancestry must pass.'
+    Assert-True (-not (Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess $goodListener -ServiceProcessId 300 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)).Passed) 'Listener ancestry that does not reach the declared service must fail.'
+    Assert-True (-not (Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess ([pscustomobject]@{ ProcessId = 100; ParentProcessId = 200; ExecutablePath = $postgresExe; CommandLine = 'postgres.exe -D "C:\AeroLink\Production\pgdata-copy"' }) -ServiceProcessId 200 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)).Passed) 'A data-root prefix must not satisfy ownership.'
+    Assert-True (-not (Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess ([pscustomobject]@{ ProcessId = 100; ParentProcessId = 200; ExecutablePath = 'C:\Temp\postgres.exe'; CommandLine = 'postgres.exe -D "' + $dataRoot + '"' }) -ServiceProcessId 200 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)).Passed) 'A same-named postgres.exe outside the installed bin must fail.'
+
+    $hostFixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-hostcheck-contract-' + [Guid]::NewGuid().ToString('N'))
+    $hostBackupRoot = Join-Path $hostFixtureRoot 'backups'; $hostLogPath = Join-Path $hostFixtureRoot 'logs\scheduled-backup.log'; $fixtures.Add($hostFixtureRoot)
+    New-Item -ItemType Directory -Path $hostBackupRoot,(Split-Path $hostLogPath) -Force | Out-Null
+    $absent = Test-AeroLinkHostVerifiedBackup -BackupRoot $hostBackupRoot -LogPath $hostLogPath -WarningHours 30 -Now ([datetime]'2026-01-03T00:00:00')
+    Assert-True (-not $absent.Passed) 'An absent backup must fail verification.'
+    $unverifiedArchive = Join-Path $hostBackupRoot 'aerolink-unverified.zip'; Set-Content -LiteralPath $unverifiedArchive -Value 'unverified' -Encoding ASCII
+    $unverified = Test-AeroLinkHostVerifiedBackup -BackupRoot $hostBackupRoot -LogPath $hostLogPath -WarningHours 30 -Now ([datetime]'2026-01-03T00:00:00')
+    Assert-True (-not $unverified.Passed) 'An archive without matching sidecar and scheduled verification must fail.'
+    $staleArchive = Join-Path $hostBackupRoot 'aerolink-stale.zip'; Set-Content -LiteralPath $staleArchive -Value 'stale' -Encoding ASCII
+    $staleHash = (Get-FileHash -LiteralPath $staleArchive -Algorithm SHA256).Hash
+    "$staleHash  aerolink-stale.zip" | Set-Content -LiteralPath "$staleArchive.sha256" -Encoding ASCII
+    (Get-Item -LiteralPath $staleArchive).LastWriteTime = [datetime]'2026-01-01T00:00:00'
+    "[2026-01-01T00:00:00] Scheduled backup verified successfully: $staleArchive" | Set-Content -LiteralPath $hostLogPath -Encoding UTF8
+    $stale = Test-AeroLinkHostVerifiedBackup -BackupRoot $hostBackupRoot -LogPath $hostLogPath -WarningHours 30 -Now ([datetime]'2026-01-03T00:00:00')
+    Assert-True ($stale.Passed -and -not $stale.Fresh) 'A verified archive older than the freshness bound must fail freshness.'
+    $sanKey = [Security.Cryptography.RSA]::Create(2048)
+    try {
+        $request = New-Object Security.Cryptography.X509Certificates.CertificateRequest('CN=not-the-host.example.test', $sanKey, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $san = New-Object Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder
+        $san.AddDnsName('aerolink.example.test'); $san.AddDnsName('*.apps.example.test')
+        $request.CertificateExtensions.Add($san.Build())
+        $sanCertificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
+        $dnsNames = Get-AeroLinkCertificateDnsNames -Certificate $sanCertificate
+        Assert-True (($dnsNames -join ',') -eq 'aerolink.example.test,*.apps.example.test') "SAN DNS names are read from the extension's bytes: $($dnsNames -join ',')"
+        Assert-True ((Test-AeroLinkHostNameCovered -HostName 'AeroLink.Example.Test' -DnsNames $dnsNames) -and (Test-AeroLinkHostNameCovered -HostName 'x.apps.example.test' -DnsNames $dnsNames) -and
+            -not (Test-AeroLinkHostNameCovered -HostName 'not-the-host.example.test' -DnsNames $dnsNames) -and -not (Test-AeroLinkHostNameCovered -HostName 'a.b.apps.example.test' -DnsNames $dnsNames)) `
+            'The host name is matched against the SAN only (never the CN), with one wildcard label.'
+    }
+    finally { $sanKey.Dispose() }
 }
 finally {
     $env:AEROLINK_INSTALLATION_ROOT = $previousOverride

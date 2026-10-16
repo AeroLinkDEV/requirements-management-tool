@@ -14,7 +14,13 @@ AeroLink decisions must be attributable to authenticated people, not browser-sup
 - Usernames are normalized, unique, and retained after an account is disabled so historic authorship remains resolvable.
 - Newly created, changed, and reset passwords are stored only as salted PBKDF2-SHA-256 derivations with 600,000 iterations. Existing hashes continue to verify at their encoded iteration count until an ordinary password change or reset; login and password confirmation do not rewrite them. Plaintext passwords are never persisted.
 - Eight consecutive failures lock an account. Successful authentication resets the failure counter.
-- The browser receives a random opaque session token in an HTTP-only cookie. Only its SHA-256 digest is stored. Sessions expire after 12 hours and can be explicitly revoked.
+- The browser receives a random opaque session token in an HTTP-only cookie. Only its SHA-256 digest is stored. Sessions expire after 12 hours and can be explicitly revoked. On a declared
+  `SiteProduction` or `SiteDevelopment` installation, the session, antiforgery and Windows-link cookie names use
+  the persisted instance GUID as their sole suffix: `__Host-aerolink_session-<InstanceId:N>`,
+  `__Host-AeroLink.PreferenceConfirmation-<InstanceId:N>` and
+  `__Host-AeroLink.WindowsLink-<InstanceId:N>`. A missing or malformed instance GUID refuses site startup;
+  non-site launches retain their existing names. Site cookies remain Secure, `Path=/`, host-only and use their
+  existing HttpOnly/SameSite settings.
 - Account Security identifies the current session, lists retained session history, and permits a user to revoke
   other active sessions without revoking the session performing the action.
 - Material API routes require an authenticated session. Actor names supplied by clients are ignored; the server derives the actor from the session.
@@ -45,7 +51,8 @@ Where `Identity:Windows:Enabled` is set ([DEC-154](../../DECISIONS_AND_OPEN_QUES
   made Engineer in each Program created afterwards, both granted by `system.windows-provisioning`. Nothing else
   re-grants it, so an administrator's narrowing stands.
 - **Linking.** `?intent=link` holds the proven Windows identity for five minutes in an encrypted, host-only,
-  SameSite=Strict cookie; `POST /api/auth/windows/link` then attaches it to an existing account after that
+  SameSite=Strict Windows-link cookie (the site name is the derived `__Host-AeroLink.WindowsLink-<InstanceId:N>`;
+  non-site launches retain their established name); `POST /api/auth/windows/link` then attaches it to an existing account after that
   account's password and second factor, counting failures toward lockout; an account still holding an
   administrator-issued temporary password cannot be linked. The form names the Windows logon from the ticket. The
   administrator roster shows each local account's linked Windows logon, and an administrator can unlink it, which

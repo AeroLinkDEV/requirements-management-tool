@@ -51,7 +51,29 @@ function Get-AeroLinkInstallationPointerPath {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ProductRoot)
-    return Join-Path (Join-Path $ProductRoot '.local') $script:AeroLinkInstallationPointerName
+    $root = [IO.Path]::GetFullPath($ProductRoot).TrimEnd('\', '/')
+    # A signed site release is laid out as <installation>\program\versions\<version>.
+    # Its installation pointer is mutable installation metadata, so it belongs beside versions,
+    # outside the signed release tree. Source checkouts keep the historical product\\.local path.
+    $versionsRoot = Split-Path $root -Parent
+    $programRoot = Split-Path $versionsRoot -Parent
+    $isSignedVersionRoot = ([string]::Equals((Split-Path $versionsRoot -Leaf), 'versions', [StringComparison]::OrdinalIgnoreCase)) -and
+        ([string]::Equals((Split-Path $programRoot -Leaf), 'program', [StringComparison]::OrdinalIgnoreCase)) -and
+        (Test-Path -LiteralPath (Join-Path $root 'manifest.json') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $root 'app\AeroLink.Api.exe') -PathType Leaf)
+    $currentParent = Split-Path $root -Parent
+    $currentItem = if ([string]::Equals((Split-Path $root -Leaf), 'current', [StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals((Split-Path $currentParent -Leaf), 'program', [StringComparison]::OrdinalIgnoreCase)) {
+        Get-Item -LiteralPath $root -Force -ErrorAction SilentlyContinue
+    } else { $null }
+    $isCurrentAlias = $null -ne $currentItem -and $currentItem.PSIsContainer -and
+        -not [string]::IsNullOrWhiteSpace([string]$currentItem.Target)
+    $pointerRoot = if ($isSignedVersionRoot) {
+        $programRoot
+    } elseif ($isCurrentAlias) {
+        $currentParent
+    } else { $root }
+    return Join-Path (Join-Path $pointerRoot '.local') $script:AeroLinkInstallationPointerName
 }
 
 function Get-AeroLinkInstallationRoot {
@@ -163,11 +185,11 @@ function Set-AeroLinkInstallationPointer {
     if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
         throw "Refusing to point at an installation root that does not exist: $resolved"
     }
-    $localRoot = Join-Path $ProductRoot '.local'
-    if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) {
-        New-Item -ItemType Directory -Path $localRoot -Force | Out-Null
-    }
     $pointerPath = Get-AeroLinkInstallationPointerPath -ProductRoot $ProductRoot
+    $pointerDirectory = Split-Path -Parent $pointerPath
+    if (-not (Test-Path -LiteralPath $pointerDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $pointerDirectory -Force | Out-Null
+    }
     [pscustomobject]@{
         installationRoot = $resolved
         note             = $Note
@@ -402,6 +424,32 @@ function Get-AeroLinkServiceSid {
     finally { $sha.Dispose() }
     $parts = for ($i = 0; $i -lt 20; $i += 4) { [BitConverter]::ToUInt32($hash, $i) }
     return 'S-1-5-80-' + ($parts -join '-')
+}
+
+function Assert-AeroLinkSiteServiceSid {
+    <#
+        .SYNOPSIS Refuses a production site declaration whose ACL reader is not its computed virtual service SID.
+        .DESCRIPTION
+            Site declarations accept SID overrides for disposable, non-elevated qualification. An operator entry
+            point that writes an installation-owned ACL must establish the real virtual-account binding first;
+            otherwise a value such as the Users SID would become a durable reader. Low-level ACL helpers remain
+            SID-oriented so disposable fixtures can qualify them without touching a production installation.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Site,
+        [ValidateSet('Api', 'Postgres')][string]$Role = 'Api'
+    )
+    $serviceName = if ($Role -eq 'Api') { [string]$Site.ServiceName } else { [string]$Site.PostgresServiceName }
+    $declaredSid = if ($Role -eq 'Api') { [string]$Site.RunAsSid } else { [string]$Site.PostgresRunAsSid }
+    if ([string]::IsNullOrWhiteSpace($serviceName) -or [string]::IsNullOrWhiteSpace($declaredSid)) {
+        throw "The site declaration has no $Role virtual service binding to authorize an installation-owned ACL."
+    }
+    $computedSid = Get-AeroLinkServiceSid -ServiceName $serviceName
+    if ($declaredSid -ne $computedSid) {
+        throw "The site's $Role SID '$declaredSid' is an override, not the computed NT SERVICE\$serviceName SID '$computedSid'; refusing an installation-owned ACL write."
+    }
+    return $true
 }
 
 function Assert-AeroLinkNotSiteInstallation {
@@ -715,6 +763,7 @@ Export-ModuleMember -Function @(
     'Get-AeroLinkSiteDeclaration',
     'Test-AeroLinkSiteClassification',
     'Get-AeroLinkServiceSid',
+    'Assert-AeroLinkSiteServiceSid',
     'Assert-AeroLinkNotSiteInstallation',
     'Get-AeroLinkPortListenerProcessIds',
     'Assert-AeroLinkPortAvailable',

@@ -79,6 +79,48 @@ function Get-AeroLinkDefaultSiteServiceName {
     return "AeroLink-$leaf"
 }
 
+function Assert-AeroLinkUniqueSiteInstanceId {
+    <#
+        .SYNOPSIS Refuses a site declaration that reuses the other canonical site's instance id.
+        .DESCRIPTION
+            Production and Development share a host name. Their site cookie names and Windows-link
+            cookie names are derived from instanceId, so copying one instance.json into the other must
+            fail before the declaration is written. Arbitrary disposable roots have no sibling site and
+            retain the existing qualification path.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallationRoot,
+        [Parameter(Mandatory)][string]$InstanceId
+    )
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) { throw 'A site declaration requires a non-empty instanceId.' }
+    $targetGuid = [guid]::Empty
+    if (-not [guid]::TryParse($InstanceId.Trim(), [ref]$targetGuid)) {
+        throw "The site instanceId '$InstanceId' is not a valid GUID; refusing to write a declaration or derive cookie names from it."
+    }
+    $root = [IO.Path]::GetFullPath($InstallationRoot).TrimEnd('\', '/')
+    $parent = Split-Path -Parent $root
+    foreach ($siblingName in @('AeroLink Production', 'AeroLink Development')) {
+        $sibling = [IO.Path]::GetFullPath((Join-Path $parent $siblingName)).TrimEnd('\', '/')
+        if ([string]::Equals($sibling, $root, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $configPath = Join-Path $sibling 'instance.json'
+        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { continue }
+        try { $document = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
+        catch { throw "The sibling site declaration at $configPath is malformed: $($_.Exception.Message)" }
+        $classification = if ($document.PSObject.Properties['classification']) { [string]$document.classification } else { '' }
+        $otherId = if ($document.PSObject.Properties['instanceId']) { [string]$document.instanceId } else { '' }
+        if ((Test-AeroLinkSiteClassification $classification) -and -not [string]::IsNullOrWhiteSpace($otherId)) {
+            $otherGuid = [guid]::Empty
+            if (-not [guid]::TryParse($otherId.Trim(), [ref]$otherGuid)) {
+                throw "The sibling site declaration at $configPath has an invalid instanceId '$otherId'; refusing to write a declaration while a declared site identity cannot be verified."
+            }
+            if ($otherGuid -eq $targetGuid) {
+                throw "The site instanceId '$InstanceId' is already used by $classification at '$sibling'. Production and Development must have distinct persisted instance ids and cookie namespaces; copy the declaration only after assigning a new id."
+            }
+        }
+    }
+}
+
 function Set-AeroLinkSiteDeclaration {
     <#
         .SYNOPSIS Declares, idempotently, a site installation's ports, service accounts, role and stable ids.
@@ -159,6 +201,7 @@ function Set-AeroLinkSiteDeclaration {
     if (-not $document.Contains('instanceId') -or [string]::IsNullOrWhiteSpace([string]$document['instanceId'])) {
         $document['instanceId'] = [guid]::NewGuid().ToString('D')
     }
+    Assert-AeroLinkUniqueSiteInstanceId -InstallationRoot $root -InstanceId ([string]$document['instanceId'])
     $document['updatedAtUtc'] = (Get-Date).ToUniversalTime().ToString('o')
     $temporary = "$configPath.$([guid]::NewGuid().ToString('N')).tmp"
     try {
@@ -265,7 +308,7 @@ function Get-AeroLinkSiteFolderPlan {
               under a restricted token in which Administrators is deny-only, so an installer could not otherwise
               execute them (#1636 review P1-1).
             - pgdata: writable by the PostgreSQL account and Administrators only. The API has no file access to it.
-            - Every other data folder: writable by the API account and Administrators only.
+            - Data folders are writable by the API account and Administrators only; the Data Protection key ring also grants SYSTEM full control.
             - The notification authority, outside the installation: read-only to the API account. An
               administrator provisions it; the application never writes it.
     #>
@@ -280,6 +323,7 @@ function Get-AeroLinkSiteFolderPlan {
     $binaries = @($admin, $system, @{ Sid = $script:UsersSid; Access = 'Read' })
     $cluster = @($admin, @{ Sid = $site.PostgresRunAsSid; Access = 'Modify' })
     $writable = @($admin, @{ Sid = $site.RunAsSid; Access = 'Modify' })
+    $keyRingWritable = @($admin, $system, @{ Sid = $site.RunAsSid; Access = 'Modify' })
     $plan = New-Object System.Collections.Generic.List[object]
     foreach ($path in @($site.InstallationRoot, $site.ProgramRoot, $site.NotificationAuthorityRoot)) {
         $plan.Add([pscustomobject]@{ Path = $path; Kind = 'ReadOnly'; Grants = $readOnly })
@@ -289,7 +333,8 @@ function Get-AeroLinkSiteFolderPlan {
     foreach ($path in @($site.EvidenceRoot, $site.KeyRingPath, $site.ConnectorKeyDirectory, $paths.Logs, $paths.Backups,
                         $paths.BackupVerification, $paths.RestoreWork, $paths.RestoreValidation, $paths.BootstrapState,
                         $paths.DocumentConnector, $paths.UpgradeState, $paths.SnapshotInbox)) {
-        $plan.Add([pscustomobject]@{ Path = $path; Kind = 'Data'; Grants = $writable })
+        $grants = if ($path -eq $site.KeyRingPath) { $keyRingWritable } else { $writable }
+        $plan.Add([pscustomobject]@{ Path = $path; Kind = 'Data'; Grants = $grants })
     }
     return $plan.ToArray()
 }
@@ -443,6 +488,10 @@ function Initialize-AeroLinkSitePostgres {
     )
     $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
     if (-not $site) { throw "$InstallationRoot has no site declaration. Only a site installation's cluster is initialised here." }
+    # Qualification declarations may override both SIDs, but a production cluster bootstrap writes installation
+    # folders and protected secrets. Establish both real virtual-account bindings before the first ACL write.
+    Assert-AeroLinkSiteServiceSid -Site $site -Role Api | Out-Null
+    Assert-AeroLinkSiteServiceSid -Site $site -Role Postgres | Out-Null
     $paths = Get-AeroLinkInstallationPaths -ProductRoot $site.ProgramRoot -InstallationRoot $site.InstallationRoot
     $bin = if ($PostgresBin) { [IO.Path]::GetFullPath($PostgresBin) } else { $paths.PostgresBin }
     $data = $paths.PostgresData
@@ -840,6 +889,10 @@ function Register-AeroLinkSiteBackupTask {
     if ($site.RunAsSid -ne (Get-AeroLinkServiceSid -ServiceName $site.ServiceName)) {
         throw "The declared API SID $($site.RunAsSid) is an override, not NT SERVICE\$($site.ServiceName). Remove runAsSid from the site declaration before registering the backup task."
     }
+    $runner = Join-Path ([IO.Path]::GetFullPath($ScriptRoot)) 'Invoke-AeroLinkScheduledBackup.ps1'
+    if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
+        throw "The site backup task runner does not exist at '$runner'; refusing before Task Scheduler registration."
+    }
     if (-not (Test-AeroLinkElevatedAdministrator)) { throw 'Registering the site backup task requires an elevated administrator.' }
     $definition = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $InstallationRoot -ScriptRoot $ScriptRoot -At $At
     $task = New-ScheduledTask -Action $definition.Action -Trigger $definition.Trigger -Principal $definition.Principal `
@@ -860,5 +913,6 @@ Export-ModuleMember -Function @(
     'Set-AeroLinkSiteFolderAcl',
     'Initialize-AeroLinkSitePostgres',
     'Register-AeroLinkSitePostgresService',
-    'Get-AeroLinkSiteRuntimeEnvironment'
+    'Get-AeroLinkSiteRuntimeEnvironment',
+    'Assert-AeroLinkUniqueSiteInstanceId'
 )

@@ -21,16 +21,53 @@ namespace AeroLink.Api;
 public sealed class SessionCookie
 {
     public const string BaseName = "aerolink_session";
+    public const string AntiforgeryBaseName = "AeroLink.PreferenceConfirmation";
+    public const string WindowsLinkBaseName = "AeroLink.WindowsLink";
     public const string SecurePrefix = "__Host-";
 
-    public SessionCookie(bool secure)
+    public SessionCookie(bool secure) : this(secure, suffix: null)
+    {
+    }
+
+    private SessionCookie(bool secure, string? suffix)
     {
         Secure = secure;
-        Name = secure ? SecurePrefix + BaseName : BaseName;
+        Suffix = suffix;
+        Name = SecureName(BaseName);
+        // Antiforgery retained its historical non-site name even when a secure non-site launch prefixes the
+        // session and Windows-link cookies. Declared sites are the one intentional new namespace.
+        AntiforgeryName = suffix is null ? AntiforgeryBaseName : SecureName(AntiforgeryBaseName);
+        WindowsLinkName = SecureName(WindowsLinkBaseName);
     }
 
     public bool Secure { get; }
     public string Name { get; }
+    public string AntiforgeryName { get; }
+    public string WindowsLinkName { get; }
+
+    private string? Suffix { get; }
+
+    /// <summary>
+    /// Builds the cookie owner for the composition boundary. A declared site has a persisted identity because
+    /// two installations may share a host name; its identity is therefore part of every site cookie name. The
+    /// value is parsed here, immediately before registration, so a missing or malformed site identity refuses
+    /// startup before any request can use an ambiguous cookie name.
+    /// </summary>
+    public static SessionCookie FromConfiguration(IConfiguration configuration, IHostEnvironment environment, bool siteServer)
+    {
+        var secure = SecureFrom(configuration, environment);
+        if (!siteServer) return new SessionCookie(secure, suffix: null);
+        if (!secure)
+            throw new InvalidOperationException("A site server requires secure cookies.");
+
+        var raw = configuration["Instance:InstanceId"];
+        if (!Guid.TryParse(raw, out var instanceId) || instanceId == Guid.Empty)
+            throw new InvalidOperationException("A site server requires a valid Instance:InstanceId GUID before it can issue cookies.");
+        return new SessionCookie(secure, "-" + instanceId.ToString("N"));
+    }
+
+    private string SecureName(string baseName)
+        => (Secure ? SecurePrefix : "") + baseName + Suffix;
 
     /// <summary>
     /// Whether cookies are written Secure: <c>Identity:CookieSecure</c> when set, otherwise everywhere except

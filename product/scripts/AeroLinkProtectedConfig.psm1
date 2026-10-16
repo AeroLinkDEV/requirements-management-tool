@@ -438,7 +438,7 @@ function Get-AeroLinkProtectedSiteSecretPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$InstallationRoot,
-        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser')][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser', 'api-bootstrap')][string]$Name,
         [string]$RootOverride
     )
     $root = if ([string]::IsNullOrWhiteSpace($RootOverride)) {
@@ -466,7 +466,7 @@ function Set-AeroLinkProtectedSiteSecret {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$InstallationRoot,
-        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser')][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser', 'api-bootstrap')][string]$Name,
         [Parameter(Mandatory)][securestring]$Secret,
         # The SID that reads it: the run-as identity for the application password, S-1-5-32-544 for the superuser.
         [Parameter(Mandatory)][string]$ReaderSid,
@@ -555,7 +555,7 @@ function Get-AeroLinkProtectedSiteSecret {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$InstallationRoot,
-        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser')][string]$Name,
+        [Parameter(Mandatory)][ValidateSet('postgres-application', 'postgres-superuser', 'api-bootstrap')][string]$Name,
         [string]$RootOverride
     )
     $installationRoot = Resolve-AeroLinkProtectedInstallationRoot $InstallationRoot
@@ -587,6 +587,23 @@ function Get-AeroLinkProtectedSiteSecret {
     return $value
 }
 
+function Remove-AeroLinkProtectedSiteSecret {
+    <#
+        .SYNOPSIS Removes one site secret. The bootstrap secret is removed once the first administrator exists.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallationRoot,
+        [Parameter(Mandatory)][ValidateSet('api-bootstrap')][string]$Name,
+        [string]$RootOverride
+    )
+    $path = Get-AeroLinkProtectedSiteSecretPath -InstallationRoot $InstallationRoot -Name $Name -RootOverride $RootOverride
+    $directory = Split-Path -Parent $path
+    $existed = Test-Path -LiteralPath $path -PathType Leaf
+    if (Test-Path -LiteralPath $directory -PathType Container) { Remove-Item -LiteralPath $directory -Recurse -Force }
+    return [pscustomobject]@{ Removed = $existed; Path = $path }
+}
+
 Export-ModuleMember -Function Get-AeroLinkProtectedConfigPath, Get-AeroLinkProtectedGitLabDescriptor, Get-AeroLinkProtectedGitLabRuntimeEnvironment, Set-AeroLinkProtectedGitLabConfig,
     Get-AeroLinkProtectedImageryPath, Get-AeroLinkProtectedImageryDescriptor, Set-AeroLinkProtectedImageryKey, Remove-AeroLinkProtectedImageryKey,
-    Get-AeroLinkProtectedSiteSecretPath, Set-AeroLinkProtectedSiteSecret, Get-AeroLinkProtectedSiteSecret
+    Get-AeroLinkProtectedSiteSecretPath, Set-AeroLinkProtectedSiteSecret, Get-AeroLinkProtectedSiteSecret, Remove-AeroLinkProtectedSiteSecret
