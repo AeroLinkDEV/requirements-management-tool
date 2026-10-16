@@ -922,6 +922,7 @@ export default function ReleaseCampaignCenter({
         <SignatureDialog
           title={`Authorize version ${detail.release}`}
           meaning="I approve this exact release campaign package and authorize progression toward the controlled product release."
+          windowsLinked={user.windowsLinked}
           onCancel={() => setSigning(false)}
           onSign={async (password, meaning) => {
             if (await call("approve", { password, meaning })) setSigning(false);

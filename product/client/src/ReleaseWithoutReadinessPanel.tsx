@@ -1,17 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { apiRequest, operationError } from "./apiClient";
 import type { WorkspaceRelease } from "./workspaceContext";
+import type { AuthUser } from "./IdentityCenter";
 
 /**
  * Moving between builds in a project that has switched Release off (#1113, DEC-138). The in-work build is
  * released by a password-confirmed signed decision with a reason, recorded as released without readiness
  * evidence; the next build then follows it. A project with Release uses its release campaign instead.
  */
-export default function ReleaseWithoutReadinessPanel({ api, projectId, releases, onChanged }: {
+export default function ReleaseWithoutReadinessPanel({ api, projectId, releases, user, onChanged }: {
   api: string;
   projectId: string;
   /** Oldest first. */
   releases: WorkspaceRelease[];
+  user: AuthUser;
   onChanged: () => void;
 }) {
   const inWork = releases.find((release) => !release.isReleased);
@@ -49,7 +51,7 @@ export default function ReleaseWithoutReadinessPanel({ api, projectId, releases,
           <label>Why is Build {inWork.version} being released?
             <textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
           </label>
-          <label>Confirm with your password
+          <label>Confirm with your {user.windowsLinked ? "Windows" : "AeroLink"} password
             <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
           </label>
           <button type="submit" disabled={busy || reason.trim().length < 10 || !password}>

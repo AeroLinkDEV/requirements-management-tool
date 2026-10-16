@@ -183,12 +183,12 @@ internal static class ManagedDocumentHistoryEndpoints
             {
                 var rows = (await source.ToListAsync(ct)).Where(x => x.SignedAt <= snapshotAt)
                     .OrderByDescending(x => x.SignedAt).ThenByDescending(x => x.Id)
-                    .Select(x => new { x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion, x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale, x.ContentHash, x.SignedAt, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority) });
+                    .Select(x => new { x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion, x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale, x.ContentHash, x.SignedAt, x.AuthenticationMethod, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority) });
                 return PageInMemory(rows, normalized, filterKey, snapshotAt, offset, size.Value);
             }
             var query = source.Where(x => x.SignedAt <= snapshotAt)
                 .OrderByDescending(x => x.SignedAt).ThenByDescending(x => x.Id)
-                .Select(x => new { x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion, x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale, x.ContentHash, x.SignedAt, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority) });
+                .Select(x => new { x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority, x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion, x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale, x.ContentHash, x.SignedAt, x.AuthenticationMethod, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority) });
             return await PageAsync(query, normalized, filterKey, snapshotAt, offset, size.Value, ct);
         }
         if (normalized == "relationships")

@@ -19,12 +19,14 @@ import {
   type SourceLadderSuggestion,
   type SourceView,
 } from "./projectSetupSource";
+import type { AuthUser } from "./IdentityCenter";
 import "./ProjectSetupSourcePanel.css";
 
 type SetupLevelOption = { id: string; label: string };
 
 export type ProjectSetupSourcePanelProps = {
   api: string;
+  user: AuthUser;
   draftId: string;
   draftVersion: number;
   kind: SourceKind;
@@ -337,6 +339,7 @@ export function SourceAcceptanceFields({
   source,
   accepted,
   password,
+  windowsLinked = false,
   onAcceptedChange,
   onPasswordChange,
   disabled = false,
@@ -344,6 +347,7 @@ export function SourceAcceptanceFields({
   source: SourceView | null;
   accepted: boolean;
   password: string;
+  windowsLinked?: boolean;
   onAcceptedChange: (accepted: boolean) => void;
   onPasswordChange: (password: string) => void;
   disabled?: boolean;
@@ -376,7 +380,7 @@ export function SourceAcceptanceFields({
         I accept this exact source assertion as the person authorizing this project start.
       </label>
       <label className="setupSourcePassword">
-        Password to finalize source acceptance
+        {windowsLinked ? "Windows password" : "AeroLink password"} to finalize source acceptance
         <input
           type="password"
           value={password}
@@ -394,6 +398,7 @@ export function SourceAcceptanceFields({
 
 export default function ProjectSetupSourcePanel({
   api,
+  user,
   draftId,
   draftVersion,
   kind,
@@ -1624,6 +1629,7 @@ export default function ProjectSetupSourcePanel({
             source={source}
             accepted={accepted}
             password={password}
+            windowsLinked={user.windowsLinked}
             disabled={!canAcceptSource}
             onAcceptedChange={(next) => {
               setAccepted(next);

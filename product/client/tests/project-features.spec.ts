@@ -99,7 +99,7 @@ test('without Release the builds page offers a signed release of the in-work bui
   const release = panel.getByRole('button', { name: /without readiness evidence/ })
   await expect(release).toBeDisabled()
   await panel.getByLabel(/being released/).fill('First field release of this build.')
-  await panel.getByLabel('Confirm with your password').fill('not-used')
+  await panel.getByLabel('Confirm with your AeroLink password').fill('not-used')
   await expect(release).toBeEnabled()
   if (process.env.AEROLINK_1113_EVIDENCE) await page.screenshot({ path: `${process.env.AEROLINK_1113_EVIDENCE}/release-without-readiness.png`, fullPage: true, animations: 'disabled' })
   // The real project uses Release, so the server keeps the release campaign as the only way.

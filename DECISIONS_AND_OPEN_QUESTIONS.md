@@ -2851,3 +2851,23 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Decision:** AeroLink signs people in with their Windows logon through Negotiate on Kestrel: Kerberos preferred, NTLM accepted as fallback. A first Windows sign-in creates an account keyed on the Windows SID, named `DOMAIN\user`, with the directory display name and email refreshed on every sign-in. Only domain user accounts from allow-listed domains (by domain SID) may sign in; local, built-in and well-known accounts, and accounts with no directory email, are refused. A new account is Engineer in every Program, including Programs created later; administrators may narrow that, and nothing re-grants it except those two events. The owner links his Windows logon to the existing `admin` account by entering its password and MFA once; a Windows sign-in to `admin` then needs no MFA, and the password plus MFA stays as the break-glass. Production refuses to start Windows sign-in on any scheme but Negotiate, with no allowed domain, running as SYSTEM, or unless the listener is configured HTTP/1.1-only. Computer and managed service accounts are refused, a Windows-created account can never be given an AeroLink password, and an administrator can see and remove a Windows logon linked to a local account.
 - **Residual risk:** ASP.NET Core's Negotiate handler, which this uses, does not apply TLS channel binding (extended protection). Kestrel exposes the TLS stream, so binding is possible with a custom handshake over `System.Net.Security.NegotiateAuthentication`; it is not built ([#1646](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1646)). Until it is, an NTLM exchange relayed from another service is accepted, and so is a Kerberos ticket relayed by another application on this host name, because every application there shares the computer account's `HOST/` SPN (#1614 D3). The linked `admin` signs in with Windows without MFA, so a relay of the owner's logon is global administration. NTLM fallback is accepted with this risk so that Firefox, typed-credential prompts and sites without a Kerberos path keep working. Windows sign-in must not sit behind a reverse proxy, tunnel or any intermediary that shares connections between users. Domain-side mitigations (NTLM restriction or auditing, SMB and LDAP signing) are the organization's to apply. Every Windows sign-in event records whether Kerberos or NTLM was used.
 - **Not decided here:** signature re-authentication with the Windows password (#1615 part B2); granting the global administrator to accounts other than `admin`, which the product does not support today ([#1639](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1639)).
+
+### DEC-155 - Electronic Signatures Re-enter the Account's Durable Credential
+
+- **Date:** 2026-10-15
+- **Status:** Accepted owner decision for [#1615 B2](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1615).
+- **Authority:** The owner decisions recorded in #1615 require the signer to re-enter the Windows password for
+  Windows-backed accounts, validate it against the domain, record `windows-password`, retain the existing lockout
+  behavior, and never accept ambient Negotiate as a signature. The same policy applies to a Local account after it
+  has been linked to a Windows SID; an unlinked Local account uses its AeroLink password. This entry records the
+  implementation boundary without rewriting DEC-154.
+- **Decision:** Every new electronic signature calls one server-side reauthentication boundary immediately before
+  the controlled mutation. If the freshly loaded account has a durable `WindowsSid`, the boundary validates the
+  persisted `DOMAIN\\user` with `LogonUser` using `LOGON32_LOGON_NETWORK`, requires the returned token SID to match
+  that persisted SID, and records `windows-password`. If no Windows SID is present, it uses the existing PBKDF2
+  AeroLink password verifier and records `password`. The browser never supplies the identity, and credentials are
+  transient rather than stored or logged.
+- **Preserved controls:** Wrong proofs retain the existing generic refusal, lockout transition and audit behavior,
+  create no signature, and cannot weaken authority, content-hash, transaction or concurrency checks. Cancellation
+  prevents the signature commit. Historical signatures retain their empty authentication method. Password change
+  and MFA-disable remain Local-password break-glass operations. The persisted method is exposed in signature reads.

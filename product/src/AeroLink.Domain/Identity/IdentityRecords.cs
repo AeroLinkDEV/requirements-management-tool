@@ -714,8 +714,9 @@ public sealed class ElectronicSignature
     private ElectronicSignature() { }
     public ElectronicSignature(Guid userId, string userName, string displayName, Guid programId, string artifactType, Guid artifactId, string artifactRevision, string action, string meaning, string contentHash, string ipAddress, DateTimeOffset now, string authority = "",
         Guid? reviewStepId = null, int? reviewCycle = null, int? reviewStepPosition = null, string rationale = "",
-        string authoritySource = "", Guid? workflowId = null, int? workflowVersion = null, Guid? authoritySourceId = null)
-    { Id = Guid.NewGuid(); UserId = userId; UserName = userName; DisplayName = displayName; ProgramId = programId; ArtifactType = artifactType; ArtifactId = artifactId; ArtifactRevision = artifactRevision; Action = action; Meaning = meaning; ContentHash = contentHash; IpAddress = ipAddress; SignedAt = now; Authority = authority.Trim(); ReviewStepId = reviewStepId; ReviewCycle = reviewCycle; ReviewStepPosition = reviewStepPosition; Rationale = rationale.Trim(); AuthoritySource = authoritySource.Trim(); AuthoritySourceId = authoritySourceId; WorkflowId = workflowId; WorkflowVersion = workflowVersion; }
+        string authoritySource = "", Guid? workflowId = null, int? workflowVersion = null, Guid? authoritySourceId = null,
+        string authenticationMethod = "")
+    { Id = Guid.NewGuid(); UserId = userId; UserName = userName; DisplayName = displayName; ProgramId = programId; ArtifactType = artifactType; ArtifactId = artifactId; ArtifactRevision = artifactRevision; Action = action; Meaning = meaning; ContentHash = contentHash; IpAddress = ipAddress; SignedAt = now; Authority = authority.Trim(); ReviewStepId = reviewStepId; ReviewCycle = reviewCycle; ReviewStepPosition = reviewStepPosition; Rationale = rationale.Trim(); AuthoritySource = authoritySource.Trim(); AuthoritySourceId = authoritySourceId; WorkflowId = workflowId; WorkflowVersion = workflowVersion; AuthenticationMethod = authenticationMethod.Trim(); }
     public Guid Id { get; private set; }
     public Guid UserId { get; private set; }
     public string UserName { get; private set; } = "";

@@ -149,7 +149,8 @@ public sealed class IntegrityImportService(AeroLinkDbContext db, EvidenceFileSto
 
     public async Task<IntegrityImportReceipt> CommitAsync(Guid projectId, Guid operationId, byte[] bytes,
         IntegritySourcePackage package, ProblemReportImportMapping mapping, string expectedPreviewHash,
-        AuthenticatedUser actor, string remoteAddress, Func<ProjectControlledWriteScope, Task<bool>> authorized, CancellationToken ct)
+        AuthenticatedUser actor, string remoteAddress, Func<ProjectControlledWriteScope, Task<bool>> authorized, CancellationToken ct,
+        string authenticationMethod = IdentityService.PasswordMethod)
     {
         if (operationId == Guid.Empty) throw new DomainException("An import operation identity is required.");
         ValidateMapping(mapping);
@@ -234,7 +235,7 @@ public sealed class IntegrityImportService(AeroLinkDbContext db, EvidenceFileSto
             var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync(ct);
             db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "IntegrityImportBatch", batch.Id,
                 package.Manifest.SourceName, "ImportIntegrityProblemReports", "Accepted the exact reviewed import result and preserved source assertion",
-                batch.PreviewHash, remoteAddress, now));
+                batch.PreviewHash, remoteAddress, now, authenticationMethod: authenticationMethod));
             await storage.CompleteAsync(operation, now, ct);
             await write.CommitAsync(ct);
             return receipt;

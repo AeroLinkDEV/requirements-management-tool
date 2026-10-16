@@ -62,7 +62,7 @@ public static class ProjectFeatureEndpoints
     {
         app.MapPost("/api/releases/{releaseId:guid}/release-without-readiness", async (Guid releaseId,
             ReleaseWithoutReadinessRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
-            CancellationToken ct) =>
+            SignatureReauthenticationService reauthentication, CancellationToken ct) =>
         {
             var release = await db.Releases.SingleOrDefaultAsync(x => x.Id == releaseId, ct);
             if (release is null) return Results.NotFound(new { error = "That build does not exist." });
@@ -74,7 +74,9 @@ public static class ProjectFeatureEndpoints
             var reason = request.Reason?.Trim() ?? "";
             if (reason.Length < 10) return Results.BadRequest(new { error = "Say why this build is being released (at least 10 characters)." });
             var actor = http.UserAccount();
-            if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password ?? "", ct))
+            var authentication = await reauthentication.AuthenticateAsync(actor.Id, request.Password,
+                http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct);
+            if (authentication is null)
                 return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
             var programId = await db.Projects.Where(x => x.Id == release.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
             var now = DateTimeOffset.UtcNow;
@@ -84,13 +86,13 @@ public static class ProjectFeatureEndpoints
             db.ElectronicSignatures.Add(new ElectronicSignature(actor.Id, actor.UserName, actor.DisplayName, programId,
                 "SoftwareRelease", release.Id, release.Version, "ReleaseWithoutReadiness",
                 "Released without readiness evidence", hash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
-                rationale: reason));
+                rationale: reason, authenticationMethod: authentication.AuthenticationMethod));
             db.SecurityAuditEvents.Add(new SecurityAuditEvent("ReleasedWithoutReadiness", actor.UserName, $"Release:{release.Id}",
                 "Success", $"Build {release.Version} released without readiness evidence: {reason}",
                 http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
             await db.SaveChangesAsync(ct);
             return Results.Ok(new { release.Id, release.Version, release.IsReleased, release.ReleasedAt, release.ReleasedWithoutReadiness, signatureHash = hash });
-        });
+        }).RequireRateLimiting("signature-authentication");
     }
 
     private static object Projection(ProjectFeatureRead read, bool canManage) => new

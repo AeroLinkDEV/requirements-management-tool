@@ -2029,7 +2029,7 @@ export default function ManagedDocumentationCenter({
                   <textarea name="rationale" required />
                 </label>
                 <label>
-                  Password
+                  {user.windowsLinked ? "Windows password" : "AeroLink password"}
                   <input name="password" type="password" autoComplete="current-password" required />
                 </label>
                 <button

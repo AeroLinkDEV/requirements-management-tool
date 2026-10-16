@@ -148,7 +148,7 @@ export default function LifecycleDecisionRoom({ api, projectId, activeReleaseId,
     {screen === "readiness" && !showChanges && <ReadinessView detail={detail} comparison={comparison} blockers={blockers} gate={gate} onBack={onBack} onOpenDecision={onOpenDecision} onExploreChanges={() => setShowChanges(true)} openGate={openGate} />}
     {screen === "impact" && <ImpactView detail={detail} scr={scr} affected={affected} selectedIndex={selectedRequirement} selected={selected} onSelect={setSelectedRequirement} onBack={onBackToReadiness} onOpenScr={() => effectiveScrId && onOpenScr(effectiveScrId)} onOpenVerification={onOpenVerification} />}
     {screen === "decision" && <DecisionView detail={detail} comparison={comparison} documents={documents} blockers={blockers} decision={decision} onDecision={setDecision} onBack={onBackToReadiness} onRecord={recordDecision} onOpenDocuments={onOpenDocuments} openGate={openGate} />}
-    {signing && <SignatureDialog title={`Approve release ${detail.release}`} meaning="I approve this exact release decision package and authorize controlled progression." onCancel={() => setSigning(false)} onSign={sign} />}
+    {signing && <SignatureDialog title={`Approve release ${detail.release}`} meaning="I approve this exact release decision package and authorize controlled progression." windowsLinked={user.windowsLinked} onCancel={() => setSigning(false)} onSign={sign} />}
   </main>;
 }
 

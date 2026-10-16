@@ -19,7 +19,7 @@ namespace AeroLink.Infrastructure.Persistence;
 /// diagnostics. Every granted administrator holds it, and so does <c>admin</c>.</item>
 /// </list>
 /// </summary>
-public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs, bool MustChangePassword = false, bool IsSystemAdministrator = false);
+public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs, bool MustChangePassword = false, bool IsSystemAdministrator = false, bool WindowsLinked = false);
 public sealed record UserProgramAccess(Guid ProgramId, IReadOnlyList<string> Roles);
 public sealed record LoginResult(AuthenticatedUser User, string Token, DateTimeOffset ExpiresAt);
 /// <summary>A session, or the refusal code the sign-in page explains (#1615).</summary>
@@ -319,7 +319,8 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         // Ended memberships are retained as history and must never reach a session's authority set.
         var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id && x.EndedAt == null).ToListAsync(ct);
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
-        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.HoldsAuthorityOverride, programs, user.MustChangePassword, user.IsGlobalAdministrator);
+        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.HoldsAuthorityOverride, programs,
+            user.MustChangePassword, IsSystemAdministrator: user.IsGlobalAdministrator, WindowsLinked: user.WindowsSid is not null);
     }
     public static string? TokenDigest(string? token) => string.IsNullOrWhiteSpace(token)?null:Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
     public static string CreateMfaSecret()=>Base32Encode(RandomNumberGenerator.GetBytes(20));

@@ -179,7 +179,7 @@ public sealed class ProblemReportImportService(AeroLinkDbContext db)
     public async Task<ProblemReportImportReceipt> CommitAsync(Guid projectId, Guid operationId,
         byte[] bytes, string fileName, ProblemReportImportMapping mapping, string expectedPreviewHash,
         AuthenticatedUser actor, string remoteAddress, Func<ProjectControlledWriteScope, Task<bool>> authorized,
-        CancellationToken ct)
+        CancellationToken ct, string authenticationMethod = IdentityService.PasswordMethod)
     {
         if (operationId == Guid.Empty) throw new DomainException("An import operation identity is required.");
         // Bind submitted content before live normalization; receipt recovery remains available under runtime drift.
@@ -251,7 +251,8 @@ public sealed class ProblemReportImportService(AeroLinkDbContext db)
         var programId = await db.Projects.Where(x => x.Id == projectId).Select(x => x.ProgramId).SingleAsync(ct);
         db.ElectronicSignatures.Add(new ElectronicSignature(actor.Id, actor.UserName, actor.DisplayName, programId,
             "ProblemReportImportBatch", batch.Id, batch.FileName, "ImportProblemReports",
-            "Accepted the source provenance and mapping of this import", batch.PreviewHash, remoteAddress, now));
+            "Accepted the source provenance and mapping of this import", batch.PreviewHash, remoteAddress, now,
+            authenticationMethod: authenticationMethod));
         await db.SaveChangesAsync(ct);
         await write.CommitAsync(ct);
         return receipt;

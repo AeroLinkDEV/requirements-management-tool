@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiRequest, operationError } from "./apiClient";
 import { RichContentView } from "./RichContent";
 import { useCategoryVocabulary } from "./problemReportCategories";
+import type { AuthUser } from "./IdentityCenter";
 import "./ProblemReportImportPanel.css";
 import "./IntegrityImportPanel.css";
 
@@ -41,8 +42,8 @@ const fields = [
   ["analysis", "Analysis", "Analysis"], ["rootCause", "Root cause", "Root Cause"], ["correctiveAction", "Corrective action", "Corrective Action"],
 ];
 
-export default function IntegrityImportPanel({ api, projectId, releases, onClose, onImported }: {
-  api: string; projectId: string; releases: { id: string; version: string }[]; onClose: () => void; onImported: () => void;
+export default function IntegrityImportPanel({ api, projectId, releases, user, onClose, onImported }: {
+  api: string; projectId: string; releases: { id: string; version: string }[]; user: AuthUser; onClose: () => void; onImported: () => void;
 }) {
   const vocabulary = useCategoryVocabulary(api);
   const [file, setFile] = useState<File>();
@@ -161,7 +162,7 @@ export default function IntegrityImportPanel({ api, projectId, releases, onClose
         {preview.rows.length > 50 && <nav aria-label="Preview pages"><button disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</button>
           <span>Page {page + 1} of {Math.ceil(preview.rows.length / 50)}</span><button disabled={(page + 1) * 50 >= preview.rows.length} onClick={() => setPage(page + 1)}>Next</button></nav>}
         <p>Confirming accepts this exact result, including the date interpretations and findings. Source approvals do not become AeroLink approvals. Preserved source content is restricted to project import-authority roles.</p>
-        <label>Confirm with your password<input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></label>
+        <label>Confirm with your {user.windowsLinked ? "Windows" : "AeroLink"} password<input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></label>
         <button type="button" disabled={busy || !password || !preview.previewHash || preview.blocked > 0} onClick={() => void commit()}>Confirm import</button>
       </>}
     </>}
