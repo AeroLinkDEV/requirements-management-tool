@@ -153,8 +153,7 @@ key ring and trust-mode development cluster.
 - **Daily site backup.** The installer requests a versioned `Invoke-AeroLinkScheduledBackup.ps1` runner under
   `\AeroLink\`, using the API virtual account with no interactive password, a daily trigger (02:00 by default),
   start-when-available/ignore-overlap settings, and local retention of 15 days. The registration path refuses a
-  missing runner before changing Task Scheduler and fails closed on registration refusal. The site-aware runner
-  and B1/admin integration are present in the current source through #1649 and #1615 B1; this remains the source
+  missing runner before changing Task Scheduler and fails closed on registration refusal. This remains the source
   contract, not evidence that a task has been registered on the company host. The existing current-user workstation
   schedule below remains a separate HOME/laptop convenience mode.
 - **Readiness.** Unless `-NoStart` is supplied, the installer starts PostgreSQL and the API and invokes
