@@ -98,6 +98,29 @@ public sealed class SiteServerProfileTests : IDisposable
         AssertRefused(factory, $"does not cover '{PublicHost}'");
     }
 
+    [Fact]
+    public void A_site_server_refuses_commissioning_while_HOME_continuity_is_pending()
+    {
+        // Authoring gate: the ring and connector publish are separate filesystem operations. The credible
+        // regression is normal startup accepting a durable marker after a crash, which would commission a
+        // partial move; apply-only refusal does not protect this boundary.
+        var keyRing = Directory.CreateTempSubdirectory("aerolink-continuity-pending-").FullName;
+        var marker = keyRing + ".continuity-pending.json";
+        File.WriteAllText(marker, "{\"phase\":\"staged\"}");
+        try
+        {
+            var settings = ValidSite();
+            settings["DataProtection:KeyRingPath"] = keyRing;
+            using var factory = Host(settings);
+            AssertRefused(factory, "Site commissioning is refused until an attended recovery completes");
+        }
+        finally
+        {
+            try { if (File.Exists(marker)) File.Delete(marker); } catch { }
+            try { if (Directory.Exists(keyRing)) Directory.Delete(keyRing, recursive: true); } catch { }
+        }
+    }
+
     [Theory]
     [InlineData("http://0.0.0.0:5080", true)]
     [InlineData("http://*:5080", true)]

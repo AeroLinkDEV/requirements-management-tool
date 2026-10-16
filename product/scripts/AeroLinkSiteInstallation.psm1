@@ -668,8 +668,9 @@ function Get-AeroLinkSiteRuntimeEnvironment {
         .DESCRIPTION
             Every piece of state that would otherwise fall back to the run-as account's profile or the machine
             name is named explicitly: the Data Protection key ring (protected with DPAPI-LocalMachine, under the
-            fixed application name AeroLink), the evidence root, the connector signing key and deployment id,
-            the notification authority root and the instance id. Run as the API's account with
+            fixed application name AeroLink), the declared installation root and API service SID, the evidence
+            root, the connector signing key and deployment id, the notification authority root and the instance id.
+            Run as the API's account with
             -IncludeConnectionSecret to receive a connection string that carries the application password from
             the protected store; without it the connection string carries no password.
     #>
@@ -692,6 +693,8 @@ function Get-AeroLinkSiteRuntimeEnvironment {
         DataProtection__KeyRingPath         = $site.KeyRingPath
         DataProtection__ApplicationName     = 'AeroLink'
         DataProtection__ProtectKeysWith     = 'DpapiLocalMachine'
+        SiteServer__InstallationRoot        = $site.InstallationRoot
+        SiteServer__ServiceSid              = $site.RunAsSid
         Evidence__Root                      = $site.EvidenceRoot
         Connector__SigningKeyPath           = $site.ConnectorSigningKeyPath
         Connector__DeploymentId             = $site.ConnectorDeploymentId

@@ -103,6 +103,21 @@ public static class HomeContinuityKeyTransfer
         RequireProtectedDirectoryAcl(destinationParent, "The destination Data Protection ring parent");
     }
 
+    /// <summary>
+    /// A ring and connector publish cannot be one filesystem transaction.  The pending receipt therefore
+    /// remains outside the ring and is a startup/commissioning hold, not merely a second-apply guard.
+    /// </summary>
+    public static void RequireNoPendingContinuity(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var ring = configuration["DataProtection:KeyRingPath"]?.Trim();
+        if (string.IsNullOrWhiteSpace(ring)) return;
+        var pending = PendingPath(ring);
+        if (File.Exists(pending) || Directory.Exists(pending))
+            throw new InvalidOperationException(
+                $"A HOME continuity transfer is pending at '{pending}'. Site commissioning is refused until an attended recovery completes.");
+    }
+
     public static HomeContinuityPackageManifest ExportPackage(
         IKeyManager sourceKeyManager,
         IXmlRepository sourceRepository,
