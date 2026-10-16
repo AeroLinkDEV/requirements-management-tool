@@ -350,6 +350,13 @@ try {
             $declared.RunAsSid -eq (Get-AeroLinkServiceSid 'AeroLink-Production') -and $declared.PostgresRunAsSid -eq (Get-AeroLinkServiceSid 'AeroLink-Production-PostgreSQL') -and
             $declared.RunAsSid -ne $declared.PostgresRunAsSid) `
             "A site must default to its own API and PostgreSQL virtual accounts; got $($declared.RunAsAccount) $($declared.RunAsSid) / $($declared.PostgresRunAsAccount) $($declared.PostgresRunAsSid)."
+        Assert-True (Assert-AeroLinkSiteServiceSid -Site $declared -Role Api) 'The production API binding must be the computed virtual service SID.'
+        Assert-True (Assert-AeroLinkSiteServiceSid -Site $declared -Role Postgres) 'The production PostgreSQL binding must be the computed virtual service SID.'
+        Assert-Throws {
+            Assert-AeroLinkSiteServiceSid -Site ([pscustomobject]@{
+                ServiceName = 'AeroLink-Production'; RunAsSid = 'S-1-5-32-545'
+            }) -Role Api
+        } 'override|computed' 'An arbitrary Users SID must not authorize a production ACL writer.'
         Assert-True ((Get-AeroLinkServiceSid 'TrustedInstaller') -eq 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') 'The service SID must match the documented NT SERVICE\TrustedInstaller SID.'
         $translated = (New-Object Security.Principal.NTAccount('NT SERVICE', 'EventLog')).Translate([Security.Principal.SecurityIdentifier]).Value
         Assert-True ((Get-AeroLinkServiceSid 'EventLog') -eq $translated) "The computed service SID must equal Windows' own for an installed service; Windows says $translated."
@@ -435,6 +442,37 @@ try {
             Assert-True (-not @($authorityRules | Where-Object { $_.IdentityReference.Value -in @('S-1-5-32-545', 'S-1-5-11', 'S-1-1-0') }).Count) `
                 "The notification authority file '$authorityFile' must not grant broad Users/Authenticated Users/Everyone access."
         }
+
+        # A disposable declaration may carry an override for low-level qualification, but a production authority
+        # revoke must refuse before replacing either authority file. This is the fail-before proof for #1647's
+        # caller boundary: the old caller-supplied SID path would have written a Users read ACE here.
+        $validSiteConfigBytes = [IO.File]::ReadAllBytes($siteConfig)
+        $authorityBefore = [IO.File]::ReadAllBytes($authorityPath)
+        $generationBefore = [IO.File]::ReadAllBytes("$authorityPath.generation")
+        $overriddenSite = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+        $overriddenSite.site | Add-Member -NotePropertyName runAsSid -NotePropertyValue 'S-1-5-32-545' -Force
+        $overriddenSite | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        try {
+            Assert-Throws { Revoke-AeroLinkNotificationSendGeneration -ProductRoot $siteSource } 'override|computed' `
+                'Notification authority provisioning must reject an arbitrary Users SID before writing.'
+            Assert-True (([IO.File]::ReadAllBytes($authorityPath) -join ',') -eq ($authorityBefore -join ',') -and
+                ([IO.File]::ReadAllBytes("$authorityPath.generation") -join ',') -eq ($generationBefore -join ',')) `
+                'A rejected notification authority SID must leave both authority files unchanged.'
+        }
+        finally { [IO.File]::WriteAllBytes($siteConfig, $validSiteConfigBytes) }
+
+        # The PostgreSQL bootstrap is another production caller that writes installation folders and protected
+        # secrets. Its guard must run before it even inspects the binary path when the declaration names an override.
+        $postgresOverrideBytes = [IO.File]::ReadAllBytes($siteConfig)
+        $postgresOverride = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
+        $postgresOverride.site | Add-Member -NotePropertyName postgresRunAsSid -NotePropertyValue 'S-1-5-32-545' -Force
+        $postgresOverride | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
+        try {
+            Assert-Throws {
+                Initialize-AeroLinkSitePostgres -InstallationRoot $siteRoot -PostgresBin (Join-Path $siteFixture 'no-postgres')
+            } 'override|computed' 'PostgreSQL bootstrap must reject an arbitrary SID before folder or secret writes.'
+        }
+        finally { [IO.File]::WriteAllBytes($siteConfig, $postgresOverrideBytes) }
 
         # HOME keeps exactly what it had: no site block, 5080/54329 as postgres.
         $homeRoot = Join-Path $siteFixture 'home-installation'

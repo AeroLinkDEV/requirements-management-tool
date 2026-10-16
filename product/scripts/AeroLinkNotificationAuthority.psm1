@@ -69,6 +69,7 @@ function Revoke-AeroLinkNotificationSendGeneration {
     # files' permissions as written here.
     $siteDeclaration = Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot
     $siteReader = if ($siteDeclaration) {
+        Assert-AeroLinkSiteServiceSid -Site $siteDeclaration -Role Api | Out-Null
         [Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($siteDeclaration.RunAsSid), [Security.AccessControl.FileSystemRights]::Read, [Security.AccessControl.AccessControlType]::Allow)
     } else { $null }
     $root = Split-Path $path -Parent

@@ -63,6 +63,7 @@ function Assert-SiteApiStopped {
         throw "Stop the site's AeroLink service before a production restore: port $($site.ApiPort) is listening."
     }
 }
+if ($site) { Assert-AeroLinkSiteServiceSid -Site $site -Role Api | Out-Null }
 $serviceEndpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $restoreInstallationRoot
 $persistentPostgresPort = $serviceEndpoints.DeclaredPostgresPort
 if (-not $PostgresPort) { $PostgresPort = $persistentPostgresPort }

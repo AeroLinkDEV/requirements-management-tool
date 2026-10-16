@@ -443,6 +443,10 @@ function Initialize-AeroLinkSitePostgres {
     )
     $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
     if (-not $site) { throw "$InstallationRoot has no site declaration. Only a site installation's cluster is initialised here." }
+    # Qualification declarations may override both SIDs, but a production cluster bootstrap writes installation
+    # folders and protected secrets. Establish both real virtual-account bindings before the first ACL write.
+    Assert-AeroLinkSiteServiceSid -Site $site -Role Api | Out-Null
+    Assert-AeroLinkSiteServiceSid -Site $site -Role Postgres | Out-Null
     $paths = Get-AeroLinkInstallationPaths -ProductRoot $site.ProgramRoot -InstallationRoot $site.InstallationRoot
     $bin = if ($PostgresBin) { [IO.Path]::GetFullPath($PostgresBin) } else { $paths.PostgresBin }
     $data = $paths.PostgresData

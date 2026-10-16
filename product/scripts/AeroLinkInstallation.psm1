@@ -404,6 +404,32 @@ function Get-AeroLinkServiceSid {
     return 'S-1-5-80-' + ($parts -join '-')
 }
 
+function Assert-AeroLinkSiteServiceSid {
+    <#
+        .SYNOPSIS Refuses a production site declaration whose ACL reader is not its computed virtual service SID.
+        .DESCRIPTION
+            Site declarations accept SID overrides for disposable, non-elevated qualification. An operator entry
+            point that writes an installation-owned ACL must establish the real virtual-account binding first;
+            otherwise a value such as the Users SID would become a durable reader. Low-level ACL helpers remain
+            SID-oriented so disposable fixtures can qualify them without touching a production installation.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Site,
+        [ValidateSet('Api', 'Postgres')][string]$Role = 'Api'
+    )
+    $serviceName = if ($Role -eq 'Api') { [string]$Site.ServiceName } else { [string]$Site.PostgresServiceName }
+    $declaredSid = if ($Role -eq 'Api') { [string]$Site.RunAsSid } else { [string]$Site.PostgresRunAsSid }
+    if ([string]::IsNullOrWhiteSpace($serviceName) -or [string]::IsNullOrWhiteSpace($declaredSid)) {
+        throw "The site declaration has no $Role virtual service binding to authorize an installation-owned ACL."
+    }
+    $computedSid = Get-AeroLinkServiceSid -ServiceName $serviceName
+    if ($declaredSid -ne $computedSid) {
+        throw "The site's $Role SID '$declaredSid' is an override, not the computed NT SERVICE\$serviceName SID '$computedSid'; refusing an installation-owned ACL write."
+    }
+    return $true
+}
+
 function Assert-AeroLinkNotSiteInstallation {
     <#
         .SYNOPSIS Refuses, without prompting, a HOME tool run against a site server installation.
@@ -715,6 +741,7 @@ Export-ModuleMember -Function @(
     'Get-AeroLinkSiteDeclaration',
     'Test-AeroLinkSiteClassification',
     'Get-AeroLinkServiceSid',
+    'Assert-AeroLinkSiteServiceSid',
     'Assert-AeroLinkNotSiteInstallation',
     'Get-AeroLinkPortListenerProcessIds',
     'Assert-AeroLinkPortAvailable',
