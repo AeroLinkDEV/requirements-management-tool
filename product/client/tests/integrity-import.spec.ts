@@ -42,7 +42,7 @@ test('Integrity package review shows preserved images and requires review after 
     await first.getByText(/source outcomes/).click()
     await expect(first).toContainText('Preserved as a source reference')
     expect(externalRequests).toEqual([])
-    await panel.getByLabel('Confirm with your password').fill('not-submitted')
+    await panel.getByLabel('Confirm with your AeroLink password').fill('not-submitted')
     await expect(panel.getByRole('button', { name: 'Confirm import', exact: true })).toBeEnabled()
     await page.screenshot({ path: testInfo.outputPath('integrity-package-review.png'), fullPage: true, animations: 'disabled' })
     await panel.getByLabel('Map statuses: Active').selectOption('Draft')
