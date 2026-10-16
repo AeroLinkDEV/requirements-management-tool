@@ -324,7 +324,7 @@ app.Use(async (context, next) =>
             return;
         }
         context.Items["AeroLink.User"] = new AuthenticatedUser(Guid.Empty, "system.restore-validator",
-            "Restore Validator", "restore-validator@localhost", true, []);
+            "Restore Validator", "restore-validator@localhost", true, [], IsSystemAdministrator: true);
         await next(); return;
     }
     if (!isApi || isAnonymous) { await next(); return; }

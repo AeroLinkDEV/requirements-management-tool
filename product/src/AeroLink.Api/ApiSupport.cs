@@ -100,6 +100,27 @@ static class IdentityHttpExtensions
         return false;
     }
 
+    /// <summary>
+    /// Whether a global system administrator may configure this project (#1639 owner decisions: review and
+    /// approval configuration, assurance policy and artifact schemas are system powers a granted administrator
+    /// holds). It applies in the Programs the administrator can see: system administration does not by itself
+    /// grant access to every Program.
+    /// </summary>
+    public static async Task<bool> IsSystemAdministratorForProjectAsync(this HttpContext context,
+        AeroLinkDbContext db, Guid projectId, CancellationToken ct) =>
+        context.UserAccount().IsSystemAdministrator && await context.HasProjectAccessAsync(db, projectId, ct);
+
+    /// <summary>
+    /// Who may configure review workflows, approval procedures and assurance policy: the approval-configuration
+    /// authority above, or a system administrator who can see the project.
+    /// </summary>
+    public static async Task<bool> HasProjectConfigurationAuthorityAsync(this HttpContext context,
+        AeroLinkDbContext db, ProjectAuthorityResolver resolver, Guid projectId, CancellationToken ct)
+    {
+        if (await context.IsSystemAdministratorForProjectAsync(db, projectId, ct)) return true;
+        return await context.HasApprovalConfigurationAuthorityAsync(db, resolver, projectId, ct);
+    }
+
     private static readonly ProgramRole[] ApprovalConfigurationAuthorities =
         [ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator];
 
@@ -135,7 +156,7 @@ static class IdentityHttpExtensions
             .Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList()))
             .ToList();
         return new(user.Id, user.UserName, user.DisplayName, user.Email,
-            user.UserName == IdentityService.SystemAdministratorUserName, programs, user.MustChangePassword);
+            user.HoldsAuthorityOverride, programs, user.MustChangePassword, user.IsGlobalAdministrator);
     }
 
     public static async Task<bool> HasFreshProjectRoleAsync(this HttpContext context, AeroLinkDbContext db,
