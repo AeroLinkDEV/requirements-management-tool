@@ -435,6 +435,27 @@ try {
     $ownedArchiveUnpacked = Assert-OwnedQualificationPath $archiveUnpacked $root
     Remove-Item -LiteralPath $ownedArchiveUnpacked -Recurse -Force
 
+    # Primary fresh-target owner: run the real restore authority against a foreign marker database. A fresh
+    # continuity target may refuse before mutation, but it must never replace a database it did not create.
+    # The race-specific pre-fix witness is retained externally because this owner intentionally exercises the
+    # public script boundary rather than adding a test-only call into New-RestoredDatabase.
+    $foreignTarget = "aerolink_restore_foreign_$shortToken"
+    Invoke-Checked (Join-Path $PostgresBin 'createdb.exe') @('-h','127.0.0.1','-p',"$pgPort",'-U','postgres',$foreignTarget)
+    $foreignMarker = "fresh-target-foreign-$token"
+    Invoke-Checked (Join-Path $PostgresBin 'psql.exe') @('-h','127.0.0.1','-p',"$pgPort",'-U','postgres','-d',$foreignTarget,'-v','ON_ERROR_STOP=1','-c',"COMMENT ON DATABASE `"$foreignTarget`" IS '$foreignMarker';")
+    $foreignOidBefore = (Invoke-QualificationSql 'postgres' "SELECT oid::text FROM pg_database WHERE datname='$foreignTarget';").Trim()
+    $freshRefused = $false
+    try {
+        & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $archive -TargetDatabase $foreignTarget `
+            -PostgresPort $pgPort -PostgresBin $PostgresBin -RequireFreshTarget -DisposableQualification
+        if ($LASTEXITCODE -ne 0) { $freshRefused = $true }
+    } catch { $freshRefused = $true }
+    if (-not $freshRefused) { throw 'Fresh restore unexpectedly accepted a pre-existing foreign target database.' }
+    $foreignOidAfter = (Invoke-QualificationSql 'postgres' "SELECT oid::text FROM pg_database WHERE datname='$foreignTarget';").Trim()
+    $foreignCommentAfter = (Invoke-QualificationSql 'postgres' "SELECT coalesce(shobj_description(oid,'pg_database'),'') FROM pg_database WHERE datname='$foreignTarget';").Trim()
+    if ($foreignOidAfter -ne $foreignOidBefore -or $foreignCommentAfter -ne $foreignMarker) { throw 'Fresh restore changed a foreign target database identity or marker.' }
+    Invoke-Checked (Join-Path $PostgresBin 'dropdb.exe') @('-h','127.0.0.1','-p',"$pgPort",'-U','postgres',$foreignTarget)
+
     & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $archive -TargetDatabase aerolink_restore_validation `
         -EvidenceTarget $isolatedEvidence -PostgresPort $pgPort -PostgresBin $PostgresBin -ValidationApiPort (Get-FreePort)
     if ($LASTEXITCODE -ne 0) { throw 'Isolated restore and API-download validation failed.' }

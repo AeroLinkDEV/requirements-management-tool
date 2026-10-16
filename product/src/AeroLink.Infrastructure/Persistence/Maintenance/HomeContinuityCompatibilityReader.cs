@@ -86,7 +86,7 @@ public static class HomeContinuityCompatibilityReader
         ValidateBinding(binding);
         var backup = VerifyBackupArchive(binding.VerifiedBackupArchivePath, binding.VerifiedBackupArchiveSha256, binding.SourceInstallationId);
         VerifyRestoreProof(binding, backup);
-        var syntheticDatabase = AssertDisposableRestoredDatabase(db, binding.RestoredDatabaseName, binding.RestoredPostgresPort);
+        var syntheticDatabase = AssertDisposableRestoredDatabase(db, binding.RestoredDatabaseName, binding.RestoredPostgresPort, binding.RestoredDatabaseOid);
 
         var ringBefore = ComputeRingManifestSha256(binding.SourceRingDirectory);
         if (!string.Equals(ringBefore, binding.SourceRingManifestSha256, StringComparison.OrdinalIgnoreCase))
@@ -184,6 +184,22 @@ public static class HomeContinuityCompatibilityReader
         RequireExistingFile(binding.VerifiedBackupArchivePath, nameof(binding.VerifiedBackupArchivePath));
         RequireExistingFile(binding.RestoreProofPath, nameof(binding.RestoreProofPath));
         RequireExistingFile(binding.RestoreScriptPath, nameof(binding.RestoreScriptPath));
+        if (!string.IsNullOrWhiteSpace(binding.RestoreOperationJournalPath))
+        {
+            RequireExistingFile(binding.RestoreOperationJournalPath, nameof(binding.RestoreOperationJournalPath));
+            Require(binding.RestoreOperationId, nameof(binding.RestoreOperationId));
+            Require(binding.RestoredDatabaseOid, nameof(binding.RestoredDatabaseOid));
+            if (!binding.RestoredDatabaseOid.All(char.IsDigit))
+                throw new ArgumentException("The restored database OID is invalid.", nameof(binding));
+            using var journal = JsonDocument.Parse(File.ReadAllText(binding.RestoreOperationJournalPath));
+            if (!TryGetString(journal.RootElement, "OperationId", out var operationId)
+                || !string.Equals(operationId, binding.RestoreOperationId, StringComparison.Ordinal)
+                || !TryGetString(journal.RootElement, "Status", out var operationStatus)
+                || !string.Equals(operationStatus, "completed", StringComparison.Ordinal)
+                || !TryGetString(journal.RootElement, "CreatedDatabaseOid", out var journalOid)
+                || !string.Equals(journalOid, binding.RestoredDatabaseOid, StringComparison.Ordinal))
+                throw new ArgumentException("The restored database operation journal is not a completed identity match.", nameof(binding));
+        }
         Require(binding.SourceUserSid, nameof(binding.SourceUserSid));
         if (!binding.SourceUserSid.StartsWith("S-", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("The source Windows user SID is invalid.", nameof(binding));
         Require(binding.ReaderUserSid, nameof(binding.ReaderUserSid));
@@ -297,7 +313,7 @@ public static class HomeContinuityCompatibilityReader
             throw new ArgumentException("The compatibility receipt reader image hash is not current.", nameof(receipt));
     }
 
-    public static bool AssertDisposableRestoredDatabase(AeroLinkDbContext db, string expectedDatabaseName, int expectedPort)
+    public static bool AssertDisposableRestoredDatabase(AeroLinkDbContext db, string expectedDatabaseName, int expectedPort, string expectedDatabaseOid = "")
     {
         ArgumentNullException.ThrowIfNull(db);
         Require(expectedDatabaseName, nameof(expectedDatabaseName));
@@ -318,6 +334,19 @@ public static class HomeContinuityCompatibilityReader
                 throw new InvalidOperationException("The configured database does not match the bound disposable restore identity.");
             if (connection.Host is not ("127.0.0.1" or "localhost" or "::1"))
                 throw new InvalidOperationException("The compatibility probe refuses a remote or unowned PostgreSQL host.");
+            if (!string.IsNullOrWhiteSpace(expectedDatabaseOid))
+            {
+                using var command = db.Database.GetDbConnection().CreateCommand();
+                command.CommandText = "SELECT oid::text FROM pg_database WHERE datname = current_database();";
+                db.Database.OpenConnection();
+                try
+                {
+                    var actualOid = Convert.ToString(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+                    if (!string.Equals(actualOid, expectedDatabaseOid, StringComparison.Ordinal))
+                        throw new InvalidOperationException("The restored database identity no longer matches the product-owned restore operation.");
+                }
+                finally { db.Database.CloseConnection(); }
+            }
             return false;
         }
         else if (!provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
@@ -486,6 +515,21 @@ public static class HomeContinuityCompatibilityReader
             throw new InvalidOperationException("The continuity restore proof is outside the owned validation root.");
         if (backup.InstanceId is null || !string.Equals(backup.InstanceId, binding.SourceInstallationId, StringComparison.Ordinal))
             throw new InvalidOperationException("The verified archive instance is not bound to the continuity source.");
+        if (!string.IsNullOrWhiteSpace(binding.RestoreOperationJournalPath))
+        {
+            if (!TryGetString(root, "OperationId", out var operationId)
+                || !string.Equals(operationId, binding.RestoreOperationId, StringComparison.Ordinal)
+                || !TryGetString(root, "OperationJournalPath", out var operationJournalPath)
+                || !string.Equals(Path.GetFullPath(operationJournalPath), Path.GetFullPath(binding.RestoreOperationJournalPath), StringComparison.OrdinalIgnoreCase)
+                || !TryGetString(root, "DatabaseOid", out var databaseOid)
+                || !string.Equals(databaseOid, binding.RestoredDatabaseOid, StringComparison.Ordinal)
+                || !root.TryGetProperty("PostgresRuntimeAfter", out var runtimeAfter)
+                || runtimeAfter.ValueKind != JsonValueKind.Object
+                || !TryGetString(runtimeAfter, "DataDirectory", out _)
+                || !runtimeAfter.TryGetProperty("Postmaster", out var postmaster)
+                || !TryGetString(postmaster, "ImageSha256", out _))
+                throw new InvalidOperationException("The continuity restore proof does not contain the product-owned PostgreSQL operation identity.");
+        }
     }
 
     private static bool TryGetInt(JsonElement root, string name, out int value)
@@ -606,7 +650,10 @@ public sealed record HomeContinuityCompatibilityBinding(
     string ReaderAssemblySha256,
     string DiscoveryMode,
     string SourceProcessAttestation,
-    Dictionary<string, string> ExternalStoreStates);
+    Dictionary<string, string> ExternalStoreStates,
+    string RestoreOperationJournalPath = "",
+    string RestoreOperationId = "",
+    string RestoredDatabaseOid = "");
 
 public sealed record HomeContinuityCompatibilityReceipt(
     string Status,

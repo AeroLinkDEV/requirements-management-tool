@@ -14,6 +14,8 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Npgsql;
 
 namespace AeroLink.Api;
@@ -378,6 +380,7 @@ public static class AeroLinkMaintenanceHost
             return Fail("The continuity destination application must be exactly 'AeroLink'.");
         var backupHash = VerifySourceBackup(verifiedBackupArchive, verifiedBackup, sourceInstallation);
         var compatibilityReceipt = ReadCompatibilityReceipt(compatibilityReceiptPath);
+        HomeContinuityCompatibilityReader.ValidateReceipt(compatibilityReceipt);
         var configuration = services.GetRequiredService<IConfiguration>();
         var installationRoot = Path.GetFullPath(RequiredConfiguration(configuration, "SiteServer:InstallationRoot"));
         var protectedConfigRoot = configuration["SiteServer:ProtectedConfigRoot"]?.Trim();
@@ -389,7 +392,29 @@ public static class AeroLinkMaintenanceHost
         var restoreDatabase = "aerolink_continuity_restore_" + Guid.NewGuid().ToString("N")[..12];
         var restoreValidationRoot = Path.Combine(installationRoot, "restore-validation");
         Directory.CreateDirectory(restoreValidationRoot);
+        RefusePendingContinuityOperations(restoreValidationRoot);
+        using var operationLease = AcquireContinuityOperationLease(restoreValidationRoot);
         var restoreProof = Path.Combine(restoreValidationRoot, restoreDatabase + ".continuity.json");
+        var operationId = Guid.NewGuid().ToString("N");
+        var operationJournal = Path.Combine(restoreValidationRoot, restoreDatabase + ".operation.json");
+        WriteContinuityOperationJournal(operationJournal, new
+        {
+            JournalVersion = 1,
+            OperationId = operationId,
+            Status = "admitted",
+            Phase = "admission",
+            TargetDatabase = restoreDatabase,
+            RestoreValidationRoot = Path.GetFullPath(restoreValidationRoot),
+            RestoreWorkRoot = Path.Combine(installationRoot, "restore-work"),
+            ProofPath = restoreProof,
+            ArchivePath = Path.GetFullPath(verifiedBackupArchive),
+            ArchiveSha256 = backupHash,
+            PostgresPort = restorePort,
+            CreatedByOperation = false,
+            CreatedDatabaseOid = (string?)null,
+            EvidenceOwned = false,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+        }, createOnly: true);
         var readerImage = Process.GetCurrentProcess().MainModule?.FileName ?? Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(readerImage) || !File.Exists(readerImage))
             throw new InvalidOperationException("The continuity reader process image identity is unavailable.");
@@ -408,30 +433,76 @@ public static class AeroLinkMaintenanceHost
             ReaderAssemblySha256 = Sha256File(typeof(HomeContinuityCompatibilityReader).Assembly.Location),
             SourceProcessAttestation = "operator-attested-frozen",
         };
-        await RunFreshContinuityRestoreAsync(restoreScript, restorePostgresBin, verifiedBackupArchive,
-            restoreDatabase, restorePort, restoreProof, installationRoot, protectedConfigRoot);
-        HomeContinuityCompatibilityReader.ValidateBinding(freshBinding);
-        var connector = ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation);
-        using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
-        await using var restoredDb = BuildContinuityRestoreDb(services, freshBinding);
-        var freshCompatibility = await HomeContinuityCompatibilityReader.ProbeAsync(
-            restoredDb, sourceServices, freshBinding);
-        if (!string.Equals(freshCompatibility.Status, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal))
-            return Fail("The continuity export requires a fresh complete compatibility proof from its owned restore; a retained receipt status is not sufficient.");
-        var sourceManager = sourceServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
-        var sourceRepository = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(
-            new DirectoryInfo(sourceRingPath), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
-        using var certificate = LoadCertificate(certificatePath, keyPath: null, requirePrivateKey: false);
-        var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator, targetApplication,
-            sourceProtection, backupHash, connectorDeployment, connectorKey, connector.PublicKeyFingerprint, backupHash);
-        var manifest = HomeContinuityKeyTransfer.ExportPackage(
-            sourceManager, sourceRepository, certificate, binding, connector, package);
-        Console.WriteLine($"HOME CONTINUITY PACKAGE EXPORTED: {manifest.PackageId:D}");
-        Console.WriteLine($"Keys: {manifest.Keys.Count}; revocations: {manifest.Revocations.Count}");
-        Console.WriteLine($"Manifest SHA-256: {Sha256File(Path.Combine(package, "manifest.json"))}");
-        Console.WriteLine("Key descriptors and protected values were not printed or written in plaintext.");
-        await Task.CompletedTask;
-        return 0;
+        UpdateContinuityOperationJournal(operationJournal, journal =>
+        {
+            journal["MaintenanceEntryImagePath"] = Path.GetFullPath(readerImage);
+            journal["MaintenanceEntryImageSha256"] = freshBinding.ReaderSourceSha256;
+            journal["InfrastructureReaderAssemblyPath"] = typeof(HomeContinuityCompatibilityReader).Assembly.Location;
+            journal["InfrastructureReaderAssemblySha256"] = freshBinding.ReaderAssemblySha256;
+            journal["ApiHttpValidation"] = "not-executed: SkipCurrentCodeValidation was explicitly supplied";
+            journal["ApiExecutablePath"] = null;
+            journal["ApiExecutableSha256"] = null;
+        });
+        var operationCleaned = false;
+        try
+        {
+            var operation = await RunFreshContinuityRestoreAsync(restoreScript, restorePostgresBin, verifiedBackupArchive,
+                restoreDatabase, restorePort, restoreProof, operationJournal, operationId, installationRoot, protectedConfigRoot);
+            var restoredOid = RequiredJournalValue(operation, "CreatedDatabaseOid");
+            freshBinding = freshBinding with
+            {
+                RestoreOperationJournalPath = operationJournal,
+                RestoreOperationId = operationId,
+                RestoredDatabaseOid = restoredOid,
+            };
+            HomeContinuityCompatibilityReader.ValidateBinding(freshBinding);
+            var connector = ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation);
+            using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
+            await using var restoredDb = BuildContinuityRestoreDb(services, freshBinding);
+            UpdateContinuityOperationJournal(operationJournal, journal =>
+            {
+                journal["Phase"] = "probe-running";
+                journal["ProbeStartedAtUtc"] = DateTimeOffset.UtcNow;
+            });
+            var freshCompatibility = await HomeContinuityCompatibilityReader.ProbeAsync(
+                restoredDb, sourceServices, freshBinding);
+            UpdateContinuityOperationJournal(operationJournal, journal =>
+            {
+                journal["Phase"] = "probe-complete";
+                journal["ProbeCompletedAtUtc"] = DateTimeOffset.UtcNow;
+                journal["ProbeStatus"] = freshCompatibility.Status;
+            });
+            if (freshCompatibility.Status is not (HomeContinuityCompatibilityReader.CompatibilityProof
+                or HomeContinuityCompatibilityReader.NoApplicableValues
+                or HomeContinuityCompatibilityReader.LegacyPlaintextPresent))
+                throw new InvalidOperationException("The continuity export requires a fresh complete compatibility result from its owned restore; a retained receipt status is not sufficient.");
+
+            await CleanupContinuityOperationAsync(restoreScript, restorePostgresBin, restoreDatabase, restorePort,
+                operationJournal, operationId, installationRoot, protectedConfigRoot);
+            operationCleaned = true;
+            var sourceManager = sourceServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
+            var sourceRepository = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(
+                new DirectoryInfo(sourceRingPath), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+            using var certificate = LoadCertificate(certificatePath, keyPath: null, requirePrivateKey: false);
+            var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator, targetApplication,
+                sourceProtection, backupHash, connectorDeployment, connectorKey, connector.PublicKeyFingerprint, backupHash);
+            var manifest = HomeContinuityKeyTransfer.ExportPackage(
+                sourceManager, sourceRepository, certificate, binding, connector, package,
+                freshCompatibility.Status, string.Equals(freshCompatibility.Status, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal));
+            Console.WriteLine($"HOME CONTINUITY PACKAGE EXPORTED: {manifest.PackageId:D}");
+            Console.WriteLine($"Keys: {manifest.Keys.Count}; revocations: {manifest.Revocations.Count}");
+            Console.WriteLine($"Compatibility status: {manifest.CompatibilityStatus}; cryptographic proof: {manifest.CryptographicCompatibilityProof}");
+            Console.WriteLine($"Manifest SHA-256: {Sha256File(Path.Combine(package, "manifest.json"))}");
+            Console.WriteLine("Key descriptors and protected values were not printed or written in plaintext.");
+            await Task.CompletedTask;
+            return 0;
+        }
+        catch
+        {
+            if (!operationCleaned) TryCleanupContinuityOperation(restoreScript, restorePostgresBin, restoreDatabase, restorePort,
+                operationJournal, operationId, installationRoot, protectedConfigRoot);
+            throw;
+        }
     }
 
     private static void ValidateExportSourceContext(
@@ -505,13 +576,15 @@ public static class AeroLinkMaintenanceHost
         return identity.User?.Value ?? throw new InvalidOperationException("The continuity reader Windows identity is unavailable.");
     }
 
-    private static async Task RunFreshContinuityRestoreAsync(
+    private static async Task<JsonObject> RunFreshContinuityRestoreAsync(
         string restoreScript,
         string postgresBin,
         string archive,
         string database,
         int port,
         string proof,
+        string operationJournal,
+        string operationId,
         string installationRoot,
         string? protectedConfigRoot)
     {
@@ -545,6 +618,8 @@ public static class AeroLinkMaintenanceHost
             "-BackupArchive", archive, "-TargetDatabase", database, "-PostgresPort", port.ToString(CultureInfo.InvariantCulture),
             "-PostgresBin", postgresBin, "-DisposableQualification", "-SkipCurrentCodeValidation",
             "-RequireFreshTarget", "-ContinuityReceiptPath", proof, "-InstallationRoot", installationRoot,
+            "-ContinuityOperationJournalPath", operationJournal, "-ContinuityOperationId", operationId,
+            "-RetainContinuityRestore",
         }) start.ArgumentList.Add(argument);
         if (!string.IsNullOrWhiteSpace(protectedConfigRoot))
         {
@@ -552,22 +627,249 @@ public static class AeroLinkMaintenanceHost
             start.ArgumentList.Add(protectedConfigRoot);
         }
         using var process = Process.Start(start) ?? throw new InvalidOperationException("The continuity restore process could not be started.");
+        var childIdentity = CaptureProcessIdentity(process);
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var timedOut = false;
         try
         {
             await process.WaitForExitAsync(timeout.Token);
         }
         catch (OperationCanceledException)
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-            throw new InvalidOperationException("The fresh continuity restore exceeded its bounded operation time and was refused.");
+            timedOut = true;
+            try
+            {
+                if (!process.HasExited && SameProcessIdentity(process, childIdentity)) process.Kill(entireProcessTree: true);
+            }
+            catch { }
         }
         await Task.WhenAll(stdout, stderr);
+        var operation = UpdateContinuityOperationJournal(operationJournal, journal =>
+        {
+            journal["ParentProcessId"] = Environment.ProcessId;
+            journal["ParentProcessStartedUtc"] = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+            journal["RestoreChildProcess"] = childIdentity;
+            journal["RestoreChildExitCode"] = timedOut ? null : process.ExitCode;
+            journal["RestoreChildTimedOut"] = timedOut;
+            journal["RestoreChildStdout"] = RedactContinuityOutput(stdout.Result);
+            journal["RestoreChildStderr"] = RedactContinuityOutput(stderr.Result);
+        });
+        if (timedOut)
+        {
+            throw new InvalidOperationException("The fresh continuity restore exceeded its bounded operation time and was refused.");
+        }
         if (process.ExitCode != 0 || !File.Exists(proof))
             throw new InvalidOperationException("The existing continuity restore authority refused the fresh owned restore; no export package was written.");
+        var status = operation["Status"]?.GetValue<string>();
+        if (!string.Equals(status, "completed", StringComparison.Ordinal))
+            throw new InvalidOperationException("The continuity restore completed without a product-owned completed operation journal.");
+        return operation;
     }
+
+    private static async Task CleanupContinuityOperationAsync(
+        string restoreScript,
+        string postgresBin,
+        string database,
+        int port,
+        string operationJournal,
+        string operationId,
+        string installationRoot,
+        string? protectedConfigRoot)
+    {
+        var shell = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
+            : "pwsh";
+        var start = new ProcessStartInfo(shell)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(restoreScript)!,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        if (OperatingSystem.IsWindows())
+        {
+            var windowsPowerShellModules = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "Modules"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsPowerShell", "Modules"),
+            }.Where(Directory.Exists);
+            start.Environment["PSModulePath"] = string.Join(Path.PathSeparator, windowsPowerShellModules);
+        }
+        foreach (var argument in new[]
+        {
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", restoreScript,
+            "-CleanupContinuityOperation", "-ContinuityOperationJournalPath", operationJournal,
+            "-ContinuityOperationId", operationId, "-TargetDatabase", database,
+            "-PostgresPort", port.ToString(CultureInfo.InvariantCulture), "-PostgresBin", postgresBin,
+            "-InstallationRoot", installationRoot,
+        }) start.ArgumentList.Add(argument);
+        if (!string.IsNullOrWhiteSpace(protectedConfigRoot))
+        {
+            start.ArgumentList.Add("-ProtectedConfigRoot");
+            start.ArgumentList.Add(protectedConfigRoot);
+        }
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("The continuity cleanup process could not be started.");
+        var childIdentity = CaptureProcessIdentity(process);
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException)
+        {
+            try { if (!process.HasExited && SameProcessIdentity(process, childIdentity)) process.Kill(entireProcessTree: true); } catch { }
+            throw new InvalidOperationException($"The continuity cleanup timed out; recovery is required at {operationJournal}.");
+        }
+        await Task.WhenAll(stdout, stderr);
+        UpdateContinuityOperationJournal(operationJournal, journal =>
+        {
+            journal["CleanupChildProcess"] = childIdentity;
+            journal["CleanupChildExitCode"] = process.ExitCode;
+            journal["CleanupChildStdout"] = RedactContinuityOutput(stdout.Result);
+            journal["CleanupChildStderr"] = RedactContinuityOutput(stderr.Result);
+        });
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"The product-owned continuity cleanup refused; recovery is required at {operationJournal}.");
+        var final = ReadContinuityOperationJournal(operationJournal);
+        if (!string.Equals(final["Status"]?.GetValue<string>(), "cleaned", StringComparison.Ordinal))
+            throw new InvalidOperationException($"The product-owned continuity cleanup did not reach a terminal cleaned state; recovery is required at {operationJournal}.");
+    }
+
+    private static void TryCleanupContinuityOperation(
+        string restoreScript,
+        string postgresBin,
+        string database,
+        int port,
+        string operationJournal,
+        string operationId,
+        string installationRoot,
+        string? protectedConfigRoot)
+    {
+        try
+        {
+            var journal = ReadContinuityOperationJournal(operationJournal);
+            if (journal["Status"]?.GetValue<string>() is "cleaned" or "recovery-required") return;
+            CleanupContinuityOperationAsync(restoreScript, postgresBin, database, port, operationJournal, operationId,
+                installationRoot, protectedConfigRoot).GetAwaiter().GetResult();
+        }
+        catch { /* The journal remains the attended recovery record; never hide the original refusal. */ }
+    }
+
+    private static JsonObject ReadContinuityOperationJournal(string path)
+    {
+        if (!File.Exists(path)) throw new InvalidOperationException("The continuity operation journal is missing.");
+        return JsonNode.Parse(File.ReadAllText(path)) as JsonObject
+            ?? throw new InvalidOperationException("The continuity operation journal is invalid.");
+    }
+
+    private static void RefusePendingContinuityOperations(string restoreValidationRoot)
+    {
+        var leasePath = Path.Combine(restoreValidationRoot, ".home-continuity.operation.lease");
+        if (File.Exists(leasePath))
+            throw new InvalidOperationException($"A continuity operation lease is present; attended recovery is required at {leasePath}.");
+        foreach (var path in Directory.EnumerateFiles(restoreValidationRoot, "*.operation.json", SearchOption.TopDirectoryOnly))
+        {
+            JsonObject journal;
+            try { journal = ReadContinuityOperationJournal(path); }
+            catch { throw new InvalidOperationException($"A continuity operation journal is malformed; attended recovery is required at {path}."); }
+            var status = journal["Status"]?.GetValue<string>();
+            if (!string.Equals(status, "cleaned", StringComparison.Ordinal))
+                throw new InvalidOperationException($"A continuity operation is incomplete; attended recovery is required at {path}.");
+        }
+    }
+
+    private static ContinuityOperationLease AcquireContinuityOperationLease(string restoreValidationRoot)
+    {
+        var path = Path.Combine(restoreValidationRoot, ".home-continuity.operation.lease");
+        try
+        {
+            var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
+            using var writer = new StreamWriter(stream, new UTF8Encoding(false), 4096, leaveOpen: true);
+            writer.Write(JsonSerializer.Serialize(new
+            {
+                ProcessId = Environment.ProcessId,
+                ProcessStartedUtc = Process.GetCurrentProcess().StartTime.ToUniversalTime(),
+                ImagePath = Process.GetCurrentProcess().MainModule?.FileName ?? Environment.ProcessPath,
+                AcquiredAtUtc = DateTimeOffset.UtcNow,
+            }));
+            writer.Flush();
+            stream.Flush(true);
+            return new ContinuityOperationLease(path, stream);
+        }
+        catch (IOException) { throw new InvalidOperationException($"A continuity export operation is already in progress or requires attended recovery at {path}."); }
+    }
+
+    private sealed class ContinuityOperationLease : IDisposable
+    {
+        private readonly string path;
+        private readonly FileStream stream;
+        public ContinuityOperationLease(string path, FileStream stream) { this.path = path; this.stream = stream; }
+        public void Dispose()
+        {
+            stream.Dispose();
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+    }
+
+    private static JsonObject UpdateContinuityOperationJournal(string path, Action<JsonObject> update)
+    {
+        var journal = ReadContinuityOperationJournal(path);
+        update(journal);
+        WriteJsonOnceReplacing(path, journal);
+        return journal;
+    }
+
+    private static void WriteContinuityOperationJournal(string path, object value, bool createOnly)
+    {
+        var fullPath = Path.GetFullPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        if (createOnly && File.Exists(fullPath)) throw new InvalidOperationException("The continuity operation journal already exists; refusing to reuse an operation.");
+        WriteJsonOnceReplacing(fullPath, JsonSerializer.SerializeToNode(value)?.AsObject()
+            ?? throw new InvalidOperationException("The continuity operation journal could not be serialized."));
+    }
+
+    private static void WriteJsonOnceReplacing(string path, JsonObject value)
+    {
+        var temporary = $"{path}.writing-{Guid.NewGuid():N}";
+        File.WriteAllText(temporary, value.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+        try
+        {
+            if (File.Exists(path)) File.Replace(temporary, path, null);
+            else File.Move(temporary, path);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    private static JsonObject CaptureProcessIdentity(Process process)
+    {
+        var image = process.MainModule?.FileName ?? throw new InvalidOperationException("The continuity child image identity is unavailable.");
+        return new JsonObject
+        {
+            ["ProcessId"] = process.Id,
+            ["ProcessStartedUtc"] = process.StartTime.ToUniversalTime(),
+            ["ImagePath"] = Path.GetFullPath(image),
+            ["ImageSha256"] = Sha256File(image),
+        };
+    }
+
+    private static bool SameProcessIdentity(Process process, JsonObject identity) =>
+        process.Id == identity["ProcessId"]?.GetValue<int>()
+        && process.StartTime.ToUniversalTime() == identity["ProcessStartedUtc"]?.GetValue<DateTimeOffset>();
+
+    private static string RedactContinuityOutput(string value)
+    {
+        var redacted = Regex.Replace(value ?? string.Empty,
+            @"(?im)(?<name>password|pwd|secret|connectionstring|pgpassword)\s*[:=]\s*[^\s;]+",
+            "${name}=<redacted>");
+        return redacted.Length <= 16000 ? redacted : redacted[^16000..];
+    }
+
+    private static string RequiredJournalValue(JsonObject journal, string name) =>
+        journal[name]?.GetValue<string>() is { Length: > 0 } value
+            ? value
+            : throw new InvalidOperationException($"The continuity operation journal has no {name}.");
 
     private static HomeContinuityCompatibilityReceipt ReadCompatibilityReceipt(string path)
     {

@@ -888,7 +888,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\product\scripts\Restor
   -PostgresPort <disposable-postgres-port-not-54329> `
   -PostgresBin D:\pgsql\bin `
   -DisposableQualification -SkipCurrentCodeValidation `
-  -ContinuityReceiptPath D:\transfer\home-restore-proof.json
+  -RequireFreshTarget `
+  -ContinuityReceiptPath 'C:\AeroLink\AeroLink Development\restore-validation\aerolink_restore_validation.continuity.json'
 ```
 
 The probe's `metadata-captured`, `no-applicable-values`, `legacy-plaintext-present`, `unproven` and `refused`
@@ -904,10 +905,15 @@ dotnet AeroLink.Api.dll maintenance home-continuity probe `
   --receipt D:\transfer\home-compatibility-receipt.json
 ```
 
-Only a `compatibility-proof` receipt is eligible for transfer. A `metadata-captured`, `no-applicable-values`,
-`legacy-plaintext-present`, unproven, refused or incomplete
-receipt blocks source retirement and HOME wipe. The probe is read-only and does not qualify the implicit Windows
-profile fallback or the real source values; those remain attended evidence requirements.
+An inline `compatibility-proof`, `no-applicable-values`, or `legacy-plaintext-present` result can produce a bounded
+ring package. The latter two are explicitly non-cryptographic inventory outcomes: every actual Data Protection
+ciphertext still has to pass, and an empty or legacy field is never turned into a synthetic canary. Any
+`metadata-captured`, unproven, refused or incomplete result blocks package creation. Every export first creates an
+operation-owned fresh restore, records its PostgreSQL listener/process/data-root and tool identities, retains redacted
+child evidence, runs the complete probe, and removes only the operation-owned database and staging paths before the
+package is published. The operation journal remains as the recovery receipt if cleanup is ambiguous. None of these
+statuses authorizes source retirement or HOME wipe; the implicit Windows profile fallback, real source values,
+connector/protected-config transfer and physical D5 steps remain attended evidence requirements.
 
 ```powershell
 dotnet AeroLink.Api.dll maintenance home-continuity export `

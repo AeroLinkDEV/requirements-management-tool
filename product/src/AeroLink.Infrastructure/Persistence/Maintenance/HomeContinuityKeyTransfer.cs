@@ -224,13 +224,20 @@ public static class HomeContinuityKeyTransfer
         X509Certificate2 destinationTransportCertificate,
         HomeContinuityIdentityBinding binding,
         HomeContinuityConnectorMaterial connector,
-        string packageDirectory)
+        string packageDirectory,
+        string compatibilityStatus = HomeContinuityCompatibilityReader.CompatibilityProof,
+        bool cryptographicCompatibilityProof = true)
     {
         ArgumentNullException.ThrowIfNull(sourceKeyManager);
         ArgumentNullException.ThrowIfNull(sourceRepository);
         ArgumentNullException.ThrowIfNull(destinationTransportCertificate);
         ValidateBinding(binding);
         ValidateConnectorMaterial(connector, binding);
+        if (compatibilityStatus is not (HomeContinuityCompatibilityReader.CompatibilityProof
+            or HomeContinuityCompatibilityReader.NoApplicableValues
+            or HomeContinuityCompatibilityReader.LegacyPlaintextPresent)
+            || cryptographicCompatibilityProof != string.Equals(compatibilityStatus, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal))
+            throw new ArgumentException("The continuity compatibility status is unsupported or inconsistently labelled.", nameof(compatibilityStatus));
         RequireDirectoryDoesNotExist(packageDirectory, "The continuity package directory");
 
         var sourceElements = sourceRepository.GetAllElements().Select(x => new XElement(x)).ToArray();
@@ -322,7 +329,9 @@ public static class HomeContinuityKeyTransfer
                 Binding: binding,
                 Keys: keys,
                 Revocations: revocations,
-                Connector: connectorManifest);
+                Connector: connectorManifest,
+                CompatibilityStatus: compatibilityStatus,
+                CryptographicCompatibilityProof: cryptographicCompatibilityProof);
 
             var manifestPath = Path.Combine(stagingDirectory, "manifest.json");
             WriteJsonFile(manifestPath, manifest);
@@ -561,6 +570,11 @@ public static class HomeContinuityKeyTransfer
         if (manifest.SchemaVersion != 2 || manifest.PackageId == Guid.Empty || manifest.Keys.Count == 0
             || manifest.Connector is null)
             throw new InvalidOperationException("The HOME continuity package manifest is unsupported or incomplete.");
+        if (manifest.CompatibilityStatus is not (HomeContinuityCompatibilityReader.CompatibilityProof
+            or HomeContinuityCompatibilityReader.NoApplicableValues
+            or HomeContinuityCompatibilityReader.LegacyPlaintextPresent)
+            || manifest.CryptographicCompatibilityProof != string.Equals(manifest.CompatibilityStatus, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal))
+            throw new InvalidOperationException("The HOME continuity package compatibility status is unsupported or inconsistently labelled.");
         if (!IsSha256(manifest.SourceRingDigest))
             throw new InvalidOperationException("The HOME continuity package has no valid source ring digest.");
         if (!string.Equals(manifest.TargetApplicationName, targetApplicationName, StringComparison.Ordinal))
@@ -1417,4 +1431,6 @@ public sealed record HomeContinuityPackageManifest(
     HomeContinuityIdentityBinding Binding,
     IReadOnlyList<HomeContinuityKeyManifestEntry> Keys,
     IReadOnlyList<HomeContinuityRevocationManifestEntry> Revocations,
-    HomeContinuityConnectorManifest Connector);
+    HomeContinuityConnectorManifest Connector,
+    string CompatibilityStatus = HomeContinuityCompatibilityReader.CompatibilityProof,
+    bool CryptographicCompatibilityProof = true);
