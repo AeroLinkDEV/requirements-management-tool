@@ -1,20 +1,21 @@
 #Requires -Version 5.1
 <#
     .SYNOPSIS
-        Installs or updates one AeroLink site server installation on the company host (#1614 1.7, 1.8). Elevated.
+        Installs or repairs one AeroLink site server installation on the company host (#1614 1.7, 1.8). Elevated.
 
     .DESCRIPTION
-        Idempotent: every step checks what is already there and changes only what is missing or different, so the
-        same command installs a new installation, repairs one, and moves an existing one to a newer package.
+        Idempotent: every step checks what is already there and changes only what is missing. An existing installation
+        must already point at the exact signed release and byte-identical tree offered here; a different release is
+        refused. Clone-validated upgrades and rollback belong to the A3 updater.
 
         In order:
           1. lock C:\AeroLink and %ProgramData%\AeroLink: owner Administrators, no write for Users;
           2. declare the installation (SiteProduction or SiteDevelopment, D8) and its ports, public host name and
              virtual accounts (Set-AeroLinkSiteDeclaration, #1636);
-          3. install the release certificate the installer trusts into <root>\trust, refusing to replace a
-             different one silently; verify the package against THAT certificate, never the package's own copy;
-             extract it into program\versions\<version> and point program\current at it; keep the signed package
-             under program\packages for the host check;
+          3. verify the package against the offered release certificate before changing <root>\trust, refusing to
+             replace a different installed certificate silently; after a deliberate rotation, reverify against the
+             installed certificate; extract it into program\versions\<version> and point program\current at it;
+             keep the signed package under program\packages for the host check;
           4. write the installation pointer the program resolves its installation from (<program>\.local);
           5. set every folder's owner and permissions by SID (#1636 folder plan);
           6. copy the PostgreSQL binaries (the host is offline: a folder or zip is supplied) and initialise and
@@ -80,6 +81,75 @@ $identity = Get-AeroLinkServerIdentity -Name $Name -MachineRoot $MachineRoot
 $root = $identity.InstallationRoot
 function Step([string]$Text) { Write-Host "==> $Text" -ForegroundColor Cyan }
 
+function Get-AeroLinkReleaseTreeFingerprint {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root)
+    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $fingerprint = @{}
+    foreach ($file in @(Get-ChildItem -LiteralPath $fullRoot -File -Recurse -Force)) {
+        $relative = $file.FullName.Substring($fullRoot.Length).Replace('\', '/')
+        $fingerprint[$relative] = "$($file.Length)|$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+    }
+    return $fingerprint
+}
+
+function Compare-AeroLinkRetainedRelease {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ExistingRoot,
+        [Parameter(Mandatory)][string]$IncomingRoot,
+        [Parameter(Mandatory)]$Verified
+    )
+    try {
+        $manifestPath = Join-Path $ExistingRoot 'manifest.json'
+        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return [pscustomobject]@{ Matches = $false; Reason = 'the retained release has no manifest.json' } }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ([string]$manifest.version -cne [string]$Verified.Version -or [string]$manifest.sourceSha -cne [string]$Verified.SourceSha) {
+            return [pscustomobject]@{ Matches = $false; Reason = "the retained manifest identity is $($manifest.version)/$($manifest.sourceSha), offered is $($Verified.Version)/$($Verified.SourceSha)" }
+        }
+        $existing = Get-AeroLinkReleaseTreeFingerprint -Root $ExistingRoot
+        $incoming = Get-AeroLinkReleaseTreeFingerprint -Root $IncomingRoot
+        foreach ($path in @($incoming.Keys)) {
+            if (-not $existing.ContainsKey($path) -or $existing[$path] -cne $incoming[$path]) {
+                return [pscustomobject]@{ Matches = $false; Reason = "retained file '$path' differs from the verified offered release" }
+            }
+        }
+        foreach ($path in @($existing.Keys)) {
+            if (-not $incoming.ContainsKey($path)) {
+                return [pscustomobject]@{ Matches = $false; Reason = "retained release has extra file '$path'" }
+            }
+        }
+        return [pscustomobject]@{ Matches = $true; Reason = $null }
+    }
+    catch { return [pscustomobject]@{ Matches = $false; Reason = "the retained release could not be compared: $($_.Exception.Message)" } }
+}
+
+function Assert-AeroLinkInstallReleasePreflight {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$CurrentTarget,
+        [Parameter(Mandatory)][string]$VersionRoot,
+        [Parameter(Mandatory)][string]$IncomingRoot,
+        [Parameter(Mandatory)]$Verified
+    )
+    if ($CurrentTarget) {
+        $current = [IO.Path]::GetFullPath($CurrentTarget).TrimEnd('\')
+        $offered = [IO.Path]::GetFullPath($VersionRoot).TrimEnd('\')
+        if (-not [string]::Equals($current, $offered, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "A different release is already current at '$CurrentTarget'. A2 refuses the transition before backup, service stop, junction switch or migration; use the A3 clone-validated updater."
+        }
+    }
+    if (Test-Path -LiteralPath $VersionRoot) {
+        if (-not (Test-Path -LiteralPath $VersionRoot -PathType Container)) {
+            throw "The existing release path '$VersionRoot' is not a directory; A2 refuses to replace it."
+        }
+        $retained = Compare-AeroLinkRetainedRelease -ExistingRoot $VersionRoot -IncomingRoot $IncomingRoot -Verified $Verified
+        if (-not $retained.Matches) {
+            throw "The existing release directory '$VersionRoot' cannot be reused: $($retained.Reason). A2 refuses the operation before changing the current release."
+        }
+    }
+}
+
 if ($RemoveBootstrapSecret) {
     $removed = Remove-AeroLinkProtectedSiteSecret -InstallationRoot $root -Name 'api-bootstrap'
     Write-Host "Bootstrap secret $(if ($removed.Removed) { 'removed' } else { 'was already absent' })." -ForegroundColor Green
@@ -109,42 +179,49 @@ $layout = Get-AeroLinkServerLayout -InstallationRoot $root
 Step 'Release: verify against the installed trusted certificate'
 New-Item -ItemType Directory -Path $layout.Trust, $layout.Versions, $layout.Packages -Force | Out-Null
 $offered = New-Object Security.Cryptography.X509Certificates.X509Certificate2(, [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $TrustedCertificate).Path))
-if (Test-Path -LiteralPath $layout.TrustedCertificate -PathType Leaf) {
-    $installed = New-Object Security.Cryptography.X509Certificates.X509Certificate2(, [IO.File]::ReadAllBytes($layout.TrustedCertificate))
-    if ($installed.Thumbprint -ne $offered.Thumbprint) {
-        if (-not $ReplaceTrustedCertificate) { throw "This installation trusts release certificate $($installed.Thumbprint), not $($offered.Thumbprint). Pass -ReplaceTrustedCertificate only for a deliberate key rotation. Nothing was installed." }
-        Copy-Item -LiteralPath $TrustedCertificate -Destination $layout.TrustedCertificate -Force
-    }
-}
-else { Copy-Item -LiteralPath $TrustedCertificate -Destination $layout.TrustedCertificate }
 $incoming = Join-Path $layout.Versions ('.incoming-' + [guid]::NewGuid().ToString('N'))
 try {
     if ($AllowUnverifiedDevelopment -and $Name -ne 'Development') { throw 'An unverified development package is never installed as Production.' }
-    $verified = Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $layout.TrustedCertificate -Destination $incoming -AllowUnverifiedDevelopment:$AllowUnverifiedDevelopment
+    # Validate the offered package against the certificate the operator supplied before changing the installed trust anchor.
+    $verified = Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $TrustedCertificate -Destination $incoming -AllowUnverifiedDevelopment:$AllowUnverifiedDevelopment
     $versionRoot = (Get-AeroLinkServerLayout -InstallationRoot $root -Version $verified.Version).VersionRoot
-    if (Test-Path -LiteralPath $versionRoot) { Write-Host "    $($verified.Version) is already installed; keeping it." -ForegroundColor DarkGray }
+    $currentItem = if (Test-Path -LiteralPath $layout.Current) { Get-Item -LiteralPath $layout.Current -ErrorAction Stop } else { $null }
+    $previousTarget = if ($currentItem) { [string]$currentItem.Target } else { $null }
+    if ($currentItem -and [string]::IsNullOrWhiteSpace($previousTarget)) { throw "The existing current path '$($layout.Current)' is not a readable junction; refusing to replace it." }
+    Assert-AeroLinkInstallReleasePreflight -CurrentTarget $previousTarget -VersionRoot $versionRoot -IncomingRoot $incoming -Verified $verified
+
+    $installed = if (Test-Path -LiteralPath $layout.TrustedCertificate -PathType Leaf) {
+        New-Object Security.Cryptography.X509Certificates.X509Certificate2(, [IO.File]::ReadAllBytes($layout.TrustedCertificate))
+    } else { $null }
+    if ($installed -and $installed.Thumbprint -ne $offered.Thumbprint) {
+        if (-not $ReplaceTrustedCertificate) { throw "This installation trusts release certificate $($installed.Thumbprint), not $($offered.Thumbprint). Pass -ReplaceTrustedCertificate only for a deliberate key rotation. Nothing was installed." }
+        $oldTrustBytes = [IO.File]::ReadAllBytes($layout.TrustedCertificate)
+        try {
+            Copy-Item -LiteralPath $TrustedCertificate -Destination $layout.TrustedCertificate -Force
+            $reverified = Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $layout.TrustedCertificate -AllowUnverifiedDevelopment:$AllowUnverifiedDevelopment
+            if ($reverified.Version -cne $verified.Version -or $reverified.SourceSha -cne $verified.SourceSha) {
+                throw 'The package identity changed between offered-certificate and installed-trust verification.'
+            }
+        }
+        catch {
+            [IO.File]::WriteAllBytes($layout.TrustedCertificate, $oldTrustBytes)
+            throw
+        }
+    }
+    elseif (-not $installed) { Copy-Item -LiteralPath $TrustedCertificate -Destination $layout.TrustedCertificate -Force }
+
+    if (Test-Path -LiteralPath $versionRoot) { Write-Host "    $($verified.Version) is already installed with matching signed identity and bytes; keeping it." -ForegroundColor DarkGray }
     else { Move-Item -LiteralPath $incoming -Destination $versionRoot }
 }
 finally { if (Test-Path -LiteralPath $incoming) { Remove-Item -LiteralPath $incoming -Recurse -Force } }
 $packageName = Split-Path $Package -Leaf
 Copy-Item -LiteralPath $Package -Destination (Join-Path $layout.Packages $packageName) -Force
 Copy-Item -LiteralPath "$Package.sig" -Destination (Join-Path $layout.Packages "$packageName.sig") -Force
-$previousTarget = if (Test-Path -LiteralPath $layout.Current) { [string](Get-Item -LiteralPath $layout.Current).Target } else { $null }
-$apiWasRunning = (Get-Service -Name $site.ServiceName -ErrorAction SilentlyContinue).Status -eq 'Running'
-if ($previousTarget -and -not [string]::Equals(([IO.Path]::GetFullPath($previousTarget)).TrimEnd('\'), $versionRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
-    # An update (D9: any time, a short restart outage): a verified backup with the running version's own scripts,
-    # then stop the API, switch, and let the new version migrate on start. Rollback is restoring that backup.
-    Step "Update from $(Split-Path $previousTarget -Leaf): verified backup, then stop the API"
-    $backup = & (Join-Path $previousTarget 'scripts\Backup-AeroLink.ps1') -InstallationRoot $root -RetentionDays 15 |
-        Where-Object { $_ -is [pscustomobject] -and $_.PSObject.Properties['Archive'] } | Select-Object -Last 1
-    if (-not $backup) { throw 'The pre-update backup produced no archive; nothing was switched.' }
-    $null = & (Join-Path $previousTarget 'scripts\Verify-AeroLinkBackup.ps1') -BackupArchive $backup.Archive -InstallationRoot $root
-    Write-Host "    pre-update backup: $($backup.Archive)"
-    if ($apiWasRunning) { Stop-Service -Name $site.ServiceName }
+if (-not $previousTarget) {
+    New-Item -ItemType Junction -Path $layout.Current -Target $versionRoot | Out-Null
+    Write-Host "    current -> $($verified.Version) ($($verified.SourceSha))"
 }
-if (Test-Path -LiteralPath $layout.Current) { (Get-Item -LiteralPath $layout.Current).Delete() }
-New-Item -ItemType Junction -Path $layout.Current -Target $versionRoot | Out-Null
-Write-Host "    current -> $($verified.Version) ($($verified.SourceSha))"
+else { Write-Host "    current -> $($verified.Version) ($($verified.SourceSha)); existing exact release retained" }
 
 Step 'Installation pointer'
 Set-AeroLinkInstallationPointer -ProductRoot $versionRoot -InstallationRoot $root -Note "AeroLink site server $Name (#1614): this program belongs to the installation named here." | Out-Null

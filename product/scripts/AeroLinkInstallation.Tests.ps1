@@ -614,7 +614,8 @@ try {
                 $certificateAccess = [Security.AccessControl.AccessControlSections]::Access
                 $certificateDacl = [Security.AccessControl.FileSecurity]::new()
                 $certificateDacl.SetSecurityDescriptorSddlForm($certificateFileAcl.GetSecurityDescriptorSddlForm($certificateAccess), $certificateAccess)
-                [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($certificateFile), $certificateDacl)
+                if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.File]::SetAccessControl($certificateFile, $certificateDacl) }
+                else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($certificateFile), $certificateDacl) }
             }
             Set-AeroLinkDirectoryAccessBySid -Path $certificateCleanup -Grants @(@{ Sid = $me; Access = 'FullControl' })
         }
@@ -645,6 +646,62 @@ try {
     Assert-True ($layout.VersionRoot -eq 'C:\AeroLink\AeroLink Production\program\versions\1.2.3' -and $layout.Current -eq 'C:\AeroLink\AeroLink Production\program\current' -and
         $layout.ApiExecutable -eq 'C:\AeroLink\AeroLink Production\program\current\app\AeroLink.Api.exe' -and $layout.TrustedCertificate -eq 'C:\AeroLink\AeroLink Production\trust\release-signing.cer') `
         'The layout: versions\<version>, a current junction, the API under current\app, the trusted certificate under trust\.'
+
+    # --- 13a. A2 entry-point release preflight (#1614): exact identity/idempotence and no unsafe update path ---
+    # Authoring gate: this protects the observable refusal boundary before backup, service stop, junction switch,
+    # migration, or trust promotion. The credible regressions are the pre-fix version-only reuse and update branch;
+    # existing installation tests never execute Install-AeroLinkServer.ps1 because it is elevated and mutates host
+    # services. These assertions extract the production functions and inspect the production release block, with no
+    # test-only production seam. The immutable pre-fix execution witness is retained at host-move\installer-a2-entrypoint-audit-20261016.
+    $installerPath = Join-Path $PSScriptRoot 'Install-AeroLinkServer.ps1'
+    $installerTokens = $null; $installerParseErrors = $null
+    $installerAst = [System.Management.Automation.Language.Parser]::ParseFile($installerPath, [ref]$installerTokens, [ref]$installerParseErrors)
+    Assert-True (@($installerParseErrors).Count -eq 0) 'Install-AeroLinkServer.ps1 must parse for its focused release contracts.'
+    foreach ($helperName in @('Get-AeroLinkReleaseTreeFingerprint', 'Compare-AeroLinkRetainedRelease', 'Assert-AeroLinkInstallReleasePreflight')) {
+        $helperAst = $installerAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $helperName }, $true)
+        Assert-True ($null -ne $helperAst) "Installer helper $helperName must remain source-visible for its release contract fixture."
+        if ($helperAst) { . ([scriptblock]::Create($helperAst.Extent.Text)) }
+    }
+    $installerFixture = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-installer-release-contract-' + [Guid]::NewGuid().ToString('N'))
+    $fixtures.Add($installerFixture)
+    $incoming = Join-Path $installerFixture 'incoming'
+    $retained = Join-Path $installerFixture 'versions\1.0.0'
+    $different = Join-Path $installerFixture 'versions\0.9.0'
+    New-Item -ItemType Directory -Path $incoming, $retained, $different -Force | Out-Null
+    'payload' | Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -NoNewline
+    'payload' | Set-Content -LiteralPath (Join-Path $retained 'app.bin') -NoNewline
+    $payloadHash = (Get-FileHash -LiteralPath (Join-Path $incoming 'app.bin') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $manifest = [ordered]@{ formatVersion = 1; version = '1.0.0'; sourceSha = ('a' * 40); files = @(@{ path = 'app.bin'; sha256 = $payloadHash }) } | ConvertTo-Json -Depth 5
+    $manifest | Set-Content -LiteralPath (Join-Path $incoming 'manifest.json') -NoNewline
+    $manifest | Set-Content -LiteralPath (Join-Path $retained 'manifest.json') -NoNewline
+    $verifiedRelease = [pscustomobject]@{ Version = '1.0.0'; SourceSha = ('a' * 40) }
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -CurrentTarget $different -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'A2 refuses' `
+        'A2 must refuse a different current release before backup, service stop, junction switch, or migration.'
+    try { Assert-AeroLinkInstallReleasePreflight -CurrentTarget $retained -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease; $sameRelease = $true } catch { $sameRelease = $false }
+    Assert-True $sameRelease 'An exact signed identity and byte-identical retained tree must be idempotently reusable.'
+    Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -Value 'changed' -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'cannot be reused' `
+        'A same-version release with changed bytes must fail closed before reuse.'
+    Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -Value 'payload' -NoNewline
+    'extra' | Set-Content -LiteralPath (Join-Path $retained 'extra.bin') -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'extra file' `
+        'A retained release with extra content must fail closed before reuse.'
+    Remove-Item -LiteralPath $retained -Recurse -Force
+    'not-a-directory' | Set-Content -LiteralPath $retained -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'not a directory' `
+        'A release path occupied by a file must fail closed before replacement.'
+    $installerSource = [IO.File]::ReadAllText($installerPath)
+    $releaseStart = $installerSource.IndexOf('$layout = Get-AeroLinkServerLayout -InstallationRoot $root')
+    $pointerStart = $installerSource.IndexOf("Step 'Installation pointer'")
+    $releaseBlock = if ($releaseStart -ge 0 -and $pointerStart -gt $releaseStart) { $installerSource.Substring($releaseStart, $pointerStart - $releaseStart) } else { '' }
+    $offeredVerifyOffset = $releaseBlock.IndexOf('Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $TrustedCertificate')
+    $trustPromotionOffset = $releaseBlock.IndexOf('Copy-Item -LiteralPath $TrustedCertificate -Destination $layout.TrustedCertificate')
+    Assert-True ($offeredVerifyOffset -ge 0 -and $trustPromotionOffset -gt $offeredVerifyOffset) `
+        'The offered package must verify before an installed trust certificate can be promoted.'
+    Assert-True ($releaseBlock -notmatch 'Stop-Service -Name \$site\.ServiceName|Backup-AeroLink\.ps1|\(Get-Item -LiteralPath \$layout\.Current\)\.Delete\(\)') `
+        'The A2 entry point must not perform the A3 backup, stop, or junction replacement transition.'
+    Assert-True ($installerSource -match 'Installs or repairs one AeroLink site server installation') `
+        'The installer synopsis must describe the A2 fresh-install/repair boundary.'
 
     # The API service, as data: the executable itself (UseWindowsService), as the virtual account, after PostgreSQL.
     $fakeSite = [pscustomobject]@{ ServiceName = 'AeroLink-Production'; PostgresServiceName = 'AeroLink-Production-PostgreSQL'; Classification = 'SiteProduction'
