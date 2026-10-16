@@ -1204,6 +1204,12 @@ export function AdministrationCenter({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: user.state !== "Active" }),
       });
+      // A successful disable of the built-in active row can only be that account disabling itself; the server
+      // revoked its sessions, so leave the stale administrator shell the same way self-revoke does.
+      if (user.isBuiltInAdministrator && user.state === "Active") {
+        window.location.reload();
+        return;
+      }
       await load();
     } catch (error) {
       recordClientOperationFailure("identity.account.state", error);
