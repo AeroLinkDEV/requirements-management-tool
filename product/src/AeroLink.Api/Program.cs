@@ -61,6 +61,9 @@ builder.Host.UseWindowsService();
 // packaged host reports its own identity without a launcher setting Runtime__SourceSha. Added last, so it wins
 // over anything else that claims a revision for these binaries; development builds have no such file.
 builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, RuntimeIdentityEndpoints.ReleaseIdentityFileName), optional: true, reloadOnChange: false);
+// A site server's service (#1614 1.8) reads its database password and bootstrap secret from the protected store
+// itself, as its own account; they are never in the service's environment. Nothing happens without a site root.
+SiteProtectedSecrets.AddTo(builder.Configuration);
 var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreValidation:ReadOnly");
 var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
 if (restoreValidationReadOnly && restoreValidationToken.Length < 32)
@@ -200,6 +203,14 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (seedDemoAccounts && !app.Environment.IsDevelopment() && !allowDemoAccounts)
         throw new InvalidOperationException("Demo identity seeding is disabled outside Development. Set Identity:AllowDemoAccounts only for an explicitly isolated non-production showcase.");
     var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+    // A site's API service depends on its PostgreSQL service, but "started" is not "accepting connections": at boot
+    // the cluster may still be recovering. Wait for it, briefly, instead of failing into the SCM's restart delay.
+    if (!string.IsNullOrWhiteSpace(builder.Configuration[SiteProtectedSecrets.InstallationRootKey]))
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Clamp(builder.Configuration.GetValue<int?>("SiteServer:DatabaseWaitSeconds") ?? 120, 0, 600));
+        while (!await db.Database.CanConnectAsync() && DateTimeOffset.UtcNow < deadline)
+            await Task.Delay(TimeSpan.FromSeconds(2));
+    }
     if (restoreValidationReadOnly)
     {
         if (!await db.Database.CanConnectAsync())
