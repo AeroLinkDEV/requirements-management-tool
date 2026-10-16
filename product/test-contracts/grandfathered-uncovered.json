@@ -8,8 +8,6 @@
     "DELETE /api/releases/{}/test-sets/{}/procedures/{}",
     "PATCH /api/managed-documents/{}/links/{}",
     "POST /api/admin/external-identity/mappings/{}/enabled",
-    "POST /api/admin/users/{}/reset-password",
-    "POST /api/auth/password",
     "POST /api/builds",
     "POST /api/change-requests/{}/jira",
     "POST /api/controlled-editing/sessions/{}/force-unlock",

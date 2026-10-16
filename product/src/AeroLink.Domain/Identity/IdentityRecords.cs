@@ -437,14 +437,41 @@ public sealed class ExternalGroupRoleMapping
             : value.Trim();
 }
 
+/// <summary>
+/// How an account came to exist (#1615). A Local account was created by an administrator or the bootstrap and
+/// signs in with an AeroLink password. A Windows account was created automatically by a first Windows sign-in,
+/// has no AeroLink password, and is identified by its Windows SID.
+/// </summary>
+public enum AccountOrigin { Local, Windows }
+
 public sealed class UserAccount
 {
+    /// <summary>The longest SID text: S-1-5 plus fifteen 32-bit sub-authorities.</summary>
+    public const int WindowsSidMaxLength = 184;
+    public const int WindowsPrincipalMaxLength = 300;
+
     private UserAccount() { }
     public UserAccount(string userName, string displayName, string email, string passwordHash, DateTimeOffset now)
     {
         Id = Guid.NewGuid(); UserName = Normalize(userName); DisplayName = Required(displayName, nameof(displayName));
         Email = email.Trim(); PasswordHash = passwordHash; State = AccountState.Active; CreatedAt = now;
     }
+
+    /// <summary>
+    /// An account created by somebody's first Windows sign-in. It has no AeroLink password, so password sign-in
+    /// can never succeed for it; the Windows SID is what identifies it from then on, and the user name taken
+    /// from <c>DOMAIN\user</c> stays fixed even if the directory later renames the person.
+    /// </summary>
+    public static UserAccount ProvisionFromWindows(string sid, string principal, string displayName, string email, DateTimeOffset now)
+    {
+        var account = new UserAccount(Required(principal, nameof(principal)), displayName, Required(email, nameof(email)), "", now)
+        {
+            Origin = AccountOrigin.Windows,
+        };
+        account.LinkWindows(sid, principal);
+        return account;
+    }
+
     public Guid Id { get; private set; }
     public string UserName { get; private set; } = "";
     public string DisplayName { get; private set; } = "";
@@ -456,7 +483,31 @@ public sealed class UserAccount
     public DateTimeOffset? LastLoginAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DisabledAt { get; private set; }
+    public AccountOrigin Origin { get; private set; } = AccountOrigin.Local;
+    /// <summary>The Windows account SID this account answers to, if any. Unique among accounts.</summary>
+    public string? WindowsSid { get; private set; }
+    /// <summary>The <c>DOMAIN\user</c> name last seen for <see cref="WindowsSid"/>, refreshed on every sign-in.</summary>
+    public string? WindowsPrincipal { get; private set; }
+    public bool HasPassword => PasswordHash.Length > 0;
+    public void LinkWindows(string sid, string principal)
+    {
+        var trimmed = Required(sid, nameof(sid));
+        if (trimmed.Length > WindowsSidMaxLength) throw new ArgumentException("The Windows SID is too long.", nameof(sid));
+        WindowsSid = trimmed.ToUpperInvariant();
+        RecordWindowsPrincipal(principal);
+    }
+    public void UnlinkWindows() { WindowsSid = null; }
+    public void RecordWindowsPrincipal(string principal)
+    {
+        var trimmed = Required(principal, nameof(principal));
+        WindowsPrincipal = trimmed.Length > WindowsPrincipalMaxLength ? trimmed[..WindowsPrincipalMaxLength] : trimmed;
+    }
     public void LoginSucceeded(DateTimeOffset now) { FailedLoginCount = 0; LastLoginAt = now; }
+    /// <summary>
+    /// A sign-in that did not prove the AeroLink password (Windows sign-in). It must not clear the password's
+    /// failure count, or a Windows sign-in would hand a password guesser a fresh set of attempts.
+    /// </summary>
+    public void SignedInWithoutPassword(DateTimeOffset now) { LastLoginAt = now; }
     public void LoginFailed() { FailedLoginCount++; if (FailedLoginCount >= 8) State = AccountState.Locked; }
     public void ChangePassword(string hash) { PasswordHash = hash; MustChangePassword = false; FailedLoginCount = 0; State = AccountState.Active; }
     public void RequirePasswordChange(string temporaryHash) { PasswordHash = temporaryHash; MustChangePassword = true; FailedLoginCount = 0; State = AccountState.Active; }
@@ -634,6 +685,11 @@ public sealed class ElectronicSignature
     public string ContentHash { get; private set; } = "";
     public string IpAddress { get; private set; } = "";
     public DateTimeOffset SignedAt { get; private set; }
+    /// <summary>
+    /// How the signer re-proved who they were (#1615). Empty on every signature recorded before the column
+    /// existed; nothing is backfilled, because the method was not recorded at the time.
+    /// </summary>
+    public string AuthenticationMethod { get; private set; } = "";
 }
 
 public sealed class SecurityAuditEvent
@@ -649,4 +705,16 @@ public sealed class SecurityAuditEvent
     public string Detail { get; private set; } = "";
     public string IpAddress { get; private set; } = "";
     public DateTimeOffset OccurredAt { get; private set; }
+    /// <summary>How the actor authenticated (<c>password</c> or <c>windows</c>), on sign-in events (#1615).</summary>
+    public string AuthenticationMethod { get; private set; } = "";
+    /// <summary>The Windows <c>DOMAIN\user</c> that authenticated, when Windows did.</summary>
+    public string WindowsPrincipal { get; private set; } = "";
+
+    public SecurityAuditEvent WithAuthentication(string method, string? windowsPrincipal = null)
+    {
+        AuthenticationMethod = method.Trim();
+        var principal = (windowsPrincipal ?? "").Trim();
+        WindowsPrincipal = principal.Length > UserAccount.WindowsPrincipalMaxLength ? principal[..UserAccount.WindowsPrincipalMaxLength] : principal;
+        return this;
+    }
 }

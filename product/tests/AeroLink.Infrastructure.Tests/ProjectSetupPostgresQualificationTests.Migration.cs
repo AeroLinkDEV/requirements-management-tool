@@ -27,7 +27,9 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             var secondAccount = new UserAccount("migration-owner-b", "Migration Owner B", "migration-owner-b@example.test",
                 "fixture-hash", now);
             migrate.AddRange(firstAccount, secondAccount);
-            await migrate.SaveChangesAsync();
+            // Seed the exact predecessor shape. The current model maps Windows sign-in columns that this
+            // historical schema does not have yet.
+            await PredecessorSchemaRows.InsertTrackedAsync(migrate);
 
             var first = new ProjectSetupDraft(firstAccount.Id, firstAccount.UserName, "Existing draft A");
             var second = new ProjectSetupDraft(secondAccount.Id, secondAccount.UserName, "Existing draft B");

@@ -83,7 +83,9 @@ public sealed class ProcedureControlledDocumentPostgresQualificationTests
             "SYSTD-000729.00/docx", systemArtifact.Sha256, now);
         db.AddRange(caseDocument, systemDocument, caseArtifact, systemArtifact,
             caseDocumentSignature, caseArtifactSignature, systemDocumentSignature, systemArtifactSignature);
-        await db.SaveChangesAsync();
+        // Seed the exact predecessor shape. The current model also maps columns added by later migrations,
+        // including ElectronicSignature.AuthenticationMethod, which the predecessor schema does not have.
+        await PredecessorSchemaRows.InsertTrackedAsync(db);
 
         await db.Database.GetService<IMigrator>().MigrateAsync();
         db.ChangeTracker.Clear();

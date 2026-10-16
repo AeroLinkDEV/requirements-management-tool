@@ -70,3 +70,8 @@
   .loginPanel { padding: 24px 16px; }
   .loginPanel form, .setupBlocked, .setupChecking { padding: 28px 24px; }
 }
+
+/* #1615: Windows sign-in sits below the password form, separated from it, as the second way in. */
+.loginPanel .windowsSignIn { display: grid; gap: 8px; margin-top: 18px; padding-top: 18px; border-top: 1px solid #e3e8ef; }
+.loginPanel .windowsSignIn button { margin-top: 0; }
+.loginPanel .windowsSignIn .linkButton { background: white; color: #176c76; border: 1px solid #cbd7e2; }

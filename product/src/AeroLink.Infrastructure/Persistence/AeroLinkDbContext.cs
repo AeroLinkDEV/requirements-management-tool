@@ -1667,6 +1667,12 @@ public sealed class AeroLinkDbContext : DbContext
         {
             b.ToTable("user_accounts"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
             b.Property(x => x.Email).HasMaxLength(320); b.Property(x => x.PasswordHash).HasMaxLength(500).IsRequired(); b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.HasIndex(x => x.UserName).IsUnique(); b.HasIndex(x => x.Email);
+            // #1615: existing accounts are all Local, which the column default records without a backfill. A SID
+            // identifies at most one account; accounts without one are not constrained.
+            b.Property(x => x.Origin).HasConversion<string>().HasMaxLength(20).HasDefaultValue(AccountOrigin.Local);
+            b.Property(x => x.WindowsSid).HasMaxLength(UserAccount.WindowsSidMaxLength);
+            b.Property(x => x.WindowsPrincipal).HasMaxLength(UserAccount.WindowsPrincipalMaxLength);
+            b.HasIndex(x => x.WindowsSid).IsUnique().HasFilter("\"WindowsSid\" IS NOT NULL");
         });
         modelBuilder.Entity<ProgramMembership>(b =>
         {
@@ -1730,10 +1736,13 @@ public sealed class AeroLinkDbContext : DbContext
         modelBuilder.Entity<ElectronicSignature>(b =>
         {
             b.ToTable("electronic_signatures"); b.HasKey(x => x.Id); b.Property(x => x.UserName).HasMaxLength(100).IsRequired(); b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired(); b.Property(x => x.ArtifactType).HasMaxLength(60).IsRequired(); b.Property(x => x.ArtifactRevision).HasMaxLength(80).IsRequired(); b.Property(x => x.Action).HasMaxLength(80).IsRequired(); b.Property(x => x.Authority).HasMaxLength(80).IsRequired(); b.Property(x => x.AuthoritySource).HasMaxLength(80).IsRequired(); b.Property(x => x.Meaning).HasMaxLength(1000).IsRequired(); b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired(); b.Property(x => x.ContentHash).HasMaxLength(64).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => new { x.ArtifactType, x.ArtifactId, x.SignedAt }); b.HasIndex(x => new { x.UserId, x.SignedAt });
+            b.Property(x => x.AuthenticationMethod).HasMaxLength(40).IsRequired().HasDefaultValue("");
         });
         modelBuilder.Entity<SecurityAuditEvent>(b =>
         {
             b.ToTable("security_audit_events"); b.HasKey(x => x.Id); b.Property(x => x.EventType).HasMaxLength(100).IsRequired(); b.Property(x => x.ActorId).HasMaxLength(100).IsRequired(); b.Property(x => x.Target).HasMaxLength(300).IsRequired(); b.Property(x => x.Outcome).HasMaxLength(30).IsRequired(); b.Property(x => x.Detail).HasMaxLength(4000).IsRequired(); b.Property(x => x.IpAddress).HasMaxLength(100); b.HasIndex(x => x.OccurredAt); b.HasIndex(x => new { x.ActorId, x.OccurredAt });
+            b.Property(x => x.AuthenticationMethod).HasMaxLength(40).IsRequired().HasDefaultValue("");
+            b.Property(x => x.WindowsPrincipal).HasMaxLength(UserAccount.WindowsPrincipalMaxLength).IsRequired().HasDefaultValue("");
         });
         modelBuilder.Entity<GovernedMigrationCompletion>(b =>
         {

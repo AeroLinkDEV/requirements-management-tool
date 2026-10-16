@@ -133,6 +133,9 @@ public sealed class ProblemReportSourceIdentityPostgresTests
             {
                 await db.Database.MigrateAsync();
                 Assert.Equal(original, await OriginalInventory(db));
+                Assert.Equal(new[] { "" }, await db.ElectronicSignatures
+                    .Select(x => x.AuthenticationMethod)
+                    .ToArrayAsync());
                 var immutable = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
                     $"UPDATE problem_report_import_batches SET \"PreviewHash\"='rewritten' WHERE \"Id\"={batch.Id}"));
                 Assert.Contains("receipts are immutable", immutable.MessageText);
@@ -166,7 +169,7 @@ public sealed class ProblemReportSourceIdentityPostgresTests
         return await db.Database.SqlQueryRaw<string>("""
             SELECT (SELECT coalesce(jsonb_agg(to_jsonb(r) - 'SourceSystemIdentityV1' - 'SourceKeyIdentityV1' ORDER BY "Id"),'[]') FROM problem_reports r)::text
               || (SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY "Id"),'[]') FROM problem_report_revisions r)::text
-              || (SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY "Id"),'[]') FROM electronic_signatures s)::text
+              || (SELECT coalesce(jsonb_agg(to_jsonb(s) - 'AuthenticationMethod' ORDER BY "Id"),'[]') FROM electronic_signatures s)::text
               || (SELECT coalesce(jsonb_agg(to_jsonb(b) - 'OperationId' - 'ActorId' - 'RequestHash' - 'ReceiptJson' ORDER BY "Id"),'[]') FROM problem_report_import_batches b)::text AS "Value"
             """).SingleAsync();
     }

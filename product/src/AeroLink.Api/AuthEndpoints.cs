@@ -18,13 +18,15 @@ public static class AuthEndpoints
 {
     public static void MapAuthEndpoints(this WebApplication app)
     {
-        app.MapGet("/api/setup/status", async (AeroLinkDbContext db, IConfiguration configuration, CancellationToken ct) =>
+        app.MapGet("/api/setup/status", async (AeroLinkDbContext db, IConfiguration configuration, Microsoft.Extensions.Options.IOptions<WindowsSignInOptions> windows, CancellationToken ct) =>
         {
             var bootstrapRequired = !await db.UserAccounts.AsNoTracking().AnyAsync(ct);
             return Results.Ok(new
             {
                 bootstrapRequired,
-                bootstrapEnabled = bootstrapRequired && BootstrapSecret(configuration) is not null
+                bootstrapEnabled = bootstrapRequired && BootstrapSecret(configuration) is not null,
+                // #1615: the sign-in page offers Windows sign-in, and tries it on arrival, only when it is on.
+                windowsSignIn = windows.Value.Enabled
             });
         });
 

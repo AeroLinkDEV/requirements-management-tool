@@ -118,8 +118,18 @@ if (restoreValidationReadOnly)
     foreach (var worker in builder.Services.Where(x => x.ServiceType == typeof(IHostedService)).ToList())
         builder.Services.Remove(worker);
 }
-builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
+var authentication = builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, AeroLinkAuthorizationHandler>(AeroLinkAuthorizationHandler.SchemeName, _ => { });
+// #1615 Windows sign-in. Negotiate is never the default scheme: it proves who somebody is at /api/auth/windows
+// only, which then issues the ordinary AeroLink session every other route reads.
+builder.Services.Configure<WindowsSignInOptions>(builder.Configuration.GetSection(WindowsSignInOptions.Section));
+var windowsSignIn = builder.Configuration.GetSection(WindowsSignInOptions.Section).Get<WindowsSignInOptions>() ?? new WindowsSignInOptions();
+if (windowsSignIn.Enabled && windowsSignIn.Scheme == Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
+    // A completed NTLM handshake must not keep authenticating its TCP connection: any intermediary that shares
+    // connections between users would hand one person's identity to the next (DEC-154). Kerberos persistence is
+    // already off by default.
+    authentication.AddNegotiate(options => options.PersistNtlmCredentials = false);
+if (OperatingSystem.IsWindows()) builder.Services.AddSingleton<IWindowsDirectory, ActiveDirectoryWindowsDirectory>();
 builder.Services.AddSingleton<BrowserMutationProtector>();
 builder.Services.AddSingleton<ConnectorSigningService>();
 var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 600);
@@ -151,6 +161,7 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 var app = builder.Build();
 // The certificate's imported machine key is temporary; release it with the host rather than leave it behind.
 if (siteServer is not null) app.Lifetime.ApplicationStopped.Register(siteServer.Certificate.Dispose);
+await WindowsSignInStartupGuard.EnforceAsync(app.Services, builder.Configuration, app.Environment);
 app.UseExceptionHandler();
 if (app.Environment.IsProduction()) app.UseHsts();
 // #939 stall diagnostics, opt-in. First in the pipeline so a request is tracked from the moment it arrives,
@@ -169,7 +180,18 @@ if (StallDiagnosticsSettings.StallReportAfter(builder.Configuration) is not null
 }
 app.UseCors();
 app.UseRateLimiter();
-app.UseAuthentication();
+// Any UseStatusCodePages must be added above this line. Negotiate writes intermediate 401 challenge responses from
+// inside UseAuthentication; this exemption must wrap it so those responses cannot be rewritten.
+app.Use(async (context, next) =>
+{
+    await next();
+    if (context.Response.StatusCode == StatusCodes.Status401Unauthorized) StatusCodePagesExemption.Apply(context);
+});
+// Authentication middleware runs only on Windows sign-in (#1615). Nothing else reads HttpContext.User: every other
+// route is authorized by the AeroLink session gate below. Confining it keeps Negotiate's handshake, which runs
+// inside this middleware for any request carrying `Authorization: Negotiate`, off every other path.
+app.UseWhen(context => context.Request.Path.Equals(WindowsSignInEndpoints.SignInPath, StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseAuthentication());
 
 await using (var scope = app.Services.CreateAsyncScope())
 {
@@ -277,6 +299,9 @@ app.Use(async (context, next) =>
     // email came to return 401 to anybody who clicked it.
     var isAnonymous = path.StartsWith("/health", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase)
+        // Windows sign-in and the Windows link exist to create a session, so they cannot require one (#1615).
+        || path.Equals(WindowsSignInEndpoints.SignInPath, StringComparison.OrdinalIgnoreCase)
+        || path.Equals(WindowsSignInEndpoints.LinkPath, StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/status", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/bootstrap", StringComparison.OrdinalIgnoreCase)
         || path.StartsWith("/api/document-connector/", StringComparison.OrdinalIgnoreCase)
@@ -418,17 +443,6 @@ app.Use(async (context, next) =>
     await next();
 });
 
-// A 401 is an answer, never an error page. Windows sign-in (#1615) is a 401 challenge with an empty body and a
-// WWW-Authenticate header, and error-page middleware that rewrote it - with a body, a re-executed path or a
-// redirect - would break the handshake. None is wired today. This is the innermost middleware, so any
-// UseStatusCodePages added anywhere above it sees the exemption before it acts on an endpoint's empty 401; the
-// challenge handler below exempts the 401s authentication itself issues.
-app.Use(async (context, next) =>
-{
-    await next();
-    if (context.Response.StatusCode == StatusCodes.Status401Unauthorized) StatusCodePagesExemption.Apply(context);
-});
-
 app.MapGet("/health",() => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 // Who is listening, and what source is it running? Readiness cannot answer that, and #816 proved a launcher
@@ -475,6 +489,7 @@ app.MapGet("/health/routes", (EndpointDataSource endpoints) =>
 // matches — routing resolves that by precedence — so these read in the order somebody meets the product:
 // sign in, find your work, propose a change, freeze it, verify it, release it, administer it.
 app.MapAuthEndpoints();
+app.MapWindowsSignInEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapFmsBenchTerrainEndpoints();
 app.MapFmsBenchImageryEndpoints();

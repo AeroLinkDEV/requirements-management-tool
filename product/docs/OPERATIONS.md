@@ -1253,6 +1253,44 @@ The operation uses a serializable zero-user transaction and permanently closes a
 
 Demo identity seeding fails closed outside the `Development` environment. `Identity__AllowDemoAccounts=true` is an explicit escape hatch only for an isolated, non-production showcase and must never be used for an operational deployment.
 
+## Windows sign-in
+
+Windows sign-in (DEC-154, #1615) is off until configured, and it waits for first-install setup above: nobody is
+provisioned until `admin` exists. The policy it enforces is in
+[SECURITY_AND_IDENTITY_MODEL.md](../../docs/product-definition/SECURITY_AND_IDENTITY_MODEL.md#windows-sign-in).
+
+**Configuration** (service environment, `__` for `:`):
+
+| Key | Value |
+|---|---|
+| `Identity__Windows__Enabled` | `true` |
+| `Identity__Windows__AllowedDomainSids__0` (`__1`, ...) | Each allowed domain's SID, `S-1-5-21-a-b-c` |
+| `Kestrel__EndpointDefaults__Protocols` or the site server's HTTP/1.1-only option | `Http1`. Negotiate cannot run over HTTP/2. |
+
+Leave `Identity__Windows__Scheme` unset: it is `Negotiate`, and Production refuses to start with anything else. Production
+also refuses an empty or malformed allow-list, running as SYSTEM (run as the installation's virtual service account),
+and a listener that is not configured HTTP/1.1-only.
+
+**Finding a domain SID.** On any domain-joined machine, signed in as a domain user, run `whoami /user`. The domain SID is
+the user SID without its last `-RID` part: `S-1-5-21-1111-2222-3333-1104` belongs to domain `S-1-5-21-1111-2222-3333`.
+With the AD module, `(Get-ADDomain).DomainSID.Value` gives it directly.
+
+**Linking the administrator.** Sign in to the website on your own domain account, choose **Link an existing account**,
+check that the form names *your* Windows logon, and enter `admin`'s password and authenticator code once. Do it at
+your own machine, never at somebody else's signed-in session. From then on Windows signs you in to `admin` without
+MFA, and `admin`'s password plus MFA remains the break-glass (reach it from the sign-in page, or `/?windows=password`
+when Windows sign-in cannot complete). If you signed in with Windows before linking, an account was created for you:
+disable it under People & Authority first, then link. A wrong link is removed with **Unlink Windows** on the account's
+row, which also ends its sessions.
+
+**No intermediary.** Windows sign-in must be reached directly on the AeroLink listener: no reverse proxy, tunnel or
+any device that shares upstream connections between users. Negotiate authenticates a connection, and a shared one
+would carry one person's identity to the next.
+
+**Name reuse.** An account keeps its `DOMAIN\user` name for good. If the directory later gives that name to a
+different person (a new SID), their sign-in is refused as `account_name_in_use`. No route renames an account yet, so
+raise it as an issue rather than editing the database.
+
 ## Local credentials warning
 
 The deterministic demonstration password is `AeroLink!2026`. Useful users include `admin`, `systems.author`, `software.author`, `systems.reviewer`, and `release.manager`. These credentials are for the disconnected local development installation only. Replace them, remove credential prefill, configure TLS, and establish organizational identity and privileged-access policy before operational use.

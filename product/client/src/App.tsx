@@ -61,6 +61,7 @@ import "./People.css";
 import "./CohesionPass.css";
 import ProblemReportsCommandCard from "./ProblemReportsCommandCard";
 import { ALL_FEATURES, hasFeature, viewEnabled, type ProjectFeature, type ProjectFeatureProjection } from "./projectFeatures";
+import { recordWindowsAttempt, setStaySignedOut, shouldStartWindowsSignIn, staySignedOut, takeWindowsAttempt, windowsSignInUrl } from "./windowsSignIn";
 
 const projectLevelViews: View[] = ["projects", "projectSetup", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"];
 
@@ -358,7 +359,22 @@ function App() {
 
   useEffect(() => {
     fetch(`${API}/api/auth/me`)
-      .then(async (r) => setUser(r.ok ? await r.json() : null))
+      .then(async (r) => {
+        const attemptPending = takeWindowsAttempt();
+        if (r.ok) { setUser(await r.json()); return; }
+        // #1615: with Windows sign-in on, arriving without a session signs in with Windows, unless this tab
+        // signed out or the previous arrival already tried and came back without a session. The page stays on
+        // "Establishing your secure session" while the browser navigates away.
+        if (r.status === 401) {
+          const status = await fetch(`${API}/api/setup/status`).then(s => s.ok ? s.json() : {}).catch(() => ({}));
+          if (shouldStartWindowsSignIn(status, location.search, staySignedOut(), attemptPending)) {
+            recordWindowsAttempt();
+            location.assign(windowsSignInUrl(API, { returnTo: location.pathname + location.search }));
+            return;
+          }
+        }
+        setUser(null);
+      })
       .catch(() => setUser(null));
   }, []);
   useEffect(() => {
@@ -739,6 +755,8 @@ function App() {
     // session is precisely when somebody reaches for that button, so the local session is cleared whatever
     // the server says. The server side is already correct — it revokes the session and deletes the cookie.
     try { await fetch(`${API}/api/auth/logout`,{method:"POST"}) } catch { /* the session is gone either way */ }
+    // #1615: signing out must not sign straight back in with Windows; only an explicit sign-in clears this.
+    setStaySignedOut(true);
     invalidateWorkspaces();
     invalidateDashboard();
     setWorkspaces([]);
