@@ -87,6 +87,13 @@ try {
         (Test-Path -LiteralPath $expectedSignedPointer -PathType Leaf) -and
         -not (Test-Path -LiteralPath (Join-Path $signedVersionRoot '.local'))) `
         'A signed release pointer must be written beside program\versions, never inside the immutable version tree.'
+    $currentAlias = Join-Path $signedSiteRoot 'program\current'
+    New-Item -ItemType Junction -Path $currentAlias -Target $signedVersionRoot -Force | Out-Null
+    $currentPointer = Set-AeroLinkInstallationPointer -ProductRoot $currentAlias -InstallationRoot $signedSiteRoot
+    Assert-True ($currentPointer -eq [IO.Path]::GetFullPath($expectedSignedPointer) -and
+        (Test-Path -LiteralPath $expectedSignedPointer -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $currentAlias '.local'))) `
+        'The real program\current junction must share the program-level pointer and never receive a sidecar inside the signed release tree.'
     $ambiguousRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-ambiguous-release-' + [Guid]::NewGuid().ToString('N'))
     $fixtures.Add($ambiguousRoot)
     New-Item -ItemType Directory -Path (Join-Path $ambiguousRoot 'app') -Force | Out-Null
@@ -420,6 +427,17 @@ try {
         } 'not a valid GUID' 'A non-empty invalid instanceId must be rejected before declaration writes.'
         Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $invalidBefore) `
             'An invalid instanceId refusal must leave declaration bytes unchanged.'
+        @{ classification = 'SiteProduction'; instanceId = 'also-not-a-guid' } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateProduction 'instance.json') -Encoding UTF8
+        @{ classification = 'SiteDevelopment'; instanceId = ([Guid]::NewGuid().ToString('D')) } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Encoding UTF8
+        $malformedSiblingBefore = Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw
+        Assert-Throws {
+            Set-AeroLinkSiteDeclaration -InstallationRoot $duplicateDevelopment -ApiPort $duplicateApiPort -PostgresPort $duplicatePostgresPort
+        } 'sibling site declaration.*invalid instanceId' `
+            'A declared sibling with a malformed instanceId must be rejected before the target declaration is written.'
+        Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $malformedSiblingBefore) `
+            'A malformed sibling identity refusal must leave the target declaration bytes unchanged.'
         # #1614 1.9 (D7): the daily verified backup runs as the installation's own API account, never a person.
         $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
         Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `

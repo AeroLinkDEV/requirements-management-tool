@@ -109,11 +109,14 @@ function Assert-AeroLinkUniqueSiteInstanceId {
         catch { throw "The sibling site declaration at $configPath is malformed: $($_.Exception.Message)" }
         $classification = if ($document.PSObject.Properties['classification']) { [string]$document.classification } else { '' }
         $otherId = if ($document.PSObject.Properties['instanceId']) { [string]$document.instanceId } else { '' }
-        $otherGuid = [guid]::Empty
-        if ((Test-AeroLinkSiteClassification $classification) -and
-            -not [string]::IsNullOrWhiteSpace($otherId) -and
-            [guid]::TryParse($otherId.Trim(), [ref]$otherGuid) -and $otherGuid -eq $targetGuid) {
-            throw "The site instanceId '$InstanceId' is already used by $classification at '$sibling'. Production and Development must have distinct persisted instance ids and cookie namespaces; copy the declaration only after assigning a new id."
+        if ((Test-AeroLinkSiteClassification $classification) -and -not [string]::IsNullOrWhiteSpace($otherId)) {
+            $otherGuid = [guid]::Empty
+            if (-not [guid]::TryParse($otherId.Trim(), [ref]$otherGuid)) {
+                throw "The sibling site declaration at $configPath has an invalid instanceId '$otherId'; refusing to write a declaration while a declared site identity cannot be verified."
+            }
+            if ($otherGuid -eq $targetGuid) {
+                throw "The site instanceId '$InstanceId' is already used by $classification at '$sibling'. Production and Development must have distinct persisted instance ids and cookie namespaces; copy the declaration only after assigning a new id."
+            }
         }
     }
 }
