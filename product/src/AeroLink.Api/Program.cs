@@ -23,6 +23,7 @@ using System.Text.Json;
 using System.Diagnostics;
 using System.Data;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
