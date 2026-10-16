@@ -49,6 +49,9 @@ try {
     $outsideLayout = [pscustomobject]@{ Current = $outsideCurrent; Versions = $layout.Versions }
     Assert-Throws { Get-AeroLinkSiteCurrentTarget -Layout $outsideLayout } 'outside|missing release' `
         'A current alias outside the installation versions directory must fail closed.'
+    $missingLayout = [pscustomobject]@{ Current = (Join-Path $outside 'missing-current'); Versions = $layout.Versions }
+    Assert-Throws { Get-AeroLinkSiteCurrentTarget -Layout $missingLayout } 'missing.*exact prior target' `
+        'An installation without a current junction must fail closed because no exact rollback target exists.'
 
     # Public full-DNS health owns both readiness and promoted source/instance identity.
     $health = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('a' * 40) `
@@ -65,6 +68,9 @@ try {
     $events = [System.Collections.Generic.List[string]]::new()
     $package = Join-Path $root 'incoming-package.zip'; 'package' | Set-Content $package
     $certificate = Join-Path $root 'trusted.cer'; 'certificate' | Set-Content $certificate
+    $backup = Join-Path $root 'backups\aerolink-20261015-120000.zip'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $backup) -Force | Out-Null
+    'verified backup fixture' | Set-Content -LiteralPath $backup
     $verify = {
         param($PackagePath, $TrustedPath, $Destination)
         $events.Add('verify')
@@ -82,7 +88,7 @@ try {
         if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'clone received no packaged executable' }
         $events.Add('clone')
         & $BeforeReal
-        [pscustomobject]@{ Applied = $true; DatabaseModified = $true; Archive = (Join-Path $root 'backups\aerolink-20261015-120000.zip'); Detail = 'clone and real upgrade passed' }
+        [pscustomobject]@{ Applied = $true; DatabaseModified = $true; Archive = $backup; Detail = 'clone and real upgrade passed' }
     }.GetNewClosure()
     $result = Invoke-AeroLinkSiteUpdate -ProductRoot (Split-Path -Parent $PSScriptRoot) -InstallationRoot $root -Package $package -TrustedCertificate $certificate `
         -VerifyPackage $verify -CloneRunner $clone -ServiceStopper $stopper -ServiceStarter $starter -HealthProver $healthProver -Switcher $switcher
@@ -92,8 +98,9 @@ try {
     $journalPath = Get-AeroLinkSiteUpdateJournalPath -InstallationRoot $root
     $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
     Assert-True ($journal.stage -eq 'Completed' -and $journal.sourceSha -eq ('a' * 40) -and $journal.databaseModified -and
+        $journal.backupSha256 -match '^[0-9a-f]{64}$' -and
         ($journal.PSObject.Properties.Name -notcontains 'Password') -and ($journal.PSObject.Properties.Name -notcontains 'ConnectionString')) `
-        'The completed journal must retain recovery identity without credentials.'
+        'The completed journal must retain package, backup hash and recovery identity without credentials.'
 }
 finally { foreach ($fixture in $fixtures) { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue } } }
 

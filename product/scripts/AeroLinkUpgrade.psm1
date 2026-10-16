@@ -278,6 +278,12 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
     $cloneDatabase = "aerolink_upgrade_validation_$token"
     $cloneUser = if ($site) { $site.DatabaseRole } else { 'postgres' }
     $cloneConnection = "Host=127.0.0.1;Port=$PostgresPort;Database=$cloneDatabase;Username=$cloneUser"
+    # A site maintenance host must connect as the declared application role, whose password is supplied only
+    # through the scoped PGPASSWORD handoff above. That keeps migration-created objects owned by the application
+    # role; the operator/superuser credential is for backup and restore, not Npgsql maintenance. Its evidence
+    # root is installation-owned so real semantic/evidence writes stay bound to this site.
+    $realConnection = if ($site) { "Host=127.0.0.1;Port=$PostgresPort;Database=$Database;Username=$($site.DatabaseRole)" } else { $null }
+    $realEvidence = if ($site) { $site.EvidenceRoot } else { $null }
     # The clone's OWN evidence tree, which is where the restore already places its evidence. Without binding
     # this, a semantic authority that rewrites controlled renditions writes new objects straight into the
     # live evidence store while "validating" - and a database rollback cannot undo a file write.
@@ -371,8 +377,8 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
 
     if ($BeforeRealUpgrade) { & $BeforeRealUpgrade }
     Write-Host '      Upgrading the local database...' -ForegroundColor Cyan
-    $realUpgrade = if ($UpgradeRunner) { & $UpgradeRunner $null $null $ApiExecutable } else {
-        $action = { Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -ApiExecutable $ApiExecutable -Arguments @('maintenance', 'upgrade', '--apply') -DotnetPath $DotnetPath }
+    $realUpgrade = if ($UpgradeRunner) { & $UpgradeRunner $realConnection $realEvidence $ApiExecutable } else {
+        $action = { Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -ApiExecutable $ApiExecutable -Arguments @('maintenance', 'upgrade', '--apply') -ConnectionString $realConnection -EvidenceRoot $realEvidence -DotnetPath $DotnetPath }
         if ($maintenanceAccess) { Invoke-AeroLinkWithPostgresAccess $maintenanceAccess $action } else { & $action }
     }
     if ($realUpgrade.ExitCode -ne 0) {
