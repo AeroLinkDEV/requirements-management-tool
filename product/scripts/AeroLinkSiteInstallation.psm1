@@ -79,6 +79,39 @@ function Get-AeroLinkDefaultSiteServiceName {
     return "AeroLink-$leaf"
 }
 
+function Assert-AeroLinkUniqueSiteInstanceId {
+    <#
+        .SYNOPSIS Refuses a site declaration that reuses the other canonical site's instance id.
+        .DESCRIPTION
+            Production and Development share a host name. Their site cookie names and Windows-link
+            cookie names are derived from instanceId, so copying one instance.json into the other must
+            fail before the declaration is written. Arbitrary disposable roots have no sibling site and
+            retain the existing qualification path.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallationRoot,
+        [Parameter(Mandatory)][string]$InstanceId
+    )
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) { throw 'A site declaration requires a non-empty instanceId.' }
+    $root = [IO.Path]::GetFullPath($InstallationRoot).TrimEnd('\', '/')
+    $parent = Split-Path -Parent $root
+    foreach ($siblingName in @('AeroLink Production', 'AeroLink Development')) {
+        $sibling = [IO.Path]::GetFullPath((Join-Path $parent $siblingName)).TrimEnd('\', '/')
+        if ([string]::Equals($sibling, $root, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $configPath = Join-Path $sibling 'instance.json'
+        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { continue }
+        try { $document = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
+        catch { throw "The sibling site declaration at $configPath is malformed: $($_.Exception.Message)" }
+        $classification = if ($document.PSObject.Properties['classification']) { [string]$document.classification } else { '' }
+        $otherId = if ($document.PSObject.Properties['instanceId']) { [string]$document.instanceId } else { '' }
+        if ((Test-AeroLinkSiteClassification $classification) -and
+            [string]::Equals($otherId.Trim(), $InstanceId.Trim(), [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The site instanceId '$InstanceId' is already used by $classification at '$sibling'. Production and Development must have distinct persisted instance ids and cookie namespaces; copy the declaration only after assigning a new id."
+        }
+    }
+}
+
 function Set-AeroLinkSiteDeclaration {
     <#
         .SYNOPSIS Declares, idempotently, a site installation's ports, service accounts, role and stable ids.
@@ -159,6 +192,7 @@ function Set-AeroLinkSiteDeclaration {
     if (-not $document.Contains('instanceId') -or [string]::IsNullOrWhiteSpace([string]$document['instanceId'])) {
         $document['instanceId'] = [guid]::NewGuid().ToString('D')
     }
+    Assert-AeroLinkUniqueSiteInstanceId -InstallationRoot $root -InstanceId ([string]$document['instanceId'])
     $document['updatedAtUtc'] = (Get-Date).ToUniversalTime().ToString('o')
     $temporary = "$configPath.$([guid]::NewGuid().ToString('N')).tmp"
     try {
@@ -870,5 +904,6 @@ Export-ModuleMember -Function @(
     'Set-AeroLinkSiteFolderAcl',
     'Initialize-AeroLinkSitePostgres',
     'Register-AeroLinkSitePostgresService',
-    'Get-AeroLinkSiteRuntimeEnvironment'
+    'Get-AeroLinkSiteRuntimeEnvironment',
+    'Assert-AeroLinkUniqueSiteInstanceId'
 )

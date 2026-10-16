@@ -51,7 +51,15 @@ function Get-AeroLinkInstallationPointerPath {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ProductRoot)
-    return Join-Path (Join-Path $ProductRoot '.local') $script:AeroLinkInstallationPointerName
+    $root = [IO.Path]::GetFullPath($ProductRoot).TrimEnd('\', '/')
+    # A signed site release is laid out as <installation>\program\versions\<version>.
+    # Its installation pointer is mutable installation metadata, so it belongs beside versions,
+    # outside the signed release tree. Source checkouts keep the historical product\\.local path.
+    $pointerRoot = if ((Test-Path -LiteralPath (Join-Path $root 'manifest.json') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $root 'app\AeroLink.Api.exe') -PathType Leaf)) {
+        Split-Path (Split-Path $root -Parent) -Parent
+    } else { $root }
+    return Join-Path (Join-Path $pointerRoot '.local') $script:AeroLinkInstallationPointerName
 }
 
 function Get-AeroLinkInstallationRoot {
@@ -163,11 +171,11 @@ function Set-AeroLinkInstallationPointer {
     if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
         throw "Refusing to point at an installation root that does not exist: $resolved"
     }
-    $localRoot = Join-Path $ProductRoot '.local'
-    if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) {
-        New-Item -ItemType Directory -Path $localRoot -Force | Out-Null
-    }
     $pointerPath = Get-AeroLinkInstallationPointerPath -ProductRoot $ProductRoot
+    $pointerDirectory = Split-Path -Parent $pointerPath
+    if (-not (Test-Path -LiteralPath $pointerDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $pointerDirectory -Force | Out-Null
+    }
     [pscustomobject]@{
         installationRoot = $resolved
         note             = $Note

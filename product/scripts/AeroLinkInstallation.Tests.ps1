@@ -73,6 +73,21 @@ try {
     Assert-True ($productionPaths.PostgresData -eq (Join-Path $canonicalInstallation 'pgdata')) `
         'The relocated checkout must address the canonical cluster, not one of its own.'
 
+    # A signed site release is immutable. Its installation pointer belongs beside the version tree,
+    # and pointer creation must not create a mutable .local directory inside the signed release.
+    $signedSiteRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-signed-site-' + [Guid]::NewGuid().ToString('N'))
+    $fixtures.Add($signedSiteRoot)
+    $signedVersionRoot = Join-Path $signedSiteRoot 'program\versions\1.2.3'
+    New-Item -ItemType Directory -Path (Join-Path $signedVersionRoot 'app') -Force | Out-Null
+    '{}' | Set-Content -LiteralPath (Join-Path $signedVersionRoot 'manifest.json') -Encoding UTF8
+    '' | Set-Content -LiteralPath (Join-Path $signedVersionRoot 'app\AeroLink.Api.exe') -Encoding ASCII
+    $signedPointer = Set-AeroLinkInstallationPointer -ProductRoot $signedVersionRoot -InstallationRoot $signedSiteRoot
+    $expectedSignedPointer = Join-Path $signedSiteRoot 'program\.local\installation.json'
+    Assert-True ($signedPointer -eq [IO.Path]::GetFullPath($expectedSignedPointer) -and
+        (Test-Path -LiteralPath $expectedSignedPointer -PathType Leaf) -and
+        -not (Test-Path -LiteralPath (Join-Path $signedVersionRoot '.local'))) `
+        'A signed release pointer must be written beside program\versions, never inside the immutable version tree.'
+
     # --- 3. Relocation changes nothing about installation IDENTITY. This is acceptance 66-70. ---
     $canonicalIdentity = Get-AeroLinkInstallationIdentity -ProductRoot $canonicalProduct
     $productionIdentity = Get-AeroLinkInstallationIdentity -ProductRoot $productionProduct
@@ -367,6 +382,28 @@ try {
         Assert-True ($redeclared.ConnectorDeploymentId -eq $declared.ConnectorDeploymentId -and $redeclared.NotificationAuthorityRoot -eq [IO.Path]::GetFullPath($siteAuthority) -and
             (Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json).instanceId -eq $instanceId) `
             'Re-declaring a site must keep its connector deployment id, instance id and notification authority root; a new id would orphan every enrolled connector.'
+
+        # A copied Production declaration must not silently reuse the Development cookie namespace.
+        $duplicateFixture = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-duplicate-site-' + [Guid]::NewGuid().ToString('N'))
+        $fixtures.Add($duplicateFixture)
+        $duplicateProduction = Join-Path $duplicateFixture 'AeroLink Production'
+        $duplicateDevelopment = Join-Path $duplicateFixture 'AeroLink Development'
+        New-Item -ItemType Directory -Path $duplicateProduction, $duplicateDevelopment -Force | Out-Null
+        $duplicateId = [Guid]::NewGuid().ToString('D')
+        @{ classification = 'SiteProduction'; instanceId = $duplicateId } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateProduction 'instance.json') -Encoding UTF8
+        @{ classification = 'SiteDevelopment'; instanceId = $duplicateId } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Encoding UTF8
+        $duplicateBefore = Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw
+        $duplicateApiPort = Get-FreeLoopbackPort
+        $duplicatePostgresPort = Get-FreeLoopbackPort
+        while ($duplicatePostgresPort -eq $duplicateApiPort) { $duplicatePostgresPort = Get-FreeLoopbackPort }
+        Assert-Throws {
+            Set-AeroLinkSiteDeclaration -InstallationRoot $duplicateDevelopment -ApiPort $duplicateApiPort -PostgresPort $duplicatePostgresPort
+        } 'distinct persisted instance ids|cookie namespaces' `
+            'A site declaration must refuse a copied sibling instanceId before changing the declaration.'
+        Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $duplicateBefore) `
+            'A duplicate instanceId refusal must leave the existing declaration bytes unchanged.'
         # #1614 1.9 (D7): the daily verified backup runs as the installation's own API account, never a person.
         $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
         Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
@@ -698,6 +735,12 @@ try {
     $trustPromotionOffset = $releaseBlock.IndexOf('Copy-Item -LiteralPath $TrustedCertificate -Destination $layout.TrustedCertificate')
     Assert-True ($offeredVerifyOffset -ge 0 -and $trustPromotionOffset -gt $offeredVerifyOffset) `
         'The offered package must verify before an installed trust certificate can be promoted.'
+    $releasePreflightOffset = $installerSource.IndexOf('Assert-AeroLinkInstallReleasePreflight -CurrentTarget')
+    $instanceMutationOffset = $installerSource.IndexOf('Set-AeroLinkInstanceConfig -ProductRoot $productLookup')
+    $declarationMutationOffset = $installerSource.IndexOf('$site = Set-AeroLinkSiteDeclaration -InstallationRoot $root')
+    Assert-True ($releasePreflightOffset -ge 0 -and $instanceMutationOffset -gt $releasePreflightOffset -and
+        $declarationMutationOffset -gt $releasePreflightOffset) `
+        'The installer must complete release identity and trust preflight before mutating instance or site declarations.'
     Assert-True ($releaseBlock -notmatch 'Stop-Service -Name \$site\.ServiceName|Backup-AeroLink\.ps1|\(Get-Item -LiteralPath \$layout\.Current\)\.Delete\(\)') `
         'The A2 entry point must not perform the A3 backup, stop, or junction replacement transition.'
     Assert-True ($installerSource -match 'Installs or repairs one AeroLink site server installation') `
