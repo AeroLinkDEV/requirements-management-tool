@@ -1,7 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.Repositories;
+using Microsoft.Extensions.Options;
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace AeroLink.Api;
 
@@ -122,6 +130,23 @@ public static class RuntimeIdentityEndpoints
     /// </summary>
     public static void MapRuntimeIdentityEndpoint(this WebApplication app)
     {
+        app.MapGet("/health/identity/data-protection", (
+            HttpContext context,
+            IConfiguration configuration,
+            IOptions<DataProtectionOptions> dataProtectionOptions,
+            IOptions<KeyManagementOptions> keyManagementOptions,
+            IKeyManager keyManager) =>
+        {
+            // This answer contains the effective discriminator, ring location and key metadata fingerprints.
+            // A null TestServer address is not loopback evidence, and a forwarded header is deliberately ignored.
+            if (context.Connection.RemoteIpAddress is not { } remoteAddress
+                || !IPAddress.IsLoopback(remoteAddress))
+                return Results.NotFound();
+
+            return Results.Ok(DataProtectionRuntimeCapture.Capture(
+                configuration, dataProtectionOptions.Value, keyManagementOptions.Value, keyManager));
+        });
+
         app.MapGet("/health/identity", async (HttpContext context, IConfiguration configuration, AeroLinkDbContext db, CancellationToken ct) =>
         {
             var identity = Resolve(configuration);
@@ -188,3 +213,166 @@ public static class RuntimeIdentityEndpoints
         });
     }
 }
+
+/// <summary>
+/// Captures the effective Data Protection configuration of the running process without opening or serializing
+/// protected material.  This is intentionally a separate read-only diagnostic so the HOME continuity export can
+/// be fed an action-time source receipt instead of a guessed framework default.
+/// </summary>
+public static class DataProtectionRuntimeCapture
+{
+    public static DataProtectionRuntimeCaptureResult Capture(
+        IConfiguration configuration,
+        DataProtectionOptions dataProtectionOptions,
+        KeyManagementOptions keyManagementOptions,
+        IKeyManager keyManager)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(dataProtectionOptions);
+        ArgumentNullException.ThrowIfNull(keyManagementOptions);
+        ArgumentNullException.ThrowIfNull(keyManager);
+
+        var identity = RuntimeIdentityEndpoints.Resolve(configuration);
+        var process = CaptureProcessIdentity();
+        var repository = keyManagementOptions.XmlRepository;
+        var repositoryType = repository?.GetType().FullName ?? "unconfigured";
+        var repositoryPath = repository is FileSystemXmlRepository fileSystemRepository
+            ? fileSystemRepository.Directory.FullName
+            : null;
+        var repositoryExists = repository is FileSystemXmlRepository && repositoryPath is not null
+            && Directory.Exists(repositoryPath);
+        var applicationDiscriminator = dataProtectionOptions.ApplicationDiscriminator;
+        var declaredProtection = ClassifyProtection(configuration["DataProtection:ProtectKeysWith"]);
+        var metadata = new DataProtectionRuntimeMetadata(
+            ApplicationDiscriminator: applicationDiscriminator,
+            ApplicationDiscriminatorSource: "IOptions<DataProtectionOptions>",
+            RepositoryType: repositoryType,
+            RepositoryPath: repositoryExists ? repositoryPath : null,
+            RepositoryPathSource: repositoryExists ? "actual XmlRepository.Directory" : "unproven",
+            DeclaredProtection: declaredProtection,
+            XmlEncryptorType: keyManagementOptions.XmlEncryptor?.GetType().FullName,
+            AutoGenerateKeys: keyManagementOptions.AutoGenerateKeys,
+            DeclaredKeyRingPath: configuration["DataProtection:KeyRingPath"],
+            KeyCount: null,
+            RevokedKeyCount: null,
+            KeyMetadataSha256: null,
+            RevokedMetadataSha256: null);
+
+        // FileSystemXmlRepository creates its directory when enumerated. Do not ask IKeyManager for metadata
+        // unless the resolved directory already exists; a default candidate must remain explicitly unproven.
+        if (!repositoryExists)
+            return new DataProtectionRuntimeCaptureResult(
+                Status: "unproven",
+                CapturedAtUtc: DateTimeOffset.UtcNow,
+                Process: process,
+                Instance: CaptureInstance(identity),
+                DataProtection: metadata);
+
+        try
+        {
+            var keys = keyManager.GetAllKeys()
+                .OrderBy(key => key.KeyId)
+                .ToArray();
+            var revoked = keys.Where(key => key.IsRevoked).ToArray();
+            metadata = metadata with
+            {
+                KeyCount = keys.Length,
+                RevokedKeyCount = revoked.Length,
+                KeyMetadataSha256 = MetadataDigest(keys),
+                RevokedMetadataSha256 = MetadataDigest(revoked),
+            };
+            var status = string.IsNullOrWhiteSpace(applicationDiscriminator) ? "unproven" : "captured";
+            return new DataProtectionRuntimeCaptureResult(
+                Status: status,
+                CapturedAtUtc: DateTimeOffset.UtcNow,
+                Process: process,
+                Instance: CaptureInstance(identity),
+                DataProtection: metadata);
+        }
+        catch
+        {
+            // A diagnostic must never turn an unreadable ring into a false source receipt or expose framework
+            // paths/errors. The effective repository and discriminator are still returned as unproven facts.
+            return new DataProtectionRuntimeCaptureResult(
+                Status: "unavailable",
+                CapturedAtUtc: DateTimeOffset.UtcNow,
+                Process: process,
+                Instance: CaptureInstance(identity),
+                DataProtection: metadata);
+        }
+    }
+
+    private static DataProtectionRuntimeInstance CaptureInstance(AeroLinkRuntimeIdentity identity) =>
+        new(identity.InstanceId, identity.Mode, identity.InstanceLabel, identity.InstanceClassification,
+            identity.SourceSha, identity.SourceIdentity,
+            identity.SourceIdentity == "unknown" ? "unproven" : "declared");
+
+    private static DataProtectionProcessIdentity CaptureProcessIdentity()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            string? imagePath = null;
+            try { imagePath = process.MainModule?.FileName; } catch { }
+            return new DataProtectionProcessIdentity(
+                process.Id, process.StartTime.ToUniversalTime(), imagePath);
+        }
+        catch
+        {
+            return new DataProtectionProcessIdentity(Environment.ProcessId, null, null);
+        }
+    }
+
+    private static string ClassifyProtection(string? value) => string.IsNullOrWhiteSpace(value)
+        ? "absent"
+        : value.Trim().Equals("DpapiLocalMachine", StringComparison.OrdinalIgnoreCase)
+            ? "DpapiLocalMachine"
+            : "other";
+
+    private static string MetadataDigest(IEnumerable<IKey> keys)
+    {
+        var canonical = string.Join('\n', keys.Select(key => string.Join('|',
+            key.KeyId.ToString("D"),
+            key.CreationDate.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            key.ActivationDate.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            key.ExpirationDate.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            key.IsRevoked ? "true" : "false")));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+}
+
+public sealed record DataProtectionRuntimeCaptureResult(
+    string Status,
+    DateTimeOffset CapturedAtUtc,
+    DataProtectionProcessIdentity Process,
+    DataProtectionRuntimeInstance Instance,
+    DataProtectionRuntimeMetadata DataProtection);
+
+public sealed record DataProtectionProcessIdentity(
+    int Pid,
+    DateTimeOffset? StartedAtUtc,
+    string? ImagePath);
+
+public sealed record DataProtectionRuntimeInstance(
+    string InstanceId,
+    string Mode,
+    string InstanceLabel,
+    string InstanceClassification,
+    string SourceSha,
+    string SourceIdentity,
+    string SourceIdentityStatus);
+
+public sealed record DataProtectionRuntimeMetadata(
+    string? ApplicationDiscriminator,
+    string ApplicationDiscriminatorSource,
+    string RepositoryType,
+    string? RepositoryPath,
+    string RepositoryPathSource,
+    string DeclaredProtection,
+    string? XmlEncryptorType,
+    bool AutoGenerateKeys,
+    string? DeclaredKeyRingPath,
+    int? KeyCount,
+    int? RevokedKeyCount,
+    string? KeyMetadataSha256,
+    string? RevokedMetadataSha256);
