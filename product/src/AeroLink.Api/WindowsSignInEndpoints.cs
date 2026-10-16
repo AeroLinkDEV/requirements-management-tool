@@ -37,7 +37,6 @@ public static class WindowsSignInEndpoints
 {
     public const string SignInPath = "/api/auth/windows";
     public const string LinkPath = "/api/auth/windows/link";
-    private const string LinkCookie = "AeroLink.WindowsLink";
     private const string LinkPurpose = "AeroLink.WindowsLink.v1";
     private static readonly TimeSpan LinkLifetime = TimeSpan.FromMinutes(5);
 
@@ -181,10 +180,7 @@ public static class WindowsSignInEndpoints
             ? value : "/";
 
     private static string LinkCookieName(HttpContext http)
-    {
-        var cookie = http.RequestServices.GetRequiredService<SessionCookie>();
-        return cookie.Secure ? SessionCookie.SecurePrefix + LinkCookie : LinkCookie;
-    }
+        => http.RequestServices.GetRequiredService<SessionCookie>().WindowsLinkName;
 
     private static CookieOptions LinkCookieOptions(HttpContext http, DateTimeOffset? expires)
     {

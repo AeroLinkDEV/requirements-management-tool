@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace AeroLink.Api.Tests;
 
@@ -20,6 +21,8 @@ public sealed class SiteServerProfileTests : IDisposable
 {
     private const string PublicHost = "aerolink-site.example.test";
     private const string Origin = "https://aerolink-site.example.test:5443";
+    private const string SiteInstanceId = "11111111-1111-4111-8111-111111111111";
+    private const string SiteCookieSuffix = "-11111111111141118111111111111111";
     private readonly string _directory = Directory.CreateTempSubdirectory("aerolink-site-cert-").FullName;
     private readonly (string Cert, string Key) _pem;
 
@@ -39,6 +42,7 @@ public sealed class SiteServerProfileTests : IDisposable
         ["SiteServer:Certificate:Path"] = _pem.Cert,
         ["SiteServer:Certificate:KeyPath"] = _pem.Key,
         ["Identity:CookieSecure"] = "true",
+        ["Instance:InstanceId"] = SiteInstanceId,
     };
 
     private static WebApplicationFactoryWith Host(Dictionary<string, string?> settings, string? environment = null)
@@ -60,6 +64,8 @@ public sealed class SiteServerProfileTests : IDisposable
         { "Notifications:BaseUrl", "https://elsewhere.example.test", "", "HTTPS origin is 'https://aerolink-site.example.test:5443'" },
         { "Connector:PublicOrigin", "http://aerolink-site.example.test:5443", "", "HTTPS origin" },
         { "Identity:BootstrapSecret", "", "", "no accounts and Identity__BootstrapSecret is not set" },
+        { "Instance:InstanceId", "", "", "valid Instance:InstanceId GUID" },
+        { "Instance:InstanceId", "not-a-guid", "", "valid Instance:InstanceId GUID" },
         { "SiteServer:Enabled", "true", "Development", "runs as Production" },
         // Kestrel binds configured endpoints beside the explicit HTTPS Listen, so one would serve plain HTTP.
         { "Kestrel:Endpoints:Http:Url", "http://127.0.0.1:5081", "", "remove Kestrel:Endpoints" },
@@ -137,7 +143,7 @@ public sealed class SiteServerProfileTests : IDisposable
         using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         var issued = Assert.Single(login.Headers.GetValues("Set-Cookie"));
-        Assert.StartsWith("__Host-aerolink_session=", issued);
+        Assert.StartsWith("__Host-aerolink_session" + SiteCookieSuffix + "=", issued);
         Assert.Contains("secure", issued, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/", issued, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("domain=", issued, StringComparison.OrdinalIgnoreCase);
@@ -155,7 +161,7 @@ public sealed class SiteServerProfileTests : IDisposable
 
         // A browser ignores a __Host- deletion that lacks Secure and Path=/, which would leave the session behind.
         var cleared = Assert.Single(signedOut.Headers.GetValues("Set-Cookie"));
-        Assert.StartsWith("__Host-aerolink_session=;", cleared);
+        Assert.StartsWith("__Host-aerolink_session" + SiteCookieSuffix + "=;", cleared);
         Assert.Contains("secure", cleared, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/", cleared, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
@@ -167,10 +173,47 @@ public sealed class SiteServerProfileTests : IDisposable
         using var preference = await client.GetAsync($"/api/notifications/unsubscribe?recipient=admin&token={token}");
         Assert.Equal(HttpStatusCode.OK, preference.StatusCode);
         var antiforgery = Assert.Single(preference.Headers.GetValues("Set-Cookie"));
-        Assert.StartsWith("__Host-AeroLink.PreferenceConfirmation=", antiforgery);
+        Assert.StartsWith("__Host-AeroLink.PreferenceConfirmation" + SiteCookieSuffix + "=", antiforgery);
         Assert.Contains("secure", antiforgery, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/", antiforgery, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Two_declared_site_instances_have_distinct_stable_cookie_names_and_non_site_names_remain_historical()
+    {
+        // Authoring gate: this protects the persisted instance identity projection used by all three site cookie
+        // owners. The credible regression is deriving names from a transient port or a caller-specific value,
+        // which would let two declarations collide or change after reconstruction. Existing hosted coverage only
+        // exercised one literal site name and did not cover Windows-link naming or reconstruction stability.
+        var first = ConfigurationForSite("11111111-1111-4111-8111-111111111111", 5443);
+        var second = ConfigurationForSite("22222222-2222-4222-8222-222222222222", 5444);
+        var environment = new TestHostEnvironment();
+
+        var one = SessionCookie.FromConfiguration(first, environment, siteServer: true);
+        var two = SessionCookie.FromConfiguration(second, environment, siteServer: true);
+        var oneAgain = SessionCookie.FromConfiguration(ConfigurationForSite("11111111-1111-4111-8111-111111111111", 6001), environment, siteServer: true);
+
+        Assert.NotEqual(one.Name, two.Name);
+        Assert.NotEqual(one.AntiforgeryName, two.AntiforgeryName);
+        Assert.NotEqual(one.WindowsLinkName, two.WindowsLinkName);
+        Assert.Equal(one.Name, oneAgain.Name);
+        Assert.Equal(one.AntiforgeryName, oneAgain.AntiforgeryName);
+        Assert.Equal(one.WindowsLinkName, oneAgain.WindowsLinkName);
+
+        var nonSite = SessionCookie.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection().Build(), environment, siteServer: false);
+        Assert.Equal("__Host-aerolink_session", nonSite.Name);
+        Assert.Equal("__Host-AeroLink.PreferenceConfirmation", nonSite.AntiforgeryName);
+        Assert.Equal("__Host-AeroLink.WindowsLink", nonSite.WindowsLinkName);
+    }
+
+    private static IConfiguration ConfigurationForSite(string instanceId, int port)
+        => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Identity:CookieSecure"] = "true",
+            ["Instance:InstanceId"] = instanceId,
+            ["SiteServer:PublicHost"] = PublicHost,
+            ["SiteServer:Port"] = port.ToString(),
+        }).Build();
 
     [Fact]
     public async Task Status_code_pages_never_rewrite_a_401()
@@ -199,6 +242,14 @@ public sealed class SiteServerProfileTests : IDisposable
 
     private sealed record SessionRow(bool Current);
     private sealed record CsrfToken(string Token);
+
+    private sealed class TestHostEnvironment : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Environments.Production;
+        public string ApplicationName { get; set; } = "AeroLink.Api.Tests";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
+    }
 
     private static void AssertRefused(WebApplicationFactoryWith factory, string expected)
     {

@@ -74,20 +74,17 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.W
 // it was, except that Production may no longer listen on plain HTTP anywhere but loopback.
 var siteServer = SiteServerHosting.Configure(builder);
 // Secure cookies take the __Host- prefix, which stops plain-HTTP origins, Domain= cookies from other hosts and
-// path-scoped cookies from planting or shadowing them. It does not isolate them from another application on the
-// same host name (a site server shares one): cookies are not isolated by port, so that application receives and
-// can overwrite them. The owner accepted that risk on 15 Oct 2026 (#1614 D3); a dedicated DNS alias removes it.
-// See SessionCookie.
-// Resolved from the built configuration, the same as the sign-in endpoint always read it, so a source added after
-// this line (a host's own configuration callbacks run at Build) still decides it.
-builder.Services.AddSingleton(services => new SessionCookie(SessionCookie.SecureFrom(
-    services.GetRequiredService<IConfiguration>(), services.GetRequiredService<IHostEnvironment>())));
+// path-scoped cookies from planting or shadowing them. A declared site also carries its persisted instance identity
+// in every cookie name, so two AeroLink installations on one host cannot consume each other's sessions, antiforgery
+// confirmations or Windows-link tickets. SessionCookie validates that identity before service registration.
+var sessionCookie = SessionCookie.FromConfiguration(builder.Configuration, builder.Environment, siteServer is not null);
+builder.Services.AddSingleton(sessionCookie);
 builder.Services.AddAntiforgery(options =>
 {
     // Prefixed only where AeroLink terminates TLS itself. Antiforgery decides Secure from the request, and with
     // SecurePolicy=Always it refuses any request that did not arrive over HTTPS - which is every request behind a
     // TLS-terminating proxy, where Identity:CookieSecure is also true. A site server always sees HTTPS.
-    options.Cookie.Name = siteServer is not null ? SessionCookie.SecurePrefix + "AeroLink.PreferenceConfirmation" : "AeroLink.PreferenceConfirmation";
+    options.Cookie.Name = sessionCookie.AntiforgeryName;
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.HttpOnly = true;
     if (siteServer is not null)
