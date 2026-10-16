@@ -114,8 +114,94 @@ public static class HomeContinuityKeyTransfer
         if (string.IsNullOrWhiteSpace(ring)) return;
         var pending = PendingPath(ring);
         if (File.Exists(pending) || Directory.Exists(pending))
+        {
+            var receipt = ReadPendingReceipt(pending);
+            if (string.Equals(receipt.Phase, "completed", StringComparison.Ordinal))
+            {
+                ValidateCompletedReceipt(receipt, configuration);
+                return;
+            }
             throw new InvalidOperationException(
                 $"A HOME continuity transfer is pending at '{pending}'. Site commissioning is refused until an attended recovery completes.");
+        }
+
+        var terminal = TerminalPath(ring);
+        if (File.Exists(terminal) || Directory.Exists(terminal))
+        {
+            var receipt = ReadPendingReceipt(terminal);
+            if (string.Equals(receipt.Phase, "completed", StringComparison.Ordinal))
+            {
+                ValidateCompletedReceipt(receipt, configuration);
+                return;
+            }
+            throw new InvalidOperationException(
+                $"A HOME continuity transfer was aborted at '{terminal}'. Site commissioning remains refused until a new attended continuity transfer completes.");
+        }
+    }
+
+    public static HomeContinuityPendingReceipt RecoverPending(
+        string packageDirectory,
+        string destinationRingDirectory,
+        HomeContinuityIdentityBinding expectedBinding,
+        string expectedManifestSha256,
+        Guid expectedPackageId,
+        string destinationInstallationRoot,
+        string destinationConnectorPath,
+        string destinationServiceSid,
+        bool abort)
+    {
+        var pendingPath = PendingPath(destinationRingDirectory);
+        var receipt = ReadPendingReceipt(pendingPath);
+        _ = ValidateRecoveryReceipt(receipt, packageDirectory, destinationRingDirectory,
+            expectedBinding, expectedManifestSha256, expectedPackageId, destinationInstallationRoot,
+            destinationConnectorPath, destinationServiceSid);
+
+        if (string.Equals(receipt.Phase, "completed", StringComparison.Ordinal))
+            throw new InvalidOperationException("The continuity receipt is already terminal; no recovery action is required.");
+
+        if (abort)
+        {
+            if (string.Equals(receipt.Phase, "ring-published", StringComparison.Ordinal)
+                || Directory.Exists(destinationRingDirectory) && Directory.EnumerateFileSystemEntries(destinationRingDirectory).Any())
+            {
+                if (!string.Equals(receipt.Phase, "ring-publishing", StringComparison.Ordinal))
+                    throw new InvalidOperationException("The destination ring is already published; complete recovery instead of aborting it.");
+            }
+            ValidateRecoveryArtifactsForAbort(receipt, destinationRingDirectory);
+            if (string.Equals(receipt.Phase, "ring-publishing", StringComparison.Ordinal)
+                && Directory.Exists(destinationRingDirectory))
+            {
+                foreach (var artifact in ReadArtifactManifest(destinationRingDirectory))
+                    File.Delete(Path.Combine(destinationRingDirectory, artifact.RelativePath));
+            }
+            if (Directory.Exists(receipt.StagedDirectory)) Directory.Delete(receipt.StagedDirectory, recursive: true);
+            if (File.Exists(destinationConnectorPath)) File.Delete(destinationConnectorPath);
+            RequireDestinationRingEmpty(destinationRingDirectory, destinationServiceSid);
+            var terminal = receipt with { Phase = "aborted", RecordedAt = DateTimeOffset.UtcNow };
+            WriteJsonFile(TerminalPath(destinationRingDirectory), terminal);
+            File.Delete(pendingPath);
+            return terminal;
+        }
+
+        if (!string.Equals(receipt.Phase, "artifacts-ready", StringComparison.Ordinal)
+            && !string.Equals(receipt.Phase, "connector-published", StringComparison.Ordinal)
+            && !string.Equals(receipt.Phase, "ready-to-publish", StringComparison.Ordinal)
+            && !string.Equals(receipt.Phase, "ring-publishing", StringComparison.Ordinal)
+            && !string.Equals(receipt.Phase, "ring-published", StringComparison.Ordinal))
+            throw new InvalidOperationException("The pending receipt has no fully staged connector publish to complete; abort it after reviewing the exact receipt.");
+        ValidateRecoveryArtifactsForComplete(receipt, destinationRingDirectory, destinationConnectorPath);
+        if (!string.Equals(receipt.Phase, "ring-published", StringComparison.Ordinal))
+            PublishStagedArtifacts(receipt.StagedDirectory, destinationRingDirectory, receipt.Artifacts!, receipt.DestinationServiceSid,
+                allowPartialExisting: string.Equals(receipt.Phase, "ring-publishing", StringComparison.Ordinal));
+        var completed = receipt with
+        {
+            Phase = "completed",
+            StagedDirectory = Path.GetFullPath(destinationRingDirectory),
+            Artifacts = ReadArtifactManifest(destinationRingDirectory),
+            RecordedAt = DateTimeOffset.UtcNow,
+        };
+        ReplaceJsonFile(pendingPath, completed);
+        return completed;
     }
 
     public static HomeContinuityPackageManifest ExportPackage(
@@ -274,7 +360,9 @@ public static class HomeContinuityKeyTransfer
         var manifest = ReadManifest(manifestPath);
         ValidateManifest(manifest, packageDirectory, expectedTargetApplicationName, expectedBinding);
         ValidateConnectorManifest(manifest.Connector, expectedBinding);
-        RequireDestinationRingEmpty(destinationRingDirectory);
+        ConsumeValidatedAbortedTerminal(TerminalPath(destinationRingDirectory), destinationRingDirectory,
+            destinationInstallationRoot, destinationConnectorPath, destinationServiceSid);
+        RequireDestinationRingEmpty(destinationRingDirectory, destinationServiceSid);
         var pendingPath = PendingPath(destinationRingDirectory);
         RequireFileDoesNotExist(pendingPath, "The continuity pending receipt");
 
@@ -316,16 +404,18 @@ public static class HomeContinuityKeyTransfer
         var stagedDirectory = destinationRingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + $".continuity-stage-{manifest.PackageId:N}";
         RequireDirectoryDoesNotExist(stagedDirectory, "The destination staging directory");
-        Directory.CreateDirectory(stagedDirectory);
-        var connectorPublished = false;
-        var ringPublished = false;
         var pending = new HomeContinuityPendingReceipt(
             1, manifest.PackageId, expectedManifestSha256, destinationInstallationRoot,
             Path.GetFullPath(destinationRingDirectory), Path.GetFullPath(destinationConnectorPath),
-            destinationServiceSid, "staged", DateTimeOffset.UtcNow);
+            destinationServiceSid, "staged", DateTimeOffset.UtcNow,
+            Path.GetFullPath(packageDirectory), Path.GetFullPath(stagedDirectory),
+            Array.Empty<HomeContinuityPendingArtifact>(), Sha256Utf8(connectorPem));
         try
         {
+            // The receipt is outside both the staging directory and the final ring.  It is written before any
+            // artifact so every crash leaves a durable, identity-bound recovery boundary.
             WriteJsonFile(pendingPath, pending);
+            Directory.CreateDirectory(stagedDirectory);
             var dpapiEncryptor = new DpapiXmlEncryptor(protectToLocalMachine: true, NullLoggerFactory.Instance);
             foreach (var keyEntry in manifest.Keys)
             {
@@ -344,28 +434,53 @@ public static class HomeContinuityKeyTransfer
             }
 
             ValidateRewrappedRing(stagedDirectory, expectedTargetApplicationName, manifest);
+            pending = pending with
+            {
+                Phase = "artifacts-ready",
+                Artifacts = ReadArtifactManifest(stagedDirectory),
+                RecordedAt = DateTimeOffset.UtcNow,
+            };
+            ReplaceJsonFile(pendingPath, pending);
+
             WriteConnectorFile(destinationConnectorPath, connectorPem);
-            connectorPublished = true;
+            pending = pending with { Phase = "connector-published", RecordedAt = DateTimeOffset.UtcNow };
+            ReplaceJsonFile(pendingPath, pending);
+
             WriteJsonFile(Path.Combine(stagedDirectory, "continuity-receipt.json"), new HomeContinuityApplyReceipt(
                 2, manifest.PackageId, expectedManifestSha256, manifest.SourceRingDigest,
                 expectedTargetApplicationName, CanonicalTargetProtectionProvider, manifest.Keys.Count,
                 manifest.Revocations.Count, manifest.Connector.KeyId, manifest.Connector.PublicKeyFingerprint,
                 manifest.Connector.DeploymentId, Path.GetFullPath(destinationConnectorPath), DateTimeOffset.UtcNow));
+            pending = pending with
+            {
+                Phase = "ready-to-publish",
+                Artifacts = ReadArtifactManifest(stagedDirectory),
+                RecordedAt = DateTimeOffset.UtcNow,
+            };
+            ReplaceJsonFile(pendingPath, pending);
+
             Directory.CreateDirectory(Path.GetDirectoryName(destinationRingDirectory)
                 ?? throw new InvalidOperationException("The destination ring has no parent directory."));
-            if (Directory.Exists(destinationRingDirectory) || File.Exists(destinationRingDirectory))
-                throw new InvalidOperationException("The destination Data Protection ring appeared during preparation; nothing was installed.");
-            Directory.Move(stagedDirectory, destinationRingDirectory);
-            ringPublished = true;
-            File.Delete(pendingPath);
+            pending = pending with { Phase = "ring-publishing", RecordedAt = DateTimeOffset.UtcNow };
+            ReplaceJsonFile(pendingPath, pending);
+            PublishStagedArtifacts(stagedDirectory, destinationRingDirectory, pending.Artifacts!, destinationServiceSid,
+                allowPartialExisting: false);
+            pending = pending with
+            {
+                Phase = "ring-published",
+                StagedDirectory = Path.GetFullPath(destinationRingDirectory),
+                Artifacts = ReadArtifactManifest(destinationRingDirectory),
+                RecordedAt = DateTimeOffset.UtcNow,
+            };
+            ReplaceJsonFile(pendingPath, pending);
+            pending = pending with { Phase = "completed", RecordedAt = DateTimeOffset.UtcNow };
+            ReplaceJsonFile(pendingPath, pending);
         }
         catch
         {
-            if (Directory.Exists(stagedDirectory)) Directory.Delete(stagedDirectory, recursive: true);
-            if (connectorPublished && !ringPublished && File.Exists(destinationConnectorPath))
-            {
-                try { File.Delete(destinationConnectorPath); } catch { /* pending receipt keeps recovery attended */ }
-            }
+            // Leave the exact staging boundary and receipt for the attended recovery command.  Deleting on the
+            // catch path cannot authenticate a crash window and would destroy the only evidence of what was
+            // published; recovery is deliberately receipt-bound below.
             throw;
         }
 
@@ -754,14 +869,332 @@ public static class HomeContinuityKeyTransfer
         Path.GetFullPath(destinationRingDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
         + ".continuity-pending.json";
 
-    private static void RequireDestinationRingEmpty(string path)
+    private static string TerminalPath(string destinationRingDirectory) =>
+        Path.GetFullPath(destinationRingDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+        + ".continuity-terminal.json";
+
+    private static HomeContinuityPendingReceipt ReadPendingReceipt(string path)
+    {
+        if (!File.Exists(path) || Directory.Exists(path))
+            throw new InvalidOperationException($"The continuity receipt '{path}' is missing or is not a file.");
+        try
+        {
+            var receipt = JsonSerializer.Deserialize<HomeContinuityPendingReceipt>(File.ReadAllText(path));
+            if (receipt is null || receipt.SchemaVersion != 1 || receipt.PackageId == Guid.Empty
+                || string.IsNullOrWhiteSpace(receipt.ManifestSha256)
+                || string.IsNullOrWhiteSpace(receipt.DestinationRingPath)
+                || string.IsNullOrWhiteSpace(receipt.DestinationInstallationRoot)
+                || string.IsNullOrWhiteSpace(receipt.DestinationConnectorPath)
+                || string.IsNullOrWhiteSpace(receipt.DestinationServiceSid)
+                || string.IsNullOrWhiteSpace(receipt.Phase))
+                throw new InvalidOperationException("The continuity receipt is incomplete.");
+            return receipt;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("The continuity receipt is malformed; no recovery action was taken.", ex);
+        }
+    }
+
+    private static HomeContinuityPackageManifest ValidateRecoveryReceipt(
+        HomeContinuityPendingReceipt receipt,
+        string packageDirectory,
+        string destinationRingDirectory,
+        HomeContinuityIdentityBinding expectedBinding,
+        string expectedManifestSha256,
+        Guid expectedPackageId,
+        string destinationInstallationRoot,
+        string destinationConnectorPath,
+        string destinationServiceSid)
+    {
+        var fullPackage = Path.GetFullPath(packageDirectory);
+        var fullRing = Path.GetFullPath(destinationRingDirectory);
+        var fullRoot = Path.GetFullPath(destinationInstallationRoot);
+        var fullConnector = Path.GetFullPath(destinationConnectorPath);
+        if (!string.Equals(receipt.PackageDirectory, fullPackage, StringComparison.OrdinalIgnoreCase)
+            || receipt.PackageId != expectedPackageId
+            || !string.Equals(receipt.ManifestSha256, expectedManifestSha256, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.DestinationRingPath, fullRing, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.DestinationInstallationRoot, fullRoot, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.DestinationConnectorPath, fullConnector, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.DestinationServiceSid, destinationServiceSid, StringComparison.Ordinal))
+            throw new InvalidOperationException("The recovery arguments do not match the pending continuity receipt; nothing was changed.");
+        var expectedStagedDirectory = fullRing.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + $".continuity-stage-{expectedPackageId:N}";
+        if (!string.Equals(receipt.Phase, "ring-published", StringComparison.Ordinal)
+            && !string.Equals(receipt.StagedDirectory, expectedStagedDirectory, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The pending receipt does not bind the canonical owned staging directory.");
+        if (string.Equals(receipt.Phase, "ring-published", StringComparison.Ordinal)
+            && !string.Equals(receipt.StagedDirectory, fullRing, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The pending receipt does not bind the canonical owned staging directory.");
+        if (receipt.Phase is not ("staged" or "artifacts-ready" or "connector-published" or "ready-to-publish" or "ring-publishing" or "ring-published"))
+            throw new InvalidOperationException($"The pending receipt phase '{receipt.Phase}' is not recoverable.");
+        ValidateBinding(expectedBinding);
+        if (!IsSha256(receipt.ManifestSha256) || !IsSha256(receipt.ConnectorSha256))
+            throw new InvalidOperationException("The pending receipt has no valid manifest or connector artifact hash.");
+        RequireNoReparsePoints(fullRoot, "The destination installation root");
+        RequireUnderRoot(fullRoot, fullRing, "The destination Data Protection ring");
+        RequireUnderRoot(fullRoot, fullConnector, "The destination connector path");
+        RequireNoReparsePoints(Path.GetDirectoryName(fullRing)
+            ?? throw new InvalidOperationException("The destination ring has no parent directory."),
+            "The destination Data Protection ring parent");
+
+        RequireNoReparsePoints(fullPackage, "The continuity package");
+        var manifestPath = Path.Combine(fullPackage, "manifest.json");
+        if (!string.Equals(Sha256File(manifestPath), expectedManifestSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The recovery package manifest changed after the pending receipt was recorded; nothing was changed.");
+        var manifest = ReadManifest(manifestPath);
+        if (manifest.PackageId != expectedPackageId)
+            throw new InvalidOperationException("The recovery package ID does not match the pending receipt.");
+        ValidateManifest(manifest, fullPackage, CanonicalTargetApplicationName, expectedBinding);
+        ValidateConnectorManifest(manifest.Connector, expectedBinding);
+        ValidateReceiptArtifactNames(receipt.Artifacts, manifest);
+        return manifest;
+    }
+
+    private static void ValidateRecoveryArtifactsForAbort(HomeContinuityPendingReceipt receipt,
+        string destinationRingDirectory)
+    {
+        if (receipt.Artifacts is null)
+            throw new InvalidOperationException("The pending receipt has no authenticated artifact hashes; refusing arbitrary cleanup.");
+        var ringArtifacts = Directory.Exists(destinationRingDirectory)
+            ? ReadArtifactManifest(destinationRingDirectory)
+            : Array.Empty<HomeContinuityPendingArtifact>();
+        if (ringArtifacts.Count != 0 && !string.Equals(receipt.Phase, "ring-publishing", StringComparison.Ordinal))
+            throw new InvalidOperationException("The destination ring contains unexpected artifacts; refusing cleanup.");
+        if (!ArtifactsSubset(ringArtifacts, receipt.Artifacts))
+            throw new InvalidOperationException("The destination ring contains artifacts that are not authenticated by the receipt; refusing cleanup.");
+        if (Directory.Exists(receipt.StagedDirectory))
+        {
+            var actual = ReadArtifactManifest(receipt.StagedDirectory);
+            if (!ArtifactsSubset(actual, receipt.Artifacts)
+                || !ArtifactsDisjoint(actual, ringArtifacts)
+                || actual.Count + ringArtifacts.Count != receipt.Artifacts.Count)
+                throw new InvalidOperationException("The staged continuity artifacts do not match the receipt; refusing cleanup.");
+        }
+        else if (receipt.Phase != "ring-publishing" || !ArtifactsEqual(ringArtifacts, receipt.Artifacts))
+            throw new InvalidOperationException("The staged continuity artifacts disappeared after the receipt was recorded; refusing cleanup.");
+        if (File.Exists(receipt.DestinationConnectorPath))
+        {
+            if (!string.Equals(Sha256File(receipt.DestinationConnectorPath), receipt.ConnectorSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The destination connector artifact does not match the receipt; refusing cleanup.");
+        }
+        else if (receipt.Phase is "connector-published" or "ready-to-publish" or "ring-publishing" or "ring-published")
+            throw new InvalidOperationException("The receipt says the connector was published, but the connector artifact is missing; refusing cleanup.");
+        if (Directory.Exists(destinationRingDirectory))
+            RequireCanonicalRingAcl(destinationRingDirectory, receipt.DestinationServiceSid);
+    }
+
+    private static void ValidateRecoveryArtifactsForComplete(HomeContinuityPendingReceipt receipt,
+        string destinationRingDirectory, string destinationConnectorPath)
+    {
+        if (receipt.Artifacts is null)
+            throw new InvalidOperationException("The pending receipt does not identify a complete staged artifact set; abort it after review.");
+        if (!File.Exists(destinationConnectorPath)
+            || !string.Equals(Sha256File(destinationConnectorPath), receipt.ConnectorSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The destination connector artifact does not match the receipt; refusing completion.");
+        if (File.Exists(destinationRingDirectory))
+            throw new InvalidOperationException("The destination ring path is a file; refusing completion.");
+        var ringArtifacts = Directory.Exists(destinationRingDirectory)
+            ? ReadArtifactManifest(destinationRingDirectory)
+            : Array.Empty<HomeContinuityPendingArtifact>();
+        if (Directory.Exists(destinationRingDirectory))
+            RequireCanonicalRingAcl(destinationRingDirectory, receipt.DestinationServiceSid);
+        if (ringArtifacts.Count != 0 && !string.Equals(receipt.Phase, "ring-publishing", StringComparison.Ordinal))
+            throw new InvalidOperationException("The destination ring already contains artifacts before recovery publication; refusing completion.");
+        if (string.Equals(receipt.Phase, "ring-published", StringComparison.Ordinal))
+        {
+            if (!ArtifactsEqual(ringArtifacts, receipt.Artifacts))
+                throw new InvalidOperationException("The published ring does not match the receipt; refusing completion.");
+            return;
+        }
+        if (!Directory.Exists(receipt.StagedDirectory))
+            throw new InvalidOperationException("The pending receipt does not identify a complete staged artifact set; abort it after review.");
+        var stagedArtifacts = ReadArtifactManifest(receipt.StagedDirectory);
+        if (!ArtifactsSubset(stagedArtifacts, receipt.Artifacts)
+            || !ArtifactsSubset(ringArtifacts, receipt.Artifacts)
+            || !ArtifactsDisjoint(stagedArtifacts, ringArtifacts)
+            || stagedArtifacts.Count + ringArtifacts.Count != receipt.Artifacts.Count)
+            throw new InvalidOperationException("The staged and destination continuity artifacts do not match the receipt; refusing completion.");
+    }
+
+    private static void ValidateCompletedReceipt(HomeContinuityPendingReceipt receipt, IConfiguration configuration)
+    {
+        var configuredRing = configuration["DataProtection:KeyRingPath"]?.Trim();
+        var configuredRoot = configuration["SiteServer:InstallationRoot"]?.Trim();
+        var configuredSid = configuration["SiteServer:ServiceSid"]?.Trim();
+        if (string.IsNullOrWhiteSpace(configuredRing) || string.IsNullOrWhiteSpace(configuredRoot)
+            || string.IsNullOrWhiteSpace(configuredSid)
+            || !string.Equals(Path.GetFullPath(configuredRing), receipt.DestinationRingPath, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Path.GetFullPath(configuredRoot), receipt.DestinationInstallationRoot, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(configuredSid, receipt.DestinationServiceSid, StringComparison.Ordinal))
+            throw new InvalidOperationException("The terminal continuity receipt is not bound to this site's configured ring, installation root and service SID.");
+        if (string.IsNullOrWhiteSpace(receipt.PackageDirectory) || !IsSha256(receipt.ManifestSha256)
+            || !IsSha256(receipt.ConnectorSha256) || !Directory.Exists(receipt.PackageDirectory))
+            throw new InvalidOperationException("The terminal continuity receipt has no authenticated package identity.");
+        RequireNoReparsePoints(receipt.PackageDirectory, "The continuity package");
+        var manifestPath = Path.Combine(receipt.PackageDirectory, "manifest.json");
+        if (!string.Equals(Sha256File(manifestPath), receipt.ManifestSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The terminal continuity package manifest changed after publication.");
+        var manifest = ReadManifest(manifestPath);
+        if (manifest.PackageId != receipt.PackageId)
+            throw new InvalidOperationException("The terminal continuity package ID does not match its receipt.");
+        ValidateManifest(manifest, receipt.PackageDirectory, CanonicalTargetApplicationName, manifest.Binding);
+        ValidateConnectorManifest(manifest.Connector, manifest.Binding);
+        ValidateReceiptArtifactNames(receipt.Artifacts, manifest);
+        if (!Directory.Exists(receipt.DestinationRingPath)
+            || !File.Exists(receipt.DestinationConnectorPath)
+            || receipt.Artifacts is null
+            || !ArtifactsEqual(ReadArtifactManifest(receipt.DestinationRingPath), receipt.Artifacts)
+            || !string.Equals(Sha256File(receipt.DestinationConnectorPath), receipt.ConnectorSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The terminal continuity receipt does not match the published ring and connector artifacts.");
+        RequireCanonicalRingAcl(receipt.DestinationRingPath, receipt.DestinationServiceSid);
+    }
+
+    private static void ConsumeValidatedAbortedTerminal(string terminalPath, string destinationRingDirectory,
+        string destinationInstallationRoot, string destinationConnectorPath, string destinationServiceSid)
+    {
+        if (!File.Exists(terminalPath) && !Directory.Exists(terminalPath)) return;
+        var receipt = ReadPendingReceipt(terminalPath);
+        if (!string.Equals(receipt.Phase, "aborted", StringComparison.Ordinal)
+            || !string.Equals(receipt.DestinationRingPath, Path.GetFullPath(destinationRingDirectory), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.DestinationInstallationRoot, Path.GetFullPath(destinationInstallationRoot), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.DestinationConnectorPath, Path.GetFullPath(destinationConnectorPath), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.DestinationServiceSid, destinationServiceSid, StringComparison.Ordinal)
+            || receipt.Artifacts is null || receipt.Artifacts.Count != 0
+            || Directory.Exists(receipt.StagedDirectory) || File.Exists(destinationConnectorPath)
+            || Directory.Exists(destinationRingDirectory) && Directory.EnumerateFileSystemEntries(destinationRingDirectory).Any())
+            throw new InvalidOperationException("The aborted continuity receipt does not authenticate an empty destination; refusing to remove it.");
+        if (Directory.Exists(destinationRingDirectory))
+            RequireCanonicalRingAcl(destinationRingDirectory, destinationServiceSid);
+        File.Delete(terminalPath);
+    }
+
+    private static IReadOnlyList<HomeContinuityPendingArtifact> ReadArtifactManifest(string directory)
+    {
+        if (!Directory.Exists(directory)) return Array.Empty<HomeContinuityPendingArtifact>();
+        RequireNoReparsePoints(directory, "The continuity artifact directory");
+        if (Directory.EnumerateDirectories(directory).Any())
+            throw new InvalidOperationException("The continuity artifact directory contains an unexpected subdirectory.");
+        return Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly)
+            .Select(path => new HomeContinuityPendingArtifact(Path.GetFileName(path), Sha256File(path)))
+            .OrderBy(x => x.RelativePath, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static bool ArtifactsEqual(IReadOnlyList<HomeContinuityPendingArtifact> actual,
+        IReadOnlyList<HomeContinuityPendingArtifact> expected) =>
+        actual.Count == expected.Count
+        && actual.Zip(expected).All(pair => string.Equals(pair.First.RelativePath, pair.Second.RelativePath, StringComparison.Ordinal)
+            && string.Equals(pair.First.Sha256, pair.Second.Sha256, StringComparison.OrdinalIgnoreCase));
+
+    private static bool ArtifactsSubset(IReadOnlyList<HomeContinuityPendingArtifact> actual,
+        IReadOnlyList<HomeContinuityPendingArtifact> expected) =>
+        actual.All(candidate => expected.Any(reference =>
+            string.Equals(candidate.RelativePath, reference.RelativePath, StringComparison.Ordinal)
+            && string.Equals(candidate.Sha256, reference.Sha256, StringComparison.OrdinalIgnoreCase)));
+
+    private static bool ArtifactsDisjoint(IReadOnlyList<HomeContinuityPendingArtifact> first,
+        IReadOnlyList<HomeContinuityPendingArtifact> second) =>
+        first.All(candidate => second.All(other =>
+            !string.Equals(candidate.RelativePath, other.RelativePath, StringComparison.Ordinal)));
+
+    private static void ValidateReceiptArtifactNames(
+        IReadOnlyList<HomeContinuityPendingArtifact>? artifacts,
+        HomeContinuityPackageManifest manifest)
+    {
+        if (artifacts is null)
+            throw new InvalidOperationException("The continuity receipt has no authenticated artifact list.");
+        var allowed = manifest.Keys.Select(x => x.FileName)
+            .Concat(manifest.Revocations.Select(x => x.FileName))
+            .Append("continuity-receipt.json")
+            .ToHashSet(StringComparer.Ordinal);
+        if (artifacts.Select(x => x.RelativePath).Distinct(StringComparer.Ordinal).Count() != artifacts.Count
+            || artifacts.Any(x => string.IsNullOrWhiteSpace(x.RelativePath) || !allowed.Contains(x.RelativePath)
+                || !IsSha256(x.Sha256)))
+            throw new InvalidOperationException("The continuity receipt contains an unexpected or malformed artifact name.");
+    }
+
+    private static void PublishStagedArtifacts(string stagedDirectory, string destinationRingDirectory,
+        IReadOnlyList<HomeContinuityPendingArtifact> expectedArtifacts, string destinationServiceSid,
+        bool allowPartialExisting)
+    {
+        if (File.Exists(destinationRingDirectory))
+            throw new InvalidOperationException("The destination ring path is a file; nothing was published.");
+        if (Directory.Exists(destinationRingDirectory))
+        {
+            RequireCanonicalRingAcl(destinationRingDirectory, destinationServiceSid);
+            var existing = ReadArtifactManifest(destinationRingDirectory);
+            if (existing.Count != 0 && (!allowPartialExisting
+                || !ArtifactsSubset(existing, expectedArtifacts)))
+                throw new InvalidOperationException("The destination ring already contains artifacts; continuity refuses to merge or overwrite it.");
+            foreach (var artifact in expectedArtifacts.OrderBy(x => x.RelativePath, StringComparer.Ordinal))
+            {
+                var source = Path.Combine(stagedDirectory, artifact.RelativePath);
+                var target = Path.Combine(destinationRingDirectory, artifact.RelativePath);
+                if (File.Exists(target))
+                {
+                    if (!allowPartialExisting
+                        || !string.Equals(Sha256File(target), artifact.Sha256, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("The destination ring already contains an artifact; continuity refuses to overwrite it.");
+                    continue;
+                }
+                if (!File.Exists(source) || Directory.Exists(target)
+                    || !string.Equals(Sha256File(source), artifact.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The staged continuity artifact changed before publication; nothing was published.");
+                File.Move(source, target);
+            }
+            if (Directory.Exists(stagedDirectory)) Directory.Delete(stagedDirectory, recursive: true);
+            if (!ArtifactsEqual(ReadArtifactManifest(destinationRingDirectory), expectedArtifacts))
+                throw new InvalidOperationException("The published continuity ring did not match its authenticated receipt.");
+            return;
+        }
+        Directory.Move(stagedDirectory, destinationRingDirectory);
+        RequireCanonicalRingAcl(destinationRingDirectory, destinationServiceSid);
+        if (!ArtifactsEqual(ReadArtifactManifest(destinationRingDirectory), expectedArtifacts))
+            throw new InvalidOperationException("The published continuity ring did not match its authenticated receipt.");
+    }
+
+    private static void RequireDestinationRingEmpty(string path, string serviceSid)
     {
         RequireNoReparsePoints(Path.GetDirectoryName(Path.GetFullPath(path))
             ?? throw new InvalidOperationException("The destination ring has no parent directory."),
             "The destination Data Protection ring parent");
         if (File.Exists(path)) throw new InvalidOperationException("The destination Data Protection ring path is a file.");
         if (Directory.Exists(path))
-            throw new InvalidOperationException("The destination Data Protection ring already exists; continuity refuses to merge or overwrite it.");
+        {
+            RequireNoReparsePoints(path, "The destination Data Protection ring");
+            if (Directory.EnumerateFileSystemEntries(path).Any())
+                throw new InvalidOperationException("The destination Data Protection ring already contains artifacts; continuity refuses to merge or overwrite it.");
+            RequireCanonicalRingAcl(path, serviceSid);
+        }
+    }
+
+    private static void RequireCanonicalRingAcl(string path, string serviceSid)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Continuity ACL validation requires Windows.");
+        ValidateServiceSid(serviceSid, "The destination connector service SID");
+        var security = new DirectoryInfo(path).GetAccessControl();
+        if (!security.AreAccessRulesProtected)
+            throw new InvalidOperationException("The destination Data Protection ring inherits permissions; continuity refuses an unprotected staging boundary.");
+
+        var expected = new Dictionary<string, FileSystemRights>(StringComparer.Ordinal)
+        {
+            // Windows materializes Modify with Synchronize on an explicit directory
+            // grant.  Accept that normalized mask while keeping the identity,
+            // inheritance, and three-rule boundary exact.
+            [serviceSid] = FileSystemRights.Modify | FileSystemRights.Synchronize,
+            ["S-1-5-18"] = FileSystemRights.FullControl,
+            ["S-1-5-32-544"] = FileSystemRights.FullControl,
+        };
+        var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>().ToArray();
+        if (rules.Length != expected.Count || rules.Any(rule => rule.AccessControlType != AccessControlType.Allow
+            || rule.IsInherited || rule.InheritanceFlags != (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit)
+            || rule.PropagationFlags != PropagationFlags.None || rule.IdentityReference is not SecurityIdentifier identity
+            || !expected.TryGetValue(identity.Value, out var rights) || rule.FileSystemRights != rights))
+            throw new InvalidOperationException("The destination Data Protection ring must retain exactly API Modify plus SYSTEM and Administrators FullControl with protected inheritance.");
     }
 
     private static void RequireProtectedDirectoryAcl(string path, string description)
@@ -813,11 +1246,27 @@ public static class HomeContinuityKeyTransfer
         File.Move(temp, path);
     }
 
+    private static void ReplaceJsonFile<T>(string path, T value)
+    {
+        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+        }
+        File.Move(temp, path, overwrite: true);
+    }
+
     private static string Sha256File(string path)
     {
         using var stream = File.OpenRead(path);
         return Convert.ToHexString(SHA256.HashData(stream));
     }
+
+    private static string Sha256Utf8(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static string DigestElements(IEnumerable<XElement> elements)
     {
@@ -916,7 +1365,13 @@ public sealed record HomeContinuityPendingReceipt(
     string DestinationConnectorPath,
     string DestinationServiceSid,
     string Phase,
-    DateTimeOffset RecordedAt);
+    DateTimeOffset RecordedAt,
+    string PackageDirectory = "",
+    string StagedDirectory = "",
+    IReadOnlyList<HomeContinuityPendingArtifact>? Artifacts = null,
+    string ConnectorSha256 = "");
+
+public sealed record HomeContinuityPendingArtifact(string RelativePath, string Sha256);
 
 public sealed record HomeContinuityConnectorMaterial(
     string DeploymentId,

@@ -47,7 +47,14 @@ namespace AeroLink.Api;
 ///       --verified-backup &lt;sha256&gt; --connector-deployment &lt;id&gt; --connector-key &lt;id&gt;
 ///       --connector-public-fingerprint &lt;sha256&gt; --verified-backup-archive-sha256 &lt;sha256&gt; --manifest-sha256 &lt;hash&gt;
 ///       --certificate &lt;cert.pem|pfx&gt; [--certificate-key &lt;private-key.pem&gt;]
-///       Rewraps the package with LocalMachine DPAPI and refuses a pre-existing destination ring.
+///       Rewraps the package with LocalMachine DPAPI and refuses a non-empty or incorrectly ACLed destination ring.
+///
+///   maintenance home-continuity recover --action complete|abort --package &lt;directory&gt;
+///       --destination-ring &lt;directory&gt; --package-id &lt;guid&gt; --manifest-sha256 &lt;hash&gt;
+///       --source-installation &lt;id&gt; --source-discriminator &lt;exact-value&gt; --source-protection &lt;provider&gt;
+///       --verified-backup &lt;sha256&gt; --connector-deployment &lt;id&gt; --connector-key &lt;id&gt;
+///       --connector-public-fingerprint &lt;sha256&gt; --verified-backup-archive-sha256 &lt;sha256&gt;
+///       Completes or compensates only the exact receipt-bound partial transfer; mismatches refuse all cleanup.
 /// </summary>
 public static class AeroLinkMaintenanceHost
 {
@@ -66,6 +73,7 @@ public static class AeroLinkMaintenanceHost
             Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
             Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory>");
             Console.WriteLine("  maintenance home-continuity apply --package <directory> --destination-ring <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256> --manifest-sha256 <hash> --certificate <cert.pem|pfx> [--certificate-key <private-key.pem>]");
+            Console.WriteLine("  maintenance home-continuity recover --action complete|abort --package <directory> --destination-ring <directory> --package-id <guid> --manifest-sha256 <hash> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256>");
             return 0;
         }
 
@@ -305,7 +313,8 @@ public static class AeroLinkMaintenanceHost
         {
             "export" => await ExportHomeContinuityAsync(services, args),
             "apply" => await ApplyHomeContinuityAsync(services, args),
-            _ => Fail("Use 'maintenance home-continuity export' or 'maintenance home-continuity apply'."),
+            "recover" => await RecoverHomeContinuityAsync(services, args),
+            _ => Fail("Use 'maintenance home-continuity export', 'maintenance home-continuity apply' or 'maintenance home-continuity recover'."),
         };
     }
 
@@ -381,6 +390,49 @@ public static class AeroLinkMaintenanceHost
         Console.WriteLine($"HOME CONTINUITY RING INSTALLED: {applied.PackageId:D}");
         Console.WriteLine($"Keys: {applied.Keys.Count}; revocations: {applied.Revocations.Count}");
         Console.WriteLine("Destination key files were rewrapped with LocalMachine DPAPI; no source file was modified.");
+        await Task.CompletedTask;
+        return 0;
+    }
+
+    private static async Task<int> RecoverHomeContinuityAsync(IServiceProvider services, string[] args)
+    {
+        var action = RequiredValue(args, "--action").ToLowerInvariant();
+        if (action is not ("complete" or "abort")) return Fail("--action must be complete or abort.");
+        var package = RequiredValue(args, "--package");
+        var destinationRing = RequiredValue(args, "--destination-ring");
+        var packageIdText = RequiredValue(args, "--package-id");
+        if (!Guid.TryParse(packageIdText, out var packageId) || packageId == Guid.Empty)
+            return Fail("--package-id must be a non-empty GUID.");
+        var sourceInstallation = RequiredValue(args, "--source-installation");
+        var sourceDiscriminator = RequiredValue(args, "--source-discriminator");
+        var sourceProtection = RequiredValue(args, "--source-protection");
+        var verifiedBackup = RequiredValue(args, "--verified-backup");
+        var verifiedBackupArchiveHash = RequiredValue(args, "--verified-backup-archive-sha256");
+        var connectorDeployment = RequiredValue(args, "--connector-deployment");
+        var connectorKey = RequiredValue(args, "--connector-key");
+        var connectorFingerprint = RequiredValue(args, "--connector-public-fingerprint");
+        var manifestSha256 = RequiredValue(args, "--manifest-sha256");
+        if (!IsSha256(manifestSha256) || !IsSha256(verifiedBackup) || !IsSha256(verifiedBackupArchiveHash)
+            || !IsSha256(connectorFingerprint))
+            return Fail("Recovery hashes must be SHA-256 values.");
+        if (!string.Equals(verifiedBackup, verifiedBackupArchiveHash, StringComparison.OrdinalIgnoreCase))
+            return Fail("--verified-backup and --verified-backup-archive-sha256 must identify the same verified archive.");
+
+        var configuration = services.GetRequiredService<IConfiguration>();
+        try { HomeContinuityKeyTransfer.ValidateDestinationConfiguration(configuration, destinationRing); }
+        catch (Exception ex) when (ex is InvalidOperationException or PlatformNotSupportedException)
+        { return Fail(ex.Message); }
+        var destination = ReadDestinationIdentity(configuration, connectorDeployment);
+        var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator,
+            HomeContinuityKeyTransfer.CanonicalTargetApplicationName, sourceProtection, verifiedBackup,
+            connectorDeployment, connectorKey, connectorFingerprint, verifiedBackupArchiveHash);
+        var recovered = HomeContinuityKeyTransfer.RecoverPending(package, destinationRing, binding, manifestSha256,
+            packageId, destination.InstallationRoot, destination.ConnectorPath, destination.ServiceSid,
+            abort: action == "abort");
+        Console.WriteLine(action == "abort"
+            ? $"HOME CONTINUITY PARTIAL TRANSFER ABORTED: {recovered.PackageId:D}"
+            : $"HOME CONTINUITY PARTIAL TRANSFER COMPLETED: {recovered.PackageId:D}");
+        Console.WriteLine("The receipt, package identity, destination binding and artifact hashes were verified before the recovery action.");
         await Task.CompletedTask;
         return 0;
     }

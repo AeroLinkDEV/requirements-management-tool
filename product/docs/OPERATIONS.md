@@ -898,15 +898,45 @@ Before apply, the destination must explicitly configure exactly `DataProtection:
 target `DataProtection:KeyRingPath`, and `DataProtection:ProtectKeysWith=DpapiLocalMachine`; all three are checked
 before staging. The maintenance runtime must also expose the declared installation root, connector path, effective
 deployment ID and API service SID; source export checks those values against the actual configured source key, while
-apply refuses a connector path outside the destination root or a pre-existing ring/key. Apply requires the exact
-source binding, final-backup SHA-256 and manifest hash, rejects malformed or unexpected XML, reparse-point parents
-and any pre-existing destination ring or connector key, decrypts certificate envelopes only in memory, rewraps the
-Data Protection descriptors with LocalMachine DPAPI in a staging directory, validates key metadata, the exact
-revocation set and connector public identity, then publishes the new ring and connector key under a durable pending
-receipt. A pending receipt refuses unattended commissioning after a crash or partial publish; recovery may remove
-only artifacts owned by that receipt. The destination certificate private key stays on the destination and must be
+apply refuses a connector path outside the destination root or a pre-existing connector key/non-empty ring. A fresh A2 `-NoStart`
+installation may already contain the canonical empty key-ring directory: apply accepts it only when it has no
+entries, no reparse point and exactly the protected API-Modify plus SYSTEM/Administrators-FullControl ACL; it never
+merges or replaces an existing key. Apply requires the exact source binding, final-backup SHA-256 and manifest hash,
+rejects malformed or unexpected XML, reparse-point parents and any non-empty destination ring or connector key,
+decrypts certificate envelopes only in memory, rewraps the Data Protection descriptors with LocalMachine DPAPI in a
+staging directory, validates key metadata, the exact revocation set and connector public identity, then publishes the
+new ring and connector key under a durable receipt outside the ring. A pending receipt refuses unattended
+commissioning after a crash or partial publish. An attended recovery must supply the recorded package ID, manifest
+digest, installation root, service SID and identity binding; it may complete only a fully hashed connector publish or
+abort only an exactly hashed, owned partial stage (including a receipt-bound partial publish into the preprovisioned
+empty ring). Any mismatch refuses cleanup. An abort writes a terminal receipt,
+keeps normal commissioning refused until a new transfer completes, and permits a later explicit apply to consume only
+that validated empty abort boundary. The destination certificate private key stays on the destination and must be
 transferred/imported through the existing attended certificate and ACL procedure; it is never placed in the package
 or repository.
+
+For an interrupted apply, stop the site and use the same package and recorded values:
+
+```powershell
+dotnet AeroLink.Api.dll maintenance home-continuity recover `
+  --action complete `
+  --package D:\transfer\aerolink-home-continuity-package `
+  --destination-ring 'C:\AeroLink\AeroLink Production\keys\data-protection' `
+  --package-id <pending-package-guid> `
+  --manifest-sha256 <pending-manifest-sha256> `
+  --source-installation <source-installation-id> `
+  --source-discriminator <captured-source-discriminator> `
+  --source-protection <captured-provider> `
+  --verified-backup <verified-backup-sha256> `
+  --verified-backup-archive-sha256 <verified-backup-sha256> `
+  --connector-deployment <connector-deployment-id> `
+  --connector-key <connector-key-id> `
+  --connector-public-fingerprint <connector-public-fingerprint-sha256>
+```
+
+Use `--action abort` only after reviewing the receipt. It refuses a completed ring, unexpected files, missing
+authenticated hashes or any path/identity mismatch; an in-progress partial publish is cleaned only when its exact
+receipt-owned hashes verify. It does not provide an arbitrary cleanup switch.
 
 When the captured source discriminator differs from canonical `AeroLink`, set the attended temporary
 `DataProtection:LegacyApplicationName` to that exact captured value. AeroLink protects new durable values with the

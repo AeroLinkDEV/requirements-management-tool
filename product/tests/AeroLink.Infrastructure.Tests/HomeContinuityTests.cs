@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.AccessControl;
+using System.Text.Json;
 using System.Xml.Linq;
 using AeroLink.ConnectorProtocol;
 using AeroLink.Infrastructure.Persistence.Maintenance;
@@ -66,6 +67,85 @@ public sealed class HomeContinuityTests
     }
 
     [WindowsFact]
+    public void Receipt_bound_abort_refuses_mismatch_and_cleans_only_the_owned_empty_stage()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-recovery-{Guid.NewGuid():N}");
+        var package = Path.Combine(root, "package");
+        var destinationInstallation = Path.Combine(root, "destination-installation");
+        var destination = Path.Combine(destinationInstallation, "keys", "data-protection");
+        var destinationConnector = Path.Combine(destinationInstallation, "keys", "connector", "connector-signing-key.pem");
+        var sourceInstallation = Path.Combine(root, "source-installation");
+        var destinationServiceSid = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+        var packageId = Guid.NewGuid();
+        var keyId = Guid.NewGuid();
+        var connectorDeployment = "connector-deployment";
+        var connectorFingerprint = new string('b', 64);
+        var binding = new HomeContinuityIdentityBinding(
+            "source-installation", "captured-source", "AeroLink", "Unprotected", new string('a', 64),
+            connectorDeployment, connectorFingerprint[..24], connectorFingerprint, new string('a', 64));
+        Directory.CreateDirectory(package);
+        Directory.CreateDirectory(destinationInstallation);
+        Directory.CreateDirectory(destination);
+        SetCanonicalRingAcl(destination, destinationServiceSid);
+        try
+        {
+            var keyPath = Path.Combine(package, "key.xml");
+            var connectorPath = Path.Combine(package, "connector-key.cms");
+            File.WriteAllText(keyPath, "<key />");
+            File.WriteAllText(connectorPath, "synthetic encrypted connector envelope");
+            var creation = DateTimeOffset.UtcNow.AddMinutes(-2);
+            var key = new HomeContinuityKeyManifestEntry(keyId, creation, creation, creation.AddDays(1),
+                "key.xml", Sha256File(keyPath));
+            var connector = new HomeContinuityConnectorManifest(
+                "connector-key.cms", Sha256File(connectorPath), connectorDeployment, connectorFingerprint[..24],
+                connectorFingerprint, sourceInstallation, Path.Combine(sourceInstallation, "connector.pem"),
+                "S-1-5-80-1234");
+            var manifest = new HomeContinuityPackageManifest(
+                2, packageId, DateTimeOffset.UtcNow, binding.SourceApplicationDiscriminator,
+                "AeroLink", binding.SourceProtectionProvider, new string('d', 64), binding,
+                [key], [], connector);
+            File.WriteAllText(Path.Combine(package, "manifest.json"),
+                JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+            var manifestHash = Sha256File(Path.Combine(package, "manifest.json"));
+            var staged = destination.TrimEnd(Path.DirectorySeparatorChar) + $".continuity-stage-{packageId:N}";
+            Directory.CreateDirectory(staged);
+            var pending = new HomeContinuityPendingReceipt(
+                1, packageId, manifestHash, destinationInstallation, destination, destinationConnector,
+                destinationServiceSid, "staged", DateTimeOffset.UtcNow, package, staged,
+                Array.Empty<HomeContinuityPendingArtifact>(), new string('c', 64));
+            var pendingPath = destination + ".continuity-pending.json";
+            File.WriteAllText(pendingPath, JsonSerializer.Serialize(pending, new JsonSerializerOptions { WriteIndented = true }));
+
+            var mismatch = Assert.Throws<InvalidOperationException>(() => HomeContinuityKeyTransfer.RecoverPending(
+                package, destination, binding, manifestHash, Guid.NewGuid(), destinationInstallation,
+                destinationConnector, destinationServiceSid, abort: true));
+            Assert.Contains("do not match", mismatch.Message, StringComparison.Ordinal);
+            Assert.True(File.Exists(pendingPath));
+
+            var aborted = HomeContinuityKeyTransfer.RecoverPending(
+                package, destination, binding, manifestHash, packageId, destinationInstallation,
+                destinationConnector, destinationServiceSid, abort: true);
+            Assert.Equal("aborted", aborted.Phase);
+            Assert.False(File.Exists(pendingPath));
+            Assert.True(File.Exists(destination + ".continuity-terminal.json"));
+            Assert.False(Directory.Exists(staged));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(destination));
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DataProtection:KeyRingPath"] = destination,
+                ["SiteServer:InstallationRoot"] = destinationInstallation,
+                ["SiteServer:ServiceSid"] = destinationServiceSid,
+            }).Build();
+            var blocked = Assert.Throws<InvalidOperationException>(() => HomeContinuityKeyTransfer.RequireNoPendingContinuity(configuration));
+            Assert.Contains("aborted", blocked.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [WindowsFact]
     public void Certificate_wrapped_ring_preserves_identity_and_legacy_payload_reads_without_plaintext_files()
     {
         var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-continuity-{Guid.NewGuid():N}");
@@ -114,6 +194,8 @@ public sealed class HomeContinuityTests
             var manifestHash = Sha256File(Path.Combine(package, "manifest.json"));
             ProtectDirectoryInheritance(destinationConnectorDirectory);
             var destinationServiceSid = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+            Directory.CreateDirectory(destination);
+            SetCanonicalRingAcl(destination, destinationServiceSid);
 
             var applied = HomeContinuityKeyTransfer.ApplyPackage(
                 package, destination, certificate, targetApplication, binding, manifestHash,
@@ -124,6 +206,22 @@ public sealed class HomeContinuityTests
             Assert.Single(applied.Revocations);
             Assert.Equal(revoked.KeyId, Assert.Single(manifest.Revocations).KeyId);
             Assert.True(File.Exists(destinationConnector));
+            var destinationAcl = new DirectoryInfo(destination).GetAccessControl();
+            var destinationRules = destinationAcl.GetAccessRules(true, true,
+                typeof(System.Security.Principal.SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+            Assert.True(destinationAcl.AreAccessRulesProtected);
+            Assert.Equal(3, destinationRules.Length);
+            Assert.Contains(destinationRules, rule => rule.IdentityReference.Value == destinationServiceSid
+                && rule.AccessControlType == AccessControlType.Allow
+                && (rule.FileSystemRights & (FileSystemRights.Modify | FileSystemRights.Synchronize))
+                    == (FileSystemRights.Modify | FileSystemRights.Synchronize)
+                && !rule.IsInherited);
+            Assert.Contains(destinationRules, rule => rule.IdentityReference.Value == "S-1-5-18"
+                && rule.FileSystemRights == FileSystemRights.FullControl
+                && rule.AccessControlType == AccessControlType.Allow && !rule.IsInherited);
+            Assert.Contains(destinationRules, rule => rule.IdentityReference.Value == "S-1-5-32-544"
+                && rule.FileSystemRights == FileSystemRights.FullControl
+                && rule.AccessControlType == AccessControlType.Allow && !rule.IsInherited);
             using (var restoredConnector = ECDsa.Create())
             {
                 restoredConnector.ImportFromPem(File.ReadAllText(destinationConnector));
@@ -191,6 +289,25 @@ public sealed class HomeContinuityTests
     {
         var security = new DirectoryInfo(path).GetAccessControl();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: true);
+        new DirectoryInfo(path).SetAccessControl(security);
+    }
+
+    private static void SetCanonicalRingAcl(string path, string serviceSid)
+    {
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var grant in new[]
+        {
+            (Sid: serviceSid, Rights: FileSystemRights.Modify),
+            (Sid: "S-1-5-18", Rights: FileSystemRights.FullControl),
+            (Sid: "S-1-5-32-544", Rights: FileSystemRights.FullControl),
+        })
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                new System.Security.Principal.SecurityIdentifier(grant.Sid), grant.Rights,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+        }
         new DirectoryInfo(path).SetAccessControl(security);
     }
 
