@@ -493,8 +493,8 @@ try {
     $cleanupStdout = Join-Path $continuityOwnerRoot 'cleanup.stdout.log'
     $cleanupStderr = Join-Path $continuityOwnerRoot 'cleanup.stderr.log'
     $cleanupArguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $cleanupScript),
-        '-TargetDatabase','aerolink_restore_validation','-PostgresPort',"$pgPort",'-PostgresBin',('"{0}"' -f $PostgresBin),
-        '-CleanupContinuityOperation','-ContinuityOperationJournalPath',('"{0}"' -f $continuityJournal),
+        '-TargetDatabase','aerolink_restore_validation','-PostgresPort',"$pgPort",'-PostgresBin',$PostgresBin,
+        '-CleanupContinuityOperation','-ContinuityOperationJournalPath',$continuityJournal,
         '-ContinuityOperationId',"$continuityOperationId")
     $cleanupProcess = Start-Process -FilePath $cleanupEngine -ArgumentList $cleanupArguments -RedirectStandardOutput $cleanupStdout -RedirectStandardError $cleanupStderr -WindowStyle Hidden -PassThru
     [void]$cleanupProcess.Handle
