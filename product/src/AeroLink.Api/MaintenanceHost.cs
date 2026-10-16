@@ -4,7 +4,9 @@ using AeroLink.Infrastructure;
 using AeroLink.Infrastructure.Persistence;
 using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Win32.SafeHandles;
 using Microsoft.Extensions.Configuration;
+using System.ComponentModel;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
@@ -12,6 +14,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -640,9 +643,15 @@ public static class AeroLinkMaintenanceHost
             start.ArgumentList.Add(protectedConfigRoot);
         }
         using var process = Process.Start(start) ?? throw new InvalidOperationException("The continuity restore process could not be started.");
-        var childIdentity = CaptureProcessIdentity(process);
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
+        JsonObject childIdentity;
+        try { childIdentity = CaptureProcessIdentity(process); }
+        catch (Exception error)
+        {
+            await FailContinuityChildIdentityCaptureAsync(operationJournal, "restore", process, stdout, stderr, error);
+            throw;
+        }
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         var timedOut = false;
         try
@@ -759,9 +768,15 @@ public static class AeroLinkMaintenanceHost
             start.ArgumentList.Add(protectedConfigRoot);
         }
         using var process = Process.Start(start) ?? throw new InvalidOperationException("The continuity cleanup process could not be started.");
-        var childIdentity = CaptureProcessIdentity(process);
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
+        JsonObject childIdentity;
+        try { childIdentity = CaptureProcessIdentity(process); }
+        catch (Exception error)
+        {
+            await FailContinuityChildIdentityCaptureAsync(operationJournal, "cleanup", process, stdout, stderr, error);
+            throw;
+        }
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         var timedOut = false;
         try { await process.WaitForExitAsync(timeout.Token); }
@@ -854,6 +869,72 @@ public static class AeroLinkMaintenanceHost
 
     private static string CompletedChildOutput(Task<string> output) =>
         output.Status == TaskStatus.RanToCompletion ? output.Result : "[child-output-unavailable]";
+
+    private static async Task FailContinuityChildIdentityCaptureAsync(
+        string operationJournal,
+        string childKind,
+        Process process,
+        Task<string> stdout,
+        Task<string> stderr,
+        Exception error)
+    {
+        var termination = "not-attempted";
+        var wait = "not-attempted";
+        try
+        {
+            var ownedHandle = process.SafeHandle;
+            if (ownedHandle.IsInvalid || ownedHandle.IsClosed)
+            {
+                termination = "handle-unavailable";
+                wait = "not-attempted";
+            }
+            else if (process.HasExited)
+            {
+                termination = "already-exited";
+                wait = "already-exited";
+            }
+            else
+            {
+                // Process.Start created this directly owned child. Identity capture failed before an
+                // attributable record existed, so terminate only this owned Process object and its
+                // descendants, then wait inside the same bounded failure window.
+                process.Kill(entireProcessTree: true);
+                termination = "requested";
+                try
+                {
+                    using var killWait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await process.WaitForExitAsync(killWait.Token);
+                    wait = process.HasExited ? "exited" : "not-exited";
+                }
+                catch (OperationCanceledException) { wait = "timeout"; }
+                catch (Exception waitError) { wait = $"failed:{waitError.GetType().Name}"; }
+            }
+        }
+        catch (Exception terminateError)
+        {
+            termination = $"failed:{terminateError.GetType().Name}";
+        }
+
+        var captured = await DrainContinuityChildOutputAsync(process, stdout, stderr, TimeSpan.FromSeconds(5));
+        try
+        {
+            UpdateContinuityOperationJournal(operationJournal, journal =>
+            {
+                journal[$"{childKind.Substring(0, 1).ToUpperInvariant()}{childKind.Substring(1)}ChildIdentityCapture"] = "failed";
+                journal[$"{childKind.Substring(0, 1).ToUpperInvariant()}{childKind.Substring(1)}ChildIdentityError"] = error.GetType().Name;
+                journal[$"{childKind.Substring(0, 1).ToUpperInvariant()}{childKind.Substring(1)}ChildTermination"] = termination;
+                journal[$"{childKind.Substring(0, 1).ToUpperInvariant()}{childKind.Substring(1)}ChildWait"] = wait;
+                journal[$"{childKind.Substring(0, 1).ToUpperInvariant()}{childKind.Substring(1)}ChildOutputDrainComplete"] = captured.Drained;
+                journal[$"{childKind.Substring(0, 1).ToUpperInvariant()}{childKind.Substring(1)}ChildStdout"] = RedactContinuityOutput(captured.Stdout);
+                journal[$"{childKind.Substring(0, 1).ToUpperInvariant()}{childKind.Substring(1)}ChildStderr"] = RedactContinuityOutput(captured.Stderr);
+            });
+        }
+        catch { /* MarkContinuityRecoveryRequired still preserves the terminal diagnostic record. */ }
+
+        MarkContinuityRecoveryRequired(operationJournal, "identity-capture-failed",
+            $"The product-owned {childKind} child identity could not be captured; termination={termination}, wait={wait}, outputDrainComplete={captured.Drained}; attended recovery is required.");
+        throw new InvalidOperationException($"The continuity {childKind} child identity could not be captured; recovery is required at {operationJournal}.", error);
+    }
 
     private static void MarkContinuityRecoveryRequired(string operationJournal, string phase, string disposition)
     {
@@ -969,21 +1050,57 @@ public static class AeroLinkMaintenanceHost
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetProcessTimes(SafeProcessHandle processHandle, out long creation, out long exit, out long kernel, out long user);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool QueryFullProcessImageNameW(SafeProcessHandle processHandle, uint flags, StringBuilder name, ref int size);
+
+    private static (int ProcessId, DateTimeOffset StartedUtc, string ImagePath) ReadProcessIdentity(Process process)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            var fallbackImage = process.MainModule?.FileName ?? throw new InvalidOperationException("The continuity child image identity is unavailable.");
+            return (process.Id, process.StartTime.ToUniversalTime(), Path.GetFullPath(fallbackImage));
+        }
+
+        var handle = process.SafeHandle;
+        if (handle.IsInvalid || handle.IsClosed)
+            throw new InvalidOperationException("The continuity child process handle is unavailable.");
+        if (!GetProcessTimes(handle, out var creation, out _, out _, out _))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "The continuity child creation identity is unavailable.");
+        var imageBuffer = new StringBuilder(32768);
+        var imageLength = imageBuffer.Capacity;
+        if (!QueryFullProcessImageNameW(handle, 0, imageBuffer, ref imageLength))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "The continuity child image identity is unavailable.");
+        if (imageLength <= 0)
+            throw new InvalidOperationException("The continuity child image identity is empty.");
+        return (process.Id, new DateTimeOffset(DateTime.FromFileTimeUtc(creation)), Path.GetFullPath(imageBuffer.ToString()));
+    }
+
     private static JsonObject CaptureProcessIdentity(Process process)
     {
-        var image = process.MainModule?.FileName ?? throw new InvalidOperationException("The continuity child image identity is unavailable.");
+        var observed = ReadProcessIdentity(process);
         return new JsonObject
         {
-            ["ProcessId"] = process.Id,
-            ["ProcessStartedUtc"] = process.StartTime.ToUniversalTime(),
-            ["ImagePath"] = Path.GetFullPath(image),
-            ["ImageSha256"] = Sha256File(image),
+            ["ProcessId"] = observed.ProcessId,
+            ["ProcessStartedUtc"] = observed.StartedUtc,
+            ["ImagePath"] = observed.ImagePath,
+            ["ImageSha256"] = Sha256File(observed.ImagePath),
         };
     }
 
-    private static bool SameProcessIdentity(Process process, JsonObject identity) =>
-        process.Id == identity["ProcessId"]?.GetValue<int>()
-        && process.StartTime.ToUniversalTime() == identity["ProcessStartedUtc"]?.GetValue<DateTimeOffset>();
+    private static bool SameProcessIdentity(Process process, JsonObject identity)
+    {
+        try
+        {
+            var observed = ReadProcessIdentity(process);
+            return observed.ProcessId == identity["ProcessId"]?.GetValue<int>()
+                && observed.StartedUtc == identity["ProcessStartedUtc"]?.GetValue<DateTimeOffset>()
+                && string.Equals(observed.ImagePath, identity["ImagePath"]?.GetValue<string>(), StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
 
     private static string RedactContinuityOutput(string value)
     {
