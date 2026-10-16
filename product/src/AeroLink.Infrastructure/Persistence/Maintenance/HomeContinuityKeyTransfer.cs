@@ -28,6 +28,12 @@ public static class HomeContinuityKeyTransfer
 {
     public const string CanonicalTargetApplicationName = "AeroLink";
     public const string CanonicalTargetProtectionProvider = "DpapiLocalMachine";
+    /// <summary>
+    /// Reads a Windows DPAPI-protected ring by using the decryptor type serialized in each key descriptor.
+    /// The scope is deliberately not selected by the reader: <see cref="Microsoft.AspNetCore.DataProtection.XmlEncryption.DpapiXmlDecryptor"/>
+    /// delegates to Windows DPAPI, whose protected blob carries the applicable user or machine binding.
+    /// </summary>
+    public const string SerializedWindowsDpapiProvider = "WindowsDpapi";
     private static readonly XNamespace DataProtectionNamespace =
         XNamespace.Get("http://schemas.asp.net/2015/03/dataProtection");
     private static readonly XNamespace XmlEncryptionNamespace =
@@ -67,12 +73,20 @@ public static class HomeContinuityKeyTransfer
                     throw new PlatformNotSupportedException("DpapiLocalMachine source rings require Windows.");
                 builder.ProtectKeysWithDpapi(protectToLocalMachine: true);
                 break;
+            case SerializedWindowsDpapiProvider:
+                if (!OperatingSystem.IsWindows())
+                    throw new PlatformNotSupportedException("Windows DPAPI source rings require Windows.");
+                // Do not call ProtectKeysWithDpapi here. The source scope is intentionally unknown. With
+                // automatic key generation disabled, the persisted descriptor's serialized DpapiXmlDecryptor
+                // is authoritative and Windows DPAPI attempts the protected blob without selecting a new scope
+                // or writing a replacement key.
+                break;
             case "Unprotected":
                 break;
             default:
                 throw new InvalidOperationException(
                     $"The captured source protection provider '{sourceProtectionProvider}' is unsupported. " +
-                    "Use DpapiCurrentUser, DpapiLocalMachine, or Unprotected.");
+                    "Use WindowsDpapi, DpapiCurrentUser, DpapiLocalMachine, or Unprotected.");
         }
         return services.BuildServiceProvider();
     }

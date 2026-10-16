@@ -14,6 +14,17 @@ foreach ($path in @('Backup-AeroLink.ps1','Restore-AeroLink.ps1','Test-AeroLinkR
 foreach ($required in @('aerolink_restore_stage_','Rename-Database ''aerolink'' $oldDatabase','AfterEvidenceActivation','Test-RestoredApi ''aerolink''','$activationPassed = $true')) {
     if(-not $restore.Contains($required)){throw "Restore activation contract is missing: $required"}
 }
+# HOME continuity export owns a fresh restore database. The guard must query the authoritative cluster before
+# archive expansion or database creation, so a stale target is a refusal and cannot be replaced by the restore
+# script. This source owner is retained because the production caller executes this exact script path.
+if(-not $restore.Contains('[switch]$RequireFreshTarget') -or
+   -not $restore.Contains('SELECT COUNT(*) FROM pg_database') -or
+   -not $restore.Contains('The fresh restore target database ''$Database'' already exists; refusing to replace it.')) {
+    throw 'Restore does not expose the fresh-target refusal contract.'
+}
+$freshGuard = $restore.IndexOf('if ($RequireFreshTarget) { Assert-DatabaseAbsent $restoreDatabase }', [StringComparison]::Ordinal)
+$restoreMutation = $restore.IndexOf('New-RestoredDatabase $restoreDatabase $dump', [StringComparison]::Ordinal)
+if($freshGuard -lt 0 -or $restoreMutation -lt 0 -or $freshGuard -ge $restoreMutation){throw 'Fresh-target refusal is not ordered before restore database mutation.'}
 foreach ($rollbackRequired in @('$originalDatabaseRenamed = $true','AfterOriginalDatabaseRename','if ($databaseActivated) { Rename-Database ''aerolink'' $failedDatabase }','Rename-Database $oldDatabase ''aerolink''','SELECT COUNT(*) FROM programs;')) {
     if(-not $restore.Contains($rollbackRequired)){throw "Restore rollback/query contract is missing: $rollbackRequired"}
 }

@@ -58,6 +58,52 @@ public sealed class HomeContinuityTests
         }
     }
 
+    /// <summary>
+    /// Authoring gate: this owns the Windows source-ring compatibility boundary when the serialized key
+    /// descriptor is the only honest evidence of DPAPI scope. A regression that selects CurrentUser or
+    /// LocalMachine while reading an opposite-scope descriptor fails to load the captured key; existing source
+    /// provider tests use an unprotected ring and cannot see that mistake. The fixture writes one non-default
+    /// temporary ring through the real Data Protection builder and reads it through the production source reader;
+    /// no test-only production seam or implicit profile path is involved.
+    /// </summary>
+    [WindowsFact]
+    public void Source_provider_uses_the_serialized_windows_dpapi_decryptor_without_reprotecting_the_ring()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-windows-dpapi-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string application = "captured-windows-dpapi-discriminator";
+            var seedServices = new ServiceCollection();
+            seedServices.AddDataProtection()
+                .SetApplicationName(application)
+                .PersistKeysToFileSystem(new DirectoryInfo(root))
+                .ProtectKeysWithDpapi();
+            using (var original = seedServices.BuildServiceProvider())
+            {
+                var created = original.GetRequiredService<IKeyManager>()
+                    .CreateNewKey(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+                Assert.NotEqual(Guid.Empty, created.KeyId);
+            }
+
+            var before = HomeContinuityCompatibilityReader.ComputeRingManifestSha256(root);
+            using var captured = HomeContinuityKeyTransfer.BuildSourceServices(
+                root, application, HomeContinuityKeyTransfer.SerializedWindowsDpapiProvider);
+            var keys = captured.GetRequiredService<IKeyManager>().GetAllKeys();
+            Assert.Single(keys);
+            Assert.Equal(before, HomeContinuityCompatibilityReader.ComputeRingManifestSha256(root));
+            var payload = captured.GetRequiredService<IDataProtectionProvider>()
+                .CreateProtector("synthetic-windows-dpapi")
+                .Protect("serialized-descriptor-canary");
+            Assert.Equal("serialized-descriptor-canary", captured.GetRequiredService<IDataProtectionProvider>()
+                .CreateProtector("synthetic-windows-dpapi").Unprotect(payload));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void Destination_boundary_requires_canonical_application_ring_and_protector()
     {

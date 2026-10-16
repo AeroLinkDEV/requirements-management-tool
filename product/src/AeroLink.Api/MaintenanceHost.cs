@@ -6,9 +6,12 @@ using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Data.Common;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Npgsql;
@@ -42,6 +45,7 @@ namespace AeroLink.Api;
 ///       --connector-deployment &lt;id&gt; --connector-key &lt;id&gt; --target-application AeroLink
 ///       --verified-backup-archive &lt;verified-backup.zip&gt;
 ///       --certificate &lt;public-cert.pem|cer&gt; --source-ring &lt;captured-directory&gt; --compatibility-receipt &lt;receipt.json&gt;
+///       --restore-postgres-bin &lt;postgres-bin-directory&gt;
 ///       Exports an identity-bound, certificate-wrapped ring package without printing key material.
 ///
 ///   maintenance home-continuity apply --package &lt;directory&gt; --destination-ring &lt;new-directory&gt;
@@ -77,7 +81,7 @@ public static class AeroLinkMaintenanceHost
             Console.WriteLine("  maintenance analyze [--json]");
             Console.WriteLine("  maintenance upgrade [--apply]");
             Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
-            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory> --compatibility-receipt <receipt.json>");
+            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory> --compatibility-receipt <receipt.json> --restore-postgres-bin <postgres-bin-directory>");
             Console.WriteLine("  maintenance home-continuity apply --package <directory> --destination-ring <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256> --manifest-sha256 <hash> --certificate <cert.pem|pfx> [--certificate-key <private-key.pem>]");
             Console.WriteLine("  maintenance home-continuity recover --action complete|abort --package <directory> --destination-ring <directory> --package-id <guid> --manifest-sha256 <hash> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256>");
             Console.WriteLine("  maintenance home-continuity probe --binding <binding.json> --receipt <receipt.json>");
@@ -369,25 +373,51 @@ public static class AeroLinkMaintenanceHost
         var certificatePath = RequiredValue(args, "--certificate");
         var sourceRingPath = RequiredValue(args, "--source-ring");
         var compatibilityReceiptPath = RequiredValue(args, "--compatibility-receipt");
+        var restorePostgresBin = RequiredValue(args, "--restore-postgres-bin");
         if (!string.Equals(targetApplication, HomeContinuityKeyTransfer.CanonicalTargetApplicationName, StringComparison.Ordinal))
             return Fail("The continuity destination application must be exactly 'AeroLink'.");
         var backupHash = VerifySourceBackup(verifiedBackupArchive, verifiedBackup, sourceInstallation);
         var compatibilityReceipt = ReadCompatibilityReceipt(compatibilityReceiptPath);
-        HomeContinuityCompatibilityReader.ValidateReceipt(compatibilityReceipt);
-        if (!string.Equals(compatibilityReceipt.Binding.SourceInstallationId, sourceInstallation, StringComparison.Ordinal)
-            || !string.Equals(compatibilityReceipt.Binding.VerifiedBackupArchiveSha256, backupHash, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(compatibilityReceipt.Binding.SourceDiscriminator, sourceDiscriminator, StringComparison.Ordinal)
-            || !string.Equals(Path.GetFullPath(compatibilityReceipt.Binding.SourceRingDirectory), Path.GetFullPath(sourceRingPath), StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(Path.GetFullPath(compatibilityReceipt.Binding.VerifiedBackupArchivePath), Path.GetFullPath(verifiedBackupArchive), StringComparison.OrdinalIgnoreCase))
-            return Fail("The continuity export receipt is not bound to this source ring, installation, discriminator or verified backup.");
         var configuration = services.GetRequiredService<IConfiguration>();
+        var installationRoot = Path.GetFullPath(RequiredConfiguration(configuration, "SiteServer:InstallationRoot"));
+        var protectedConfigRoot = configuration["SiteServer:ProtectedConfigRoot"]?.Trim();
+        ValidateExportSourceContext(compatibilityReceipt.Binding, sourceInstallation, sourceDiscriminator,
+            sourceProtection, sourceRingPath, verifiedBackupArchive, backupHash);
+        var restorePort = GetConfiguredRestorePort(configuration);
+        var restoreScript = ResolveCanonicalRestoreScript(installationRoot);
+        ValidatePostgresBin(restorePostgresBin);
+        var restoreDatabase = "aerolink_continuity_restore_" + Guid.NewGuid().ToString("N")[..12];
+        var restoreValidationRoot = Path.Combine(installationRoot, "restore-validation");
+        Directory.CreateDirectory(restoreValidationRoot);
+        var restoreProof = Path.Combine(restoreValidationRoot, restoreDatabase + ".continuity.json");
+        var readerImage = Process.GetCurrentProcess().MainModule?.FileName ?? Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(readerImage) || !File.Exists(readerImage))
+            throw new InvalidOperationException("The continuity reader process image identity is unavailable.");
+        var readerSid = CurrentReaderSid(compatibilityReceipt.Binding.ReaderUserSid);
+        var freshBinding = compatibilityReceipt.Binding with
+        {
+            SourceProviderSelection = sourceProtection,
+            VerifiedBackupArchivePath = Path.GetFullPath(verifiedBackupArchive),
+            VerifiedBackupArchiveSha256 = backupHash,
+            RestoredDatabaseName = restoreDatabase,
+            RestoredPostgresPort = restorePort,
+            RestoreProofPath = restoreProof,
+            RestoreScriptPath = restoreScript,
+            ReaderUserSid = readerSid,
+            ReaderSourceSha256 = Sha256File(readerImage),
+            ReaderAssemblySha256 = Sha256File(typeof(HomeContinuityCompatibilityReader).Assembly.Location),
+            SourceProcessAttestation = "operator-attested-frozen",
+        };
+        await RunFreshContinuityRestoreAsync(restoreScript, restorePostgresBin, verifiedBackupArchive,
+            restoreDatabase, restorePort, restoreProof, installationRoot, protectedConfigRoot);
+        HomeContinuityCompatibilityReader.ValidateBinding(freshBinding);
         var connector = ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation);
         using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
-        await using var restoredDb = BuildContinuityRestoreDb(services, compatibilityReceipt.Binding);
+        await using var restoredDb = BuildContinuityRestoreDb(services, freshBinding);
         var freshCompatibility = await HomeContinuityCompatibilityReader.ProbeAsync(
-            restoredDb, sourceServices, compatibilityReceipt.Binding);
+            restoredDb, sourceServices, freshBinding);
         if (!string.Equals(freshCompatibility.Status, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal))
-            return Fail("The continuity export requires a fresh complete compatibility proof from the verified restore; a stored receipt status is not sufficient.");
+            return Fail("The continuity export requires a fresh complete compatibility proof from its owned restore; a retained receipt status is not sufficient.");
         var sourceManager = sourceServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
         var sourceRepository = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(
             new DirectoryInfo(sourceRingPath), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
@@ -402,6 +432,141 @@ public static class AeroLinkMaintenanceHost
         Console.WriteLine("Key descriptors and protected values were not printed or written in plaintext.");
         await Task.CompletedTask;
         return 0;
+    }
+
+    private static void ValidateExportSourceContext(
+        HomeContinuityCompatibilityBinding captured,
+        string sourceInstallation,
+        string sourceDiscriminator,
+        string sourceProtection,
+        string sourceRingPath,
+        string verifiedBackupArchive,
+        string backupHash)
+    {
+        if (!string.Equals(captured.SourceInstallationId, sourceInstallation, StringComparison.Ordinal)
+            || !string.Equals(captured.SourceDiscriminator, sourceDiscriminator, StringComparison.Ordinal)
+            || !string.Equals(captured.SourceProviderSelection, sourceProtection, StringComparison.Ordinal)
+            || !string.Equals(Path.GetFullPath(captured.SourceRingDirectory), Path.GetFullPath(sourceRingPath), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Path.GetFullPath(captured.VerifiedBackupArchivePath), Path.GetFullPath(verifiedBackupArchive), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The continuity export receipt is not bound to this source ring, installation, discriminator, provider or verified backup.");
+        if (!Guid.TryParse(sourceInstallation, out var instanceId) || instanceId == Guid.Empty || captured.SourceInstanceId != instanceId)
+            throw new InvalidOperationException("The continuity export source installation and instance identities do not agree.");
+        if (captured.SourceProcessId <= 0 || captured.SourceProcessStartedUtc == default
+            || !string.Equals(captured.SourceProcessAttestation, "operator-attested-frozen", StringComparison.Ordinal))
+            throw new InvalidOperationException("The continuity export requires a separately attested frozen source process identity.");
+        if (!File.Exists(captured.SourceExecutablePath) || !string.Equals(Sha256File(captured.SourceExecutablePath), captured.SourceExecutableSha256, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(captured.SourceConfigurationPath) || !string.Equals(Sha256File(captured.SourceConfigurationPath), captured.SourceConfigurationSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The captured source executable or configuration no longer matches its recorded identity.");
+        if (!string.Equals(HomeContinuityCompatibilityReader.ComputeRingManifestSha256(sourceRingPath), captured.SourceRingManifestSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The captured source Data Protection ring no longer matches its recorded manifest digest.");
+        if (!string.Equals(captured.VerifiedBackupArchiveSha256, backupHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The retained continuity context does not match the verified backup archive hash.");
+        if (captured.ExternalStoreStates is null
+            || HomeContinuityCompatibilityReader.ExternalProtectedCategories.Any(category => !captured.ExternalStoreStates.ContainsKey(category)))
+            throw new InvalidOperationException("The retained continuity context does not contain the complete external-store inventory.");
+    }
+
+    private static int GetConfiguredRestorePort(IConfiguration configuration)
+    {
+        var configured = configuration.GetConnectionString("AeroLink");
+        if (string.IsNullOrWhiteSpace(configured))
+            throw new InvalidOperationException("The fresh continuity restore connection is not configured.");
+        var connection = new NpgsqlConnectionStringBuilder(configured);
+        if (connection.Port is <= 0 or 54329 || connection.Host is not ("127.0.0.1" or "localhost" or "::1"))
+            throw new InvalidOperationException("The fresh continuity restore must use an owned loopback PostgreSQL port other than 54329.");
+        return connection.Port;
+    }
+
+    private static string ResolveCanonicalRestoreScript(string installationRoot)
+    {
+        var script = Path.GetFullPath(Path.Combine(installationRoot, "program", "scripts", "Restore-AeroLink.ps1"));
+        if (!File.Exists(script) || (File.GetAttributes(script) & FileAttributes.ReparsePoint) != 0)
+            throw new FileNotFoundException("The installed continuity restore script is missing from the declared program root.", script);
+        return script;
+    }
+
+    private static void ValidatePostgresBin(string root)
+    {
+        var fullRoot = Path.GetFullPath(root);
+        if (!Directory.Exists(fullRoot) || (File.GetAttributes(fullRoot) & FileAttributes.ReparsePoint) != 0)
+            throw new DirectoryNotFoundException("The supplied PostgreSQL binary root does not exist as an owned directory.");
+        foreach (var executable in new[] { "createdb.exe", "pg_restore.exe", "psql.exe", "dropdb.exe" })
+        {
+            var path = Path.Combine(fullRoot, executable);
+            if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new FileNotFoundException($"The supplied PostgreSQL binary root is missing {executable}.", path);
+        }
+    }
+
+    private static string CurrentReaderSid(string capturedSid)
+    {
+        if (!OperatingSystem.IsWindows()) return capturedSid;
+        using var identity = WindowsIdentity.GetCurrent();
+        return identity.User?.Value ?? throw new InvalidOperationException("The continuity reader Windows identity is unavailable.");
+    }
+
+    private static async Task RunFreshContinuityRestoreAsync(
+        string restoreScript,
+        string postgresBin,
+        string archive,
+        string database,
+        int port,
+        string proof,
+        string installationRoot,
+        string? protectedConfigRoot)
+    {
+        var shell = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
+            : "pwsh";
+        var start = new ProcessStartInfo(shell)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(restoreScript)!,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        if (OperatingSystem.IsWindows())
+        {
+            // A .NET host launched from pwsh inherits pwsh's PSModulePath, whose PowerShell 7
+            // Microsoft.PowerShell.Security module can shadow the Windows PowerShell module. The
+            // installed restore authority uses Get-Acl, so give Windows PowerShell its own module
+            // roots exactly as a direct powershell.exe invocation does.
+            var windowsPowerShellModules = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "Modules"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsPowerShell", "Modules"),
+            }.Where(Directory.Exists);
+            start.Environment["PSModulePath"] = string.Join(Path.PathSeparator, windowsPowerShellModules);
+        }
+        foreach (var argument in new[]
+        {
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", restoreScript,
+            "-BackupArchive", archive, "-TargetDatabase", database, "-PostgresPort", port.ToString(CultureInfo.InvariantCulture),
+            "-PostgresBin", postgresBin, "-DisposableQualification", "-SkipCurrentCodeValidation",
+            "-RequireFreshTarget", "-ContinuityReceiptPath", proof, "-InstallationRoot", installationRoot,
+        }) start.ArgumentList.Add(argument);
+        if (!string.IsNullOrWhiteSpace(protectedConfigRoot))
+        {
+            start.ArgumentList.Add("-ProtectedConfigRoot");
+            start.ArgumentList.Add(protectedConfigRoot);
+        }
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("The continuity restore process could not be started.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            throw new InvalidOperationException("The fresh continuity restore exceeded its bounded operation time and was refused.");
+        }
+        await Task.WhenAll(stdout, stderr);
+        if (process.ExitCode != 0 || !File.Exists(proof))
+            throw new InvalidOperationException("The existing continuity restore authority refused the fresh owned restore; no export package was written.");
     }
 
     private static HomeContinuityCompatibilityReceipt ReadCompatibilityReceipt(string path)

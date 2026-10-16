@@ -736,13 +736,14 @@ When the source discriminator differs from canonical `AeroLink`, the exact captu
 temporary legacy read provider for existing durable payloads; new values use the canonical provider. Immutable
 notification history, controlled signatures and evidence are not rewritten. Sessions and other time-limited tokens
 are reissued, while connector key/deployment identity and certificate private-key ACLs remain separate attended
-transfer and qualification steps. Before export, the read-only compatibility reader must restore the verified backup
-into an owned disposable database and unprotect the complete compiled catalog of durable protected fields in memory.
+transfer and qualification steps. Export invokes the existing restore authority to create a fresh uniquely named
+owned disposable database, then unprotects the complete compiled catalog of durable protected fields in memory.
 The existing restore authority emits a write-once proof under the restore-validation root after archive and attachment
-verification; the reader binds that proof to the archive, database, restore script and source instance before using a
-read-only transaction. It emits only IDs, ciphertext digests, counts and pass/fail statuses, binds the source and
-reader identities plus the ring/configuration/discriminator/archive evidence, and requires an unchanged ring digest.
-Export re-runs this probe inline against the owned restore, so a mutable receipt status cannot authorize transfer. A
+verification; the reader binds that fresh proof to the archive, database, restore script and source instance before
+using a read-only transaction. It emits only IDs, ciphertext digests, counts and pass/fail statuses, binds the source
+and reader identities plus the ring/configuration/discriminator/archive evidence, and requires an unchanged ring
+digest. A retained compatibility receipt is diagnostic context only; export re-runs this probe inline against the
+fresh owned restore, so a mutable receipt status cannot authorize transfer. A
 candidate discriminator is compatibility evidence only; serialized decryptors remain authoritative and unknown
 Windows DPAPI scope is not guessed. Incomplete, conflicting or unsupported categories refuse transfer, while
 no-applicable and legacy-plaintext results remain non-proof statuses, ephemeral tokens and external protected stores

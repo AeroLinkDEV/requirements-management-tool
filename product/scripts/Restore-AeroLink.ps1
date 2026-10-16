@@ -8,6 +8,10 @@ param(
     [string]$PostgresBin,
     [int]$ValidationApiPort = 5091,
     [switch]$DisposableQualification,
+    # A continuity export owns a fresh restore database. When supplied, an existing target is a refusal rather
+    # than a disposable object to replace; this prevents a caller-controlled or stale restore from becoming the
+    # export's database authority.
+    [switch]$RequireFreshTarget,
     # Restore the archive's own state and validate the archive itself, but do NOT stand up current AeroLink
     # against the result.
     #
@@ -100,6 +104,10 @@ function Remove-Database([string]$Database) {
     [void](Invoke-Psql 'postgres' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();")
     $code = Invoke-AeroLinkWithPostgresAccess $suAccess { & (Join-Path $bin 'dropdb.exe') -w -h 127.0.0.1 -p $PostgresPort -U $suUser --if-exists $Database | Out-Host; $LASTEXITCODE }
     if ($code -ne 0) { throw "Could not remove disposable database '$Database'." }
+}
+function Assert-DatabaseAbsent([string]$Database) {
+    $answer = ([string](Invoke-Psql 'postgres' "SELECT COUNT(*) FROM pg_database WHERE datname = '$Database';")).Trim()
+    if ($answer -ne '0') { throw "The fresh restore target database '$Database' already exists; refusing to replace it." }
 }
 function New-RestoredDatabase([string]$Database, [string]$Dump) {
     Remove-Database $Database
@@ -267,6 +275,7 @@ $resolvedTarget = $null; $incoming = $null; $retained = $null
 $originalDatabaseRenamed = $false; $databaseActivated = $false; $evidenceActivated = $false; $activationPassed = $false
 
 try {
+    if ($RequireFreshTarget) { Assert-DatabaseAbsent $restoreDatabase }
     Expand-AeroLinkBackupArchive -ArchivePath $archive -DestinationDirectory $temporary
     $manifest = ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $temporary 'manifest.json') -Raw)
     $archiveInventoryObject = ConvertFrom-Json -InputObject (Get-Content -LiteralPath (Join-Path $temporary ([string]$manifest.AttachmentInventory)) -Raw)

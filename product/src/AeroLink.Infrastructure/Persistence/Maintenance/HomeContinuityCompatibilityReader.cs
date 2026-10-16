@@ -203,7 +203,7 @@ public static class HomeContinuityCompatibilityReader
         if (!string.Equals(binding.SourceProtectionScopeEvidence, UnknownProtectionScope, StringComparison.Ordinal)
             && binding.SourceProtectionScopeEvidence is not ("DpapiCurrentUser" or "DpapiLocalMachine" or "Unprotected"))
             throw new ArgumentException("Protection scope evidence must be unknown or a supported explicit value.", nameof(binding));
-        if (binding.SourceProviderSelection is not ("DpapiCurrentUser" or "DpapiLocalMachine" or "Unprotected"))
+        if (binding.SourceProviderSelection is not ("WindowsDpapi" or "DpapiCurrentUser" or "DpapiLocalMachine" or "Unprotected"))
             throw new ArgumentException("The source provider selection is unsupported.", nameof(binding));
         if (!string.Equals(binding.DiscoveryMode, ExplicitRingRead, StringComparison.Ordinal))
             throw new ArgumentException("Only the explicit ring-read discovery mode is implemented; fallback observations require their pinned public event schema.", nameof(binding));

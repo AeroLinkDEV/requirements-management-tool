@@ -1632,6 +1632,12 @@ Any failure through activation or restart stops the service and restores the pri
 retained pair is deliberately not deleted automatically; an operator dispositions it only after the restored
 deployment completes its site acceptance period.
 
+HOME continuity export reuses that restore authority with a fresh unique `restore` database and a write-once proof
+under the installation's `restore-validation` root. The retained compatibility receipt supplies source context only;
+export refuses to treat its status or restored database as authority, and performs the complete protected-field
+catalog probe again against the fresh archive restore in a read-only transaction before writing a package. The
+explicit PostgreSQL binary root is part of the command binding, and an existing fresh-target database is refused.
+
 For an isolated drill, use a database name containing `restore`, `validation`, or `test`; its evidence target must
 remain under `product\.local\restore-validation`. `AeroLinkRestoreQualification.Tests.ps1` exercises the
 destructive activation/fault matrix only on disposable PostgreSQL and refuses persistent port 54329.
