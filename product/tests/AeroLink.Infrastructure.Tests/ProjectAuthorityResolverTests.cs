@@ -322,6 +322,7 @@ public sealed class ProjectAuthorityResolverTests : IAsyncLifetime
     {
         var administrator = new UserAccount(IdentityService.SystemAdministratorUserName, "Global Administrator",
             "global.admin@example.test", IdentityService.HashPassword("StrongPass!2026"), _now);
+        administrator.DesignateBuiltInAdministrator("test.setup", _now);
         _db.Add(administrator);
         await _db.SaveChangesAsync();
 
@@ -512,6 +513,7 @@ public sealed class ProjectAuthorityResolverTests : IAsyncLifetime
         _db.RoleDelegations.Add(delegation);
         var administrator = new UserAccount(IdentityService.SystemAdministratorUserName, "Global Administrator",
             "global-source@example.test", IdentityService.HashPassword("StrongPass!2026"), _now);
+        administrator.DesignateBuiltInAdministrator("test.setup", _now);
         _db.Add(administrator);
         await _db.SaveChangesAsync();
 

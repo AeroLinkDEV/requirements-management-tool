@@ -41,6 +41,7 @@ import {
   verificationSummary,
 } from "./projectSetupVerificationProfile";
 import type { VerificationKind } from "./projectSetupVerificationProfile";
+import { isSystemAdministrator } from "./administratorCapability";
 import "./ProjectSetupWalkthrough.css";
 
 type StartKind = "Fresh" | "AeroLinkBaseline" | "ExternalBaseline";
@@ -1286,7 +1287,7 @@ export default function ProjectSetupWalkthrough({
 
   const finalize = async () => {
     if (!draft || !values || (!freshComplete && !sourceComplete)) return;
-    if (!user.isAdministrator) {
+    if (!isSystemAdministrator(user)) {
       setError("Only an AeroLink administrator can finalize a new Project. Your saved setup remains available for editing and resume.");
       return;
     }
@@ -1583,7 +1584,7 @@ export default function ProjectSetupWalkthrough({
               draftId={draft.draftId}
               draftVersion={draft.version}
               kind={values.startKind as SourceKind}
-              canAcceptSource={user.isAdministrator}
+              canAcceptSource={isSystemAdministrator(user)}
               selectedCategories={values.selectedCategories}
               levelOptions={levelCatalogue.map((level) => ({ id: level.id, label: level.label }))}
               ladderRevision={JSON.stringify(values.ladder)}
@@ -2454,7 +2455,7 @@ export default function ProjectSetupWalkthrough({
               source={sourceState.source}
               accepted={sourceState.assertionAccepted}
               password={sourceState.password}
-              disabled={!user.isAdministrator}
+              disabled={!isSystemAdministrator(user)}
               onAcceptedChange={(accepted) => setSourceState((current) => ({ ...current, assertionAccepted: accepted }))}
               onPasswordChange={(password) => setSourceState((current) => ({ ...current, password }))}
             />
@@ -2479,12 +2480,12 @@ export default function ProjectSetupWalkthrough({
         )}
         {values.startKind === "Fresh" && freshComplete && !hasUnsavedChanges && (
           <p className="setupReadyNotice" role="status">
-            {user.isAdministrator
+            {isSystemAdministrator(user)
               ? "Fresh setup is ready for the server's finalization gate. The resulting build will be In Work."
               : "Your fresh setup answers are saved. An AeroLink administrator must finalize this Project; you can continue editing and resume this draft."}
           </p>
         )}
-        {!user.isAdministrator && (
+        {!isSystemAdministrator(user) && (
           <p className="setupPendingNotice" role="status">
             Only an AeroLink administrator can accept source facts or create a Project. You can
             still review, edit, and save this setup draft.
@@ -2493,7 +2494,7 @@ export default function ProjectSetupWalkthrough({
         <button
           type="button"
           className="setupFinalizeButton"
-          disabled={!user.isAdministrator || finalizing || saving || (!freshComplete && !sourceComplete) || hasUnsavedChanges}
+          disabled={!isSystemAdministrator(user) || finalizing || saving || (!freshComplete && !sourceComplete) || hasUnsavedChanges}
           onClick={() => void finalize()}
         >
           {finalizing ? "Finalizing…" : "Create Project"}
