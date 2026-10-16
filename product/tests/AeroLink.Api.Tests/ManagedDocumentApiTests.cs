@@ -1125,6 +1125,11 @@ public sealed partial class ManagedDocumentApiTests
                     events.Add(new ManagedDocumentEvent(document.Id, "ScaleEvent", "admin", $"Bounded history event {eventIndex:D2}", now.AddSeconds(eventIndex)));
             }
             historyDocumentId = documents[0].Id; db.AddRange(documents); db.AddRange(revisions); db.AddRange(events); await db.SaveChangesAsync();
+            db.ElectronicSignatures.Add(new ElectronicSignature(Guid.NewGuid(), "windows.reviewer", "Windows Reviewer",
+                scope.ProgramId, "ManagedDocument", historyDocumentId, "DOC-000001.00", "Approve",
+                "Synthetic history signature", new string('a', 64), "127.0.0.1", now,
+                authenticationMethod: "windows-password"));
+            await db.SaveChangesAsync();
         }
 
         commands.Clear();
@@ -1175,6 +1180,8 @@ public sealed partial class ManagedDocumentApiTests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var page = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.InRange(page.GetProperty("items").GetArrayLength(), 0, 10);
+            if (surface == "signatures")
+                Assert.Equal("windows-password", page.GetProperty("items").EnumerateArray().Single().GetProperty("authenticationMethod").GetString());
         }
     }
 
