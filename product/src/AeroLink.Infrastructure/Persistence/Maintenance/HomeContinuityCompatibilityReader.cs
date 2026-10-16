@@ -1,7 +1,9 @@
 using System.Data;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +27,8 @@ public static class HomeContinuityCompatibilityReader
     public const string Unproven = "unproven";
     public const string Refused = "refused";
     public const string NotApplicable = "NOT_APPLICABLE";
+    public const string NoApplicableValues = "no-applicable-values";
+    public const string LegacyPlaintextPresent = "legacy-plaintext-present";
     public const string CandidateDiscriminatorCompatibility = "candidate-discriminator-compatibility";
     public const string ExplicitRingRead = "explicit-ring-read";
     public const string UnknownProtectionScope = "unknown";
@@ -80,7 +84,9 @@ public static class HomeContinuityCompatibilityReader
         ArgumentNullException.ThrowIfNull(sourceServices);
         ArgumentNullException.ThrowIfNull(binding);
         ValidateBinding(binding);
-        AssertDisposableRestoredDatabase(db, binding.RestoredDatabaseName, binding.RestoredPostgresPort);
+        var backup = VerifyBackupArchive(binding.VerifiedBackupArchivePath, binding.VerifiedBackupArchiveSha256, binding.SourceInstallationId);
+        VerifyRestoreProof(binding, backup);
+        var syntheticDatabase = AssertDisposableRestoredDatabase(db, binding.RestoredDatabaseName, binding.RestoredPostgresPort);
 
         var ringBefore = ComputeRingManifestSha256(binding.SourceRingDirectory);
         if (!string.Equals(ringBefore, binding.SourceRingManifestSha256, StringComparison.OrdinalIgnoreCase))
@@ -102,6 +108,7 @@ public static class HomeContinuityCompatibilityReader
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         try
         {
+            await SetReadOnlyAsync(db, syntheticDatabase, cancellationToken);
             categories.Add(await InspectAsync(Catalog[0],
                 await db.UserMfaEnrollments.AsNoTracking().Select(x => new ProtectedFieldRow(x.Id.ToString("D"), x.Secret)).ToListAsync(cancellationToken),
                 provider.CreateProtector(Catalog[0].Purpose), cancellationToken));
@@ -149,7 +156,7 @@ public static class HomeContinuityCompatibilityReader
                 binding.ExternalStoreStates.TryGetValue(name, out var state) ? state : "separate-reentry-required"))
             .ToArray();
         var reader = CaptureReaderIdentity(binding.ReaderSourceSha256);
-        var status = DetermineStatus(categories, external, binding.DiscoveryMode, ringBefore == ringAfter);
+        var status = DetermineStatus(categories, binding.DiscoveryMode, ringBefore == ringAfter, syntheticDatabase);
         return new HomeContinuityCompatibilityReceipt(
             status,
             DateTimeOffset.UtcNow,
@@ -172,15 +179,27 @@ public static class HomeContinuityCompatibilityReader
         if (binding.SourceProcessId <= 0 || binding.SourceProcessStartedUtc == default) throw new ArgumentException("The old process identity is incomplete.", nameof(binding));
         RequireExistingFile(binding.SourceExecutablePath, nameof(binding.SourceExecutablePath));
         RequireExistingDirectory(binding.SourceContentRoot, nameof(binding.SourceContentRoot));
+        RequireExistingFile(binding.SourceConfigurationPath, nameof(binding.SourceConfigurationPath));
         RequireExistingDirectory(binding.SourceRingDirectory, nameof(binding.SourceRingDirectory));
+        RequireExistingFile(binding.VerifiedBackupArchivePath, nameof(binding.VerifiedBackupArchivePath));
+        RequireExistingFile(binding.RestoreProofPath, nameof(binding.RestoreProofPath));
+        RequireExistingFile(binding.RestoreScriptPath, nameof(binding.RestoreScriptPath));
         Require(binding.SourceUserSid, nameof(binding.SourceUserSid));
         if (!binding.SourceUserSid.StartsWith("S-", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("The source Windows user SID is invalid.", nameof(binding));
+        Require(binding.ReaderUserSid, nameof(binding.ReaderUserSid));
+        if (!binding.ReaderUserSid.StartsWith("S-", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("The reader Windows user SID is invalid.", nameof(binding));
         RequireSha256(binding.SourceExecutableSha256, nameof(binding.SourceExecutableSha256));
         RequireSha256(binding.SourceConfigurationSha256, nameof(binding.SourceConfigurationSha256));
         RequireSha256(binding.SourceRingManifestSha256, nameof(binding.SourceRingManifestSha256));
         RequireSha256(binding.VerifiedBackupArchiveSha256, nameof(binding.VerifiedBackupArchiveSha256));
         RequireSha256(binding.ReaderSourceSha256, nameof(binding.ReaderSourceSha256));
+        RequireSha256(binding.ReaderAssemblySha256, nameof(binding.ReaderAssemblySha256));
         Require(binding.SourceDiscriminator, nameof(binding.SourceDiscriminator));
+        if (!Guid.TryParse(binding.SourceInstallationId, out var installationId)
+            || installationId != binding.SourceInstanceId)
+            throw new ArgumentException("The source installation and instance identities do not match.", nameof(binding));
+        if (binding.SourceProcessAttestation is not ("operator-attested-frozen" or "reader-process"))
+            throw new ArgumentException("Source process attestation must identify an operator-frozen source or the reader process.", nameof(binding));
         if (!string.Equals(binding.SourceProtectionScopeEvidence, UnknownProtectionScope, StringComparison.Ordinal)
             && binding.SourceProtectionScopeEvidence is not ("DpapiCurrentUser" or "DpapiLocalMachine" or "Unprotected"))
             throw new ArgumentException("Protection scope evidence must be unknown or a supported explicit value.", nameof(binding));
@@ -200,11 +219,85 @@ public static class HomeContinuityCompatibilityReader
             if (binding.ExternalStoreStates.TryGetValue(category, out var state)
                 && state is not ("absent" or "configured" or "separate-reentry-required"))
                 throw new ArgumentException($"External protected-store state '{state}' is unsupported.", nameof(binding));
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            if (!string.Equals(identity.User?.Value, binding.ReaderUserSid, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("The reader Windows SID does not match the current process.", nameof(binding));
+        }
+        if (!string.Equals(Sha256File(binding.SourceExecutablePath), binding.SourceExecutableSha256, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The source executable hash does not match the captured file.", nameof(binding));
+        if (!string.Equals(Sha256File(binding.SourceConfigurationPath), binding.SourceConfigurationSha256, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The source configuration hash does not match the captured file.", nameof(binding));
+        var assemblyPath = GetReaderAssemblyPath();
+        if (!string.Equals(Sha256File(assemblyPath), binding.ReaderAssemblySha256, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The compatibility reader assembly hash does not match the captured source identity.", nameof(binding));
+        using (var process = Process.GetCurrentProcess())
+        {
+            if (binding.SourceProcessAttestation == "reader-process"
+                && (binding.SourceProcessId != process.Id || process.StartTime.ToUniversalTime() != binding.SourceProcessStartedUtc))
+                throw new ArgumentException("The reader-process source attestation does not match the current process.", nameof(binding));
+        }
         RequireNoReparsePoints(binding.SourceRingDirectory);
         RequireNoReparsePoints(binding.SourceContentRoot);
+        RequireNoReparsePoints(Path.GetDirectoryName(Path.GetFullPath(binding.RestoreProofPath))!);
     }
 
-    public static void AssertDisposableRestoredDatabase(AeroLinkDbContext db, string expectedDatabaseName, int expectedPort)
+    /// <summary>
+    /// Validates the shape and source bindings of a retained receipt. Export still runs a fresh probe; this method
+    /// only prevents malformed, incomplete or obviously substituted JSON from becoming its input context.
+    /// </summary>
+    public static void ValidateReceipt(HomeContinuityCompatibilityReceipt receipt)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        ValidateBinding(receipt.Binding);
+        if (receipt.Status is not (CompatibilityProof or MetadataCaptured or Unproven or Refused or NoApplicableValues or LegacyPlaintextPresent))
+            throw new ArgumentException("The compatibility receipt status is unsupported.", nameof(receipt));
+        if (!string.Equals(receipt.DiscriminatorEvidence, CandidateDiscriminatorCompatibility, StringComparison.Ordinal)
+            || !string.Equals(receipt.DiscoveryMode, receipt.Binding.DiscoveryMode, StringComparison.Ordinal)
+            || !string.Equals(receipt.RingManifestSha256Before, receipt.RingManifestSha256After, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(receipt.RingManifestSha256Before, ComputeRingManifestSha256(receipt.Binding.SourceRingDirectory), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The compatibility receipt ring or discovery binding is not current.", nameof(receipt));
+        var backup = VerifyBackupArchive(receipt.Binding.VerifiedBackupArchivePath,
+            receipt.Binding.VerifiedBackupArchiveSha256, receipt.Binding.SourceInstallationId);
+        VerifyRestoreProof(receipt.Binding, backup);
+
+        if (receipt.ProtectedCategories.Count != Catalog.Count
+            || receipt.ProtectedCategories.Select(x => x.Definition.Category).ToHashSet(StringComparer.Ordinal)
+                .SetEquals(Catalog.Select(x => x.Category)) == false)
+            throw new ArgumentException("The compatibility receipt does not contain the complete compiled catalog.", nameof(receipt));
+        foreach (var category in receipt.ProtectedCategories)
+        {
+            var expected = Catalog.Single(x => x.Category == category.Definition.Category);
+            if (category.Definition != expected
+                || category.RowCount < 0 || category.EmptyCount < 0 || category.PassedCount < 0
+                || category.FailedCount < 0 || category.LegacyPlaintextCount < 0
+                || category.EmptyCount + category.PassedCount + category.FailedCount + category.LegacyPlaintextCount > category.RowCount
+                || category.Fields.Count != category.PassedCount + category.FailedCount + category.LegacyPlaintextCount)
+                throw new ArgumentException("The compatibility receipt contains an incomplete catalog category.", nameof(receipt));
+            if (category.Status is not ("passed" or "failed" or "legacy-plaintext" or NotApplicable or Unproven))
+                throw new ArgumentException("The compatibility receipt contains an unsupported category status.", nameof(receipt));
+            foreach (var field in category.Fields)
+                if (field.Category != expected.Category || field.Table != expected.Table || field.Column != expected.Column
+                    || field.Status is not ("passed" or "failed" or "legacy-plaintext") || !IsSha256(field.CiphertextSha256))
+                    throw new ArgumentException("The compatibility receipt contains an invalid field result.", nameof(receipt));
+        }
+        var external = receipt.ExternalCategories.ToDictionary(x => x.Category, StringComparer.Ordinal);
+        if (external.Count != ExternalCategories.Count || ExternalCategories.Any(x => !external.ContainsKey(x)))
+            throw new ArgumentException("The compatibility receipt does not contain all external-store categories.", nameof(receipt));
+        if (external.Values.Any(x => x.Status is not ("absent" or "configured" or "separate-reentry-required")))
+            throw new ArgumentException("The compatibility receipt contains an unsupported external-store status.", nameof(receipt));
+        if (receipt.Status == CompatibilityProof
+            && (receipt.ProtectedCategories.Any(x => x.Status is "failed" or "legacy-plaintext" or Unproven)
+                || receipt.ProtectedCategories.All(x => x.Status == NotApplicable)))
+            throw new ArgumentException("The compatibility receipt claims cryptographic proof without complete passing durable values.", nameof(receipt));
+        var reader = receipt.Reader;
+        if (!File.Exists(reader.ImagePath) || !string.Equals(Sha256File(reader.ImagePath), reader.SourceSha256, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Sha256File(GetReaderAssemblyPath()), reader.AssemblySha256, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The compatibility receipt reader image hash is not current.", nameof(receipt));
+    }
+
+    public static bool AssertDisposableRestoredDatabase(AeroLinkDbContext db, string expectedDatabaseName, int expectedPort)
     {
         ArgumentNullException.ThrowIfNull(db);
         Require(expectedDatabaseName, nameof(expectedDatabaseName));
@@ -223,9 +316,13 @@ public static class HomeContinuityCompatibilityReader
             if (!string.Equals(connection.Database, expectedDatabaseName, StringComparison.Ordinal)
                 || connection.Port != expectedPort)
                 throw new InvalidOperationException("The configured database does not match the bound disposable restore identity.");
+            if (connection.Host is not ("127.0.0.1" or "localhost" or "::1"))
+                throw new InvalidOperationException("The compatibility probe refuses a remote or unowned PostgreSQL host.");
+            return false;
         }
         else if (!provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The compatibility probe supports only a disposable PostgreSQL or SQLite test database.");
+        return true;
     }
 
     public static string ComputeRingManifestSha256(string root)
@@ -283,29 +380,137 @@ public static class HomeContinuityCompatibilityReader
                 results.Add(new(definition.Category, definition.Table, definition.Column, row.RecordId, digest, "failed"));
             }
         }
-        var status = failed > 0 ? "failed" : legacy > 0 ? Unproven : passed == 0 ? NotApplicable : "passed";
+        var status = failed > 0 ? "failed" : legacy > 0 ? "legacy-plaintext" : passed == 0 ? NotApplicable : "passed";
         return new HomeContinuityProtectedCategoryReceipt(definition, rows.Count, empty, passed, failed, legacy, status, results);
     }
 
     private static string DetermineStatus(
         IReadOnlyList<HomeContinuityProtectedCategoryReceipt> categories,
-        IReadOnlyList<HomeContinuityExternalCategoryReceipt> external,
         string discoveryMode,
-        bool ringStable)
+        bool ringStable,
+        bool syntheticDatabase)
     {
         if (!ringStable || !string.Equals(discoveryMode, ExplicitRingRead, StringComparison.Ordinal)) return Refused;
-        if (categories.Any(x => x.Status is "failed" or "legacy-plaintext" or Unproven)) return Unproven;
-        if (external.Any(x => !string.Equals(x.Status, "absent", StringComparison.Ordinal))) return Unproven;
+        if (categories.Any(x => x.Status == "failed")) return Unproven;
+        if (categories.Any(x => x.Status == "legacy-plaintext")) return LegacyPlaintextPresent;
+        if (categories.All(x => x.Status == NotApplicable)) return NoApplicableValues;
+        if (syntheticDatabase) return MetadataCaptured;
         return CompatibilityProof;
     }
 
-    private static HomeContinuityReaderIdentity CaptureReaderIdentity(string sourceSha)
+    private static HomeContinuityReaderIdentity CaptureReaderIdentity(string expectedSourceSha)
     {
         using var process = Process.GetCurrentProcess();
         var image = process.MainModule?.FileName ?? Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(image) || !File.Exists(image)) throw new InvalidOperationException("The compatibility reader image identity is unavailable.");
-        return new HomeContinuityReaderIdentity(process.Id, process.StartTime.ToUniversalTime(), Path.GetFullPath(image), sourceSha,
-            typeof(HomeContinuityCompatibilityReader).Assembly.GetName().Version?.ToString() ?? "unknown");
+        var actualSourceSha = Sha256File(image);
+        if (!string.Equals(actualSourceSha, expectedSourceSha, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The compatibility reader image hash does not match its bound source identity.");
+        var assemblyPath = GetReaderAssemblyPath();
+        return new HomeContinuityReaderIdentity(process.Id, process.StartTime.ToUniversalTime(), Path.GetFullPath(image), actualSourceSha,
+            Sha256File(assemblyPath), typeof(HomeContinuityCompatibilityReader).Assembly.GetName().Version?.ToString() ?? "unknown");
+    }
+
+    private static string GetReaderAssemblyPath()
+    {
+        var path = typeof(HomeContinuityCompatibilityReader).Assembly.Location;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            throw new InvalidOperationException("The compatibility reader assembly identity is unavailable.");
+        return Path.GetFullPath(path);
+    }
+
+    private static async Task SetReadOnlyAsync(AeroLinkDbContext db, bool syntheticDatabase, CancellationToken cancellationToken)
+    {
+        if (syntheticDatabase)
+        {
+            await db.Database.ExecuteSqlRawAsync("PRAGMA query_only = ON", cancellationToken);
+            return;
+        }
+        await db.Database.ExecuteSqlRawAsync("SET TRANSACTION READ ONLY", cancellationToken);
+    }
+
+    public static HomeContinuityVerifiedBackup VerifyBackupArchive(
+        string archivePath, string expectedArchiveSha256, string expectedSourceInstallationId)
+    {
+        RequireExistingFile(archivePath, nameof(archivePath));
+        if (!string.Equals(Path.GetExtension(archivePath), ".zip", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The continuity backup must be a ZIP archive.");
+        var actual = Sha256File(archivePath);
+        if (!string.Equals(actual, expectedArchiveSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The continuity backup archive hash does not match its bound identity.");
+        var sidecar = archivePath + ".sha256";
+        RequireExistingFile(sidecar, "archive sidecar");
+        var sidecarHash = File.ReadAllText(sidecar).Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        if (!string.Equals(sidecarHash, actual, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The continuity backup archive sidecar does not match the archive.");
+
+        using var archive = ZipFile.OpenRead(archivePath);
+        var manifestEntry = archive.GetEntry("manifest.json")
+            ?? throw new InvalidOperationException("The continuity backup has no manifest.");
+        using var manifestReader = new StreamReader(manifestEntry.Open());
+        using var manifest = JsonDocument.Parse(manifestReader.ReadToEnd());
+        var root = manifest.RootElement;
+        if (!TryGetInt(root, "FormatVersion", out var format) || format != 2)
+            throw new InvalidOperationException("The continuity backup manifest format is unsupported.");
+        if (!TryGetString(root, "Instance", "Classification", out var classification)
+            || !string.Equals(classification, "HomeCanonical", StringComparison.Ordinal)
+            || !TryGetString(root, "Instance", "InstanceId", out var instanceId)
+            || !string.Equals(instanceId, expectedSourceInstallationId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The continuity backup manifest does not identify the bound HOME source instance.");
+        if (archive.GetEntry("aerolink-postgresql.dump") is null)
+            throw new InvalidOperationException("The continuity backup has no PostgreSQL dump.");
+        return new HomeContinuityVerifiedBackup(actual, instanceId,
+            TryGetString(root, "Application", "SourceSha", out var sourceSha) ? sourceSha : null);
+    }
+
+    private static void VerifyRestoreProof(HomeContinuityCompatibilityBinding binding, HomeContinuityVerifiedBackup backup)
+    {
+        var proofPath = Path.GetFullPath(binding.RestoreProofPath);
+        using var document = JsonDocument.Parse(File.ReadAllText(proofPath));
+        var root = document.RootElement;
+        if (!TryGetInt(root, "FormatVersion", out var format) || format != 1
+            || !TryGetString(root, "ArchiveSha256", out var proofHash)
+            || !string.Equals(proofHash, backup.ArchiveSha256, StringComparison.OrdinalIgnoreCase)
+            || !TryGetString(root, "DatabaseName", out var database)
+            || !string.Equals(database, binding.RestoredDatabaseName, StringComparison.Ordinal)
+            || !TryGetInt(root, "PostgresPort", out var port) || port != binding.RestoredPostgresPort
+            || !root.TryGetProperty("AttachmentInventoryVerified", out var inventory) || inventory.ValueKind != JsonValueKind.True)
+            throw new InvalidOperationException("The continuity restore proof is missing or does not bind the verified archive and disposable database.");
+        if (!TryGetString(root, "RestoreScriptSha256", out var scriptHash)
+            || !string.Equals(Sha256File(binding.RestoreScriptPath), scriptHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The continuity restore proof was not produced by the bound restore script.");
+        var validationRoot = TryGetString(root, "RestoreValidationRoot", out var rootValue)
+            ? Path.GetFullPath(rootValue!) + Path.DirectorySeparatorChar
+            : throw new InvalidOperationException("The continuity restore proof has no validation root.");
+        if (!proofPath.StartsWith(validationRoot, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The continuity restore proof is outside the owned validation root.");
+        if (backup.InstanceId is null || !string.Equals(backup.InstanceId, binding.SourceInstallationId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The verified archive instance is not bound to the continuity source.");
+    }
+
+    private static bool TryGetInt(JsonElement root, string name, out int value)
+    {
+        if (root.TryGetProperty(name, out var element) && element.TryGetInt32(out value)) return true;
+        value = default;
+        return false;
+    }
+
+    private static bool TryGetString(JsonElement root, string name, out string? value)
+    {
+        if (root.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+        value = null;
+        return false;
+    }
+
+    private static bool TryGetString(JsonElement root, string parent, string name, out string? value)
+    {
+        if (root.TryGetProperty(parent, out var objectElement)) return TryGetString(objectElement, name, out value);
+        value = null;
+        return false;
     }
 
     private static void Require(string? value, string name)
@@ -347,6 +552,8 @@ public static class HomeContinuityCompatibilityReader
         return Convert.ToHexString(SHA256.HashData(stream));
     }
 
+    private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
+
     private sealed record ProtectedFieldRow(string RecordId, string Value);
 }
 
@@ -369,7 +576,7 @@ public sealed record HomeContinuityProtectedCategoryReceipt(
 public sealed record HomeContinuityExternalCategoryReceipt(string Category, string Status);
 
 public sealed record HomeContinuityReaderIdentity(
-    int ProcessId, DateTimeOffset ProcessStartedUtc, string ImagePath, string SourceSha256, string RuntimeVersion);
+    int ProcessId, DateTimeOffset ProcessStartedUtc, string ImagePath, string SourceSha256, string AssemblySha256, string RuntimeVersion);
 
 public sealed record HomeContinuityCompatibilityBinding(
     string SourceInstallationId,
@@ -379,7 +586,9 @@ public sealed record HomeContinuityCompatibilityBinding(
     string SourceExecutablePath,
     string SourceExecutableSha256,
     string SourceContentRoot,
+    string SourceConfigurationPath,
     string SourceUserSid,
+    string ReaderUserSid,
     string SourceConfigurationSha256,
     string SourceRingDirectory,
     string SourceRingManifestSha256,
@@ -387,11 +596,16 @@ public sealed record HomeContinuityCompatibilityBinding(
     string SourceProtectionScopeEvidence,
     string SourceProviderSelection,
     string VerifiedBackupId,
+    string VerifiedBackupArchivePath,
     string VerifiedBackupArchiveSha256,
     string RestoredDatabaseName,
     int RestoredPostgresPort,
+    string RestoreProofPath,
+    string RestoreScriptPath,
     string ReaderSourceSha256,
+    string ReaderAssemblySha256,
     string DiscoveryMode,
+    string SourceProcessAttestation,
     Dictionary<string, string> ExternalStoreStates);
 
 public sealed record HomeContinuityCompatibilityReceipt(
@@ -407,3 +621,6 @@ public sealed record HomeContinuityCompatibilityReceipt(
     IReadOnlyList<HomeContinuityProtectedCategoryReceipt> ProtectedCategories,
     IReadOnlyList<HomeContinuityExternalCategoryReceipt> ExternalCategories,
     IReadOnlyList<string> ReissueCategories);
+
+public sealed record HomeContinuityVerifiedBackup(
+    string ArchiveSha256, string? InstanceId, string? ApplicationSourceSha);

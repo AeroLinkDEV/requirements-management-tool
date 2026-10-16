@@ -20,6 +20,10 @@ param(
     #
     # Ignored for a production restore, which always validates.
     [switch]$SkipCurrentCodeValidation,
+    # HOME continuity only: write a one-time, source-owned proof after the verified disposable restore and
+    # attachment/current-code checks complete. The maintenance reader binds this proof to the archive and live
+    # database before it reads any protected values.
+    [string]$ContinuityReceiptPath,
     [switch]$AllowProductionRestore,
     [string]$Confirmation,
     [ValidateSet('','BeforeDatabaseRestore','AfterDatabaseRestore','AfterEvidenceCopy','AfterPreActivationValidation','AfterOriginalDatabaseRename','AfterDatabaseActivation','AfterEvidenceActivation','AfterActivationValidation','BeforeRestart','AfterRestart')]
@@ -240,6 +244,17 @@ if ($PostgresPort -eq $persistentPostgresPort -and -not $site) { & (Join-Path $P
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot -InstallationRoot $restoreInstallationRoot
 if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
+$continuityReceipt = $null
+if ($ContinuityReceiptPath) {
+    $continuityReceipt = [IO.Path]::GetFullPath($ContinuityReceiptPath)
+    $restoreValidationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation) + [IO.Path]::DirectorySeparatorChar
+    if (-not ($continuityReceipt.StartsWith($restoreValidationRoot, [StringComparison]::OrdinalIgnoreCase))) {
+        throw 'The HOME continuity restore proof must remain under the installation restore-validation root.'
+    }
+    if (Test-Path -LiteralPath $continuityReceipt) { throw 'The HOME continuity restore proof already exists; proofs are write-once.' }
+    $continuityParent = Split-Path -Parent $continuityReceipt
+    New-Item -ItemType Directory -Path $continuityParent -Force | Out-Null
+}
 $bin = [IO.Path]::GetFullPath($PostgresBin)
 $archive = (Resolve-Path -LiteralPath $BackupArchive).Path
 $restoreRoot = $installation.RestoreWork; New-Item -ItemType Directory -Path $restoreRoot -Force | Out-Null
@@ -325,6 +340,30 @@ try {
     elseif ($deferCurrentCode) { $countText = 'Program table not present yet (pre-migration restore; current-code validation deferred)' }
     else { throw "The restore summary expected the Program table in database '$TargetDatabase', but it is absent and current-code validation was not deferred." }
     $verified = Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $resolvedTarget
+    if ($continuityReceipt) {
+        $continuityProof = [ordered]@{
+            FormatVersion = 1
+            ArchivePath = $archive
+            ArchiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            InstanceId = if ($manifest.Instance -and $manifest.Instance.InstanceId) { [string]$manifest.Instance.InstanceId } else { $null }
+            ApplicationSourceSha = if ($manifest.Application -and $manifest.Application.SourceSha) { [string]$manifest.Application.SourceSha } else { $null }
+            DatabaseName = [string]$TargetDatabase
+            PostgresPort = [int]$PostgresPort
+            InstallationRoot = [IO.Path]::GetFullPath($installation.InstallationRoot)
+            RestoreValidationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation)
+            CompletedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+            RestoreScriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            CurrentCodeValidationDeferred = [bool]$deferCurrentCode
+            AttachmentInventoryVerified = $true
+        }
+        $json = $continuityProof | ConvertTo-Json -Depth 8
+        $proofStream = [IO.File]::Open($continuityReceipt, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $writer = New-Object IO.StreamWriter($proofStream, [Text.UTF8Encoding]::new($false), 4096, $true)
+            try { $writer.Write($json); $writer.Flush() } finally { $writer.Dispose() }
+        } finally { $proofStream.Dispose() }
+        Write-Host "HOME continuity disposable restore proof: $continuityReceipt" -ForegroundColor Green
+    }
     Write-Host "Restore verified in database '$TargetDatabase': $countText, $($verified.ReferencedAttachments) attachment row(s), $($verified.ReferencedObjects) object(s), $($verified.VerifiedBytes) byte(s), $($finalDownloads.ManagedDocumentDownloads) API download(s). Evidence root: $resolvedTarget" -ForegroundColor Green
     if ($production) { Write-Host "Rollback retained as database '$oldDatabase'$(if($retained){" and evidence '$retained'"})." -ForegroundColor Yellow }
 }

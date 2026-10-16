@@ -11,6 +11,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using Npgsql;
 
 namespace AeroLink.Api;
 
@@ -327,31 +328,30 @@ public static class AeroLinkMaintenanceHost
 
     private static async Task<int> ProbeHomeContinuityAsync(IServiceProvider services, string[] args)
     {
-        var bindingPath = RequiredValue(args, "--binding");
-        var receiptPath = RequiredValue(args, "--receipt");
-        if (!File.Exists(bindingPath)) return Fail("The compatibility binding file does not exist.");
-        var binding = JsonSerializer.Deserialize<HomeContinuityCompatibilityBinding>(
-            await File.ReadAllTextAsync(bindingPath), new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        if (binding is null) return Fail("The compatibility binding file is invalid.");
-        HomeContinuityCompatibilityReader.ValidateBinding(binding);
-        using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(
-            binding.SourceRingDirectory, binding.SourceDiscriminator, binding.SourceProviderSelection);
         try
         {
-            var db = services.GetRequiredService<AeroLinkDbContext>();
+            var bindingPath = RequiredValue(args, "--binding");
+            var receiptPath = RequiredValue(args, "--receipt");
+            if (!File.Exists(bindingPath)) return Fail("The compatibility binding file does not exist.");
+            var binding = JsonSerializer.Deserialize<HomeContinuityCompatibilityBinding>(
+                await File.ReadAllTextAsync(bindingPath), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (binding is null) return Fail("The compatibility binding file is invalid.");
+            HomeContinuityCompatibilityReader.ValidateBinding(binding);
+            using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(
+                binding.SourceRingDirectory, binding.SourceDiscriminator, binding.SourceProviderSelection);
+            await using var db = BuildContinuityRestoreDb(services, binding);
             var receipt = await HomeContinuityCompatibilityReader.ProbeAsync(db, sourceServices, binding);
             var directory = Path.GetDirectoryName(Path.GetFullPath(receiptPath));
             if (string.IsNullOrWhiteSpace(directory)) return Fail("The compatibility receipt path has no directory.");
             Directory.CreateDirectory(directory);
-            await File.WriteAllTextAsync(receiptPath, JsonSerializer.Serialize(receipt,
-                new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+            WriteReceiptOnce(receiptPath, receipt);
             Console.WriteLine($"HOME CONTINUITY COMPATIBILITY STATUS: {receipt.Status}");
             Console.WriteLine($"Protected categories: {receipt.ProtectedCategories.Count}; external categories: {receipt.ExternalCategories.Count}");
             return receipt.Status == HomeContinuityCompatibilityReader.CompatibilityProof ? 0 : 2;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or DbException)
         {
-            return Fail($"HOME continuity compatibility probe refused: {ex.Message}");
+            return Fail("HOME continuity compatibility probe refused: the bound archive, restore, source ring or read-only database boundary was not proven.");
         }
     }
 
@@ -373,15 +373,21 @@ public static class AeroLinkMaintenanceHost
             return Fail("The continuity destination application must be exactly 'AeroLink'.");
         var backupHash = VerifySourceBackup(verifiedBackupArchive, verifiedBackup, sourceInstallation);
         var compatibilityReceipt = ReadCompatibilityReceipt(compatibilityReceiptPath);
-        if (!string.Equals(compatibilityReceipt.Status, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal)
-            || !string.Equals(compatibilityReceipt.Binding.SourceInstallationId, sourceInstallation, StringComparison.Ordinal)
+        HomeContinuityCompatibilityReader.ValidateReceipt(compatibilityReceipt);
+        if (!string.Equals(compatibilityReceipt.Binding.SourceInstallationId, sourceInstallation, StringComparison.Ordinal)
             || !string.Equals(compatibilityReceipt.Binding.VerifiedBackupArchiveSha256, backupHash, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(compatibilityReceipt.Binding.SourceDiscriminator, sourceDiscriminator, StringComparison.Ordinal)
-            || !string.Equals(Path.GetFullPath(compatibilityReceipt.Binding.SourceRingDirectory), Path.GetFullPath(sourceRingPath), StringComparison.OrdinalIgnoreCase))
-            return Fail("The continuity export requires a complete compatibility-proof receipt bound to this source ring, installation, discriminator and verified backup.");
+            || !string.Equals(Path.GetFullPath(compatibilityReceipt.Binding.SourceRingDirectory), Path.GetFullPath(sourceRingPath), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Path.GetFullPath(compatibilityReceipt.Binding.VerifiedBackupArchivePath), Path.GetFullPath(verifiedBackupArchive), StringComparison.OrdinalIgnoreCase))
+            return Fail("The continuity export receipt is not bound to this source ring, installation, discriminator or verified backup.");
         var configuration = services.GetRequiredService<IConfiguration>();
         var connector = ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation);
         using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
+        await using var restoredDb = BuildContinuityRestoreDb(services, compatibilityReceipt.Binding);
+        var freshCompatibility = await HomeContinuityCompatibilityReader.ProbeAsync(
+            restoredDb, sourceServices, compatibilityReceipt.Binding);
+        if (!string.Equals(freshCompatibility.Status, HomeContinuityCompatibilityReader.CompatibilityProof, StringComparison.Ordinal))
+            return Fail("The continuity export requires a fresh complete compatibility proof from the verified restore; a stored receipt status is not sufficient.");
         var sourceManager = sourceServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
         var sourceRepository = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(
             new DirectoryInfo(sourceRingPath), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
@@ -404,6 +410,46 @@ public static class AeroLinkMaintenanceHost
         var receipt = JsonSerializer.Deserialize<HomeContinuityCompatibilityReceipt>(
             File.ReadAllText(path), new JsonSerializerOptions(JsonSerializerDefaults.Web));
         return receipt ?? throw new InvalidOperationException("The compatibility receipt file is invalid.");
+    }
+
+    private static AeroLinkDbContext BuildContinuityRestoreDb(IServiceProvider services, HomeContinuityCompatibilityBinding binding)
+    {
+        var configuration = services.GetRequiredService<IConfiguration>();
+        if (!string.Equals(configuration["Database:Provider"], "PostgreSql", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("HOME continuity requires a local disposable PostgreSQL restore; the ambient database provider is not an owned restore boundary.");
+        var configured = configuration.GetConnectionString("AeroLink");
+        if (string.IsNullOrWhiteSpace(configured)) throw new InvalidOperationException("The disposable restore connection is not configured.");
+        var connection = new NpgsqlConnectionStringBuilder(configured);
+        connection.Database = binding.RestoredDatabaseName;
+        connection.Port = binding.RestoredPostgresPort;
+        connection.ApplicationName = $"AeroLinkHomeContinuity/{Guid.NewGuid():N}";
+        if (connection.Host is not ("127.0.0.1" or "localhost" or "::1"))
+            throw new InvalidOperationException("HOME continuity refuses a remote PostgreSQL restore host.");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection.ConnectionString).Options;
+        return new AeroLinkDbContext(options);
+    }
+
+    private static void WriteReceiptOnce(string path, HomeContinuityCompatibilityReceipt receipt)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var temporary = fullPath + $".writing-{Guid.NewGuid():N}";
+        var json = JsonSerializer.Serialize(receipt, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            {
+                writer.Write(json);
+                writer.Flush();
+                stream.Flush(true);
+            }
+            if (File.Exists(fullPath)) throw new InvalidOperationException("The compatibility receipt already exists; receipts are write-once.");
+            File.Move(temporary, fullPath);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
     }
 
     private static async Task<int> ApplyHomeContinuityAsync(IServiceProvider services, string[] args)

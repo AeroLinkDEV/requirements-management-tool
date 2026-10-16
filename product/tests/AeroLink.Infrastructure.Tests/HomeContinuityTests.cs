@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.AccessControl;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Xml.Linq;
 using AeroLink.Domain.Integrations;
@@ -117,13 +118,15 @@ public sealed class HomeContinuityTests
             db.WebhookSubscriptions.Add(new WebhookSubscription(project.Id, "test", "https://example.test/hook", "[]", webhook, "test", DateTimeOffset.UtcNow));
             await db.SaveChangesAsync();
 
+            var sourceInstanceId = Guid.NewGuid().ToString("D");
+            var continuityFiles = CreateSyntheticContinuityEvidence(root, sourceInstanceId);
             var binding = CompatibilityBinding(root, ring, contentRoot, executable,
-                HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring), discriminator);
+                HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring), discriminator, continuityFiles, sourceInstanceId);
             var before = HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring);
             var receipt = await HomeContinuityCompatibilityReader.ProbeAsync(db, sourceServices, binding);
             var after = HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring);
 
-            Assert.Equal(HomeContinuityCompatibilityReader.CompatibilityProof, receipt.Status);
+            Assert.Equal(HomeContinuityCompatibilityReader.MetadataCaptured, receipt.Status);
             Assert.Equal(HomeContinuityCompatibilityReader.ProtectedFieldCatalog.Count, receipt.ProtectedCategories.Count);
             Assert.Equal(before, receipt.RingManifestSha256Before);
             Assert.Equal(after, receipt.RingManifestSha256After);
@@ -133,11 +136,56 @@ public sealed class HomeContinuityTests
                 category => Assert.Equal(HomeContinuityCompatibilityReader.NotApplicable, category.Status));
             Assert.DoesNotContain("synthetic-mfa-secret", JsonSerializer.Serialize(receipt), StringComparison.Ordinal);
             Assert.Contains(receipt.ReissueCategories, x => x.StartsWith("user_sessions.TokenHash", StringComparison.Ordinal));
+
+            var expectedCatalog = new[]
+            {
+                ("mfa-secret", "user_mfa_enrollments", "Secret", "AeroLink.Identity.MfaSecret.v1", "dp:v1:"),
+                ("webhook-secret", "webhook_subscriptions", "ProtectedSecret", "AeroLink.Webhooks.SigningSecret.v1", (string?)null),
+                ("jira-token", "jira_connections", "ProtectedApiToken", "AeroLink.Jira.ApiToken.v1", (string?)null),
+                ("notification-credential", "notification_settings_revisions", "ProtectedCredential", HomeContinuityCompatibilityReader.NotificationPurpose, (string?)null),
+                ("notification-address", "notification_delivery_generations", "ProtectedAddress", HomeContinuityCompatibilityReader.NotificationPurpose, (string?)null),
+                ("notification-mime", "notification_delivery_generations", "ProtectedMime", HomeContinuityCompatibilityReader.NotificationPurpose, (string?)null),
+                ("notification-blocked-settings", "notification_delivery_generations", "BlockedEffectiveSettingsHash", HomeContinuityCompatibilityReader.NotificationPurpose, (string?)null),
+                ("notification-settings-snapshot", "notification_physical_attempts", "ProtectedSettingsSnapshot", HomeContinuityCompatibilityReader.NotificationPurpose, (string?)null),
+                ("notification-effective-settings", "notification_physical_attempts", "EffectiveSettingsHash", HomeContinuityCompatibilityReader.NotificationPurpose, (string?)null),
+                ("notification-operation-payload", "notification_operations", "PayloadHash", HomeContinuityCompatibilityReader.NotificationPurpose, (string?)null),
+            };
+            Assert.Equal(expectedCatalog.Length, receipt.ProtectedCategories.Count);
+            Assert.Equal(expectedCatalog,
+                receipt.ProtectedCategories.Select(x =>
+                    (x.Definition.Category, x.Definition.Table, x.Definition.Column, x.Definition.Purpose, x.Definition.RequiredPrefix)));
+            HomeContinuityCompatibilityReader.ValidateReceipt(receipt);
+            var incomplete = receipt with { ProtectedCategories = receipt.ProtectedCategories.Skip(1).ToArray() };
+            Assert.Throws<ArgumentException>(() => HomeContinuityCompatibilityReader.ValidateReceipt(incomplete));
+            var mismatchedInstance = receipt with
+            {
+                Binding = receipt.Binding with { SourceInstanceId = Guid.NewGuid() },
+            };
+            Assert.Throws<ArgumentException>(() => HomeContinuityCompatibilityReader.ValidateReceipt(mismatchedInstance));
         }
         finally
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task Compatibility_reader_reports_empty_catalog_without_claiming_proof()
+    {
+        var receipt = await ProbeSyntheticAsync(mfaValue: null);
+        Assert.Equal(HomeContinuityCompatibilityReader.NoApplicableValues, receipt.Status);
+        Assert.All(receipt.ProtectedCategories,
+            category => Assert.Equal(HomeContinuityCompatibilityReader.NotApplicable, category.Status));
+    }
+
+    [Fact]
+    public async Task Compatibility_reader_classifies_legacy_plaintext_without_claiming_proof()
+    {
+        var receipt = await ProbeSyntheticAsync("legacy-plaintext-secret");
+        Assert.Equal(HomeContinuityCompatibilityReader.LegacyPlaintextPresent, receipt.Status);
+        var mfa = receipt.ProtectedCategories.Single(x => x.Definition.Category == "mfa-secret");
+        Assert.Equal("legacy-plaintext", mfa.Status);
+        Assert.Equal(1, mfa.LegacyPlaintextCount);
     }
 
     [Fact]
@@ -151,29 +199,132 @@ public sealed class HomeContinuityTests
     }
 
     private static HomeContinuityCompatibilityBinding CompatibilityBinding(
-        string root, string ring, string contentRoot, string executable, string ringDigest, string discriminator) =>
+        string root, string ring, string contentRoot, string executable, string ringDigest, string discriminator,
+        (string Archive, string Proof, string Script, string Configuration) evidence, string sourceInstanceId) =>
         new(
-            "source-installation",
-            Guid.NewGuid(),
+            sourceInstanceId,
+            Guid.Parse(sourceInstanceId),
             Process.GetCurrentProcess().Id,
             Process.GetCurrentProcess().StartTime.ToUniversalTime(),
             executable,
             Sha256File(executable),
             contentRoot,
-            "S-1-5-21-123-456-789-1001",
-            new string('a', 64),
+            evidence.Configuration,
+            CurrentSid(),
+            CurrentSid(),
+            Sha256File(evidence.Configuration),
             ring,
             ringDigest,
             discriminator,
             HomeContinuityCompatibilityReader.UnknownProtectionScope,
             "Unprotected",
             "verified-backup-1",
-            new string('b', 64),
+            evidence.Archive,
+            Sha256File(evidence.Archive),
             "aerolink_restore_validation",
             55928,
-            new string('c', 64),
+            evidence.Proof,
+            evidence.Script,
+            Sha256File(Process.GetCurrentProcess().MainModule!.FileName!),
+            Sha256File(typeof(HomeContinuityCompatibilityReader).Assembly.Location),
             HomeContinuityCompatibilityReader.ExplicitRingRead,
+            "reader-process",
             HomeContinuityCompatibilityReader.ExternalProtectedCategories.ToDictionary(x => x, _ => "absent"));
+
+    private static (string Archive, string Proof, string Script, string Configuration) CreateSyntheticContinuityEvidence(
+        string root, string sourceInstanceId)
+    {
+        var archive = Path.Combine(root, "aerolink-home.zip");
+        var configuration = Path.Combine(root, "source-config.json");
+        File.WriteAllText(configuration, "{\"source\":\"synthetic\"}");
+        var manifest = new
+        {
+            FormatVersion = 2,
+            Instance = new { Classification = "HomeCanonical", InstanceId = sourceInstanceId },
+            Application = new { SourceSha = new string('d', 64) },
+        };
+        using (var zip = ZipFile.Open(archive, ZipArchiveMode.Create))
+        {
+            using (var writer = new StreamWriter(zip.CreateEntry("manifest.json").Open()))
+                writer.Write(JsonSerializer.Serialize(manifest));
+            using (var dump = zip.CreateEntry("aerolink-postgresql.dump").Open())
+                dump.Write([1, 2, 3]);
+        }
+        File.WriteAllText(archive + ".sha256", $"{Sha256File(archive)}  {Path.GetFileName(archive)}");
+        var script = RepositoryFile("product/scripts/Restore-AeroLink.ps1");
+        var proof = Path.Combine(root, "restore-proof.json");
+        File.WriteAllText(proof, JsonSerializer.Serialize(new
+        {
+            FormatVersion = 1,
+            ArchiveSha256 = Sha256File(archive),
+            DatabaseName = "aerolink_restore_validation",
+            PostgresPort = 55928,
+            RestoreValidationRoot = root,
+            RestoreScriptSha256 = Sha256File(script),
+            AttachmentInventoryVerified = true,
+        }));
+        return (archive, proof, script, configuration);
+    }
+
+    private static string RepositoryFile(string relative)
+    {
+        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, relative);
+            if (File.Exists(candidate)) return candidate;
+            directory = directory.Parent;
+        }
+        throw new FileNotFoundException($"Repository file not found: {relative}");
+    }
+
+    private static string CurrentSid() => OperatingSystem.IsWindows()
+        ? System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value
+        : "S-1-5-21-123-456-789-1001";
+
+    private static async Task<HomeContinuityCompatibilityReceipt> ProbeSyntheticAsync(string? mfaValue)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-compatibility-status-{Guid.NewGuid():N}");
+        var ring = Path.Combine(root, "ring");
+        var contentRoot = Path.Combine(root, "content");
+        Directory.CreateDirectory(contentRoot);
+        var executable = Environment.ProcessPath!;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        try
+        {
+            Directory.CreateDirectory(ring);
+            const string discriminator = "captured-source-content-root";
+            using (var seedServices = BuildFileServices(ring, discriminator))
+            {
+                var created = seedServices.GetRequiredService<IKeyManager>()
+                    .CreateNewKey(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+                Assert.NotEqual(Guid.Empty, created.KeyId);
+            }
+
+            using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(ring, discriminator, "Unprotected");
+            var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            if (mfaValue is not null)
+            {
+                var user = new UserAccount("compatibility-status", "Compatibility", "compatibility-status@example.test", "password-hash", DateTimeOffset.UtcNow);
+                db.UserAccounts.Add(user);
+                db.UserMfaEnrollments.Add(new UserMfaEnrollment(user.Id, mfaValue, "test", DateTimeOffset.UtcNow));
+                await db.SaveChangesAsync();
+            }
+
+            var sourceInstanceId = Guid.NewGuid().ToString("D");
+            var evidence = CreateSyntheticContinuityEvidence(root, sourceInstanceId);
+            var binding = CompatibilityBinding(root, ring, contentRoot, executable,
+                HomeContinuityCompatibilityReader.ComputeRingManifestSha256(ring), discriminator, evidence, sourceInstanceId);
+            return await HomeContinuityCompatibilityReader.ProbeAsync(db, sourceServices, binding);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
 
     [WindowsFact]
     public void Receipt_bound_abort_refuses_mismatch_and_cleans_only_the_owned_empty_stage()

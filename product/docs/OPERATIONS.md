@@ -876,13 +876,36 @@ conflicting or unsupported categories refuse the proof. Browser/session/antiforg
 reissued or classified not applicable. Connector, notification-authority and other external protected stores remain
 separate attended gates.
 
+Create the restore proof with the existing restore authority before invoking the maintenance probe. The archive,
+database name, disposable PostgreSQL port and restore-script identity are recorded by the script and the proof is
+write-once under the installation's restore-validation root; the probe refuses an ambient database, a missing proof,
+or a proof that does not bind the verified archive and attachment inventory.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\product\scripts\Restore-AeroLink.ps1 `
+  -BackupArchive D:\transfer\verified-home-backup.zip `
+  -TargetDatabase aerolink_restore_validation `
+  -PostgresPort <disposable-postgres-port-not-54329> `
+  -PostgresBin D:\pgsql\bin `
+  -DisposableQualification -SkipCurrentCodeValidation `
+  -ContinuityReceiptPath D:\transfer\home-restore-proof.json
+```
+
+The probe's `metadata-captured`, `no-applicable-values`, `legacy-plaintext-present`, `unproven` and `refused`
+statuses are evidence of the corresponding boundary only and cannot authorize export. `compatibility-proof` is
+available only after the complete catalog passes against the owned restored PostgreSQL database; the export command
+re-executes that probe inline, so an edited receipt status or binding cannot substitute for the current archive,
+restore, ring and reader checks. A legacy plaintext field is reported and carried with its existing behavior, but it
+does not become a cryptographic compatibility proof.
+
 ```powershell
 dotnet AeroLink.Api.dll maintenance home-continuity probe `
   --binding D:\transfer\home-compatibility-binding.json `
   --receipt D:\transfer\home-compatibility-receipt.json
 ```
 
-Only a `compatibility-proof` receipt is eligible for transfer. A metadata-only, unproven, refused or incomplete
+Only a `compatibility-proof` receipt is eligible for transfer. A `metadata-captured`, `no-applicable-values`,
+`legacy-plaintext-present`, unproven, refused or incomplete
 receipt blocks source retirement and HOME wipe. The probe is read-only and does not qualify the implicit Windows
 profile fallback or the real source values; those remain attended evidence requirements.
 
