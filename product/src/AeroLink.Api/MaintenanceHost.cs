@@ -418,6 +418,11 @@ public static class AeroLinkMaintenanceHost
         var readerImage = Process.GetCurrentProcess().MainModule?.FileName ?? Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(readerImage) || !File.Exists(readerImage))
             throw new InvalidOperationException("The continuity reader process image identity is unavailable.");
+        var apiAssemblyPath = typeof(AeroLinkMaintenanceHost).Assembly.Location;
+        if (string.IsNullOrWhiteSpace(apiAssemblyPath) || !File.Exists(apiAssemblyPath))
+            throw new InvalidOperationException("The continuity API entry assembly identity is unavailable.");
+        apiAssemblyPath = Path.GetFullPath(apiAssemblyPath);
+        var apiAssemblySha256 = Sha256File(apiAssemblyPath);
         var readerSid = CurrentReaderSid(compatibilityReceipt.Binding.ReaderUserSid);
         var freshBinding = compatibilityReceipt.Binding with
         {
@@ -432,6 +437,8 @@ public static class AeroLinkMaintenanceHost
             ReaderSourceSha256 = Sha256File(readerImage),
             ReaderAssemblySha256 = Sha256File(typeof(HomeContinuityCompatibilityReader).Assembly.Location),
             SourceProcessAttestation = "operator-attested-frozen",
+            RestoreApiAssemblyPath = apiAssemblyPath,
+            RestoreApiAssemblySha256 = apiAssemblySha256,
         };
         UpdateContinuityOperationJournal(operationJournal, journal =>
         {
@@ -439,6 +446,8 @@ public static class AeroLinkMaintenanceHost
             journal["MaintenanceEntryImageSha256"] = freshBinding.ReaderSourceSha256;
             journal["InfrastructureReaderAssemblyPath"] = typeof(HomeContinuityCompatibilityReader).Assembly.Location;
             journal["InfrastructureReaderAssemblySha256"] = freshBinding.ReaderAssemblySha256;
+            journal["ApiEntryAssemblyPath"] = apiAssemblyPath;
+            journal["ApiEntryAssemblySha256"] = apiAssemblySha256;
             journal["ApiHttpValidation"] = "not-executed: SkipCurrentCodeValidation was explicitly supplied";
             journal["ApiExecutablePath"] = null;
             journal["ApiExecutableSha256"] = null;
@@ -447,7 +456,8 @@ public static class AeroLinkMaintenanceHost
         try
         {
             var operation = await RunFreshContinuityRestoreAsync(restoreScript, restorePostgresBin, verifiedBackupArchive,
-                restoreDatabase, restorePort, restoreProof, operationJournal, operationId, installationRoot, protectedConfigRoot);
+                restoreDatabase, restorePort, restoreProof, operationJournal, operationId, installationRoot, protectedConfigRoot,
+                apiAssemblyPath, apiAssemblySha256);
             var restoredOid = RequiredJournalValue(operation, "CreatedDatabaseOid");
             freshBinding = freshBinding with
             {
@@ -586,7 +596,9 @@ public static class AeroLinkMaintenanceHost
         string operationJournal,
         string operationId,
         string installationRoot,
-        string? protectedConfigRoot)
+        string? protectedConfigRoot,
+        string apiAssemblyPath,
+        string apiAssemblySha256)
     {
         var shell = OperatingSystem.IsWindows()
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
@@ -619,6 +631,7 @@ public static class AeroLinkMaintenanceHost
             "-PostgresBin", postgresBin, "-DisposableQualification", "-SkipCurrentCodeValidation",
             "-RequireFreshTarget", "-ContinuityReceiptPath", proof, "-InstallationRoot", installationRoot,
             "-ContinuityOperationJournalPath", operationJournal, "-ContinuityOperationId", operationId,
+            "-ContinuityApiAssemblyPath", apiAssemblyPath, "-ContinuityApiAssemblySha256", apiAssemblySha256,
             "-RetainContinuityRestore",
         }) start.ArgumentList.Add(argument);
         if (!string.IsNullOrWhiteSpace(protectedConfigRoot))
@@ -644,21 +657,33 @@ public static class AeroLinkMaintenanceHost
                 if (!process.HasExited && SameProcessIdentity(process, childIdentity)) process.Kill(entireProcessTree: true);
             }
             catch { }
+            try
+            {
+                using var killWait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await process.WaitForExitAsync(killWait.Token);
+            }
+            catch { }
         }
-        await Task.WhenAll(stdout, stderr);
+        var captured = await DrainContinuityChildOutputAsync(process, stdout, stderr, TimeSpan.FromSeconds(5));
         var operation = UpdateContinuityOperationJournal(operationJournal, journal =>
         {
             journal["ParentProcessId"] = Environment.ProcessId;
             journal["ParentProcessStartedUtc"] = Process.GetCurrentProcess().StartTime.ToUniversalTime();
             journal["RestoreChildProcess"] = childIdentity;
-            journal["RestoreChildExitCode"] = timedOut ? null : process.ExitCode;
+            journal["RestoreChildExitCode"] = timedOut || !process.HasExited ? null : process.ExitCode;
             journal["RestoreChildTimedOut"] = timedOut;
-            journal["RestoreChildStdout"] = RedactContinuityOutput(stdout.Result);
-            journal["RestoreChildStderr"] = RedactContinuityOutput(stderr.Result);
+            journal["RestoreChildOutputDrainComplete"] = captured.Drained;
+            journal["RestoreChildStdout"] = RedactContinuityOutput(captured.Stdout);
+            journal["RestoreChildStderr"] = RedactContinuityOutput(captured.Stderr);
         });
         if (timedOut)
         {
+            MarkContinuityRecoveryRequired(operationJournal, "restore-timeout", "The restore child exceeded its bounded lifetime; attended recovery is required.");
             throw new InvalidOperationException("The fresh continuity restore exceeded its bounded operation time and was refused.");
+        }
+        if (!captured.Drained)
+        {
+            throw new InvalidOperationException("The fresh continuity restore child output could not be drained within its bounded evidence window.");
         }
         if (process.ExitCode != 0 || !File.Exists(proof))
             throw new InvalidOperationException("The existing continuity restore authority refused the fresh owned restore; no export package was written.");
@@ -716,20 +741,34 @@ public static class AeroLinkMaintenanceHost
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        var timedOut = false;
         try { await process.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
         {
+            timedOut = true;
             try { if (!process.HasExited && SameProcessIdentity(process, childIdentity)) process.Kill(entireProcessTree: true); } catch { }
-            throw new InvalidOperationException($"The continuity cleanup timed out; recovery is required at {operationJournal}.");
+            try
+            {
+                using var killWait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await process.WaitForExitAsync(killWait.Token);
+            }
+            catch { }
         }
-        await Task.WhenAll(stdout, stderr);
+        var captured = await DrainContinuityChildOutputAsync(process, stdout, stderr, TimeSpan.FromSeconds(5));
         UpdateContinuityOperationJournal(operationJournal, journal =>
         {
             journal["CleanupChildProcess"] = childIdentity;
-            journal["CleanupChildExitCode"] = process.ExitCode;
-            journal["CleanupChildStdout"] = RedactContinuityOutput(stdout.Result);
-            journal["CleanupChildStderr"] = RedactContinuityOutput(stderr.Result);
+            journal["CleanupChildExitCode"] = timedOut || !process.HasExited ? null : process.ExitCode;
+            journal["CleanupChildTimedOut"] = timedOut;
+            journal["CleanupChildOutputDrainComplete"] = captured.Drained;
+            journal["CleanupChildStdout"] = RedactContinuityOutput(captured.Stdout);
+            journal["CleanupChildStderr"] = RedactContinuityOutput(captured.Stderr);
         });
+        if (timedOut || !captured.Drained)
+        {
+            MarkContinuityRecoveryRequired(operationJournal, "cleanup-timeout", "The cleanup child did not complete its bounded evidence window; attended recovery is required.");
+            throw new InvalidOperationException($"The continuity cleanup timed out or its output could not be drained; recovery is required at {operationJournal}.");
+        }
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"The product-owned continuity cleanup refused; recovery is required at {operationJournal}.");
         var final = ReadContinuityOperationJournal(operationJournal);
@@ -762,6 +801,47 @@ public static class AeroLinkMaintenanceHost
         if (!File.Exists(path)) throw new InvalidOperationException("The continuity operation journal is missing.");
         return JsonNode.Parse(File.ReadAllText(path)) as JsonObject
             ?? throw new InvalidOperationException("The continuity operation journal is invalid.");
+    }
+
+    private static async Task<(string Stdout, string Stderr, bool Drained)> DrainContinuityChildOutputAsync(
+        Process process,
+        Task<string> stdout,
+        Task<string> stderr,
+        TimeSpan timeout)
+    {
+        var both = Task.WhenAll(stdout, stderr);
+        var completed = await Task.WhenAny(both, Task.Delay(timeout));
+        if (completed != both)
+        {
+            try { process.StandardOutput.Close(); } catch { }
+            try { process.StandardError.Close(); } catch { }
+            await Task.WhenAny(both, Task.Delay(TimeSpan.FromSeconds(1)));
+        }
+        if (both.IsCompleted)
+        {
+            try { await both; } catch { }
+        }
+        return (CompletedChildOutput(stdout), CompletedChildOutput(stderr), both.IsCompletedSuccessfully);
+    }
+
+    private static string CompletedChildOutput(Task<string> output) =>
+        output.Status == TaskStatus.RanToCompletion ? output.Result : "[child-output-unavailable]";
+
+    private static void MarkContinuityRecoveryRequired(string operationJournal, string phase, string disposition)
+    {
+        try
+        {
+            var journal = ReadContinuityOperationJournal(operationJournal);
+            if (journal["Status"]?.GetValue<string>() != "cleaned")
+            {
+                journal["Status"] = "recovery-required";
+                journal["Phase"] = phase;
+                journal["CleanupDisposition"] = disposition;
+                journal["UpdatedAtUtc"] = DateTimeOffset.UtcNow;
+                WriteJsonOnceReplacing(operationJournal, journal);
+            }
+        }
+        catch { }
     }
 
     private static void RefusePendingContinuityOperations(string restoreValidationRoot)

@@ -1,5 +1,6 @@
 using System.Data;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -197,7 +198,11 @@ public static class HomeContinuityCompatibilityReader
                 || !TryGetString(journal.RootElement, "Status", out var operationStatus)
                 || !string.Equals(operationStatus, "completed", StringComparison.Ordinal)
                 || !TryGetString(journal.RootElement, "CreatedDatabaseOid", out var journalOid)
-                || !string.Equals(journalOid, binding.RestoredDatabaseOid, StringComparison.Ordinal))
+                || !string.Equals(journalOid, binding.RestoredDatabaseOid, StringComparison.Ordinal)
+                || !TryGetString(journal.RootElement, "ApiEntryAssemblyPath", out var journalApiPath)
+                || !string.Equals(Path.GetFullPath(journalApiPath!), Path.GetFullPath(binding.RestoreApiAssemblyPath), StringComparison.OrdinalIgnoreCase)
+                || !TryGetString(journal.RootElement, "ApiEntryAssemblySha256", out var journalApiSha256)
+                || !string.Equals(journalApiSha256, binding.RestoreApiAssemblySha256, StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("The restored database operation journal is not a completed identity match.", nameof(binding));
         }
         Require(binding.SourceUserSid, nameof(binding.SourceUserSid));
@@ -210,6 +215,13 @@ public static class HomeContinuityCompatibilityReader
         RequireSha256(binding.VerifiedBackupArchiveSha256, nameof(binding.VerifiedBackupArchiveSha256));
         RequireSha256(binding.ReaderSourceSha256, nameof(binding.ReaderSourceSha256));
         RequireSha256(binding.ReaderAssemblySha256, nameof(binding.ReaderAssemblySha256));
+        if (!string.IsNullOrWhiteSpace(binding.RestoreOperationJournalPath))
+        {
+            RequireExistingFile(binding.RestoreApiAssemblyPath, nameof(binding.RestoreApiAssemblyPath));
+            RequireSha256(binding.RestoreApiAssemblySha256, nameof(binding.RestoreApiAssemblySha256));
+            if (!string.Equals(Sha256File(binding.RestoreApiAssemblyPath), binding.RestoreApiAssemblySha256, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("The continuity API entry assembly hash does not match the captured operation identity.", nameof(binding));
+        }
         Require(binding.SourceDiscriminator, nameof(binding.SourceDiscriminator));
         if (!Guid.TryParse(binding.SourceInstallationId, out var installationId)
             || installationId != binding.SourceInstanceId)
@@ -520,16 +532,94 @@ public static class HomeContinuityCompatibilityReader
             if (!TryGetString(root, "OperationId", out var operationId)
                 || !string.Equals(operationId, binding.RestoreOperationId, StringComparison.Ordinal)
                 || !TryGetString(root, "OperationJournalPath", out var operationJournalPath)
-                || !string.Equals(Path.GetFullPath(operationJournalPath), Path.GetFullPath(binding.RestoreOperationJournalPath), StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(Path.GetFullPath(operationJournalPath!), Path.GetFullPath(binding.RestoreOperationJournalPath), StringComparison.OrdinalIgnoreCase)
                 || !TryGetString(root, "DatabaseOid", out var databaseOid)
                 || !string.Equals(databaseOid, binding.RestoredDatabaseOid, StringComparison.Ordinal)
+                || !TryGetString(root, "ApiEntryAssemblyPath", out var apiAssemblyPath)
+                || !string.Equals(Path.GetFullPath(apiAssemblyPath!), Path.GetFullPath(binding.RestoreApiAssemblyPath), StringComparison.OrdinalIgnoreCase)
+                || !TryGetString(root, "ApiEntryAssemblySha256", out var apiAssemblySha256)
+                || !string.Equals(apiAssemblySha256, binding.RestoreApiAssemblySha256, StringComparison.OrdinalIgnoreCase)
+                || !root.TryGetProperty("PostgresRuntimeBefore", out var runtimeBefore)
                 || !root.TryGetProperty("PostgresRuntimeAfter", out var runtimeAfter)
-                || runtimeAfter.ValueKind != JsonValueKind.Object
-                || !TryGetString(runtimeAfter, "DataDirectory", out _)
-                || !runtimeAfter.TryGetProperty("Postmaster", out var postmaster)
-                || !TryGetString(postmaster, "ImageSha256", out _))
+                || runtimeBefore.ValueKind != JsonValueKind.Object
+                || runtimeAfter.ValueKind != JsonValueKind.Object)
                 throw new InvalidOperationException("The continuity restore proof does not contain the product-owned PostgreSQL operation identity.");
+            ValidateRuntimeIdentity(runtimeBefore, binding.RestoredPostgresPort, "before");
+            ValidateRuntimeIdentity(runtimeAfter, binding.RestoredPostgresPort, "after");
+            RequireStableRuntimeIdentity(runtimeBefore, runtimeAfter);
         }
+    }
+
+    private static void ValidateRuntimeIdentity(JsonElement runtime, int expectedPort, string label)
+    {
+        if (!TryGetString(runtime, "ListenerAddress", out var address)
+            || !string.Equals(address, "127.0.0.1", StringComparison.Ordinal)
+            || !TryGetInt(runtime, "ListenerPort", out var port) || port != expectedPort
+            || !TryGetString(runtime, "DataDirectory", out var dataDirectory)
+            || !Path.IsPathFullyQualified(dataDirectory!)
+            || !TryGetString(runtime, "PostmasterPidPath", out var postmasterPidPath)
+            || !Path.IsPathFullyQualified(postmasterPidPath!)
+            || !TryGetSha256(runtime, "PostmasterPidSha256", out _)
+            || !runtime.TryGetProperty("Postmaster", out var postmaster)
+            || postmaster.ValueKind != JsonValueKind.Object
+            || !TryGetInt(postmaster, "ProcessId", out var processId) || processId <= 0
+            || !TryGetString(postmaster, "ProcessStartedUtc", out var processStartedUtc)
+            || !DateTimeOffset.TryParse(processStartedUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _)
+            || !TryGetString(postmaster, "ImagePath", out var imagePath)
+            || !Path.IsPathFullyQualified(imagePath!)
+            || !TryGetSha256(postmaster, "ImageSha256", out _)
+            || !runtime.TryGetProperty("Tools", out var tools)
+            || tools.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException($"The continuity PostgreSQL runtime {label} identity is incomplete.");
+
+        foreach (var name in new[] { "createdb.exe", "pg_restore.exe", "psql.exe", "dropdb.exe" })
+        {
+            if (!tools.TryGetProperty(name, out var tool)
+                || tool.ValueKind != JsonValueKind.Object
+                || !TryGetString(tool, "Path", out var toolPath)
+                || !Path.IsPathFullyQualified(toolPath!)
+                || !TryGetSha256(tool, "Sha256", out _)
+                || !TryGetString(tool, "Version", out _))
+                throw new InvalidOperationException($"The continuity PostgreSQL {label} identity is missing tool {name}.");
+        }
+    }
+
+    private static void RequireStableRuntimeIdentity(JsonElement before, JsonElement after)
+    {
+        foreach (var name in new[] { "ListenerAddress", "ListenerPort", "DataDirectory", "PostmasterPidPath", "PostmasterPidSha256" })
+            if (!JsonValueEquals(before, after, name))
+                throw new InvalidOperationException($"The continuity PostgreSQL runtime changed {name} during the owned restore.");
+        if (!before.TryGetProperty("Postmaster", out var beforePostmaster)
+            || !after.TryGetProperty("Postmaster", out var afterPostmaster))
+            throw new InvalidOperationException("The continuity PostgreSQL postmaster identity is incomplete.");
+        foreach (var name in new[] { "ProcessId", "ProcessStartedUtc", "ImagePath", "ImageSha256" })
+            if (!JsonValueEquals(beforePostmaster, afterPostmaster, name))
+                throw new InvalidOperationException($"The continuity PostgreSQL postmaster changed {name} during the owned restore.");
+        foreach (var name in new[] { "createdb.exe", "pg_restore.exe", "psql.exe", "dropdb.exe" })
+        {
+            if (!before.TryGetProperty("Tools", out var beforeTools) || !after.TryGetProperty("Tools", out var afterTools)
+                || !beforeTools.TryGetProperty(name, out var beforeTool) || !afterTools.TryGetProperty(name, out var afterTool))
+                throw new InvalidOperationException($"The continuity PostgreSQL tool identity is incomplete for {name}.");
+            foreach (var field in new[] { "Path", "Sha256", "Version" })
+                if (!JsonValueEquals(beforeTool, afterTool, field))
+                    throw new InvalidOperationException($"The continuity PostgreSQL tool {name} changed {field} during the owned restore.");
+        }
+    }
+
+    private static bool JsonValueEquals(JsonElement left, JsonElement right, string name) =>
+        left.TryGetProperty(name, out var leftValue)
+        && right.TryGetProperty(name, out var rightValue)
+        && leftValue.GetRawText() == rightValue.GetRawText();
+
+    private static bool TryGetSha256(JsonElement root, string name, out string value)
+    {
+        if (TryGetString(root, name, out var candidate) && IsSha256(candidate!))
+        {
+            value = candidate!;
+            return true;
+        }
+        value = string.Empty;
+        return false;
     }
 
     private static bool TryGetInt(JsonElement root, string name, out int value)
@@ -653,7 +743,9 @@ public sealed record HomeContinuityCompatibilityBinding(
     Dictionary<string, string> ExternalStoreStates,
     string RestoreOperationJournalPath = "",
     string RestoreOperationId = "",
-    string RestoredDatabaseOid = "");
+    string RestoredDatabaseOid = "",
+    string RestoreApiAssemblyPath = "",
+    string RestoreApiAssemblySha256 = "");
 
 public sealed record HomeContinuityCompatibilityReceipt(
     string Status,

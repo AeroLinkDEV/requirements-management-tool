@@ -928,7 +928,8 @@ dotnet AeroLink.Api.dll maintenance home-continuity export `
   --target-application AeroLink `
   --certificate D:\transfer\destination-transport.cer `
   --source-ring D:\captured\source-key-ring `
-  --compatibility-receipt D:\transfer\home-compatibility-receipt.json
+  --compatibility-receipt D:\transfer\home-compatibility-receipt.json `
+  --restore-postgres-bin 'C:\AeroLink\PostgreSQL\bin'
 ```
 
 ```powershell

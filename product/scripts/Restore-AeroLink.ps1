@@ -32,6 +32,8 @@ param(
     # updated by this restore authority, and retained as a redacted recovery receipt after cleanup.
     [string]$ContinuityOperationJournalPath,
     [string]$ContinuityOperationId,
+    [string]$ContinuityApiAssemblyPath,
+    [string]$ContinuityApiAssemblySha256,
     [switch]$RetainContinuityRestore,
     [switch]$CleanupContinuityOperation,
     [switch]$AllowProductionRestore,
@@ -413,6 +415,7 @@ if ($ContinuityReceiptPath) {
 }
 $bin = [IO.Path]::GetFullPath($PostgresBin)
 $script:continuityJournalState = $null
+$continuityApiAssembly = $null
 if ($ContinuityOperationJournalPath) {
     if ([string]::IsNullOrWhiteSpace($ContinuityOperationId)) { throw 'A continuity operation ID is required when an operation journal is supplied.' }
     $ContinuityOperationJournalPath = [IO.Path]::GetFullPath($ContinuityOperationJournalPath)
@@ -425,6 +428,13 @@ if ($ContinuityOperationJournalPath) {
     if ([string]$script:continuityJournalState.OperationId -ne $ContinuityOperationId) { throw 'The continuity operation journal ID does not match the requested operation.' }
     if ([string]$script:continuityJournalState.Status -in @('cleaned','recovery-required')) { throw 'The continuity operation journal is already terminal.' }
     if (-not $CleanupContinuityOperation -and [string]$script:continuityJournalState.TargetDatabase -ne $TargetDatabase) { throw 'The continuity operation target database does not match its journal.' }
+    if (-not $CleanupContinuityOperation) {
+        if ([string]::IsNullOrWhiteSpace($ContinuityApiAssemblyPath) -or [string]::IsNullOrWhiteSpace($ContinuityApiAssemblySha256)) { throw 'The continuity API entry assembly identity is required for a fresh operation.' }
+        $continuityApiAssembly = [IO.Path]::GetFullPath($ContinuityApiAssemblyPath)
+        if (-not (Test-Path -LiteralPath $continuityApiAssembly -PathType Leaf)) { throw 'The continuity API entry assembly is missing.' }
+        $actualApiAssemblySha256 = (Get-FileHash -LiteralPath $continuityApiAssembly -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualApiAssemblySha256 -ne $ContinuityApiAssemblySha256.ToLowerInvariant()) { throw 'The continuity API entry assembly hash does not match the supplied identity.' }
+    }
     if ($CleanupContinuityOperation) {
         $cleanupRuntimeBefore = Get-ContinuityRuntimeIdentity
         Invoke-ContinuityOwnedCleanup
@@ -451,6 +461,7 @@ $oldDatabase = "aerolink_pre_restore_$token"
 $failedDatabase = "aerolink_failed_restore_$token"
 $resolvedTarget = $null; $incoming = $null; $retained = $null
 $continuityDatabaseCreated = $false; $continuityDatabaseOid = $null
+$preserveContinuityRecovery = $false
 $originalDatabaseRenamed = $false; $databaseActivated = $false; $evidenceActivated = $false; $activationPassed = $false
 
 try {
@@ -562,6 +573,8 @@ try {
             PostgresPort = [int]$PostgresPort
             OperationId = $ContinuityOperationId
             OperationJournalPath = if ($ContinuityOperationJournalPath) { [IO.Path]::GetFullPath($ContinuityOperationJournalPath) } else { $null }
+            ApiEntryAssemblyPath = $continuityApiAssembly
+            ApiEntryAssemblySha256 = $ContinuityApiAssemblySha256
             InstallationRoot = [IO.Path]::GetFullPath($installation.InstallationRoot)
             RestoreValidationRoot = [IO.Path]::GetFullPath($installation.RestoreValidation)
             CompletedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
@@ -610,21 +623,26 @@ catch {
     }
     if ($ContinuityOperationJournalPath) {
         try {
+            $preserveContinuityRecovery = $true
             Write-ContinuityJournal 'failed' 'restore-failed' @{ Failure = 'The restore authority refused the operation; details are intentionally redacted.'; CreatedDatabaseOid = $continuityDatabaseOid; CreatedByOperation = $continuityDatabaseCreated; EvidencePath = $resolvedTarget; IncomingPath = $incoming; TemporaryPath = $temporary }
             if ($continuityDatabaseCreated) { Invoke-ContinuityOwnedCleanup; Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'Only the operation-owned database and staging paths were removed.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json" } }
             else { Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'The target was not created by this operation; it was preserved.' } }
             [void](Write-ContinuityDiagnosticReceipt)
+            $preserveContinuityRecovery = $false
         }
         catch {
             if ($script:continuityJournalState.Status -ne 'recovery-required') { Write-ContinuityJournal 'recovery-required' 'cleanup-failed' @{ CleanupDisposition = 'Cleanup could not prove exclusive ownership; target and recovery paths were preserved.' } }
+            try { [void](Write-ContinuityDiagnosticReceipt) } catch { }
             throw "Restore failed and product-owned cleanup requires attended recovery at $ContinuityOperationJournalPath."
         }
     }
     throw $failure
 }
 finally {
-    if ($incoming -and (Test-Path -LiteralPath $incoming)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $incoming) -Recurse -Force }
-    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $temporary) -Recurse -Force }
+    if (-not $preserveContinuityRecovery) {
+        if ($incoming -and (Test-Path -LiteralPath $incoming)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $incoming) -Recurse -Force }
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $temporary) -Recurse -Force }
+    }
     if ($production -and -not $databaseActivated) {
         try { Remove-Database $restoreDatabase } catch { }
     }
