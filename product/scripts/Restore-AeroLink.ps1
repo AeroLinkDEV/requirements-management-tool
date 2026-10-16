@@ -436,12 +436,21 @@ if ($ContinuityOperationJournalPath) {
         if ($actualApiAssemblySha256 -ne $ContinuityApiAssemblySha256.ToLowerInvariant()) { throw 'The continuity API entry assembly hash does not match the supplied identity.' }
     }
     if ($CleanupContinuityOperation) {
-        $cleanupRuntimeBefore = Get-ContinuityRuntimeIdentity
-        Invoke-ContinuityOwnedCleanup
-        $cleanupRuntimeAfter = Get-ContinuityRuntimeIdentity
-        Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'Only the operation-owned database and staging paths were removed.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json"; CleanupRuntimeBefore = $cleanupRuntimeBefore; CleanupRuntimeAfter = $cleanupRuntimeAfter }
-        [void](Write-ContinuityDiagnosticReceipt)
-        exit 0
+        try {
+            $cleanupRuntimeBefore = Get-ContinuityRuntimeIdentity
+            Invoke-ContinuityOwnedCleanup
+            $cleanupRuntimeAfter = Get-ContinuityRuntimeIdentity
+            Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'Only the operation-owned database and staging paths were removed.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json"; CleanupRuntimeBefore = $cleanupRuntimeBefore; CleanupRuntimeAfter = $cleanupRuntimeAfter }
+            [void](Write-ContinuityDiagnosticReceipt)
+            exit 0
+        }
+        catch {
+            if ([string]$script:continuityJournalState.Status -ne 'cleaned') {
+                try { Write-ContinuityJournal 'recovery-required' 'cleanup-failed' @{ CleanupDisposition = 'The cleanup child failed before it could prove a cleaned terminal state; attended recovery is required.'; Failure = 'Cleanup failed; details are intentionally redacted.' } } catch { }
+                try { [void](Write-ContinuityDiagnosticReceipt) } catch { }
+            }
+            throw "The continuity cleanup requires attended recovery at $ContinuityOperationJournalPath."
+        }
     }
     $continuityRuntimeBefore = Get-ContinuityRuntimeIdentity
     Write-ContinuityJournal 'running' 'restore-started' @{

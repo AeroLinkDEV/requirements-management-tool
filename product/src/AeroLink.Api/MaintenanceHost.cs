@@ -703,6 +703,28 @@ public static class AeroLinkMaintenanceHost
         string installationRoot,
         string? protectedConfigRoot)
     {
+        try
+        {
+            await CleanupContinuityOperationCoreAsync(restoreScript, postgresBin, database, port, operationJournal,
+                operationId, installationRoot, protectedConfigRoot);
+        }
+        catch
+        {
+            MarkContinuityRecoveryRequired(operationJournal, "cleanup-failed", "The product-owned cleanup child could not establish a verified cleanup result; attended recovery is required.");
+            throw;
+        }
+    }
+
+    private static async Task CleanupContinuityOperationCoreAsync(
+        string restoreScript,
+        string postgresBin,
+        string database,
+        int port,
+        string operationJournal,
+        string operationId,
+        string installationRoot,
+        string? protectedConfigRoot)
+    {
         var shell = OperatingSystem.IsWindows()
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
             : "pwsh";
@@ -770,10 +792,16 @@ public static class AeroLinkMaintenanceHost
             throw new InvalidOperationException($"The continuity cleanup timed out or its output could not be drained; recovery is required at {operationJournal}.");
         }
         if (process.ExitCode != 0)
+        {
+            MarkContinuityRecoveryRequired(operationJournal, "cleanup-failed", "The cleanup child returned a nonzero result; attended recovery is required.");
             throw new InvalidOperationException($"The product-owned continuity cleanup refused; recovery is required at {operationJournal}.");
+        }
         var final = ReadContinuityOperationJournal(operationJournal);
         if (!string.Equals(final["Status"]?.GetValue<string>(), "cleaned", StringComparison.Ordinal))
+        {
+            MarkContinuityRecoveryRequired(operationJournal, "cleanup-failed", "The cleanup child did not establish a terminal cleaned state; attended recovery is required.");
             throw new InvalidOperationException($"The product-owned continuity cleanup did not reach a terminal cleaned state; recovery is required at {operationJournal}.");
+        }
     }
 
     private static void TryCleanupContinuityOperation(
@@ -832,7 +860,7 @@ public static class AeroLinkMaintenanceHost
         try
         {
             var journal = ReadContinuityOperationJournal(operationJournal);
-            if (journal["Status"]?.GetValue<string>() != "cleaned")
+            if (journal["Status"]?.GetValue<string>() is not "cleaned" and not "recovery-required")
             {
                 journal["Status"] = "recovery-required";
                 journal["Phase"] = phase;
@@ -840,8 +868,27 @@ public static class AeroLinkMaintenanceHost
                 journal["UpdatedAtUtc"] = DateTimeOffset.UtcNow;
                 WriteJsonOnceReplacing(operationJournal, journal);
             }
+            if (journal["Status"]?.GetValue<string>() != "cleaned")
+                WriteContinuityDiagnosticReceipt(operationJournal, journal);
         }
         catch { }
+    }
+
+    private static void WriteContinuityDiagnosticReceipt(string operationJournal, JsonObject journal)
+    {
+        var receiptPath = operationJournal + ".receipt.json";
+        if (File.Exists(receiptPath)) return;
+        var temporary = $"{receiptPath}.writing-{Guid.NewGuid():N}";
+        try
+        {
+            File.WriteAllText(temporary, journal.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+            if (File.Exists(receiptPath)) File.Delete(temporary);
+            else File.Move(temporary, receiptPath);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
     }
 
     private static void RefusePendingContinuityOperations(string restoreValidationRoot)
