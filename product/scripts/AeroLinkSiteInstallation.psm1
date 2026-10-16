@@ -265,7 +265,7 @@ function Get-AeroLinkSiteFolderPlan {
               under a restricted token in which Administrators is deny-only, so an installer could not otherwise
               execute them (#1636 review P1-1).
             - pgdata: writable by the PostgreSQL account and Administrators only. The API has no file access to it.
-            - Every other data folder: writable by the API account and Administrators only.
+            - Data folders are writable by the API account and Administrators only; the Data Protection key ring also grants SYSTEM full control.
             - The notification authority, outside the installation: read-only to the API account. An
               administrator provisions it; the application never writes it.
     #>
@@ -280,6 +280,7 @@ function Get-AeroLinkSiteFolderPlan {
     $binaries = @($admin, $system, @{ Sid = $script:UsersSid; Access = 'Read' })
     $cluster = @($admin, @{ Sid = $site.PostgresRunAsSid; Access = 'Modify' })
     $writable = @($admin, @{ Sid = $site.RunAsSid; Access = 'Modify' })
+    $keyRingWritable = @($admin, $system, @{ Sid = $site.RunAsSid; Access = 'Modify' })
     $plan = New-Object System.Collections.Generic.List[object]
     foreach ($path in @($site.InstallationRoot, $site.ProgramRoot, $site.NotificationAuthorityRoot)) {
         $plan.Add([pscustomobject]@{ Path = $path; Kind = 'ReadOnly'; Grants = $readOnly })
@@ -289,7 +290,8 @@ function Get-AeroLinkSiteFolderPlan {
     foreach ($path in @($site.EvidenceRoot, $site.KeyRingPath, $site.ConnectorKeyDirectory, $paths.Logs, $paths.Backups,
                         $paths.BackupVerification, $paths.RestoreWork, $paths.RestoreValidation, $paths.BootstrapState,
                         $paths.DocumentConnector, $paths.UpgradeState, $paths.SnapshotInbox)) {
-        $plan.Add([pscustomobject]@{ Path = $path; Kind = 'Data'; Grants = $writable })
+        $grants = if ($path -eq $site.KeyRingPath) { $keyRingWritable } else { $writable }
+        $plan.Add([pscustomobject]@{ Path = $path; Kind = 'Data'; Grants = $grants })
     }
     return $plan.ToArray()
 }

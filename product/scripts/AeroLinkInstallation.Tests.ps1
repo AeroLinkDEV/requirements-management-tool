@@ -576,10 +576,11 @@ try {
             Cluster  = @{ Principals = @('S-1-5-32-544', $postgresSid); Writers = @('S-1-5-32-544', $postgresSid) }
             Data     = @{ Principals = @('S-1-5-32-544', $apiSid); Writers = @('S-1-5-32-544', $apiSid) }
         }
+        $keyRingData = @{ Principals = @('S-1-5-18', 'S-1-5-32-544', $apiSid); Writers = @('S-1-5-18', 'S-1-5-32-544', $apiSid) }
         $sitePlan = @(Set-AeroLinkSiteFolderAcl -InstallationRoot $siteRoot)
         foreach ($entry in $sitePlan) {
             $access = Get-AeroLinkDirectoryAccessBySid -Path $entry.Path
-            $want = $expected[$entry.Kind]
+            $want = if ($entry.Path -eq $declared.KeyRingPath) { $keyRingData } else { $expected[$entry.Kind] }
             $writers = @($access.Rules | Where-Object { $_.Allow -and $_.CanWrite } | ForEach-Object Sid | Sort-Object -Unique)
             $principals = @($access.Rules | ForEach-Object Sid | Sort-Object -Unique)
             Assert-True $access.Protected "$($entry.Path) must not inherit permissions."
