@@ -869,8 +869,13 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $tests = @(Get-ChildItem -LiteralPath product/test-planner/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
-          if ($tests.Count -eq 0) { throw 'No planner tests were found.' }
+          $allTests = @(Get-ChildItem -LiteralPath product/test-planner/tests -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          if ($allTests.Count -eq 0) { throw 'No planner tests were found.' }
+          $readinessTests = @($allTests | Where-Object { (Split-Path -Leaf $_) -eq 'full-ci-readiness-dispatch.test.mjs' })
+          if ($readinessTests.Count -ne 1) { throw 'The isolated readiness planner test was not found exactly once.' }
+          $tests = @($allTests | Where-Object { (Split-Path -Leaf $_) -ne 'full-ci-readiness-dispatch.test.mjs' })
+          & node --test $readinessTests
+          if ($LASTEXITCODE -ne 0) { throw 'The isolated readiness planner test failed.' }
           & node --test $tests
           if ($LASTEXITCODE -ne 0) { throw 'A planner test suite failed.' }
       - name: Mark test complete

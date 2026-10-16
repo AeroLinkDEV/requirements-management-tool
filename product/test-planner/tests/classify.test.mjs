@@ -466,7 +466,7 @@ test('backend-core-domain runs every hosted contract test file', () => {
   assert.match(backendCore, /No hosted test-contracts test files were found/)
 })
 
-test('CI runs every planner test file directory-driven', () => {
+test('CI isolates the readiness planner test in every classifier guard lane', () => {
   const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
   const plannerStart = workflow.indexOf('product/test-planner/tests')
   assert.notEqual(plannerStart, -1)
@@ -474,12 +474,17 @@ test('CI runs every planner test file directory-driven', () => {
   assert.match(plannerJob, /Get-ChildItem\s+-LiteralPath\s+product\/test-planner\/tests\s+-Filter\s+'\*\.test\.mjs'/)
   assert.match(plannerJob, /No planner tests were found/)
 
-  const start = workflow.indexOf('      - name: Verify the changed-area classifier and its workflow contract')
-  const end = workflow.indexOf('      - name: Refuse a test project that no job runs', start)
-  assert.ok(start >= 0 && end > start, 'the planner step must remain a bounded workflow step')
-  const run = workflow.slice(start, end).match(/        run: \|\n([\s\S]*)/)?.[1]
-  assert.ok(run, 'the planner step must have an executable PowerShell body')
-  const script = run.replace(/^          /gm, '')
+  const lanes = [
+    ['Verify the changed-area classifier and its workflow contract', 'Refuse a test project that no job runs'],
+    ['Verify the changed-area classifier guards (client changes)', 'Mark test complete'],
+  ]
+  for (const [name, nextName] of lanes) {
+    const start = workflow.indexOf(`      - name: ${name}`)
+    const end = workflow.indexOf(`      - name: ${nextName}`, start)
+    assert.ok(start >= 0 && end > start, `${name} must remain a bounded workflow step`)
+    const run = workflow.slice(start, end).match(/        run: \|\n([\s\S]*)/)?.[1]
+    assert.ok(run, `${name} must have an executable PowerShell body`)
+    const script = run.replace(/^          /gm, '')
 
   const fixture = mkdtempSync(join(tmpdir(), 'aerolink-planner-selection-'))
   try {
@@ -518,26 +523,27 @@ test('CI runs every planner test file directory-driven', () => {
       `--test ${join(testsRoot, 'full-ci-readiness-dispatch.test.mjs')}`,
       `--test ${join(testsRoot, 'classify.test.mjs')} ${join(testsRoot, 'future-planner.test.mjs')}`,
     ]
-    assert.deepEqual(execute(), { status: 0, stderr: '' })
+    assert.deepEqual(execute(), { status: 0, stderr: '' }, `${name} should complete the fixture run`)
     assert.deepEqual(readFileSync(calls, 'utf8').trim().split(/\r?\n/), expected,
-      'the readiness file must be the sole member of its process and every other discovered file must run once')
+      `${name} must isolate readiness and run every other discovered file exactly once`)
 
     writeFileSync(calls, '')
     const missing = join(testsRoot, 'full-ci-readiness-dispatch.test.mjs')
     rmSync(missing)
     const missingResult = execute()
-    assert.notEqual(missingResult.status, 0, 'missing readiness must fail closed')
+    assert.notEqual(missingResult.status, 0, `${name} must fail closed when readiness is missing`)
     assert.match(missingResult.stderr, /not found exactly once/)
-    assert.equal(readFileSync(calls, 'utf8'), '', 'missing readiness must be refused before any test process starts')
+    assert.equal(readFileSync(calls, 'utf8'), '', `${name} must refuse missing readiness before starting node`)
 
     writeFileSync(join(testsRoot, 'full-ci-readiness-dispatch.test.mjs'), '')
     writeFileSync(calls, '')
     const nodeFailure = execute('9')
-    assert.notEqual(nodeFailure.status, 0, 'a failed readiness test process must fail the planner step')
+    assert.notEqual(nodeFailure.status, 0, `${name} must fail when readiness exits nonzero`)
     assert.deepEqual(readFileSync(calls, 'utf8').trim().split(/\r?\n/), [expected[0]],
-      'a readiness failure must stop before the ordinary planner process starts')
+      `${name} must stop before the ordinary planner process after readiness failure`)
   } finally {
     rmSync(fixture, { recursive: true, force: true })
+  }
   }
 })
 
