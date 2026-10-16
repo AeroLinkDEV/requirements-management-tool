@@ -203,7 +203,10 @@ public sealed class NotificationProcessQualificationTests
         await fixture.RestartRelayAsync("PauseAfterData"); await Task.Delay(1100);
         using var workerA = fixture.Worker(); using var workerB = fixture.Worker();
         await fixture.WaitFactAsync("DataReceived", 2);
-        await Task.Delay(750);
+        // The worker holding DATA cannot exit until the relay is released. The first
+        // worker to exit therefore observed the shared start gate while that socket
+        // was still active; this is the interleaving the assertions below require.
+        await Task.WhenAny(workerA.WaitForExitAsync(), workerB.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(40));
         Assert.Equal(2, fixture.FactCount("TcpAccepted")); // One original plus exactly one linked successor.
         fixture.ReleaseData(); await Fixture.ExitedAsync(workerA); await Fixture.ExitedAsync(workerB);
         await using var db = fixture.Db();
