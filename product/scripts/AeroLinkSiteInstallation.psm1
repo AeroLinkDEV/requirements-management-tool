@@ -94,6 +94,10 @@ function Assert-AeroLinkUniqueSiteInstanceId {
         [Parameter(Mandatory)][string]$InstanceId
     )
     if ([string]::IsNullOrWhiteSpace($InstanceId)) { throw 'A site declaration requires a non-empty instanceId.' }
+    $targetGuid = [guid]::Empty
+    if (-not [guid]::TryParse($InstanceId.Trim(), [ref]$targetGuid)) {
+        throw "The site instanceId '$InstanceId' is not a valid GUID; refusing to write a declaration or derive cookie names from it."
+    }
     $root = [IO.Path]::GetFullPath($InstallationRoot).TrimEnd('\', '/')
     $parent = Split-Path -Parent $root
     foreach ($siblingName in @('AeroLink Production', 'AeroLink Development')) {
@@ -105,8 +109,15 @@ function Assert-AeroLinkUniqueSiteInstanceId {
         catch { throw "The sibling site declaration at $configPath is malformed: $($_.Exception.Message)" }
         $classification = if ($document.PSObject.Properties['classification']) { [string]$document.classification } else { '' }
         $otherId = if ($document.PSObject.Properties['instanceId']) { [string]$document.instanceId } else { '' }
+        if ((Test-AeroLinkSiteClassification $classification) -and [string]::IsNullOrWhiteSpace($otherId)) {
+            throw "The sibling site declaration at $configPath has no instanceId; refusing to derive an ambiguous cookie namespace."
+        }
+        $otherGuid = [guid]::Empty
         if ((Test-AeroLinkSiteClassification $classification) -and
-            [string]::Equals($otherId.Trim(), $InstanceId.Trim(), [StringComparison]::OrdinalIgnoreCase)) {
+            -not [guid]::TryParse($otherId.Trim(), [ref]$otherGuid)) {
+            throw "The sibling site declaration at $configPath has invalid instanceId '$otherId'; refusing to compare or derive cookie namespaces."
+        }
+        if ((Test-AeroLinkSiteClassification $classification) -and $otherGuid -eq $targetGuid) {
             throw "The site instanceId '$InstanceId' is already used by $classification at '$sibling'. Production and Development must have distinct persisted instance ids and cookie namespaces; copy the declaration only after assigning a new id."
         }
     }

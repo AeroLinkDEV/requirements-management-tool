@@ -55,9 +55,13 @@ function Get-AeroLinkInstallationPointerPath {
     # A signed site release is laid out as <installation>\program\versions\<version>.
     # Its installation pointer is mutable installation metadata, so it belongs beside versions,
     # outside the signed release tree. Source checkouts keep the historical product\\.local path.
-    $pointerRoot = if ((Test-Path -LiteralPath (Join-Path $root 'manifest.json') -PathType Leaf) -and
+    $versionsRoot = Split-Path $root -Parent
+    $programRoot = Split-Path $versionsRoot -Parent
+    $pointerRoot = if (([string]::Equals((Split-Path $versionsRoot -Leaf), 'versions', [StringComparison]::OrdinalIgnoreCase)) -and
+        ([string]::Equals((Split-Path $programRoot -Leaf), 'program', [StringComparison]::OrdinalIgnoreCase)) -and
+        (Test-Path -LiteralPath (Join-Path $root 'manifest.json') -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $root 'app\AeroLink.Api.exe') -PathType Leaf)) {
-        Split-Path (Split-Path $root -Parent) -Parent
+        $programRoot
     } else { $root }
     return Join-Path (Join-Path $pointerRoot '.local') $script:AeroLinkInstallationPointerName
 }

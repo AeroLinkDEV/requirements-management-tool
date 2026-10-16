@@ -87,6 +87,14 @@ try {
         (Test-Path -LiteralPath $expectedSignedPointer -PathType Leaf) -and
         -not (Test-Path -LiteralPath (Join-Path $signedVersionRoot '.local'))) `
         'A signed release pointer must be written beside program\versions, never inside the immutable version tree.'
+    $ambiguousRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-ambiguous-release-' + [Guid]::NewGuid().ToString('N'))
+    $fixtures.Add($ambiguousRoot)
+    New-Item -ItemType Directory -Path (Join-Path $ambiguousRoot 'app') -Force | Out-Null
+    '{}' | Set-Content -LiteralPath (Join-Path $ambiguousRoot 'manifest.json') -Encoding UTF8
+    '' | Set-Content -LiteralPath (Join-Path $ambiguousRoot 'app\AeroLink.Api.exe') -Encoding ASCII
+    $ambiguousPointer = Set-AeroLinkInstallationPointer -ProductRoot $ambiguousRoot -InstallationRoot $signedSiteRoot
+    Assert-True ($ambiguousPointer -eq [IO.Path]::GetFullPath((Join-Path $ambiguousRoot '.local\installation.json'))) `
+        'A manifest and API executable outside program\versions must not trigger signed-release pointer relocation.'
 
     # --- 3. Relocation changes nothing about installation IDENTITY. This is acceptance 66-70. ---
     $canonicalIdentity = Get-AeroLinkInstallationIdentity -ProductRoot $canonicalProduct
@@ -392,7 +400,7 @@ try {
         $duplicateId = [Guid]::NewGuid().ToString('D')
         @{ classification = 'SiteProduction'; instanceId = $duplicateId } |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateProduction 'instance.json') -Encoding UTF8
-        @{ classification = 'SiteDevelopment'; instanceId = $duplicateId } |
+        @{ classification = 'SiteDevelopment'; instanceId = "{$duplicateId}" } |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Encoding UTF8
         $duplicateBefore = Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw
         $duplicateApiPort = Get-FreeLoopbackPort
@@ -404,6 +412,14 @@ try {
             'A site declaration must refuse a copied sibling instanceId before changing the declaration.'
         Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $duplicateBefore) `
             'A duplicate instanceId refusal must leave the existing declaration bytes unchanged.'
+        @{ classification = 'SiteDevelopment'; instanceId = 'not-a-guid' } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Encoding UTF8
+        $invalidBefore = Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw
+        Assert-Throws {
+            Set-AeroLinkSiteDeclaration -InstallationRoot $duplicateDevelopment -ApiPort $duplicateApiPort -PostgresPort $duplicatePostgresPort
+        } 'not a valid GUID' 'A non-empty invalid instanceId must be rejected before declaration writes.'
+        Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $invalidBefore) `
+            'An invalid instanceId refusal must leave declaration bytes unchanged.'
         # #1614 1.9 (D7): the daily verified backup runs as the installation's own API account, never a person.
         $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
         Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
