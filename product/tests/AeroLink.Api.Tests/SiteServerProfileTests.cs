@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -106,7 +107,18 @@ public sealed class SiteServerProfileTests : IDisposable
         // partial move; apply-only refusal does not protect this boundary.
         var keyRing = Directory.CreateTempSubdirectory("aerolink-continuity-pending-").FullName;
         var marker = keyRing + ".continuity-pending.json";
-        File.WriteAllText(marker, "{\"phase\":\"staged\"}");
+        File.WriteAllText(marker, JsonSerializer.Serialize(new
+        {
+            SchemaVersion = 1,
+            PackageId = Guid.Parse("22222222-2222-4222-8222-222222222222"),
+            ManifestSha256 = new string('a', 64),
+            DestinationInstallationRoot = keyRing + "-installation",
+            DestinationRingPath = keyRing,
+            DestinationConnectorPath = keyRing + "-connector.pem",
+            DestinationServiceSid = "S-1-5-80-1234",
+            Phase = "staged",
+            RecordedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
+        }));
         try
         {
             var settings = ValidSite();
