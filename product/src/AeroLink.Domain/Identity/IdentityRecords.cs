@@ -437,14 +437,41 @@ public sealed class ExternalGroupRoleMapping
             : value.Trim();
 }
 
+/// <summary>
+/// How an account came to exist (#1615). A Local account was created by an administrator or the bootstrap and
+/// signs in with an AeroLink password. A Windows account was created automatically by a first Windows sign-in,
+/// has no AeroLink password, and is identified by its Windows SID.
+/// </summary>
+public enum AccountOrigin { Local, Windows }
+
 public sealed class UserAccount
 {
+    /// <summary>The longest SID text: S-1-5 plus fifteen 32-bit sub-authorities.</summary>
+    public const int WindowsSidMaxLength = 184;
+    public const int WindowsPrincipalMaxLength = 300;
+
     private UserAccount() { }
     public UserAccount(string userName, string displayName, string email, string passwordHash, DateTimeOffset now)
     {
         Id = Guid.NewGuid(); UserName = Normalize(userName); DisplayName = Required(displayName, nameof(displayName));
         Email = email.Trim(); PasswordHash = passwordHash; State = AccountState.Active; CreatedAt = now;
     }
+
+    /// <summary>
+    /// An account created by somebody's first Windows sign-in. It has no AeroLink password, so password sign-in
+    /// can never succeed for it; the Windows SID is what identifies it from then on, and the user name taken
+    /// from <c>DOMAIN\user</c> stays fixed even if the directory later renames the person.
+    /// </summary>
+    public static UserAccount ProvisionFromWindows(string sid, string principal, string displayName, string email, DateTimeOffset now)
+    {
+        var account = new UserAccount(Required(principal, nameof(principal)), displayName, Required(email, nameof(email)), "", now)
+        {
+            Origin = AccountOrigin.Windows,
+        };
+        account.LinkWindows(sid, principal);
+        return account;
+    }
+
     public Guid Id { get; private set; }
     public string UserName { get; private set; } = "";
     public string DisplayName { get; private set; } = "";
@@ -456,7 +483,85 @@ public sealed class UserAccount
     public DateTimeOffset? LastLoginAt { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? DisabledAt { get; private set; }
+    public AccountOrigin Origin { get; private set; } = AccountOrigin.Local;
+    /// <summary>The Windows account SID this account answers to, if any. Unique among accounts.</summary>
+    public string? WindowsSid { get; private set; }
+    /// <summary>The <c>DOMAIN\user</c> name last seen for <see cref="WindowsSid"/>, refreshed on every sign-in.</summary>
+    public string? WindowsPrincipal { get; private set; }
+    public bool HasPassword => PasswordHash.Length > 0;
+    public void LinkWindows(string sid, string principal)
+    {
+        var trimmed = Required(sid, nameof(sid));
+        if (trimmed.Length > WindowsSidMaxLength) throw new ArgumentException("The Windows SID is too long.", nameof(sid));
+        WindowsSid = trimmed.ToUpperInvariant();
+        RecordWindowsPrincipal(principal);
+    }
+    public void UnlinkWindows() { WindowsSid = null; }
+    public void RecordWindowsPrincipal(string principal)
+    {
+        var trimmed = Required(principal, nameof(principal));
+        WindowsPrincipal = trimmed.Length > WindowsPrincipalMaxLength ? trimmed[..WindowsPrincipalMaxLength] : trimmed;
+    }
+    /// <summary>
+    /// Global system administration (#1639): managing accounts, roles and administrator grants, identity
+    /// links, review/approval configuration and system diagnostics. It used to be the account named
+    /// <c>admin</c> and nothing else; it is now a persisted grant any account can hold, attributable to whoever
+    /// granted or revoked it. The current grant's grantor and time stay on the row after a revoke, so the
+    /// account still answers "who made this person an administrator, and who took it away"; every earlier
+    /// cycle is in the security audit log (<c>GlobalAdministratorGranted</c> / <c>GlobalAdministratorRevoked</c>).
+    ///
+    /// A granted administrator keeps their ordinary engineering authority and gains nothing over controlled
+    /// work: see <see cref="HoldsAuthorityOverride"/>.
+    /// </summary>
+    public bool IsGlobalAdministrator { get; private set; }
+
+    /// <summary>
+    /// The installation's built-in administrator: the account first-install bootstrap, the demo seed or the
+    /// #1639 migration created as <c>admin</c>. A stable marker, so nothing has to compare usernames. Only
+    /// this account may revoke its own administrator grant or disable itself (owner decision on #1639).
+    /// </summary>
+    public bool IsBuiltInAdministrator { get; private set; }
+
+    /// <summary>
+    /// Authority override: administrator substitution at signing, every review stage's candidate list,
+    /// project access without membership, the self-review exemption, and exclusion from document
+    /// stewardship. Owner decision on #1639: this stays with the built-in administrator only, as it was before
+    /// administration became grantable. It is the one place that rule is written; queries use
+    /// <see cref="AuthorityOverrideHolder"/>, which must say the same thing.
+    /// </summary>
+    public bool HoldsAuthorityOverride => IsBuiltInAdministrator && IsGlobalAdministrator;
+
+    /// <summary>The query form of <see cref="HoldsAuthorityOverride"/>.</summary>
+    public static readonly System.Linq.Expressions.Expression<Func<UserAccount, bool>> AuthorityOverrideHolder =
+        x => x.IsBuiltInAdministrator && x.IsGlobalAdministrator;
+
+    /// <summary>Marks a newly created bootstrap/seed <c>admin</c> account as the built-in administrator.</summary>
+    public void DesignateBuiltInAdministrator(string grantedBy, DateTimeOffset now)
+    {
+        IsBuiltInAdministrator = true;
+        if (!IsGlobalAdministrator) GrantGlobalAdministrator(grantedBy, now);
+    }
+    public string? GlobalAdministratorGrantedBy { get; private set; }
+    public DateTimeOffset? GlobalAdministratorGrantedAt { get; private set; }
+    public string? GlobalAdministratorRevokedBy { get; private set; }
+    public DateTimeOffset? GlobalAdministratorRevokedAt { get; private set; }
+    public void GrantGlobalAdministrator(string grantedBy, DateTimeOffset now)
+    {
+        if (IsGlobalAdministrator) throw new InvalidOperationException("The account is already a global administrator.");
+        IsGlobalAdministrator = true; GlobalAdministratorGrantedBy = Required(grantedBy, nameof(grantedBy)); GlobalAdministratorGrantedAt = now;
+        GlobalAdministratorRevokedBy = null; GlobalAdministratorRevokedAt = null;
+    }
+    public void RevokeGlobalAdministrator(string revokedBy, DateTimeOffset now)
+    {
+        if (!IsGlobalAdministrator) throw new InvalidOperationException("The account is not a global administrator.");
+        IsGlobalAdministrator = false; GlobalAdministratorRevokedBy = Required(revokedBy, nameof(revokedBy)); GlobalAdministratorRevokedAt = now;
+    }
     public void LoginSucceeded(DateTimeOffset now) { FailedLoginCount = 0; LastLoginAt = now; }
+    /// <summary>
+    /// A sign-in that did not prove the AeroLink password (Windows sign-in). It must not clear the password's
+    /// failure count, or a Windows sign-in would hand a password guesser a fresh set of attempts.
+    /// </summary>
+    public void SignedInWithoutPassword(DateTimeOffset now) { LastLoginAt = now; }
     public void LoginFailed() { FailedLoginCount++; if (FailedLoginCount >= 8) State = AccountState.Locked; }
     public void ChangePassword(string hash) { PasswordHash = hash; MustChangePassword = false; FailedLoginCount = 0; State = AccountState.Active; }
     public void RequirePasswordChange(string temporaryHash) { PasswordHash = temporaryHash; MustChangePassword = true; FailedLoginCount = 0; State = AccountState.Active; }
@@ -634,6 +739,11 @@ public sealed class ElectronicSignature
     public string ContentHash { get; private set; } = "";
     public string IpAddress { get; private set; } = "";
     public DateTimeOffset SignedAt { get; private set; }
+    /// <summary>
+    /// How the signer re-proved who they were (#1615). Empty on every signature recorded before the column
+    /// existed; nothing is backfilled, because the method was not recorded at the time.
+    /// </summary>
+    public string AuthenticationMethod { get; private set; } = "";
 }
 
 public sealed class SecurityAuditEvent
@@ -649,4 +759,16 @@ public sealed class SecurityAuditEvent
     public string Detail { get; private set; } = "";
     public string IpAddress { get; private set; } = "";
     public DateTimeOffset OccurredAt { get; private set; }
+    /// <summary>How the actor authenticated (<c>password</c> or <c>windows</c>), on sign-in events (#1615).</summary>
+    public string AuthenticationMethod { get; private set; } = "";
+    /// <summary>The Windows <c>DOMAIN\user</c> that authenticated, when Windows did.</summary>
+    public string WindowsPrincipal { get; private set; } = "";
+
+    public SecurityAuditEvent WithAuthentication(string method, string? windowsPrincipal = null)
+    {
+        AuthenticationMethod = method.Trim();
+        var principal = (windowsPrincipal ?? "").Trim();
+        WindowsPrincipal = principal.Length > UserAccount.WindowsPrincipalMaxLength ? principal[..UserAccount.WindowsPrincipalMaxLength] : principal;
+        return this;
+    }
 }

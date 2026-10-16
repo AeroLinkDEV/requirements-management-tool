@@ -363,7 +363,10 @@ function Stop-AeroLinkOwnedListener($Port, $OwnershipFragments) {
     [pscustomobject]@{ Detail = 'Disposable owned listener stopped.' }
 }
 '@ | Set-Content (Join-Path $stopScripts 'AeroLinkRuntimeIdentity.psm1')
-    'function Get-AeroLinkInstallationPaths($ProductRoot) { [pscustomobject]@{InstallationRoot=$ProductRoot} }' | Set-Content (Join-Path $stopScripts 'AeroLinkInstallation.psm1')
+    @'
+function Get-AeroLinkInstallationPaths($ProductRoot) { [pscustomobject]@{InstallationRoot=$ProductRoot} }
+function Get-AeroLinkServiceEndpoints($InstallationRoot) { [pscustomobject]@{DeclaredApiPort=5080} }
+'@ | Set-Content (Join-Path $stopScripts 'AeroLinkInstallation.psm1')
     @'
 function Enter-AeroLinkTransition($InstallationRoot) { Add-Content (Join-Path $PSScriptRoot 'events.txt') 'enter'; [pscustomobject]@{Root=$InstallationRoot} }
 function Exit-AeroLinkTransition($Lease) { Add-Content (Join-Path $PSScriptRoot 'events.txt') 'exit' }

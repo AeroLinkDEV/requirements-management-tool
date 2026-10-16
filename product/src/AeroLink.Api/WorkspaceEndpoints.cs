@@ -195,7 +195,7 @@ public static class WorkspaceEndpoints
 
         app.MapPost("/api/workspaces", async (CreateWorkspaceRequest request, HttpContext http, AeroLinkDbContext db, TestProcedureDocumentBootstrap procedureDocuments, ProjectLadderAuthoringService ladderAuthoring, SoftwareReleaseIdentityAuthority releaseIdentity, CancellationToken ct) =>
         {
-            if(!http.UserAccount().IsAdministrator)return Results.Forbid();
+            if(!http.UserAccount().IsSystemAdministrator)return Results.Forbid();
             if (await db.Programs.AnyAsync(x => x.Code == request.ProgramCode.Trim().ToUpper(), ct))
                 return Results.Conflict(new { error = "A program with that code already exists." });
             try
@@ -222,6 +222,8 @@ public static class WorkspaceEndpoints
                     "Activated the new project ladder before first project content.", activation.CanonicalSnapshot,
                     ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot), activation.SnapshotSchemaVersion));
                 var actor = http.UserAccount(); db.ProgramMemberships.Add(new ProgramMembership(actor.Id, program.Id, ProgramRole.Administrator, actor.UserName, now));
+                // #1615: people who signed in with Windows start as Engineer in every Program, this one included.
+                await WindowsDefaultAccess.GrantForNewProgramAsync(db, program.Id, now, ct);
                 await db.SaveChangesAsync(ct);
                 // Every Project has its three test procedure documents from the moment it exists. The startup
                 // bootstrap backfills projects created before this existed; it cannot help a project created
@@ -599,7 +601,7 @@ public static class WorkspaceEndpoints
         // the workspace root, so probing cannot distinguish an artifact that exists from one that does not.
         app.MapGet("/open/{kind}/{id:guid}", async (string kind, Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
-            var user = await identity.ResolveAsync(http.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, ct);
+            var user = await identity.ResolveAsync(http.SessionToken(), DateTimeOffset.UtcNow, ct);
             if (user is null) return Results.Redirect("/");
             http.Items["AeroLink.User"] = user;
 

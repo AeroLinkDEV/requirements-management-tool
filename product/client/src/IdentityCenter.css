@@ -25,6 +25,8 @@
 .identityModal .cancel{border:1px solid #d6dde6;background:white;color:#667488;border-radius:8px;padding:12px 14px;font-weight:700}
 /* #1091 LOW-18: row actions stay on one line. */
 .userTable article > div:last-child button { white-space: nowrap; }
+/* #1639: a third row action (global administrator) wraps rather than overflowing the column. */
+.userTable article > div:last-child { flex-wrap: wrap; }
 /* My Work kind filter and Problem Report rows (#1113 S2). */
 .workQueue .workKinds{display:flex;flex-wrap:wrap;gap:6px;padding:12px 22px;border-bottom:1px solid #edf0f4}
 .workQueue .workKinds button{border:1px solid #d6dee8;border-radius:999px;background:white;color:#43516a;padding:5px 11px;font-size:12px;cursor:pointer}

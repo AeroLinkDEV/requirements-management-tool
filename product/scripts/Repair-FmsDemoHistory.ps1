@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$Database = 'aerolink',
-    [int]$PostgresPort = 54329,
+    # Defaults to this installation's declared PostgreSQL port (Get-AeroLinkServiceEndpoints).
+    [int]$PostgresPort = 0,
     [Parameter(Mandatory)][string]$PostgresBin,
     [Parameter(Mandatory)][string]$EvidenceRoot,
     [Parameter(Mandatory)][string]$ReceiptDirectory,
@@ -9,6 +10,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
+$repairInstallationRoot = Get-AeroLinkInstallationRoot -ProductRoot (Split-Path -Parent $PSScriptRoot)
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $repairInstallationRoot -Operation 'The FMS demo history repair'
+if (-not $PSBoundParameters.ContainsKey('PostgresPort')) {
+    $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $repairInstallationRoot).DeclaredPostgresPort
+}
 if ($Database -notmatch '^[A-Za-z][A-Za-z0-9_]{0,62}$') { throw 'Unsafe database name.' }
 if ($PostgresPort -lt 1 -or $PostgresPort -gt 65535) { throw 'Invalid PostgreSQL port.' }
 $PostgresBin = (Resolve-Path -LiteralPath $PostgresBin).Path

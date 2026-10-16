@@ -596,7 +596,7 @@ public sealed class SecurityBoundaryTests
         client.DefaultRequestHeaders.Add("X-AeroLink-CSRF",response.GetProperty("token").GetString());
     }
 
-    private static string Totp(string secret,DateTimeOffset now)
+    internal static string Totp(string secret,DateTimeOffset now)
     {
         const string alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";var bytes=new List<byte>();var buffer=0;var bits=0;
         foreach(var ch in secret){buffer=(buffer<<5)|alphabet.IndexOf(ch);bits+=5;if(bits>=8){bits-=8;bytes.Add((byte)((buffer>>bits)&255));}}

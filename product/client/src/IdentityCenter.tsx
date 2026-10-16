@@ -14,13 +14,18 @@ import {
 import "./IdentitySetup.css";
 import { Icon } from "./icons";
 import { PersonAvatar } from "./People";
+import { isSystemAdministrator } from "./administratorCapability";
+import { setStaySignedOut, windowsOutcome, windowsSignInUrl } from "./windowsSignIn";
 
 export type AuthUser = {
   id: string;
   userName: string;
   displayName: string;
   email: string;
+  /** The built-in administrator's authority override (substitution, access to every Program). */
   isAdministrator: boolean;
+  /** #1639 system administration: accounts, grants, identity links, review configuration, diagnostics. */
+  isSystemAdministrator?: boolean;
   mustChangePassword: boolean;
   programs: { programId: string; roles: string[] }[];
 };
@@ -37,7 +42,55 @@ export function LoginPage({
   const [setup, setSetup] = useState<{
     bootstrapRequired: boolean;
     bootstrapEnabled: boolean;
+    windowsSignIn?: boolean;
   }>();
+  // #1615: where a Windows sign-in redirected back here, if it did.
+  const [windows] = useState(() => windowsOutcome(window.location.search));
+  // The Windows logon about to be linked, as the server's ticket records it (never from the address bar).
+  const [linkTarget, setLinkTarget] = useState<{ principal: string; displayName: string } | null>();
+  useEffect(() => {
+    if (windows?.kind !== "link") return;
+    let active = true;
+    fetch(`${api}/api/auth/windows/link`)
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((target) => { if (active) setLinkTarget(target); })
+      .catch(() => { if (active) setLinkTarget(null); });
+    return () => { active = false; };
+  }, [api, windows]);
+  const startWindowsSignIn = (link: boolean) => {
+    // An explicit choice to sign in ends a "stay signed out" left by an earlier sign-out in this tab.
+    setStaySignedOut(false);
+    window.location.assign(windowsSignInUrl(api, link ? { link: true } : { returnTo: "/projects" }));
+  };
+  const linkWindows = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const f = new FormData(e.currentTarget);
+    try {
+      const response = await fetch(`${api}/api/auth/windows/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: f.get("userName"),
+          password: f.get("password"),
+          mfaCode: f.get("mfaCode") || undefined,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(body?.error || "The account could not be linked.");
+        return;
+      }
+      setStaySignedOut(false);
+      window.history.replaceState(null, "", "/");
+      onLogin(body);
+    } catch {
+      setError("AeroLink could not reach its API. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
     let active = true;
     fetch(`${api}/api/setup/status`)
@@ -82,6 +135,7 @@ export function LoginPage({
         setError(message);
         return;
       }
+      setStaySignedOut(false);
       onLogin(await response.json());
     } catch {
       setError(
@@ -169,6 +223,53 @@ export function LoginPage({
       <button disabled={busy}>
         {busy ? "Authenticating…" : "Sign in securely →"}
       </button>
+      {setup?.windowsSignIn && (
+        <div className="windowsSignIn">
+          {windows?.kind === "refused" && (
+            <div className="loginError" role="alert">{windows.message}</div>
+          )}
+          <button type="button" disabled={busy} onClick={() => startWindowsSignIn(false)}>
+            Sign in with Windows
+          </button>
+          <button type="button" className="linkButton" disabled={busy} onClick={() => startWindowsSignIn(true)}>
+            Link an existing account
+          </button>
+        </div>
+      )}
+    </form>
+  );
+  // After "Link an existing account" Windows has proved who this is; the account's own password (and second
+  // factor, when it has one) proves the right to attach that Windows logon to it. Asked once, then never again.
+  const linkForm = (
+    <form onSubmit={linkWindows}>
+      <div className="securityMark">◈</div>
+      <h2>Link your Windows sign-in</h2>
+      {linkTarget === null ? (
+        <div className="loginError" role="alert">
+          The Windows sign-in for this link has expired. Choose “Link an existing account” again.
+        </div>
+      ) : (
+        <p>
+          Enter the AeroLink account and password to link to the Windows logon{" "}
+          <b>{linkTarget?.principal ?? "…"}</b>
+          {linkTarget?.displayName && linkTarget.displayName !== linkTarget.principal ? ` (${linkTarget.displayName})` : ""}.
+          After this, that Windows logon signs in to the account without its password.
+        </p>
+      )}
+      <label>
+        Username
+        <input name="userName" autoComplete="username" required autoFocus />
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" autoComplete="current-password" required />
+      </label>
+      <label>
+        Authenticator code (if enabled)
+        <input name="mfaCode" autoComplete="one-time-code" inputMode="numeric" />
+      </label>
+      {error && <div className="loginError">{error}</div>}
+      <button disabled={busy}>{busy ? "Linking…" : "Link and sign in →"}</button>
     </form>
   );
   const setupPanel = setup?.bootstrapRequired ? (
@@ -264,6 +365,8 @@ export function LoginPage({
         </aside>
       </div>
     )
+  ) : windows?.kind === "link" && setup?.windowsSignIn ? (
+    linkForm
   ) : (
     signIn
   );
@@ -1051,6 +1154,11 @@ type AdminUser = {
   state: string;
   lastLoginAt?: string;
   isGlobalAdministrator: boolean;
+  /** #1615: "Local" or "Windows", and the Windows logon a Local account is linked to, if any. */
+  origin?: string;
+  windowsPrincipal?: string | null;
+  windowsLinked?: boolean;
+  isBuiltInAdministrator?: boolean;
   memberships: { programId: string; role: string }[];
 };
 export function AdministrationCenter({
@@ -1096,10 +1204,67 @@ export function AdministrationCenter({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: user.state !== "Active" }),
       });
+      // A successful disable of the built-in active row can only be that account disabling itself; the server
+      // revoked its sessions, so leave the stale administrator shell the same way self-revoke does.
+      if (user.isBuiltInAdministrator && user.state === "Active") {
+        window.location.reload();
+        return;
+      }
       await load();
     } catch (error) {
       recordClientOperationFailure("identity.account.state", error);
       setError(operationError(error, "The account state was not changed."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // #1615: a Windows logon linked to a local account signs in as that account with no password, so the link
+  // must be visible here and removable. Unlinking revokes the account's sessions.
+  const unlinkWindows = async (user: AdminUser) => {
+    if (busy) return;
+    if (!window.confirm(`Remove the Windows logon ${user.windowsPrincipal} from ${user.userName}? Its sessions end.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`${api}/api/admin/users/${user.id}/windows/unlink`, { method: "POST" });
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.windows.unlink", error);
+      setError(operationError(error, "The Windows logon was not unlinked."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // #1639: global administration is a grant any account can hold. The server refuses removing the last
+  // active administrator or touching the built-in `admin` from another account, and records each grant and
+  // revoke in the security audit log.
+  const setGlobalAdministrator = async (user: AdminUser) => {
+    if (busy) return;
+    if (
+      !user.isGlobalAdministrator &&
+      !window.confirm(
+        `Make ${user.displayName} a global administrator? They will be able to manage accounts, roles and administrator grants, identity links, review and approval configuration, and system diagnostics. Their engineering authority in each Program does not change.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiRequest(`${api}/api/admin/users/${user.id}/global-administrator`, {
+        method: user.isGlobalAdministrator ? "DELETE" : "POST",
+      });
+      if (user.isGlobalAdministrator) {
+        // A self-revoke ends this page's authority: reload so the session, navigation and page agree.
+        const me = await fetch(`${api}/api/auth/me`);
+        if (!me.ok || !isSystemAdministrator((await me.json()) as AuthUser)) {
+          window.location.reload();
+          return;
+        }
+      }
+      await load();
+    } catch (error) {
+      recordClientOperationFailure("identity.globalAdministrator", error);
+      setError(operationError(error, "Global administrator was not changed."));
     } finally {
       setBusy(false);
     }
@@ -1245,10 +1410,13 @@ export function AdministrationCenter({
               />
               <div>
                 <b>{user.displayName}</b>
-                {user.isGlobalAdministrator && <small>Global system administrator</small>}
+                {user.isGlobalAdministrator && <small>{user.isBuiltInAdministrator ? "Built-in global administrator" : "Global system administrator"}</small>}
                 <small>
                   {user.userName} · {user.email}
                 </small>
+                {user.windowsLinked && user.origin !== "Windows" && (
+                  <small>Windows sign-in as {user.windowsPrincipal}</small>
+                )}
               </div>
             </div>
             <div className="roleCloud">
@@ -1276,6 +1444,19 @@ export function AdministrationCenter({
                 onClick={() => setState(user)}
               >
                 {user.state === "Active" ? "Disable" : "Enable"}
+              </button>
+              {user.windowsLinked && user.origin !== "Windows" && (
+                <button className="quiet" disabled={busy} onClick={() => unlinkWindows(user)}>
+                  Unlink Windows
+                </button>
+              )}
+              <button
+                className="quiet"
+                disabled={busy}
+                aria-label={`${user.isGlobalAdministrator ? "Revoke admin" : "Make admin"} for ${user.displayName}`}
+                onClick={() => setGlobalAdministrator(user)}
+              >
+                {user.isGlobalAdministrator ? "Revoke admin" : "Make admin"}
               </button>
             </div>
           </article>

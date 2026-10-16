@@ -23,6 +23,7 @@ using System.Text.Json;
 using System.Diagnostics;
 using System.Data;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
@@ -48,18 +49,59 @@ using System.Net;
 if (AeroLinkMaintenanceHost.IsMaintenanceInvocation(args))
     return await AeroLinkMaintenanceHost.RunAsync(args);
 
-var builder = WebApplication.CreateBuilder(args);
+// Under the Service Control Manager the working directory is System32, so a service takes its content root from
+// beside the executable. It has to be set here: WebApplicationBuilder refuses a content-root change made later
+// through builder.Host, which is what UseWindowsService would otherwise attempt. Outside SCM both are no-ops.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
+});
+builder.Host.UseWindowsService();
+// A release package (#1614 1.6) stamps the source revision it was built from beside the executable, so a
+// packaged host reports its own identity without a launcher setting Runtime__SourceSha. Added last, so it wins
+// over anything else that claims a revision for these binaries; development builds have no such file.
+builder.Configuration.AddJsonFile(Path.Combine(AppContext.BaseDirectory, RuntimeIdentityEndpoints.ReleaseIdentityFileName), optional: true, reloadOnChange: false);
+// A site server's service (#1614 1.8) reads its database password and bootstrap secret from the protected store
+// itself, as its own account; they are never in the service's environment. Nothing happens without a site root.
+SiteProtectedSecrets.AddTo(builder.Configuration);
 var restoreValidationReadOnly = builder.Configuration.GetValue<bool>("RestoreValidation:ReadOnly");
 var restoreValidationToken = builder.Configuration["RestoreValidation:Token"] ?? "";
 if (restoreValidationReadOnly && restoreValidationToken.Length < 32)
     throw new InvalidOperationException("Read-only restore validation requires a one-use token of at least 32 characters.");
 // Capability-bearing URLs must not be copied into request-start diagnostic logs.
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+// #1614: a site server is Production over HTTPS from Kestrel, or it does not start. Every other launch is left as
+// it was, except that Production may no longer listen on plain HTTP anywhere but loopback.
+var siteServer = SiteServerHosting.Configure(builder);
+// Secure cookies take the __Host- prefix, which stops plain-HTTP origins, Domain= cookies from other hosts and
+// path-scoped cookies from planting or shadowing them. A declared site also carries its persisted instance identity
+// in every cookie name, so two AeroLink installations on one host cannot consume each other's sessions, antiforgery
+// confirmations or Windows-link tickets. Resolve the owner through DI after the host's final configuration layers
+// are present; this matters to hosted tests and to any composition host that adds settings during Build.
+builder.Services.AddSingleton<SessionCookie>(services => SessionCookie.FromConfiguration(
+    services.GetRequiredService<IConfiguration>(), services.GetRequiredService<IHostEnvironment>(), siteServer is not null));
 builder.Services.AddAntiforgery(options =>
 {
-    options.Cookie.Name = "AeroLink.PreferenceConfirmation";
+    // Prefixed only where AeroLink terminates TLS itself. Antiforgery decides Secure from the request, and with
+    // SecurePolicy=Always it refuses any request that did not arrive over HTTPS - which is every request behind a
+    // TLS-terminating proxy, where Identity:CookieSecure is also true. A site server always sees HTTPS.
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.HttpOnly = true;
+    if (siteServer is not null)
+    {
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.Path = "/";
+    }
+});
+builder.Services.AddOptions<AntiforgeryOptions>().Configure<SessionCookie>((options, cookie) => options.Cookie.Name = cookie.AntiforgeryName);
+// A year, this host name only: the other applications on a shared site host send their own HSTS, and their
+// subdomains are not AeroLink's to pin. Sent only on HTTPS and never for localhost or loopback addresses.
+builder.Services.AddHsts(options =>
+{
+    options.MaxAge = TimeSpan.FromDays(365);
+    options.IncludeSubDomains = false;
+    options.Preload = false;
 });
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
@@ -78,8 +120,18 @@ if (restoreValidationReadOnly)
     foreach (var worker in builder.Services.Where(x => x.ServiceType == typeof(IHostedService)).ToList())
         builder.Services.Remove(worker);
 }
-builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
+var authentication = builder.Services.AddAuthentication(AeroLinkAuthorizationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, AeroLinkAuthorizationHandler>(AeroLinkAuthorizationHandler.SchemeName, _ => { });
+// #1615 Windows sign-in. Negotiate is never the default scheme: it proves who somebody is at /api/auth/windows
+// only, which then issues the ordinary AeroLink session every other route reads.
+builder.Services.Configure<WindowsSignInOptions>(builder.Configuration.GetSection(WindowsSignInOptions.Section));
+var windowsSignIn = builder.Configuration.GetSection(WindowsSignInOptions.Section).Get<WindowsSignInOptions>() ?? new WindowsSignInOptions();
+if (windowsSignIn.Enabled && windowsSignIn.Scheme == Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
+    // A completed NTLM handshake must not keep authenticating its TCP connection: any intermediary that shares
+    // connections between users would hand one person's identity to the next (DEC-154). Kerberos persistence is
+    // already off by default.
+    authentication.AddNegotiate(options => options.PersistNtlmCredentials = false);
+if (OperatingSystem.IsWindows()) builder.Services.AddSingleton<IWindowsDirectory, ActiveDirectoryWindowsDirectory>();
 builder.Services.AddSingleton<BrowserMutationProtector>();
 builder.Services.AddSingleton<ConnectorSigningService>();
 var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 600);
@@ -109,7 +161,15 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 }));
 
 var app = builder.Build();
+// Force the shared owner and antiforgery options to resolve during startup, so a malformed declared-site identity
+// refuses the service before it can accept a request rather than on the first request that happens to use a cookie.
+_ = app.Services.GetRequiredService<SessionCookie>();
+_ = app.Services.GetRequiredService<IOptions<AntiforgeryOptions>>().Value;
+// The certificate's imported machine key is temporary; release it with the host rather than leave it behind.
+if (siteServer is not null) app.Lifetime.ApplicationStopped.Register(siteServer.Certificate.Dispose);
+await WindowsSignInStartupGuard.EnforceAsync(app.Services, builder.Configuration, app.Environment);
 app.UseExceptionHandler();
+if (app.Environment.IsProduction()) app.UseHsts();
 // #939 stall diagnostics, opt-in. First in the pipeline so a request is tracked from the moment it arrives,
 // including the session gate, which is where one of the hung requests was waiting.
 if (StallDiagnosticsSettings.StallReportAfter(builder.Configuration) is not null
@@ -126,7 +186,18 @@ if (StallDiagnosticsSettings.StallReportAfter(builder.Configuration) is not null
 }
 app.UseCors();
 app.UseRateLimiter();
-app.UseAuthentication();
+// Any UseStatusCodePages must be added above this line. Negotiate writes intermediate 401 challenge responses from
+// inside UseAuthentication; this exemption must wrap it so those responses cannot be rewritten.
+app.Use(async (context, next) =>
+{
+    await next();
+    if (context.Response.StatusCode == StatusCodes.Status401Unauthorized) StatusCodePagesExemption.Apply(context);
+});
+// Authentication middleware runs only on Windows sign-in (#1615). Nothing else reads HttpContext.User: every other
+// route is authorized by the AeroLink session gate below. Confining it keeps Negotiate's handshake, which runs
+// inside this middleware for any request carrying `Authorization: Negotiate`, off every other path.
+app.UseWhen(context => context.Request.Path.Equals(WindowsSignInEndpoints.SignInPath, StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseAuthentication());
 
 await using (var scope = app.Services.CreateAsyncScope())
 {
@@ -135,6 +206,14 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (seedDemoAccounts && !app.Environment.IsDevelopment() && !allowDemoAccounts)
         throw new InvalidOperationException("Demo identity seeding is disabled outside Development. Set Identity:AllowDemoAccounts only for an explicitly isolated non-production showcase.");
     var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+    // A site's API service depends on its PostgreSQL service, but "started" is not "accepting connections": at boot
+    // the cluster may still be recovering. Wait for it, briefly, instead of failing into the SCM's restart delay.
+    if (!string.IsNullOrWhiteSpace(builder.Configuration[SiteProtectedSecrets.InstallationRootKey]))
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Clamp(builder.Configuration.GetValue<int?>("SiteServer:DatabaseWaitSeconds") ?? 120, 0, 600));
+        while (!await db.Database.CanConnectAsync() && DateTimeOffset.UtcNow < deadline)
+            await Task.Delay(TimeSpan.FromSeconds(2));
+    }
     if (restoreValidationReadOnly)
     {
         if (!await db.Database.CanConnectAsync())
@@ -152,6 +231,7 @@ await using (var scope = app.Services.CreateAsyncScope())
         await ReleasePickerSqliteGuard.EnsureInstalledAsync(db);
         await ProblemReportImportSqliteGuard.EnsureInstalledAsync(db);
     }
+    if (siteServer is not null) await SiteServerHosting.RequireAdministratorPathAsync(builder.Configuration, db);
     if (!restoreValidationReadOnly && db.Database.IsNpgsql())
     {
         await scope.ServiceProvider.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
@@ -233,6 +313,9 @@ app.Use(async (context, next) =>
     // email came to return 401 to anybody who clicked it.
     var isAnonymous = path.StartsWith("/health", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase)
+        // Windows sign-in and the Windows link exist to create a session, so they cannot require one (#1615).
+        || path.Equals(WindowsSignInEndpoints.SignInPath, StringComparison.OrdinalIgnoreCase)
+        || path.Equals(WindowsSignInEndpoints.LinkPath, StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/status", StringComparison.OrdinalIgnoreCase)
         || path.Equals("/api/setup/bootstrap", StringComparison.OrdinalIgnoreCase)
         || path.StartsWith("/api/document-connector/", StringComparison.OrdinalIgnoreCase)
@@ -255,7 +338,7 @@ app.Use(async (context, next) =>
             return;
         }
         context.Items["AeroLink.User"] = new AuthenticatedUser(Guid.Empty, "system.restore-validator",
-            "Restore Validator", "restore-validator@localhost", true, []);
+            "Restore Validator", "restore-validator@localhost", true, [], IsSystemAdministrator: true);
         await next(); return;
     }
     if (!isApi || isAnonymous) { await next(); return; }
@@ -266,7 +349,7 @@ app.Use(async (context, next) =>
         context.Items["AeroLink.ServiceIdentity"]=service;await next();return;
     }
     var identity = context.RequestServices.GetRequiredService<IdentityService>();
-    var user = await identity.ResolveAsync(context.Request.Cookies[IdentityService.CookieName], DateTimeOffset.UtcNow, context.RequestAborted);
+    var user = await identity.ResolveAsync(context.SessionToken(), DateTimeOffset.UtcNow, context.RequestAborted);
     if (user is null) { context.Response.StatusCode = StatusCodes.Status401Unauthorized; await context.Response.WriteAsJsonAsync(new { error = "Authentication required.", code = "authentication_required" }); return; }
     context.Items["AeroLink.User"] = user;
     if(user.MustChangePassword&&!path.Equals("/api/auth/password",StringComparison.OrdinalIgnoreCase)&&!path.Equals("/api/auth/logout",StringComparison.OrdinalIgnoreCase)&&!path.Equals("/api/auth/me",StringComparison.OrdinalIgnoreCase)&&!path.Equals("/api/auth/csrf",StringComparison.OrdinalIgnoreCase))
@@ -274,7 +357,7 @@ app.Use(async (context, next) =>
     var browserMutation=!string.IsNullOrWhiteSpace(context.Request.Headers.Origin)||!string.IsNullOrWhiteSpace(context.Request.Headers["Sec-Fetch-Site"]);
     if(browserMutation&&context.Request.Method is not ("GET" or "HEAD" or "OPTIONS" or "TRACE"))
     {
-        var valid=context.RequestServices.GetRequiredService<BrowserMutationProtector>().Validate(context.Request.Cookies[IdentityService.CookieName],context.Request.Headers["X-AeroLink-CSRF"].ToString());
+        var valid=context.RequestServices.GetRequiredService<BrowserMutationProtector>().Validate(context.SessionToken(),context.Request.Headers["X-AeroLink-CSRF"].ToString());
         if(!valid){context.Response.StatusCode=StatusCodes.Status400BadRequest;await context.Response.WriteAsJsonAsync(new{error="The browser mutation token is missing or expired. Refresh and try again.",code="antiforgery_validation_failed"});return;}
     }
     var db=context.RequestServices.GetRequiredService<AeroLinkDbContext>();
@@ -374,7 +457,7 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
+app.MapGet("/health",() => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy", service = "AeroLink API", check="liveness" }));
 // Who is listening, and what source is it running? Readiness cannot answer that, and #816 proved a launcher
 // needs the answer before it may reuse a healthy process. Non-secret by construction (RuntimeIdentity.cs).
@@ -420,6 +503,7 @@ app.MapGet("/health/routes", (EndpointDataSource endpoints) =>
 // matches — routing resolves that by precedence — so these read in the order somebody meets the product:
 // sign in, find your work, propose a change, freeze it, verify it, release it, administer it.
 app.MapAuthEndpoints();
+app.MapWindowsSignInEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapFmsBenchTerrainEndpoints();
 app.MapFmsBenchImageryEndpoints();
@@ -490,11 +574,21 @@ public sealed class BrowserMutationProtector(Microsoft.AspNetCore.DataProtection
     }
 }
 
+/// <summary>Keeps status-code pages, if any are ever added, from rewriting a 401 (#1614, #1615).</summary>
+public static class StatusCodePagesExemption
+{
+    public static void Apply(HttpContext context)
+    {
+        if (context.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>() is { } statusCodePages)
+            statusCodePages.Enabled = false;
+    }
+}
+
 public sealed class AeroLinkAuthorizationHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "AeroLinkContext";
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() => Task.FromResult(AuthenticateResult.NoResult());
-    protected override Task HandleChallengeAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; }
+    protected override Task HandleChallengeAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status401Unauthorized; StatusCodePagesExemption.Apply(Context); return Task.CompletedTask; }
     protected override Task HandleForbiddenAsync(AuthenticationProperties properties) { Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; }
 }

@@ -84,12 +84,7 @@ public static class DependencyInjection
         services.AddScoped<ManagedDocumentShowcaseSeeder>();
         services.AddHostedService<ManagedDocumentIntegrityWorker>();
         services.AddHostedService<EnterpriseJobWorker>();
-        var dataProtection = services.AddDataProtection();
-        // A deployment-owned ring supports restart-stable protected notification evidence. Directory
-        // access remains lazy: a broken ring blocks protected operations, not unrelated business saves.
-        var keyRingPath = configuration["DataProtection:KeyRingPath"];
-        if (!string.IsNullOrWhiteSpace(keyRingPath))
-            dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keyRingPath));
+        DataProtectionInstallationSettings.Apply(services.AddDataProtection(), configuration);
         services.AddSingleton<IWebhookDnsResolver, SystemWebhookDnsResolver>();
         services.AddSingleton<WebhookDestinationPolicy>();
         services.AddHttpClient("AeroLinkWebhooks", client => client.Timeout = TimeSpan.FromSeconds(15))

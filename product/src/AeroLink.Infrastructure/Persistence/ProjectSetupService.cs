@@ -76,7 +76,7 @@ public sealed class ProjectSetupService(
         // for resume. Completed and in-flight setups remain discoverable so their recorded result is reachable.
         var query = db.ProjectSetupDrafts.AsNoTracking().AsQueryable()
             .Where(x => x.State != ProjectSetupState.Abandoned);
-        if (!actor.IsAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
+        if (!actor.IsSystemAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
         // SQLite cannot order DateTimeOffset values server-side. Draft discovery is an intentionally small,
         // authorized list, so materialize it and apply the same stable ordering in the application.
         return (await query.ToListAsync(ct)).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.Id).ToList();
@@ -248,12 +248,15 @@ public sealed class ProjectSetupService(
                 "Activated the accepted ladder before first project content.", activation.CanonicalSnapshot,
                 ProjectLadderSnapshot.Hash(activation.CanonicalSnapshot), activation.SnapshotSchemaVersion));
 
-            // The creator is the only project member at inception. Directory identities are intentionally not
-            // copied from the FMS showcase or any other program; staffing can be configured after completion.
+            // The creator is the project's Administrator at inception, and the only member besides the Windows
+            // accounts' default Engineer grant below (#1615). Directory identities are intentionally not copied from
+            // the FMS showcase or any other program; staffing can be configured after completion.
             // An administrator may resume somebody else's draft, but the draft creator remains the legitimate
             // project manager at completion. The actual finalizer stays attributable in GrantedBy and audit.
             db.ProgramMemberships.Add(new ProgramMembership(draft.CreatorUserId, program.Id, ProgramRole.Administrator,
                 actor.UserName, now));
+            // #1615: people who signed in with Windows start as Engineer in every Program, this one included.
+            await WindowsDefaultAccess.GrantForNewProgramAsync(db, program.Id, now, ct);
             db.ProjectVerificationVocabularies.Add(ProjectVerificationVocabulary.Founding(project.Id, now));
             db.ProjectRepositoryConfigurations.Add(CreateRepositoryConfiguration(project.Id, draft, actor.UserName, now));
             AddReviewRules(project.Id, ladder, draft.ReviewRulesJson, actor.UserName, now);
@@ -694,7 +697,7 @@ public sealed class ProjectSetupService(
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) ? value : null;
 
     private static bool CanManage(ProjectSetupDraft draft, AuthenticatedUser actor) =>
-        actor.IsAdministrator || draft.CreatorUserId == actor.Id;
+        actor.IsSystemAdministrator || draft.CreatorUserId == actor.Id;
 
     private static void RequireManage(ProjectSetupDraft draft, AuthenticatedUser actor)
     {
@@ -709,7 +712,7 @@ public sealed class ProjectSetupService(
     private static void RequireAdministrator(AuthenticatedUser actor)
     {
         RequireAuthenticated(actor);
-        if (!actor.IsAdministrator) throw new ProjectSetupAccessException();
+        if (!actor.IsSystemAdministrator) throw new ProjectSetupAccessException();
     }
 
     private static bool IsUniqueConflict(DbUpdateException exception)

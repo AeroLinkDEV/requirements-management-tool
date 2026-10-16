@@ -62,18 +62,29 @@ function Invoke-AeroLinkMaintenanceCommand {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$ProductRoot,
+        # The source tree to `dotnet run` from. Required unless -ApiExecutable names a packaged build.
+        [string]$ProductRoot,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Arguments,
         [string]$ConnectionString,
         # The evidence tree this invocation may write to. Mandatory in practice for an isolated target.
         [string]$EvidenceRoot,
         [string]$DotnetPath = 'dotnet',
+        # A packaged release's AeroLink.Api.exe (#1614 1.6). When given, that executable runs the maintenance
+        # host directly, as Production, from its own directory: a host installed from a package has no SDK and
+        # no source to `dotnet run`. Omitted, behaviour is exactly the source-tree path below.
+        [string]$ApiExecutable,
         [int]$TimeoutSeconds = 1800
     )
     if ($ConnectionString -and -not $EvidenceRoot) {
         throw 'Invoke-AeroLinkMaintenanceCommand: an isolated database target requires an isolated -EvidenceRoot. Upgrading a clone while writing evidence into the live store is not isolation, and file writes cannot be rolled back with the transaction.'
     }
-    $project = Join-Path $ProductRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
+    if ($ApiExecutable) {
+        if (-not (Test-Path -LiteralPath $ApiExecutable -PathType Leaf)) { throw "Invoke-AeroLinkMaintenanceCommand: the API executable '$ApiExecutable' does not exist." }
+        $ApiExecutable = [IO.Path]::GetFullPath($ApiExecutable)
+    }
+    elseif (-not $ProductRoot) {
+        throw 'Invoke-AeroLinkMaintenanceCommand: -ProductRoot is required unless -ApiExecutable names a packaged build.'
+    }
     $previousConnection = $env:ConnectionStrings__AeroLink
     $previousEnvironment = $env:ASPNETCORE_ENVIRONMENT
     $previousEvidence = $env:Evidence__Root
@@ -83,12 +94,21 @@ function Invoke-AeroLinkMaintenanceCommand {
         New-Item -ItemType Directory -Path $resolvedEvidence -Force | Out-Null
         $env:Evidence__Root = $resolvedEvidence
     }
-    if (-not $env:ASPNETCORE_ENVIRONMENT) { $env:ASPNETCORE_ENVIRONMENT = 'Development' }
+    if ($ApiExecutable) { $env:ASPNETCORE_ENVIRONMENT = 'Production' }
+    elseif (-not $env:ASPNETCORE_ENVIRONMENT) { $env:ASPNETCORE_ENVIRONMENT = 'Development' }
     try {
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $startInfo.FileName = $DotnetPath
-        $startInfo.Arguments = "run --project `"$project`" --no-launch-profile -- " + ($Arguments -join ' ')
-        $startInfo.WorkingDirectory = $ProductRoot
+        if ($ApiExecutable) {
+            $startInfo.FileName = $ApiExecutable
+            $startInfo.Arguments = $Arguments -join ' '
+            $startInfo.WorkingDirectory = Split-Path -Parent $ApiExecutable
+        }
+        else {
+            $project = Join-Path $ProductRoot 'src\AeroLink.Api\AeroLink.Api.csproj'
+            $startInfo.FileName = $DotnetPath
+            $startInfo.Arguments = "run --project `"$project`" --no-launch-profile -- " + ($Arguments -join ' ')
+            $startInfo.WorkingDirectory = $ProductRoot
+        }
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true
         $startInfo.RedirectStandardError = $true
@@ -121,14 +141,17 @@ function Get-AeroLinkUpgradeAnalysis {
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
         [string]$ConnectionString,
+        # A verified release can own this maintenance invocation. The explicit executable prevents a
+        # packaged updater from silently rebuilding whatever source tree happens to be nearby.
+        [string]$ApiExecutable,
         # Analysis only reads, but it runs the same host, so an isolated target still carries its own
         # evidence tree rather than defaulting to the live one.
         [string]$EvidenceRoot,
         [string]$DotnetPath = 'dotnet',
         [scriptblock]$CommandRunner
     )
-    $run = if ($CommandRunner) { & $CommandRunner @('maintenance', 'analyze', '--json') $ConnectionString } else {
-        Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -Arguments @('maintenance', 'analyze', '--json') -ConnectionString $ConnectionString -EvidenceRoot $EvidenceRoot -DotnetPath $DotnetPath
+    $run = if ($CommandRunner) { & $CommandRunner @('maintenance', 'analyze', '--json') $ConnectionString $ApiExecutable } else {
+        Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -ApiExecutable $ApiExecutable -Arguments @('maintenance', 'analyze', '--json') -ConnectionString $ConnectionString -EvidenceRoot $EvidenceRoot -DotnetPath $DotnetPath
     }
     # The host may print build or startup noise before its JSON, so take the object rather than the whole
     # transcript. Anchored on the LINE whose trimmed content is an opening brace, and rejoined from that
@@ -212,8 +235,15 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
+        # A site caller names its installation explicitly. HOME retains the historical source-root path.
+        [string]$InstallationRoot,
+        [string]$ProtectedConfigRoot,
+        # The package executable used for every maintenance/readiness phase. Empty preserves the HOME
+        # source-tree path; site callers must provide the verified package executable explicitly.
+        [string]$ApiExecutable,
         [string]$DotnetPath = 'dotnet',
-        [int]$PostgresPort = 54329,
+        # Defaults to this installation's declared PostgreSQL port (Get-AeroLinkServiceEndpoints).
+        [int]$PostgresPort = 0,
         [string]$Database = 'aerolink',
         # Test seams. Each returns the same shape as the real step so the contract suite can drive every
         # failure without a PostgreSQL server.
@@ -224,12 +254,36 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         [scriptblock]$CleanupRunner,
         # Stands current AeroLink up against the UPGRADED clone and proves it works there.
         [scriptblock]$CurrentCodeValidator,
+        # The site updater uses this hook to switch the package into current immediately before the real
+        # maintenance command. That prevents an old binary from being started against a changed schema.
+        [scriptblock]$BeforeRealUpgrade,
         [int]$ValidationApiPort = 5093
     )
-    $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
-    $token = [Guid]::NewGuid().ToString('N').Substring(0, 10)
+    $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot
+    $site = $null
+    $siteAccess = $null
+    $maintenanceAccess = $null
+    if ($InstallationRoot) {
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1')
+        $site = Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot
+        if (-not $site) { throw "The explicit upgrade installation '$($installation.InstallationRoot)' has no site declaration." }
+        Assert-AeroLinkSiteServiceSid -Site $site -Role Api | Out-Null
+        $siteAccess = Get-AeroLinkSiteBackupAccess -InstallationRoot $site.InstallationRoot -ProtectedConfigRoot $ProtectedConfigRoot
+        $maintenanceAccess = Get-AeroLinkSitePostgresAccess -InstallationRoot $site.InstallationRoot -Role Application -ProtectedConfigRoot $ProtectedConfigRoot
+    } else {
+        Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'The clone-validated upgrade'
+    }
+    if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort }
+    $token =[Guid]::NewGuid().ToString('N').Substring(0, 10)
     $cloneDatabase = "aerolink_upgrade_validation_$token"
-    $cloneConnection = "Host=127.0.0.1;Port=$PostgresPort;Database=$cloneDatabase;Username=postgres"
+    $cloneUser = if ($site) { $site.DatabaseRole } else { 'postgres' }
+    $cloneConnection = "Host=127.0.0.1;Port=$PostgresPort;Database=$cloneDatabase;Username=$cloneUser"
+    # A site maintenance host must connect as the declared application role, whose password is supplied only
+    # through the scoped PGPASSWORD handoff above. That keeps migration-created objects owned by the application
+    # role; the operator/superuser credential is for backup and restore, not Npgsql maintenance. Its evidence
+    # root is installation-owned so real semantic/evidence writes stay bound to this site.
+    $realConnection = if ($site) { "Host=127.0.0.1;Port=$PostgresPort;Database=$Database;Username=$($site.DatabaseRole)" } else { $null }
+    $realEvidence = if ($site) { $site.EvidenceRoot } else { $null }
     # The clone's OWN evidence tree, which is where the restore already places its evidence. Without binding
     # this, a semantic authority that rewrites controlled renditions writes new objects straight into the
     # live evidence store while "validating" - and a database rollback cannot undo a file write.
@@ -239,7 +293,9 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
     # The exact artifact this backup produced. Picking "the newest aerolink-*.zip" instead makes the
     # recovery point depend on file timestamps, which a clock skew or a hand-placed archive decides.
     $archive = if ($BackupRunner) { & $BackupRunner } else {
-        $capture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning -PostgresPort $PostgresPort
+        $backupArguments = @('-PostgresAlreadyRunning', '-PostgresPort', $PostgresPort)
+        if ($site) { $backupArguments += @('-InstallationRoot', $site.InstallationRoot); if ($ProtectedConfigRoot) { $backupArguments += @('-ProtectedConfigRoot', $ProtectedConfigRoot) } }
+        $capture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') @backupArguments
         ($capture | Where-Object { $_.PSObject.Properties['Archive'] } | Select-Object -Last 1).Archive
     }
     if (-not $archive) {
@@ -256,7 +312,9 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         # was ever attempted. Archive integrity, inventory and evidence are still proved by the restore; what
         # moves later is proving current code against the copy, which happens below once it IS current.
         $restored = if ($RestoreRunner) { & $RestoreRunner $archive $cloneDatabase } else {
-            & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $archive -TargetDatabase $cloneDatabase -PostgresPort $PostgresPort -SkipCurrentCodeValidation | Out-Host
+            $restoreArguments = @('-BackupArchive', $archive, '-TargetDatabase', $cloneDatabase, '-PostgresPort', $PostgresPort, '-SkipCurrentCodeValidation')
+            if ($site) { $restoreArguments += @('-InstallationRoot', $site.InstallationRoot); if ($ProtectedConfigRoot) { $restoreArguments += @('-ProtectedConfigRoot', $ProtectedConfigRoot) } }
+            & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') @restoreArguments | Out-Host
             $true
         }
         if (-not $restored) {
@@ -264,8 +322,9 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         }
 
         Write-Host '      Applying this build''s upgrade to the isolated copy...' -ForegroundColor Cyan
-        $cloneUpgrade = if ($UpgradeRunner) { & $UpgradeRunner $cloneConnection $cloneEvidence } else {
-            Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -Arguments @('maintenance', 'upgrade', '--apply') -ConnectionString $cloneConnection -EvidenceRoot $cloneEvidence -DotnetPath $DotnetPath
+        $cloneUpgrade = if ($UpgradeRunner) { & $UpgradeRunner $cloneConnection $cloneEvidence $ApiExecutable } else {
+            $action = { Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -ApiExecutable $ApiExecutable -Arguments @('maintenance', 'upgrade', '--apply') -ConnectionString $cloneConnection -EvidenceRoot $cloneEvidence -DotnetPath $DotnetPath }
+            if ($maintenanceAccess) { Invoke-AeroLinkWithPostgresAccess $maintenanceAccess $action } else { & $action }
         }
         if ($cloneUpgrade.ExitCode -ne 0) {
             $reason = if ($cloneUpgrade.StdOut) { ($cloneUpgrade.StdOut -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 12) -join ' ' } else { $cloneUpgrade.StdErr }
@@ -275,8 +334,9 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
             }
         }
 
-        $cloneAnalysis = if ($AnalysisRunner) { & $AnalysisRunner $cloneConnection $cloneEvidence } else {
-            Get-AeroLinkUpgradeAnalysis -ProductRoot $ProductRoot -ConnectionString $cloneConnection -EvidenceRoot $cloneEvidence -DotnetPath $DotnetPath
+        $cloneAnalysis = if ($AnalysisRunner) { & $AnalysisRunner $cloneConnection $cloneEvidence $ApiExecutable } else {
+            $action = { Get-AeroLinkUpgradeAnalysis -ProductRoot $ProductRoot -ApiExecutable $ApiExecutable -ConnectionString $cloneConnection -EvidenceRoot $cloneEvidence -DotnetPath $DotnetPath }
+            if ($maintenanceAccess) { Invoke-AeroLinkWithPostgresAccess $maintenanceAccess $action } else { & $action }
         }
         if ($cloneAnalysis.Status -ne 'current') {
             return [pscustomobject]@{
@@ -290,8 +350,9 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         # the real database is mutated, and the restore validator cannot stand in for that: it ran before the
         # upgrade, against the un-migrated state.
         Write-Host '      Proving current AeroLink against the upgraded copy...' -ForegroundColor Cyan
-        $cloneReadiness = if ($CurrentCodeValidator) { & $CurrentCodeValidator $cloneConnection } else {
-            Test-AeroLinkUpgradedCloneReadiness -ProductRoot $ProductRoot -ConnectionString $cloneConnection -ApiPort $ValidationApiPort
+        $cloneReadiness = if ($CurrentCodeValidator) { & $CurrentCodeValidator $cloneConnection $ApiExecutable } else {
+            $action = { Test-AeroLinkUpgradedCloneReadiness -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot -ApiExecutable $ApiExecutable -ConnectionString $cloneConnection -DatabaseUser $cloneUser -ApiPort $ValidationApiPort }
+            if ($maintenanceAccess) { Invoke-AeroLinkWithPostgresAccess $maintenanceAccess $action } else { & $action }
         }
         if (-not $cloneReadiness.Passed) {
             return [pscustomobject]@{
@@ -307,26 +368,33 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
         if (-not $cleanedUp) {
             try {
                 if ($CleanupRunner) { & $CleanupRunner $cloneDatabase }
-                else { Remove-AeroLinkUpgradeValidationDatabase -ProductRoot $ProductRoot -Database $cloneDatabase -PostgresPort $PostgresPort }
+                else { Remove-AeroLinkUpgradeValidationDatabase -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot -ProtectedConfigRoot $ProtectedConfigRoot -Database $cloneDatabase -PostgresPort $PostgresPort }
             }
-            catch { Write-Host "      The disposable validation copy could not be removed: $($_.Exception.Message)" -ForegroundColor Yellow }
+            catch {
+                # Proceeding to the real database while a generated clone or its controlled evidence remains is
+                # unsafe: the persistent mutation would no longer have a clean, disposable validation boundary.
+                # Throw from finally so every return above is replaced by a durable refusal before BeforeRealUpgrade.
+                throw "The disposable validation cleanup failed for '$cloneDatabase' under '$($installation.RestoreValidation)'; the real database was not changed and the generated validation copy requires attended cleanup before retry. $($_.Exception.Message)"
+            }
             $cleanedUp = $true
         }
     }
 
+    if ($BeforeRealUpgrade) { & $BeforeRealUpgrade }
     Write-Host '      Upgrading the local database...' -ForegroundColor Cyan
-    $realUpgrade = if ($UpgradeRunner) { & $UpgradeRunner $null $null } else {
-        Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -Arguments @('maintenance', 'upgrade', '--apply') -DotnetPath $DotnetPath
+    $realUpgrade = if ($UpgradeRunner) { & $UpgradeRunner $realConnection $realEvidence $ApiExecutable } else {
+        $action = { Invoke-AeroLinkMaintenanceCommand -ProductRoot $ProductRoot -ApiExecutable $ApiExecutable -Arguments @('maintenance', 'upgrade', '--apply') -ConnectionString $realConnection -EvidenceRoot $realEvidence -DotnetPath $DotnetPath }
+        if ($maintenanceAccess) { Invoke-AeroLinkWithPostgresAccess $maintenanceAccess $action } else { & $action }
     }
     if ($realUpgrade.ExitCode -ne 0) {
         $reason = if ($realUpgrade.StdOut) { ($realUpgrade.StdOut -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 12) -join ' ' } else { $realUpgrade.StdErr }
         return [pscustomobject]@{
-            Validated = $true; Applied = $false; Archive = $archive
+            Validated = $true; Applied = $false; DatabaseModified = $true; Archive = $archive
             Detail = "The upgrade passed on the isolated copy but failed on the local database. The verified pre-upgrade backup is retained at $archive. $reason"
         }
     }
     return [pscustomobject]@{
-        Validated = $true; Applied = $true; Archive = $archive
+        Validated = $true; Applied = $true; DatabaseModified = $true; Archive = $archive
         Detail = "The upgrade was validated on an isolated copy and then applied. The pre-upgrade backup is retained at $archive."
     }
 }
@@ -363,18 +431,21 @@ function Test-AeroLinkUpgradedCloneReadiness {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
+        [string]$InstallationRoot,
         [Parameter(Mandatory)][string]$ConnectionString,
+        [string]$ApiExecutable,
+        [string]$DatabaseUser = 'postgres',
         [int]$ApiPort = 5093,
         # Test seam: stands the isolated read-only host up and proves the authenticated/anonymous contract.
         [scriptblock]$ReadOnlyApiProver
     )
     try {
-        $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
+        $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot
         Import-Module (Join-Path $PSScriptRoot 'AeroLinkEvidenceStore.psm1') -Force
         $builder = New-Object System.Data.Common.DbConnectionStringBuilder
         $builder.set_ConnectionString($ConnectionString)
         $cloneDatabaseName = [string]$builder['Database']
-        $clonePort = if ($builder['Port']) { [int]$builder['Port'] } else { 54329 }
+        $clonePort = if ($builder['Port']) { [int]$builder['Port'] } else { (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort }
         $evidenceRoot = Join-Path $installation.RestoreValidation "$cloneDatabaseName\evidence"
 
         # Controlled storage must still be coherent after the upgrade: every referenced attachment present,
@@ -389,19 +460,20 @@ function Test-AeroLinkUpgradedCloneReadiness {
         # Readiness, the anonymous refusal, the wrong-token refusal, and byte-exact authenticated controlled
         # reads - all against the upgraded clone, in a host that can neither mutate it nor talk to the world.
         $proof = if ($ReadOnlyApiProver) { & $ReadOnlyApiProver $cloneDatabaseName $evidenceRoot $inventory $ApiPort } else {
-            # The DEBUG build, named explicitly, because that is the one current source was just built into:
+            # A verified package executable is named explicitly by the site updater. The DEBUG build is
+            # retained for HOME/source callers because that is the one current source was just built into:
             # reaching this point means `dotnet run` compiled and ran the maintenance host from this revision
             # and returned zero. An established installation may still hold a Release executable from its last
             # production run, and validating with that would run a previous SHA as proof about this one - a
             # binary predating the read-only boundary would ignore these settings and start the ordinary
             # mutating host, with its workers, over copied production data.
-            $currentBuild = Join-Path $ProductRoot 'src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe'
+            $currentBuild = if ($ApiExecutable) { [IO.Path]::GetFullPath($ApiExecutable) } else { Join-Path $ProductRoot 'src\AeroLink.Api\bin\Debug\net10.0\AeroLink.Api.exe' }
             if (-not (Test-Path -LiteralPath $currentBuild -PathType Leaf)) {
                 throw "The upgraded clone cannot be validated: the current-source build is not present at $currentBuild. The maintenance host builds it, so its absence means this is not the revision that just ran."
             }
             & (Join-Path $PSScriptRoot 'Test-AeroLinkRestoredDownloads.ps1') `
                 -Database $cloneDatabaseName -EvidenceRoot $evidenceRoot -AttachmentInventory $inventory `
-                -PostgresPort $clonePort -ApiPort $ApiPort `
+                -PostgresPort $clonePort -ApiPort $ApiPort -DatabaseUser $DatabaseUser `
                 -LogRoot (Join-Path $installation.Logs 'upgrade-validation') `
                 -ApiExecutable $currentBuild
         }
@@ -427,20 +499,36 @@ function Remove-AeroLinkUpgradeValidationDatabase {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
+        [string]$InstallationRoot,
+        [string]$ProtectedConfigRoot,
         [Parameter(Mandatory)][string]$Database,
-        [int]$PostgresPort = 54329
+        [int]$PostgresPort = 0
     )
     # The name is the guard. A cleanup helper that can be handed 'aerolink' is a cleanup helper that will
     # eventually be handed 'aerolink'.
     if ($Database -notmatch '^aerolink_upgrade_validation_[a-f0-9]{10}$') {
         throw "Refusing to drop '$Database': only a generated AeroLink upgrade-validation database may be removed here."
     }
-    $bin = (Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot).PostgresBin
-    & (Join-Path $bin 'psql.exe') -h 127.0.0.1 -p $PostgresPort -U postgres -d postgres -v ON_ERROR_STOP=1 -tA `
-        -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();" | Out-Null
-    & (Join-Path $bin 'dropdb.exe') -h 127.0.0.1 -p $PostgresPort -U postgres --if-exists $Database
-    if ($LASTEXITCODE -ne 0) { throw "Could not remove the disposable validation database '$Database'." }
-    $validationEvidence = Join-Path (Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot).RestoreValidation $Database
+    $paths = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot
+    $upgradeInstallationRoot = $paths.InstallationRoot
+    $siteAccess = $null
+    if ($InstallationRoot) {
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1')
+        $site = Get-AeroLinkSiteDeclaration -InstallationRoot $upgradeInstallationRoot
+        if (-not $site) { throw "The explicit upgrade installation '$upgradeInstallationRoot' has no site declaration." }
+        $siteAccess = Get-AeroLinkSitePostgresAccess -InstallationRoot $site.InstallationRoot -Role Superuser -ProtectedConfigRoot $ProtectedConfigRoot
+    } else {
+        Assert-AeroLinkNotSiteInstallation -InstallationRoot $upgradeInstallationRoot -Operation 'Removing an upgrade-validation database'
+    }
+    if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $upgradeInstallationRoot).DeclaredPostgresPort }
+    $drop = {
+        & (Join-Path $paths.PostgresBin 'psql.exe') -w -h 127.0.0.1 -p $PostgresPort -U $(if ($siteAccess) { $siteAccess.User } else { 'postgres' }) -d postgres -v ON_ERROR_STOP=1 -tA `
+            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();" | Out-Null
+        & (Join-Path $paths.PostgresBin 'dropdb.exe') -w -h 127.0.0.1 -p $PostgresPort -U $(if ($siteAccess) { $siteAccess.User } else { 'postgres' }) --if-exists $Database
+        if ($LASTEXITCODE -ne 0) { throw "Could not remove the disposable validation database '$Database'." }
+    }
+    if ($siteAccess) { Invoke-AeroLinkWithPostgresAccess $siteAccess $drop } else { & $drop }
+    $validationEvidence = Join-Path $paths.RestoreValidation $Database
     if (Test-Path -LiteralPath $validationEvidence -PathType Container) {
         Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $validationEvidence) -Recurse -Force
     }
@@ -454,12 +542,14 @@ function Remove-AeroLinkSnapshotStagingDatabase {
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
         [Parameter(Mandatory)][string]$Database,
-        [int]$PostgresPort = 54329
+        [int]$PostgresPort = 0
     )
     if ($Database -notmatch '^aerolink_snapshot_validation_[a-f0-9]{10}$') {
         throw "Refusing to drop '$Database': only a generated AeroLink snapshot-staging database may be removed here."
     }
     $paths = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
+    Assert-AeroLinkNotSiteInstallation -InstallationRoot $paths.InstallationRoot -Operation 'Removing a snapshot-staging database'
+    if (-not $PostgresPort) { $PostgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $paths.InstallationRoot).DeclaredPostgresPort }
     & (Join-Path $paths.PostgresBin 'psql.exe') -h 127.0.0.1 -p $PostgresPort -U postgres -d postgres -v ON_ERROR_STOP=1 -tA `
         -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Database' AND pid <> pg_backend_pid();" | Out-Null
     & (Join-Path $paths.PostgresBin 'dropdb.exe') -h 127.0.0.1 -p $PostgresPort -U postgres --if-exists $Database

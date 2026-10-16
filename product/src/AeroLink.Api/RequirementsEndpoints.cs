@@ -525,7 +525,7 @@ public static class RequirementsEndpoints
 
         app.MapPost("/api/enterprise-requirements/schemas",async(CreateArtifactSchemaRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)=>
         {
-            if(!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Administrator))return Results.Forbid();
+            if(!await http.IsSystemAdministratorForProjectAsync(db,request.ProjectId,ct)&&!await http.HasProjectRoleAsync(db,identity,request.ProjectId,ct,ProgramRole.Administrator))return Results.Forbid();
             try
             {
                 var policy=await policyResolver.ResolveAsync(request.ProjectId,ct);
@@ -539,7 +539,7 @@ public static class RequirementsEndpoints
 
         app.MapPost("/api/enterprise-requirements/schemas/{id:guid}/fields",async(Guid id,CreateSchemaFieldRequest request,HttpContext http,AeroLinkDbContext db,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)=>
         {
-            var schema=await db.ArtifactSchemas.Include(x=>x.Fields).SingleOrDefaultAsync(x=>x.Id==id,ct);if(schema is null)return Results.NotFound();if(!http.UserAccount().IsAdministrator)return Results.Forbid();try{var policy=await policyResolver.ResolveAsync(schema.ProjectId,ct);if(!schema.IsActive||!EnterpriseRequirementsService.TryLevel(schema.AppliesTo,out var level,policy)||policy.Definition(level).RequirementsCatalogue is null)return Results.BadRequest(new{error="The selected schema is not part of the effective project ladder."});schema.AddField(request.Key,request.Label,request.Type,request.IsRequired,request.SortOrder,request.OptionsJson,http.UserAccount().UserName,DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
+            var schema=await db.ArtifactSchemas.Include(x=>x.Fields).SingleOrDefaultAsync(x=>x.Id==id,ct);if(schema is null)return Results.NotFound();if(!await http.IsSystemAdministratorForProjectAsync(db,schema.ProjectId,ct))return Results.Forbid();try{var policy=await policyResolver.ResolveAsync(schema.ProjectId,ct);if(!schema.IsActive||!EnterpriseRequirementsService.TryLevel(schema.AppliesTo,out var level,policy)||policy.Definition(level).RequirementsCatalogue is null)return Results.BadRequest(new{error="The selected schema is not part of the effective project ladder."});schema.AddField(request.Key,request.Label,request.Type,request.IsRequired,request.SortOrder,request.OptionsJson,http.UserAccount().UserName,DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);return Results.NoContent();}catch(DomainException ex){return Results.BadRequest(new{error=ex.Message});}
         });
 
         app.MapPost("/api/enterprise-requirements/specifications",async(CreateSpecificationRequest request,HttpContext http,AeroLinkDbContext db,IdentityService identity,IProjectLadderPolicyResolver policyResolver,CancellationToken ct)=>

@@ -193,6 +193,109 @@ Write-Output 'FRESH_PROCESS_PROTECTED_CONFIG_OK'
     $rotated = Set-AeroLinkProtectedImageryKey -ApiKey (ConvertTo-SecureString 'rotated-esri-key' -AsPlainText -Force) -RootOverride $imageryRoot
     Assert-True ($rotated.Fingerprint -ne $imagery.Fingerprint) 'Rotating the Esri key kept the old fingerprint.'
     Assert-True ((Remove-AeroLinkProtectedImageryKey -RootOverride $imageryRoot).Removed -and -not (Get-AeroLinkProtectedImageryDescriptor -RootOverride $imageryRoot).Configured) 'Removing the Esri key left it configured.'
+
+    # #1614 1.4: a site installation's PostgreSQL passwords. The reader is named by SID - the run-as identity for the
+    # application password - and nobody else reads it, however the file came to be readable.
+    $siteRoot = Join-Path $root 'site-programdata'
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $siteSecret = 'site-application-password-never-emitted'
+    $stored = Set-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    Assert-True ([IO.File]::ReadAllText($stored.Path) -notmatch [regex]::Escape($siteSecret)) 'The site application password was written in plain text.'
+    Assert-True ((Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -RootOverride $siteRoot) -eq $siteSecret) 'The site application password did not round-trip for its reader.'
+    $fileRules = @((Get-Acl -LiteralPath $stored.Path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique)
+    Assert-True ((Get-Acl -LiteralPath $stored.Path).AreAccessRulesProtected -and (($fileRules -join ',') -eq ((@($currentSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object) -join ','))) "The site secret is not ACL'd to exactly its reader, SYSTEM and Administrators: $($fileRules -join ',')."
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot (Join-Path $root 'another-installation') -Name 'postgres-application' -RootOverride $siteRoot } 'A site secret was read for an installation it was not stored for.'
+    # DACL section only: Set-Acl with a Get-Acl object can ask for the audit section, which needs a privilege.
+    $storedFile = [IO.FileInfo]::new($stored.Path)
+    $widened = if ($PSVersionTable.PSEdition -eq 'Desktop') { $storedFile.GetAccessControl('Access') } else { [IO.FileSystemAclExtensions]::GetAccessControl($storedFile, 'Access') }
+    $widened.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Read', 'Allow')))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $storedFile.SetAccessControl($widened) } else { [IO.FileSystemAclExtensions]::SetAccessControl($storedFile, $widened) }
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-application' -RootOverride $siteRoot } 'A site secret whose file Users can read was still used.'
+
+    # The installer writes one additional site secret only for the first administrator. Before this contract, the
+    # committed module rejected api-bootstrap at ValidateSet binding and the installer could not complete a clean
+    # first install; this owns the production store/read/remove behavior rather than testing an implementation seam.
+    $bootstrapInstall = Join-Path $root 'bootstrap-installation'
+    $bootstrapSecret = 'bootstrap-secret-never-emitted'
+    $bootstrap = Set-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $bootstrapSecret -AsPlainText -Force) -RootOverride $siteRoot
+    Assert-True ([IO.File]::ReadAllText($bootstrap.Path) -notmatch [regex]::Escape($bootstrapSecret)) 'The API bootstrap secret was written in plain text.'
+    Assert-True ((Get-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -RootOverride $siteRoot) -eq $bootstrapSecret) 'The API bootstrap secret did not round-trip for its reader.'
+    $removedBootstrap = Remove-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -RootOverride $siteRoot
+    Assert-True ($removedBootstrap.Removed -and -not (Test-Path -LiteralPath $bootstrap.Path -PathType Leaf)) 'Removing the consumed API bootstrap secret left it configured.'
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $bootstrapInstall -Name 'api-bootstrap' -RootOverride $siteRoot } 'A consumed API bootstrap secret must no longer be readable.'
+    # An installer stores the application password for the API's virtual account, which it is not (D2 revised). The
+    # first write must succeed for such a writer and leave the file and directory readable by exactly that account,
+    # SYSTEM and Administrators - the writer keeps nothing.
+    $serviceSid = 'S-1-5-80-1-2-3-4-5'
+    $serviceInstall = Join-Path $root 'service-installation'
+    $forService = Set-AeroLinkProtectedSiteSecret -InstallationRoot $serviceInstall -Name 'postgres-application' -ReaderSid $serviceSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    $expectedReaders = (@($serviceSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object) -join ','
+    foreach ($securedPath in @($forService.Path, (Split-Path -Parent $forService.Path))) {
+        $sections = [Security.AccessControl.AccessControlSections]::Access
+        # Named, not probed: this process deliberately has no access left inside the directory.
+        $security = if ($securedPath -ne $forService.Path) {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') { ([IO.DirectoryInfo]::new($securedPath)).GetAccessControl($sections) } else { [IO.FileSystemAclExtensions]::GetAccessControl([IO.DirectoryInfo]::new($securedPath), $sections) }
+        } else {
+            if ($PSVersionTable.PSEdition -eq 'Desktop') { ([IO.FileInfo]::new($securedPath)).GetAccessControl($sections) } else { [IO.FileSystemAclExtensions]::GetAccessControl([IO.FileInfo]::new($securedPath), $sections) }
+        }
+        $holders = (@($security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique)) -join ','
+        Assert-True ($security.AreAccessRulesProtected -and $holders -eq $expectedReaders) "A secret stored for a service account must leave $securedPath to exactly that account, SYSTEM and Administrators; holders: $holders."
+    }
+    # This process owns both, so it hands them back to itself to let the fixture be removed.
+    $mine = New-Object Security.Principal.SecurityIdentifier($currentSid)
+    $directoryReset = New-Object Security.AccessControl.DirectorySecurity
+    $directoryReset.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($mine, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    $serviceDirectory = [IO.DirectoryInfo]::new((Split-Path -Parent $forService.Path))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $serviceDirectory.SetAccessControl($directoryReset) } else { [IO.FileSystemAclExtensions]::SetAccessControl($serviceDirectory, $directoryReset) }
+    $fileReset = New-Object Security.AccessControl.FileSecurity
+    $fileReset.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($mine, 'FullControl', 'Allow')))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.File]::SetAccessControl($forService.Path, $fileReset) } else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($forService.Path), $fileReset) }
+
+    # A record that names another reader - here NETWORK SERVICE - is refused to this process even though it can open the file.
+    $superuser = Set-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-superuser' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    $reassigned = [IO.File]::ReadAllText($superuser.Path) | ConvertFrom-Json
+    $reassigned.readerSid = 'S-1-5-20'
+    [IO.File]::WriteAllText($superuser.Path, ($reassigned | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Assert-Throws { Get-AeroLinkProtectedSiteSecret -InstallationRoot $install -Name 'postgres-superuser' -RootOverride $siteRoot } 'A site secret recorded for NETWORK SERVICE was read by another identity.'
+
+    # Review 02 P2-A: the secret path is predictable. A directory prepared in advance with exactly the expected DACL,
+    # holding a planted secret.json that Users can read, must not pass that file's ACL on to the stored secret.
+    $plantedInstall = Join-Path $root 'planted-installation'
+    $plantedPath = Get-AeroLinkProtectedSiteSecretPath -InstallationRoot $plantedInstall -Name 'postgres-superuser' -RootOverride $siteRoot
+    $plantedDirectory = Split-Path -Parent $plantedPath
+    New-Item -ItemType Directory -Path $plantedDirectory -Force | Out-Null
+    $prepared = New-Object Security.AccessControl.DirectorySecurity
+    $prepared.SetAccessRuleProtection($true, $false)
+    foreach ($sid in @($currentSid, 'S-1-5-18', 'S-1-5-32-544')) {
+        $prepared.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    }
+    $preparedInfo = [IO.DirectoryInfo]::new($plantedDirectory)
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { $preparedInfo.SetAccessControl($prepared) } else { [IO.FileSystemAclExtensions]::SetAccessControl($preparedInfo, $prepared) }
+    [IO.File]::WriteAllText($plantedPath, '{}')
+    $planted = New-Object Security.AccessControl.FileSecurity
+    $planted.SetAccessRuleProtection($true, $false)
+    $planted.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($currentSid)), 'FullControl', 'Allow')))
+    $planted.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-545')), 'Read', 'Allow')))
+    if ($PSVersionTable.PSEdition -eq 'Desktop') { [IO.File]::SetAccessControl($plantedPath, $planted) } else { [IO.FileSystemAclExtensions]::SetAccessControl([IO.FileInfo]::new($plantedPath), $planted) }
+    $null = Set-AeroLinkProtectedSiteSecret -InstallationRoot $plantedInstall -Name 'postgres-superuser' -ReaderSid $currentSid `
+        -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot
+    $storedHolders = (@((Get-Acl -LiteralPath $plantedPath).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique)) -join ','
+    Assert-True ($storedHolders -eq ((@($currentSid, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object) -join ',')) "A secret written over a planted file must end with exactly reader, SYSTEM and Administrators; holders: $storedHolders."
+    # A secret directory that is a link is refused outright.
+    $linkInstall = Join-Path $root 'linked-installation'
+    $linkPath = Split-Path -Parent (Get-AeroLinkProtectedSiteSecretPath -InstallationRoot $linkInstall -Name 'postgres-superuser' -RootOverride $siteRoot)
+    $linkTarget = Join-Path $root 'link-target'
+    New-Item -ItemType Directory -Path $linkTarget, (Split-Path -Parent $linkPath) -Force | Out-Null
+    cmd /c mklink /J "$linkPath" "$linkTarget" | Out-Null
+    try {
+        Assert-Throws { Set-AeroLinkProtectedSiteSecret -InstallationRoot $linkInstall -Name 'postgres-superuser' -ReaderSid $currentSid -Secret (ConvertTo-SecureString $siteSecret -AsPlainText -Force) -RootOverride $siteRoot } 'A site secret directory that is a link was used.'
+        Assert-True (@(Get-ChildItem -LiteralPath $linkTarget -Force).Count -eq 0) 'A refused link must receive no file.'
+    }
+    finally { cmd /c rmdir "$linkPath" | Out-Null }
 }
 finally {
     if (Test-Path -LiteralPath $root) {

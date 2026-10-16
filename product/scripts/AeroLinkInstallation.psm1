@@ -36,7 +36,14 @@ $script:AeroLinkInstallationPointerName = 'installation.json'
 # The one list of what an installation may declare itself to be. Every guard that protects real data compares
 # against these by equality, so a value outside the list is not a label AeroLink does not recognise - it is a
 # guard that silently stops applying. Keep this and Set-AeroLinkInstanceConfig's ValidateSet in step.
-$script:AeroLinkInstanceClassifications = @('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared')
+#
+# The two site classifications are the installations on the company site host (#1614 D4, D8). This is the one
+# list of them; Test-AeroLinkSiteClassification reads it. Only a -Mode Site read accepts one: the site launcher,
+# and the notification-authority scripts when the installation has a site declaration. Every other caller
+# refuses them, as every launcher, import and restore refused them as unknown before they existed - which is
+# what stops a HOME launcher, running Development with demonstration data, from starting against a site database.
+$script:AeroLinkSiteClassifications = @('SiteProduction', 'SiteDevelopment')
+$script:AeroLinkInstanceClassifications = @('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared') + $script:AeroLinkSiteClassifications
 
 function Get-AeroLinkInstallationPointerPath {
     <#
@@ -44,7 +51,29 @@ function Get-AeroLinkInstallationPointerPath {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ProductRoot)
-    return Join-Path (Join-Path $ProductRoot '.local') $script:AeroLinkInstallationPointerName
+    $root = [IO.Path]::GetFullPath($ProductRoot).TrimEnd('\', '/')
+    # A signed site release is laid out as <installation>\program\versions\<version>.
+    # Its installation pointer is mutable installation metadata, so it belongs beside versions,
+    # outside the signed release tree. Source checkouts keep the historical product\\.local path.
+    $versionsRoot = Split-Path $root -Parent
+    $programRoot = Split-Path $versionsRoot -Parent
+    $isSignedVersionRoot = ([string]::Equals((Split-Path $versionsRoot -Leaf), 'versions', [StringComparison]::OrdinalIgnoreCase)) -and
+        ([string]::Equals((Split-Path $programRoot -Leaf), 'program', [StringComparison]::OrdinalIgnoreCase)) -and
+        (Test-Path -LiteralPath (Join-Path $root 'manifest.json') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $root 'app\AeroLink.Api.exe') -PathType Leaf)
+    $currentParent = Split-Path $root -Parent
+    $currentItem = if ([string]::Equals((Split-Path $root -Leaf), 'current', [StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals((Split-Path $currentParent -Leaf), 'program', [StringComparison]::OrdinalIgnoreCase)) {
+        Get-Item -LiteralPath $root -Force -ErrorAction SilentlyContinue
+    } else { $null }
+    $isCurrentAlias = $null -ne $currentItem -and $currentItem.PSIsContainer -and
+        -not [string]::IsNullOrWhiteSpace([string]$currentItem.Target)
+    $pointerRoot = if ($isSignedVersionRoot) {
+        $programRoot
+    } elseif ($isCurrentAlias) {
+        $currentParent
+    } else { $root }
+    return Join-Path (Join-Path $pointerRoot '.local') $script:AeroLinkInstallationPointerName
 }
 
 function Get-AeroLinkInstallationRoot {
@@ -156,11 +185,11 @@ function Set-AeroLinkInstallationPointer {
     if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
         throw "Refusing to point at an installation root that does not exist: $resolved"
     }
-    $localRoot = Join-Path $ProductRoot '.local'
-    if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) {
-        New-Item -ItemType Directory -Path $localRoot -Force | Out-Null
-    }
     $pointerPath = Get-AeroLinkInstallationPointerPath -ProductRoot $ProductRoot
+    $pointerDirectory = Split-Path -Parent $pointerPath
+    if (-not (Test-Path -LiteralPath $pointerDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $pointerDirectory -Force | Out-Null
+    }
     [pscustomobject]@{
         installationRoot = $resolved
         note             = $Note
@@ -260,7 +289,9 @@ function Get-AeroLinkInstanceConfig {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
-        [ValidateSet('Development', 'HomeCanonical')][string]$Mode = 'Development',
+        # Site is the site-server launcher's mode: it accepts only a SiteProduction or SiteDevelopment
+        # declaration, and no other mode accepts one.
+        [ValidateSet('Development', 'HomeCanonical', 'Site')][string]$Mode = 'Development',
         [string]$InstallationRoot,
         # Mint and persist a stable instance id when this installation has none.
         [switch]$EnsureInstanceId
@@ -293,6 +324,14 @@ function Get-AeroLinkInstanceConfig {
         }
         if ($declared.PSObject.Properties['snapshot'] -and $declared.snapshot) { $snapshot = $declared.snapshot }
         if ($declared.PSObject.Properties['instanceId']) { $instanceId = [string]$declared.instanceId }
+    }
+
+    $isSite = Test-AeroLinkSiteClassification $classification
+    if ($isSite -and $Mode -ne 'Site') {
+        throw "The AeroLink installation at $($paths.InstallationRoot) is declared $classification, a site server installation. Only a site-aware caller (the site launcher, Start-AeroLinkSite.ps1) handles it; this $Mode read was refused and nothing was changed."
+    }
+    if ($Mode -eq 'Site' -and -not $isSite) {
+        throw "A Site read accepts only an installation declared SiteProduction or SiteDevelopment; the one at $($paths.InstallationRoot) is $classification. Nothing was started or changed."
     }
 
     # A stable identifier for this installation, minted once and then never changing.
@@ -334,7 +373,8 @@ function Set-AeroLinkInstanceConfig {
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
         [string]$Label,
-        [ValidateSet('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared')][string]$Classification,
+        # A literal, because ValidateSet cannot read a variable; keep it equal to $script:AeroLinkInstanceClassifications.
+        [ValidateSet('HomeCanonical', 'WorkLaptopLocal', 'LocalDemo', 'Undeclared', 'SiteProduction', 'SiteDevelopment')][string]$Classification,
         [hashtable]$Snapshot,
         [string]$InstallationRoot
     )
@@ -359,43 +399,360 @@ function Set-AeroLinkInstanceConfig {
     return $configPath
 }
 
-function Get-AeroLinkServiceEndpoints {
+# The ports every HOME, laptop and demo installation has always used. A site server installation (#1614) declares
+# its own in instance.json instead, because two of them share one host (D8) with other applications (D3).
+$script:AeroLinkDefaultApiPort = 5080
+$script:AeroLinkDefaultPostgresPort = 54329
+
+function Test-AeroLinkSiteClassification {
+    <# .SYNOPSIS Whether a classification is one of the site server classifications ($script:AeroLinkSiteClassifications, at the top of this module). #>
+    param([AllowNull()][AllowEmptyString()][string]$Classification)
+    return ($Classification -in $script:AeroLinkSiteClassifications)
+}
+
+function Get-AeroLinkServiceSid {
     <#
-        .SYNOPSIS The local ports this installation's services use: 5080 for the API and 54329 for PostgreSQL.
+        .SYNOPSIS The SID of the virtual account NT SERVICE\<ServiceName>: S-1-5-80 plus the SHA-1 of the upper-cased name.
         .DESCRIPTION
-            Fixed for every real installation. A DISPOSABLE qualification installation - AEROLINK_INSTALLATION_ROOT
-            set, which normal use never does - may move them with AEROLINK_QUALIFICATION_API_PORT and
-            AEROLINK_QUALIFICATION_POSTGRES_PORT, so the real launchers and transition callers can be qualified on a
-            machine whose HOME services are running. An override that names a persistent port is refused: a
-            disposable installation must never be able to reach the canonical API or database.
+            The same derivation Windows uses (sc showsid), so a folder can be granted to an installation's service
+            account before that service exists; the grant takes effect when the service runs as the account.
     #>
     [CmdletBinding()]
-    param()
-    $api = 5080
-    $postgres = 54329
+    param([Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9_-]{1,256}$')][string]$ServiceName)
+    $sha = [Security.Cryptography.SHA1]::Create()
+    try { $hash = $sha.ComputeHash([Text.Encoding]::Unicode.GetBytes($ServiceName.ToUpperInvariant())) }
+    finally { $sha.Dispose() }
+    $parts = for ($i = 0; $i -lt 20; $i += 4) { [BitConverter]::ToUInt32($hash, $i) }
+    return 'S-1-5-80-' + ($parts -join '-')
+}
+
+function Assert-AeroLinkSiteServiceSid {
+    <#
+        .SYNOPSIS Refuses a production site declaration whose ACL reader is not its computed virtual service SID.
+        .DESCRIPTION
+            Site declarations accept SID overrides for disposable, non-elevated qualification. An operator entry
+            point that writes an installation-owned ACL must establish the real virtual-account binding first;
+            otherwise a value such as the Users SID would become a durable reader. Low-level ACL helpers remain
+            SID-oriented so disposable fixtures can qualify them without touching a production installation.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Site,
+        [ValidateSet('Api', 'Postgres')][string]$Role = 'Api'
+    )
+    $serviceName = if ($Role -eq 'Api') { [string]$Site.ServiceName } else { [string]$Site.PostgresServiceName }
+    $declaredSid = if ($Role -eq 'Api') { [string]$Site.RunAsSid } else { [string]$Site.PostgresRunAsSid }
+    if ([string]::IsNullOrWhiteSpace($serviceName) -or [string]::IsNullOrWhiteSpace($declaredSid)) {
+        throw "The site declaration has no $Role virtual service binding to authorize an installation-owned ACL."
+    }
+    $computedSid = Get-AeroLinkServiceSid -ServiceName $serviceName
+    if ($declaredSid -ne $computedSid) {
+        throw "The site's $Role SID '$declaredSid' is an override, not the computed NT SERVICE\$serviceName SID '$computedSid'; refusing an installation-owned ACL write."
+    }
+    return $true
+}
+
+function Assert-AeroLinkNotSiteInstallation {
+    <#
+        .SYNOPSIS Refuses, without prompting, a HOME tool run against a site server installation.
+        .DESCRIPTION
+            A site cluster requires SCRAM passwords; these HOME tools (snapshot import, the clone-validated upgrade,
+            showcase pruning, the FMS history repair) connect as postgres with none, so psql would sit at a hidden
+            password prompt. Backup and restore are site-aware (#1614 1.9) and do not call this.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InstallationRoot, [Parameter(Mandatory)][string]$Operation)
+    if (Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot) {
+        throw "$Operation is a HOME tool and is not supported on a site server installation: it connects to PostgreSQL without the site's credentials. Nothing was changed."
+    }
+}
+
+function Get-AeroLinkSiteDeclaration {
+    <#
+        .SYNOPSIS The site server declaration in this installation's instance.json, or $null when it has none.
+        .DESCRIPTION
+            #1614 1.3-1.5. A site server installation names its own ports, run-as identity, database role and
+            connector deployment id in the `site` block of instance.json, and owns every piece of runtime state
+            under its installation root. HOME, laptop and demo installations have no `site` block and resolve
+            exactly as before.
+
+            Fail closed: a `site` block on an installation that is not classified SiteProduction or
+            SiteDevelopment, or one with an unusable value, is a refusal. A declaration that silently does not
+            apply would move nothing while appearing to move everything.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InstallationRoot)
+    $root = [IO.Path]::GetFullPath($InstallationRoot)
+    $configPath = Join-Path $root 'instance.json'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { return $null }
+    try { $declared = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
+    catch { throw "The AeroLink instance declaration at $configPath is malformed: $($_.Exception.Message)" }
+    if (-not $declared -or -not $declared.PSObject.Properties['site'] -or $null -eq $declared.site) { return $null }
+    $site = $declared.site
+    $classification = if ($declared.PSObject.Properties['classification']) { [string]$declared.classification } else { '' }
+    if (-not (Test-AeroLinkSiteClassification $classification)) {
+        throw "The AeroLink instance declaration at $configPath has a site block but classification '$classification'. Only $($script:AeroLinkSiteClassifications -join ' and ') installations may declare one."
+    }
+    function Read-SitePort([string]$Name) {
+        $raw = if ($site.PSObject.Properties[$Name]) { [string]$site.$Name } else { '' }
+        $value = 0
+        if (-not [int]::TryParse($raw, [ref]$value) -or $value -lt 1024 -or $value -gt 65535) {
+            throw "The site declaration at $configPath must set $Name to a port from 1024 to 65535; it is '$raw'."
+        }
+        return $value
+    }
+    $schema = if ($site.PSObject.Properties['schemaVersion']) { [string]$site.schemaVersion } else { '' }
+    if ($schema -ne '1') { throw "The site declaration at $configPath has schemaVersion '$schema'; this AeroLink reads version 1." }
+    $apiPort = Read-SitePort 'apiPort'
+    $postgresPort = Read-SitePort 'postgresPort'
+    if ($apiPort -eq $postgresPort) { throw "The site declaration at $configPath gives the API and PostgreSQL the same port $apiPort." }
+    # D2 (revised 15 Oct): each installation runs as its own virtual service accounts, NT SERVICE\<service name>,
+    # one for the API and one for PostgreSQL. The SIDs are computed from the names, so they need no lookup and
+    # cannot drift from them; an explicit SID is accepted only as an override for disposable qualification.
+    function Read-SiteServiceName([string]$Name) {
+        $raw = if ($site.PSObject.Properties[$Name]) { [string]$site.$Name } else { '' }
+        if ($raw -notmatch '^[A-Za-z0-9_-]{3,80}$') { throw "The site declaration at $configPath must set $Name to a Windows service name of 3-80 letters, digits, '_' or '-'; it is '$raw'." }
+        return $raw
+    }
+    function Read-SiteSid([string]$Name, [string]$ServiceName) {
+        if (-not $site.PSObject.Properties[$Name] -or [string]::IsNullOrWhiteSpace([string]$site.$Name)) { return (Get-AeroLinkServiceSid -ServiceName $ServiceName) }
+        $raw = [string]$site.$Name
+        try { return (New-Object Security.Principal.SecurityIdentifier($raw)).Value }
+        catch { throw "The site declaration at $configPath must give $Name as a SID; it is '$raw'." }
+    }
+    $serviceName = Read-SiteServiceName 'serviceName'
+    $postgresServiceName = Read-SiteServiceName 'postgresServiceName'
+    if ($serviceName -eq $postgresServiceName) { throw "The site declaration at $configPath gives the API and PostgreSQL the same service account '$serviceName'." }
+    $runAsSid = Read-SiteSid 'runAsSid' $serviceName
+    $postgresRunAsSid = Read-SiteSid 'postgresRunAsSid' $postgresServiceName
+    $publicHostName = $null
+    if ($site.PSObject.Properties['publicHostName'] -and -not [string]::IsNullOrWhiteSpace([string]$site.publicHostName)) {
+        $publicHostName = ([string]$site.publicHostName).Trim().ToLowerInvariant()
+        # D3: the full host name, never the short one, which neither resolves from other sites nor is on the certificate.
+        if ($publicHostName -notmatch '^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$') {
+            throw "The site declaration at $configPath must give publicHostName as a fully qualified host name; it is '$publicHostName'."
+        }
+    }
+    $role =if ($site.PSObject.Properties['databaseRole']) { [string]$site.databaseRole } else { '' }
+    if ($role -cnotmatch '^[a-z_][a-z0-9_]{2,62}$' -or $role -eq 'postgres') {
+        throw "The site declaration at $configPath must name a lower-case, non-superuser databaseRole; it is '$role'."
+    }
+    $deploymentId = if ($site.PSObject.Properties['connectorDeploymentId']) { [string]$site.connectorDeploymentId } else { '' }
+    if ($deploymentId -notmatch '^[A-Za-z0-9._-]{3,100}$') {
+        throw "The site declaration at $configPath must set an explicit connectorDeploymentId of 3-100 letters, digits, '.', '_' or '-'; it is '$deploymentId'."
+    }
+    $keys = Join-Path $root 'keys'
+    # The notification authority must stay OUTSIDE the installation (AeroLinkNotificationAuthority refuses one
+    # inside it), so a restore or snapshot can never carry it. It is per installation all the same: one machine
+    # folder per installation root, named by the same root hash the protected-config store uses.
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $rootHash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($root.TrimEnd('\').ToLowerInvariant())))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+    $machineState = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) 'AeroLink'
+    $authorityRoot = Join-Path (Join-Path $machineState 'notification-authority') $rootHash
+    if ($site.PSObject.Properties['notificationAuthorityRoot'] -and -not [string]::IsNullOrWhiteSpace([string]$site.notificationAuthorityRoot)) {
+        $authorityRoot = [string]$site.notificationAuthorityRoot
+        if (-not [IO.Path]::IsPathRooted($authorityRoot)) { throw "The site declaration at $configPath must name an absolute notificationAuthorityRoot; it is '$authorityRoot'." }
+        $authorityRoot = [IO.Path]::GetFullPath($authorityRoot)
+    }
+    if (($authorityRoot.TrimEnd('\') + '\').StartsWith($root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "The site declaration at $configPath places the notification authority inside the installation ($authorityRoot); it must stay outside it, beyond the reach of a restore."
+    }
+    return [pscustomobject]@{
+        ConfigPath                = $configPath
+        Classification            = $classification
+        InstallationRoot          = $root
+        ApiPort                   = $apiPort
+        PostgresPort              = $postgresPort
+        ServiceName               = $serviceName
+        RunAsAccount              = "NT SERVICE\$serviceName"
+        RunAsSid                  = $runAsSid
+        PostgresServiceName       = $postgresServiceName
+        PostgresRunAsAccount      = "NT SERVICE\$postgresServiceName"
+        PostgresRunAsSid          = $postgresRunAsSid
+        PublicHostName            = $publicHostName
+        DatabaseRole              = $role
+        ConnectorDeploymentId     = $deploymentId
+        # Installation-owned state (#1614 1.5). Derived from the root rather than stored, so a declaration can
+        # never point one installation's runtime at another installation's keys or evidence.
+        ProgramRoot               = Join-Path $root 'program'
+        EvidenceRoot              = Join-Path $root 'evidence'
+        KeyRingPath               = Join-Path $keys 'data-protection'
+        ConnectorKeyDirectory     = Join-Path $keys 'connector'
+        ConnectorSigningKeyPath   = Join-Path (Join-Path $keys 'connector') 'connector-signing-key.pem'
+        NotificationAuthorityRoot = $authorityRoot
+    }
+}
+
+function Get-AeroLinkServiceEndpoints {
+    <#
+        .SYNOPSIS The local ports this installation's services use.
+        .DESCRIPTION
+            HOME, laptop and demo installations use 5080 for the API and 54329 for PostgreSQL, unchanged. A site
+            server installation (#1614) uses the ports its instance.json declares.
+
+            A DISPOSABLE qualification installation - AEROLINK_INSTALLATION_ROOT set, which normal use never does -
+            may move them with AEROLINK_QUALIFICATION_API_PORT and AEROLINK_QUALIFICATION_POSTGRES_PORT, so the real
+            launchers and transition callers can be qualified on a machine whose HOME services are running. An
+            override that names a persistent port is refused: a disposable installation must never be able to
+            reach the canonical API or database.
+
+            DeclaredApiPort and DeclaredPostgresPort are the installation's own ports with any qualification
+            override ignored. Guards that protect the persistent database compare against those.
+    #>
+    [CmdletBinding()]
+    param(
+        # Defaults to the installation this module's own checkout resolves to.
+        [string]$InstallationRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($InstallationRoot)) {
+        $InstallationRoot = Get-AeroLinkInstallationRoot -ProductRoot (Split-Path -Parent $PSScriptRoot)
+    }
+    $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+    $declaredApi = if ($site) { $site.ApiPort } else { $script:AeroLinkDefaultApiPort }
+    $declaredPostgres = if ($site) { $site.PostgresPort } else { $script:AeroLinkDefaultPostgresPort }
+    $databaseUser = if ($site) { $site.DatabaseRole } else { 'postgres' }
+    $api = $declaredApi
+    $postgres = $declaredPostgres
     $qualification = $false
     if ($env:AEROLINK_INSTALLATION_ROOT -and ($env:AEROLINK_QUALIFICATION_API_PORT -or $env:AEROLINK_QUALIFICATION_POSTGRES_PORT)) {
+        $persistent = @($script:AeroLinkDefaultApiPort, $script:AeroLinkDefaultPostgresPort, $declaredApi, $declaredPostgres) | Select-Object -Unique
         foreach ($pair in @(@('AEROLINK_QUALIFICATION_API_PORT', 'api'), @('AEROLINK_QUALIFICATION_POSTGRES_PORT', 'postgres'))) {
             $raw = [Environment]::GetEnvironmentVariable($pair[0], 'Process')
             if (-not $raw) { throw "A disposable qualification installation must set both AEROLINK_QUALIFICATION_API_PORT and AEROLINK_QUALIFICATION_POSTGRES_PORT." }
             $value = 0
-            if (-not [int]::TryParse($raw, [ref]$value) -or $value -lt 1024 -or $value -gt 65535 -or $value -in @(5080, 54329)) {
-                throw "$($pair[0]) must be a port from 1024 to 65535 other than the persistent 5080 and 54329; it is '$raw'."
+            if (-not [int]::TryParse($raw, [ref]$value) -or $value -lt 1024 -or $value -gt 65535 -or $value -in $persistent) {
+                throw "$($pair[0]) must be a port from 1024 to 65535 other than the persistent $($persistent -join ' and '); it is '$raw'."
             }
             if ($pair[1] -eq 'api') { $api = $value } else { $postgres = $value }
         }
         $qualification = $true
     }
     return [pscustomobject]@{
-        ApiPort          = $api
-        PostgresPort     = $postgres
-        ApiBaseUri       = "http://127.0.0.1:$api"
-        ConnectionString = "Host=127.0.0.1;Port=$postgres;Database=aerolink;Username=postgres"
-        Qualification    = $qualification
+        ApiPort              = $api
+        PostgresPort         = $postgres
+        DeclaredApiPort      = $declaredApi
+        DeclaredPostgresPort = $declaredPostgres
+        ApiBaseUri           = "http://127.0.0.1:$api"
+        DatabaseUser         = $databaseUser
+        # Never a password. A site installation's password lives in the protected-config store and is added
+        # by the process that starts the API (Get-AeroLinkSiteRuntimeEnvironment).
+        ConnectionString     = "Host=127.0.0.1;Port=$postgres;Database=aerolink;Username=$databaseUser"
+        Qualification        = $qualification
+        Site                 = ($null -ne $site)
+    }
+}
+
+function Get-AeroLinkPortListenerProcessIds {
+    <#
+        .SYNOPSIS The ids of the processes listening on a local TCP port, on any address. Empty when it is free.
+        .DESCRIPTION Read from the TCP table, never from localised netstat or netsh text.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidateRange(1, 65535)][int]$Port)
+    return @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique)
+}
+
+function Assert-AeroLinkPortAvailable {
+    <#
+        .SYNOPSIS Refuses a port another process is already listening on (#1614 1.3).
+        .DESCRIPTION
+            On a shared host a port in use belongs to somebody: one of the other applications, or the other
+            AeroLink installation. Starting anyway either fails half-way or, worse, finds the other service and
+            talks to it. The caller learns which process holds the port.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateRange(1, 65535)][int]$Port,
+        [Parameter(Mandatory)][string]$Purpose
+    )
+    $owners = @(Get-AeroLinkPortListenerProcessIds -Port $Port)
+    if ($owners.Count -gt 0) {
+        $described = foreach ($owner in $owners) {
+            $process = Get-Process -Id $owner -ErrorAction SilentlyContinue
+            if ($process) { "$($process.ProcessName) (pid $owner)" } else { "pid $owner" }
+        }
+        throw "Port $Port, declared for $Purpose, is already in use by $($described -join ', '). Choose a free port for this installation or stop the process that holds it; AeroLink will not share it."
+    }
+}
+
+function Get-AeroLinkProgramLayout {
+    <#
+        .SYNOPSIS Where this program's settings, source identity, schema id and API executable come from.
+        .DESCRIPTION
+            Two layouts run these scripts:
+              Package  a release package (#1614 1.6): <program>\manifest.json, app\ (the published API, its
+                       appsettings.json and release-identity.json) and scripts\. No source tree, no git, no
+                       appsettings.Development.json. This is what a site installation runs.
+              Source   a repository checkout: src\, git and the migrations folder. HOME, the laptop and qualification,
+                       exactly as before.
+            ProductRoot is the folder above the scripts folder in both.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ProductRoot)
+    $root = [IO.Path]::GetFullPath($ProductRoot)
+    $manifestPath = Join-Path $root 'manifest.json'
+    $app = Join-Path $root 'app'
+    if ((Test-Path -LiteralPath $manifestPath -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $app 'AeroLink.Api.exe') -PathType Leaf)) {
+        try { $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json }
+        catch { throw "The release manifest at $manifestPath is malformed: $($_.Exception.Message)" }
+        $sha = if ($manifest.PSObject.Properties['sourceSha']) { [string]$manifest.sourceSha } else { '' }
+        $identityPath = Join-Path $app 'release-identity.json'
+        if (-not $sha -and (Test-Path -LiteralPath $identityPath -PathType Leaf)) {
+            $identity = Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json
+            if ($identity.PSObject.Properties['Runtime'] -and $identity.Runtime.PSObject.Properties['SourceSha']) { $sha = [string]$identity.Runtime.SourceSha }
+        }
+        $migration = if ($manifest.PSObject.Properties['latestMigration']) { [string]$manifest.latestMigration } else { '' }
+        if (-not $sha -or -not $migration) { throw "The release manifest at $manifestPath names no source SHA or latest migration; refusing to record an archive whose application identity is unknown." }
+        return [pscustomobject]@{
+            Kind          = 'Package'
+            SettingsFiles = @(@('appsettings.json', 'appsettings.Production.json') | ForEach-Object { Join-Path $app $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+            SourceSha     = $sha
+            SchemaVersion = $migration
+            ApiExecutable = Join-Path $app 'AeroLink.Api.exe'
+        }
+    }
+    $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $root '..'))
+    $sha = try { (& git -C $repositoryRoot rev-parse HEAD 2>$null).Trim() } catch { 'unknown' }
+    $schema = (Get-ChildItem -LiteralPath (Join-Path $root 'src\AeroLink.Infrastructure\Persistence\Migrations') -Filter '*.cs' -File | Where-Object Name -notmatch 'Designer|Snapshot' | Sort-Object Name | Select-Object -Last 1).BaseName
+    return [pscustomobject]@{
+        Kind          = 'Source'
+        SettingsFiles = @((Join-Path $root 'src\AeroLink.Api\appsettings.json'), (Join-Path $root 'src\AeroLink.Api\appsettings.Development.json'))
+        SourceSha     = $sha
+        SchemaVersion = $schema
+        ApiExecutable = Join-Path $root 'src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.exe'
+    }
+}
+
+function Invoke-AeroLinkWithPostgresAccess {
+    <#
+        .SYNOPSIS Runs a script block with PGPASSWORD set to one login's password, then restores the previous value.
+        .DESCRIPTION
+            A site installation's PostgreSQL requires SCRAM passwords (#1614 1.4). Every PostgreSQL tool started inside
+            the block inherits PGPASSWORD, never a command-line argument; the callers pass -w, which makes a missing
+            or wrong password a refusal instead of a hidden prompt. With no access object (HOME, trust over loopback)
+            the block runs exactly as before. The access object comes from Get-AeroLinkSitePostgresAccess.
+
+            The block runs in a child scope: return values from it, do not assign variables inside it.
+    #>
+    param([AllowNull()]$Access, [Parameter(Mandatory)][scriptblock]$Action)
+    if ($null -eq $Access) { return (& $Action) }
+    $previous = $env:PGPASSWORD
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Access.Password)
+    try {
+        $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        return (& $Action)
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        if ($null -eq $previous) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue } else { $env:PGPASSWORD = $previous }
     }
 }
 
 Export-ModuleMember -Function @(
+    'Get-AeroLinkProgramLayout',
+    'Invoke-AeroLinkWithPostgresAccess',
     'Get-AeroLinkInstallationPointerPath',
     'Get-AeroLinkInstallationRoot',
     'Get-AeroLinkInstallationPaths',
@@ -403,5 +760,12 @@ Export-ModuleMember -Function @(
     'Get-AeroLinkInstallationIdentity',
     'Get-AeroLinkInstanceConfig',
     'Get-AeroLinkServiceEndpoints',
+    'Get-AeroLinkSiteDeclaration',
+    'Test-AeroLinkSiteClassification',
+    'Get-AeroLinkServiceSid',
+    'Assert-AeroLinkSiteServiceSid',
+    'Assert-AeroLinkNotSiteInstallation',
+    'Get-AeroLinkPortListenerProcessIds',
+    'Assert-AeroLinkPortAvailable',
     'Set-AeroLinkInstanceConfig'
 )

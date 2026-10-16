@@ -154,6 +154,52 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         return (T)(await command.ExecuteScalarAsync())!;
     }
 
+    private static async Task<string> CaptureSignatureRowsAsync(string connection)
+    {
+        await using var c = new NpgsqlConnection(connection);
+        await c.OpenAsync();
+        await using var command = c.CreateCommand();
+        command.CommandText = "SELECT (to_jsonb(s) - 'AuthenticationMethod')::text AS \"Row\" FROM electronic_signatures s ORDER BY \"Id\"";
+        return await RenderRowsAsync(command);
+    }
+
+    private static async Task InsertLegacySignatureAsync(string connection,
+        AeroLink.Domain.Identity.ElectronicSignature signature)
+    {
+        await using var c = new NpgsqlConnection(connection);
+        await c.OpenAsync();
+        await using var command = c.CreateCommand();
+        command.CommandText = """
+            INSERT INTO electronic_signatures
+                ("Id", "UserId", "UserName", "DisplayName", "ProgramId", "ArtifactType", "ArtifactId",
+                 "ArtifactRevision", "Action", "Meaning", "ContentHash", "IpAddress", "SignedAt", "Authority",
+                 "AuthoritySource", "Rationale", "ReviewCycle", "ReviewStepId", "ReviewStepPosition")
+            VALUES (@id, @userId, @userName, @displayName, @programId, @artifactType, @artifactId,
+                    @artifactRevision, @action, @meaning, @contentHash, @ipAddress, @signedAt, @authority,
+                    @authoritySource, @rationale, @reviewCycle, @reviewStepId, @reviewStepPosition)
+            """;
+        command.Parameters.AddWithValue("id", signature.Id);
+        command.Parameters.AddWithValue("userId", signature.UserId);
+        command.Parameters.AddWithValue("userName", signature.UserName);
+        command.Parameters.AddWithValue("displayName", signature.DisplayName);
+        command.Parameters.AddWithValue("programId", signature.ProgramId);
+        command.Parameters.AddWithValue("artifactType", signature.ArtifactType);
+        command.Parameters.AddWithValue("artifactId", signature.ArtifactId);
+        command.Parameters.AddWithValue("artifactRevision", signature.ArtifactRevision);
+        command.Parameters.AddWithValue("action", signature.Action);
+        command.Parameters.AddWithValue("meaning", signature.Meaning);
+        command.Parameters.AddWithValue("contentHash", signature.ContentHash);
+        command.Parameters.AddWithValue("ipAddress", signature.IpAddress);
+        command.Parameters.AddWithValue("signedAt", signature.SignedAt);
+        command.Parameters.AddWithValue("authority", signature.Authority);
+        command.Parameters.AddWithValue("authoritySource", signature.AuthoritySource);
+        command.Parameters.AddWithValue("rationale", signature.Rationale);
+        command.Parameters.AddWithValue("reviewCycle", signature.ReviewCycle ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("reviewStepId", signature.ReviewStepId ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("reviewStepPosition", signature.ReviewStepPosition ?? (object)DBNull.Value);
+        await command.ExecuteNonQueryAsync();
+    }
+
     [DisposablePostgresFact]
     public async Task Picker_upgrade_preserves_legacy_rows_and_freezes_continuations()
     {
@@ -277,13 +323,13 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 campaign.Release(buildId, manifestHash, "picker.upgrade.owner", DateTimeOffset.UtcNow);
                 oldSchema.Add(campaign);
                 await oldSchema.SaveChangesAsync();
-                oldSchema.Add(new AeroLink.Domain.Identity.ElectronicSignature(
+                var signature = new AeroLink.Domain.Identity.ElectronicSignature(
                     Guid.NewGuid(), "picker.upgrade.signer", "Picker Upgrade Signer", programId,
                     "ReleaseCampaign", campaign.Id, "SW-02.00", "Release",
                     "Authorized release of build SW-02.00 against the recorded manifest.",
                     manifestHash, "127.0.0.1", DateTimeOffset.UtcNow, "ProgramManager",
-                    rationale: "Upgrade preservation fixture signature."));
-                await oldSchema.SaveChangesAsync();
+                    rationale: "Upgrade preservation fixture signature.");
+                await InsertLegacySignatureAsync(connection, signature);
 
                 // The persisted payload, its digest and the signature binding are paired and nonempty.
                 Assert.Equal(manifestHash, campaign.ReleaseHash);
@@ -309,7 +355,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             var campaignsBefore = await CaptureTableRowsAsync(connection, "release_campaigns");
             var approvalsBefore = await CaptureTableRowsAsync(connection, "release_approvals");
             var eventsBefore = await CaptureTableRowsAsync(connection, "release_campaign_events");
-            var signaturesBefore = await CaptureTableRowsAsync(connection, "electronic_signatures");
+            var signaturesBefore = await CaptureSignatureRowsAsync(connection);
             Assert.Equal(1L, await ScalarAsync(connection,
                 "SELECT COUNT(*) FROM release_campaigns WHERE \"ReleaseHash\" IS NOT NULL AND length(\"ReleaseHash\") = 64 AND \"ReleasedAt\" IS NOT NULL"));
             Assert.Equal(1L, await ScalarAsync(connection,
@@ -339,7 +385,9 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             Assert.Equal(campaignsBefore, await CaptureTableRowsAsync(connection, "release_campaigns"));
             Assert.Equal(approvalsBefore, await CaptureTableRowsAsync(connection, "release_approvals"));
             Assert.Equal(eventsBefore, await CaptureTableRowsAsync(connection, "release_campaign_events"));
-            Assert.Equal(signaturesBefore, await CaptureTableRowsAsync(connection, "electronic_signatures"));
+            Assert.Equal(signaturesBefore, await CaptureSignatureRowsAsync(connection));
+            Assert.Equal(1L, await ScalarAsync(connection,
+                "SELECT COUNT(*) FROM electronic_signatures WHERE \"AuthenticationMethod\" = ''"));
             Assert.Equal(0L, await ScalarAsync(connection,
                 "SELECT COUNT(\"PickerInsertionOrdinal\") FROM software_releases"));
             Assert.Equal(3L, await ScalarAsync(connection, "SELECT COUNT(*) FROM software_releases"));

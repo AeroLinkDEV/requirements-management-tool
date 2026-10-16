@@ -6,16 +6,35 @@ using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
 
-public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs, bool MustChangePassword = false);
+/// <summary>
+/// The signed-in person as every request sees them.
+///
+/// Since #1639 there are two administrator capabilities, and they are deliberately separate:
+/// <list type="bullet">
+/// <item><see cref="IsAdministrator"/> is the <b>authority override</b> (<see cref="UserAccount.HoldsAuthorityOverride"/>):
+/// substitution at signing, project access without membership, the self-review exemption. Only the built-in
+/// <c>admin</c> account holds it, exactly as before administration became grantable.</item>
+/// <item><see cref="IsSystemAdministrator"/> is <b>system administration</b> (<see cref="UserAccount.IsGlobalAdministrator"/>):
+/// accounts, roles, administrator grants, identity links, review/approval configuration and system
+/// diagnostics. Every granted administrator holds it, and so does <c>admin</c>.</item>
+/// </list>
+/// </summary>
+public sealed record AuthenticatedUser(Guid Id, string UserName, string DisplayName, string Email, bool IsAdministrator, IReadOnlyList<UserProgramAccess> Programs, bool MustChangePassword = false, bool IsSystemAdministrator = false);
 public sealed record UserProgramAccess(Guid ProgramId, IReadOnlyList<string> Roles);
 public sealed record LoginResult(AuthenticatedUser User, string Token, DateTimeOffset ExpiresAt);
+/// <summary>A session, or the refusal code the sign-in page explains (#1615).</summary>
+public sealed record WindowsSignInOutcome(LoginResult? Session, string? RefusalCode);
 
 public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvider? dataProtection = null)
 {
     private const string ProtectedMfaPrefix = "dp:v1:";
     private const int NewPasswordIterations = 600_000;
     private readonly IDataProtector _mfaProtector = (dataProtection ?? new EphemeralDataProtectionProvider()).CreateProtector("AeroLink.Identity.MfaSecret.v1");
-    public const string CookieName = "aerolink_session";
+    /// <summary>
+    /// The bootstrap/break-glass account's name, used only to create it. Since #1639 no authority check compares
+    /// it: the account is marked <see cref="UserAccount.IsBuiltInAdministrator"/> when it is created
+    /// (first-install bootstrap, the demo seed, or the #1639 migration for an existing database).
+    /// </summary>
     public const string SystemAdministratorUserName = "admin";
     public static string HashPassword(string password)
     {
@@ -34,12 +53,145 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     public async Task<LoginResult?> LoginAsync(string userName, string password, string ip, string userAgent, DateTimeOffset now, string? mfaCode, CancellationToken ct)
     {
         var normalized = userName.Trim().ToLowerInvariant(); var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.UserName == normalized, ct);
-        if (user is null) { db.SecurityAuditEvents.Add(new("Login", normalized, "session", "Denied", "Unknown account.", ip, now)); await db.SaveChangesAsync(ct); return null; }
-        if (user.State != AccountState.Active || !VerifyPassword(password, user.PasswordHash)) { user.LoginFailed(); db.SecurityAuditEvents.Add(new("Login", normalized, "session", "Denied", user.State == AccountState.Active ? "Invalid credentials." : $"Account is {user.State}.", ip, now)); await db.SaveChangesAsync(ct); return null; }
-        var enrollment=await db.UserMfaEnrollments.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.Confirmed,ct);if(enrollment is not null){var valid=VerifyTotp(RevealMfaSecret(enrollment.Secret),mfaCode??"",now);if(!valid&&!string.IsNullOrWhiteSpace(mfaCode)){var recovery=await db.MfaRecoveryCodes.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.CodeHash==RecoveryHash(mfaCode)&&x.UsedAt==null,ct);if(recovery is not null){recovery.Use(now);valid=true;}}if(!valid){db.SecurityAuditEvents.Add(new("MfaChallenge",user.UserName,"session","Denied","A valid authenticator or unused recovery code is required.",ip,now));await db.SaveChangesAsync(ct);return null;}}
-        user.LoginSucceeded(now); var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant(); var expires = now.AddHours(12);
-        db.UserSessions.Add(new(user.Id, TokenHash(token), ip, userAgent, now, expires)); db.SecurityAuditEvents.Add(new("Login", user.UserName, "session", "Success", "Authenticated session created.", ip, now)); await db.SaveChangesAsync(ct);
+        if (user is null) { db.SecurityAuditEvents.Add(new SecurityAuditEvent("Login", normalized, "session", "Denied", "Unknown account.", ip, now).WithAuthentication(PasswordMethod)); await db.SaveChangesAsync(ct); return null; }
+        if (!await VerifyPasswordAndSecondFactorAsync(user, password, mfaCode, "Login", ip, now, ct)) return null;
+        return await IssueSessionAsync(user, ip, userAgent, now, PasswordMethod, null, passwordProven: true, null, ct);
+    }
+
+    public const string PasswordMethod = "password";
+    public const string WindowsMethod = "windows";
+
+    /// <summary>
+    /// The password and second-factor proof shared by password sign-in and the Windows link (#1615), with the
+    /// same lockout counting. An account created by Windows sign-in has no password: it is refused without
+    /// counting a failure, so guessing at its name cannot lock somebody out of their Windows sign-in.
+    /// </summary>
+    private async Task<bool> VerifyPasswordAndSecondFactorAsync(UserAccount user, string password, string? mfaCode, string eventType, string ip, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!user.HasPassword || user.Origin == AccountOrigin.Windows) { db.SecurityAuditEvents.Add(new SecurityAuditEvent(eventType, user.UserName, "session", "Denied", "This account signs in with Windows and has no AeroLink password.", ip, now).WithAuthentication(PasswordMethod)); await db.SaveChangesAsync(ct); return false; }
+        if (user.State != AccountState.Active || !VerifyPassword(password, user.PasswordHash)) { user.LoginFailed(); db.SecurityAuditEvents.Add(new SecurityAuditEvent(eventType, user.UserName, "session", "Denied", user.State == AccountState.Active ? "Invalid credentials." : $"Account is {user.State}.", ip, now).WithAuthentication(PasswordMethod)); await db.SaveChangesAsync(ct); return false; }
+        var enrollment=await db.UserMfaEnrollments.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.Confirmed,ct);if(enrollment is not null){var valid=VerifyTotp(RevealMfaSecret(enrollment.Secret),mfaCode??"",now);if(!valid&&!string.IsNullOrWhiteSpace(mfaCode)){var recovery=await db.MfaRecoveryCodes.SingleOrDefaultAsync(x=>x.UserId==user.Id&&x.CodeHash==RecoveryHash(mfaCode)&&x.UsedAt==null,ct);if(recovery is not null){recovery.Use(now);valid=true;}}if(!valid){db.SecurityAuditEvents.Add(new SecurityAuditEvent("MfaChallenge",user.UserName,"session","Denied","A valid authenticator or unused recovery code is required.",ip,now).WithAuthentication(PasswordMethod));await db.SaveChangesAsync(ct);return false;}}
+        return true;
+    }
+
+    /// <summary>Creates the session for an account that has just proved who it is, and records how it did.</summary>
+    /// <remarks>
+    /// Only a sign-in that proved the AeroLink password clears its failure count; a Windows sign-in records the
+    /// time alone, so it cannot hand a password guesser fresh attempts. The Windows package (Kerberos or NTLM) is
+    /// recorded so NTLM use is observable (DEC-154).
+    /// </remarks>
+    private async Task<LoginResult> IssueSessionAsync(UserAccount user, string ip, string userAgent, DateTimeOffset now, string method, string? windowsPrincipal, bool passwordProven, string? authenticationPackage, CancellationToken ct)
+    {
+        if (passwordProven) user.LoginSucceeded(now); else user.SignedInWithoutPassword(now);
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant(); var expires = now.AddHours(12);
+        db.UserSessions.Add(new(user.Id, TokenHash(token), ip, userAgent, now, expires));
+        db.SecurityAuditEvents.Add(new SecurityAuditEvent("Login", user.UserName, "session", "Success", string.IsNullOrWhiteSpace(authenticationPackage) ? "Authenticated session created." : $"Authenticated session created ({authenticationPackage.Trim()}).", ip, now).WithAuthentication(method, windowsPrincipal));
+        await db.SaveChangesAsync(ct);
         return new(await MapAsync(user, now, ct), token, expires);
+    }
+
+    /// <summary>
+    /// Signs in somebody Windows has already authenticated and the endpoint has already checked against the
+    /// domain allow-list and the directory (#1615).
+    ///
+    /// The SID is the identity. An account that answers to it is reused whatever the person is called today;
+    /// otherwise one is created, with Engineer in every Program. A Windows-created account takes its display
+    /// name and email from the directory on every sign-in. A local account linked to Windows (the
+    /// administrator) keeps its own AeroLink profile, and is signed in without its second factor: the owner
+    /// decided that the Windows sign-in is enough there, and that MFA guards only the password break-glass.
+    /// </summary>
+    public async Task<WindowsSignInOutcome> SignInWindowsAsync(WindowsDirectoryIdentity identity, string? authenticationPackage, string ip, string userAgent, DateTimeOffset now, CancellationToken ct)
+    {
+        var sid = identity.Sid.Trim().ToUpperInvariant();
+        var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.WindowsSid == sid, ct);
+        if (user is null)
+        {
+            // First-install bootstrap is open only while no account exists. Creating one here first would close it
+            // with nobody able to administer the installation, so provisioning waits for the administrator.
+            if (!await db.UserAccounts.AnyAsync(x => x.UserName == SystemAdministratorUserName, ct))
+                return await RefuseWindowsAsync(identity, "setup_incomplete", "No administrator exists yet; complete first-install setup before Windows sign-in.", ip, now, ct);
+            var userName = identity.Principal.Trim().ToLowerInvariant();
+            if (await db.UserAccounts.AnyAsync(x => x.UserName == userName, ct))
+                return await RefuseWindowsAsync(identity, "account_name_in_use", $"An account named {userName} already exists without this Windows SID.", ip, now, ct);
+            user = UserAccount.ProvisionFromWindows(sid, identity.Principal, identity.DisplayName, identity.Email, now);
+            db.UserAccounts.Add(user);
+            await WindowsDefaultAccess.GrantForNewAccountAsync(db, user.Id, now, ct);
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent("AccountProvisioned", WindowsDefaultAccess.Actor, user.UserName, "Success",
+                $"Created on first Windows sign-in for {identity.Principal} ({sid}) with {WindowsDefaultAccess.DefaultRole} in every Program.", ip, now)
+                .WithAuthentication(WindowsMethod, identity.Principal));
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateException)
+            {
+                // A second first sign-in for the same SID won the unique index. Use the account it created.
+                db.ChangeTracker.Clear();
+                user = await db.UserAccounts.SingleOrDefaultAsync(x => x.WindowsSid == sid, ct);
+                if (user is null) return await RefuseWindowsAsync(identity, "provisioning_failed", "The account could not be created.", ip, now, ct);
+            }
+        }
+        if (user.State != AccountState.Active)
+            return await RefuseWindowsAsync(identity, "account_" + user.State.ToString().ToLowerInvariant(), $"Account is {user.State}.", ip, now, ct);
+        user.RecordWindowsPrincipal(identity.Principal);
+        if (user.Origin == AccountOrigin.Windows) user.RefreshDirectoryProfile(identity.DisplayName, identity.Email);
+        return new(await IssueSessionAsync(user, ip, userAgent, now, WindowsMethod, identity.Principal, passwordProven: false, authenticationPackage, ct), null);
+    }
+
+    /// <summary>
+    /// Records that a Windows sign-in was refused before any account was involved: the endpoint's domain,
+    /// account-type and directory checks.
+    /// </summary>
+    public async Task<WindowsSignInOutcome> RefuseWindowsAsync(WindowsDirectoryIdentity identity, string code, string detail, string ip, DateTimeOffset now, CancellationToken ct)
+    {
+        db.SecurityAuditEvents.Add(new SecurityAuditEvent("Login", identity.Principal.Trim().ToLowerInvariant(), "session", "Denied", $"{detail} ({code}, {identity.Sid})", ip, now)
+            .WithAuthentication(WindowsMethod, identity.Principal));
+        await db.SaveChangesAsync(ct);
+        return new(null, code);
+    }
+
+    /// <summary>
+    /// Links a Windows logon to an existing AeroLink account whose password (and second factor, when enrolled)
+    /// the person has just entered — how the owner attaches his Windows logon to <c>admin</c> (#1615). Failures
+    /// count toward that account's lockout exactly as a password sign-in does. A SID already linked to another
+    /// account is refused, unless that account is a Windows-created one an administrator has disabled: that is
+    /// how somebody who signed in with Windows before linking frees their SID.
+    /// </summary>
+    public async Task<WindowsSignInOutcome> LinkWindowsAsync(WindowsDirectoryIdentity identity, string userName, string password, string? mfaCode, string ip, string userAgent, DateTimeOffset now, CancellationToken ct)
+    {
+        var sid = identity.Sid.Trim().ToUpperInvariant();
+        var normalized = userName.Trim().ToLowerInvariant();
+        var user = await db.UserAccounts.SingleOrDefaultAsync(x => x.UserName == normalized, ct);
+        if (user is null)
+        {
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent("WindowsLink", normalized, "session", "Denied", "Unknown account.", ip, now).WithAuthentication(PasswordMethod, identity.Principal));
+            await db.SaveChangesAsync(ct);
+            return new(null, "credentials");
+        }
+        if (!await VerifyPasswordAndSecondFactorAsync(user, password, mfaCode, "WindowsLink", ip, now, ct)) return new(null, "credentials");
+        // A temporary password was issued by an administrator and is known to more than its holder; it must not be
+        // able to bind somebody's Windows logon, which would then outlive the password change it is waiting for.
+        if (user.MustChangePassword)
+            return await RefuseWindowsAsync(identity, "password_change_required", $"{user.UserName} must change its temporary password before a Windows logon can be linked.", ip, now, ct);
+        if (user.WindowsSid is not null && user.WindowsSid != sid)
+            return await RefuseWindowsAsync(identity, "account_already_linked", $"{user.UserName} is already linked to another Windows logon.", ip, now, ct);
+        if (user.WindowsSid is null)
+        {
+            var holder = await db.UserAccounts.SingleOrDefaultAsync(x => x.WindowsSid == sid, ct);
+            if (holder is not null && (holder.Origin != AccountOrigin.Windows || holder.State != AccountState.Disabled))
+                return await RefuseWindowsAsync(identity, "windows_already_linked", $"This Windows logon already signs in as {holder.UserName}.", ip, now, ct);
+            // Two saves, because the SID's unique index must see it leave the disabled account before it arrives.
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            if (holder is not null)
+            {
+                holder.UnlinkWindows();
+                await db.SaveChangesAsync(ct);
+            }
+            user.LinkWindows(sid, identity.Principal);
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent("WindowsLinked", user.UserName, user.UserName, "Success",
+                $"Linked to Windows logon {identity.Principal} ({sid})" + (holder is null ? "." : $", released from disabled account {holder.UserName}."), ip, now)
+                .WithAuthentication(PasswordMethod, identity.Principal));
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        return new(await IssueSessionAsync(user, ip, userAgent, now, WindowsMethod, identity.Principal, passwordProven: true, null, ct), null);
     }
     public async Task<AuthenticatedUser?> ResolveAsync(string? token, DateTimeOffset now, CancellationToken ct)
     {
@@ -112,7 +264,7 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
     {
         var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId && x.State == AccountState.Active, ct);
         if (account is null) return false;
-        if (account.UserName == SystemAdministratorUserName) return true;
+        if (account.HoldsAuthorityOverride) return true;
         // The same implication as the overload above. Two copies of this check exist and both are reached
         // from live authorization paths, so a rule applied to only one of them is a rule that holds by luck.
         var accepted = MembershipAnswerableRoles(role);
@@ -167,7 +319,7 @@ public sealed class IdentityService(AeroLinkDbContext db, IDataProtectionProvide
         // Ended memberships are retained as history and must never reach a session's authority set.
         var memberships = await db.ProgramMemberships.AsNoTracking().Where(x => x.UserId == user.Id && x.EndedAt == null).ToListAsync(ct);
         var programs = memberships.GroupBy(x => x.ProgramId).Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList())).ToList();
-        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.UserName == SystemAdministratorUserName, programs, user.MustChangePassword);
+        return new(user.Id, user.UserName, user.DisplayName, user.Email, user.HoldsAuthorityOverride, programs, user.MustChangePassword, user.IsGlobalAdministrator);
     }
     public static string? TokenDigest(string? token) => string.IsNullOrWhiteSpace(token)?null:Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
     public static string CreateMfaSecret()=>Base32Encode(RandomNumberGenerator.GetBytes(20));
@@ -275,6 +427,7 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
             if (!users.TryGetValue(person.User, out var user))
             {
                 user = new(person.User, person.Name, person.Email, demoPasswordHash, now);
+                if (person.User == IdentityService.SystemAdministratorUserName) user.DesignateBuiltInAdministrator("system.bootstrap", now);
                 db.UserAccounts.Add(user);
                 users[person.User] = user;
             }

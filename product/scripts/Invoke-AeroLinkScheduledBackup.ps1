@@ -1,13 +1,15 @@
 [CmdletBinding()]
 param(
     [ValidateRange(1, 15)]
-    [int]$RetentionDays = 15
+    [int]$RetentionDays = 15,
+    # A site server installation (#1614 1.9): the task runs as its service account and names its root.
+    [string]$InstallationRoot
 )
 
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
-$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot -InstallationRoot $InstallationRoot
 $logRoot = $installation.Logs
 $backupRoot = $installation.Backups
 $logPath = Join-Path $logRoot 'scheduled-backup.log'
@@ -20,7 +22,9 @@ Add-Content -LiteralPath $logPath -Encoding UTF8 -Value (
     "[{0}] Scheduled backup started (retention: {1} days)." -f $startedAt.ToString('o'), $RetentionDays)
 
 try {
-    $backupOutput = & $backupScript -RetentionDays $RetentionDays 2>&1
+    $backupArguments = @{ RetentionDays = $RetentionDays }
+    if ($InstallationRoot) { $backupArguments['InstallationRoot'] = $InstallationRoot }
+    $backupOutput = & $backupScript @backupArguments 2>&1
     if ($backupOutput) { $backupOutput | Out-String | Add-Content -LiteralPath $logPath -Encoding UTF8 }
 
     $capture = @($backupOutput | Where-Object { $_ -is [pscustomobject] -and $_.PSObject.Properties['Archive'] }) | Select-Object -Last 1
@@ -29,7 +33,7 @@ try {
         throw 'The scheduled backup did not produce a new AeroLink archive.'
     }
 
-    $verification = & $verifyScript -BackupArchive $archive.FullName
+    $verification = & $verifyScript -BackupArchive $archive.FullName -InstallationRoot $InstallationRoot
     $verification | Format-List | Out-String | Add-Content -LiteralPath $logPath -Encoding UTF8
     Add-Content -LiteralPath $logPath -Encoding UTF8 -Value (
         "[{0}] Scheduled backup verified successfully: {1}" -f (Get-Date).ToString('o'), $archive.FullName)

@@ -2,21 +2,31 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1')
 
 function Invoke-AeroLinkEvidenceSql {
-    param([string]$Psql, [string]$Database, [int]$Port, [string]$Sql, [string[]]$OutputArguments = @())
+    param([string]$Psql, [string]$Database, [int]$Port, [string]$Sql, [string[]]$OutputArguments = @(), [string]$User = 'postgres')
     # Windows PowerShell's native stdin pipeline can prepend a BOM. Use an explicitly BOM-free SQL
     # file so PostgreSQL receives the same query under PS 5.1 and PS 7, including quoted identifiers.
     $path = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-evidence-query-' + [guid]::NewGuid().ToString('N') + '.sql')
     try {
         [IO.File]::WriteAllText($path, $Sql, (New-Object Text.UTF8Encoding($false)))
-        $result = & $Psql -h 127.0.0.1 -p $Port -U postgres -d $Database -v ON_ERROR_STOP=1 @OutputArguments -f $path
+        $result = & $Psql -w -h 127.0.0.1 -p $Port -U $User -d $Database -v ON_ERROR_STOP=1 @OutputArguments -f $path
         if ($LASTEXITCODE -ne 0) { throw "Could not query controlled storage in database '$Database'." }
         return $result
     } finally { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }
 }
 
 function Get-AeroLinkEvidenceRoot {
-    param([Parameter(Mandatory)][string]$ProductRoot)
+    param(
+        [Parameter(Mandatory)][string]$ProductRoot,
+        # A site server installation (#1614) owns its evidence under the installation root; pass the root so
+        # that operator scripts find the same tree the API is given. Other installations are unaffected.
+        [string]$InstallationRoot
+    )
     if (-not [string]::IsNullOrWhiteSpace($env:Evidence__Root)) { return [IO.Path]::GetFullPath($env:Evidence__Root) }
+    if (-not [string]::IsNullOrWhiteSpace($InstallationRoot)) {
+        if (-not (Get-Command Get-AeroLinkSiteDeclaration -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') }
+        $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+        if ($site) { return $site.EvidenceRoot }
+    }
     $apiRoot = Join-Path $ProductRoot 'src\AeroLink.Api'
     $root = $null
     foreach ($name in @('appsettings.json', $(if ($env:ASPNETCORE_ENVIRONMENT) { "appsettings.$($env:ASPNETCORE_ENVIRONMENT).json" }))) {
@@ -42,9 +52,9 @@ function Get-AeroLinkEvidenceSqlText {
       value a caller may pass to a string method. Absent output becomes '' here, and every caller validates it.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329,
-        [Parameter(Mandatory)][string]$Sql,[string[]]$OutputArguments=@())
-    $raw = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $Sql -OutputArguments $OutputArguments
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port,
+        [Parameter(Mandatory)][string]$Sql,[string[]]$OutputArguments=@(),[string]$User = 'postgres')
+    $raw = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $Sql -OutputArguments $OutputArguments -User $User
     if ($null -eq $raw) { return '' }
     $lines = @(@($raw) | ForEach-Object { if ($null -eq $_) { '' } else { [string]$_ } })
     if ($lines.Count -eq 0) { return '' }
@@ -85,7 +95,7 @@ function Get-AeroLinkDatabaseSchemaState {
         treat a query failure, a partial schema, or an unknown state as an empty database.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port,[string]$User = 'postgres')
     # Two probes, deliberately. PostgreSQL resolves table references when a statement is analysed, so a
     # CASE-guarded `SELECT count(*) FROM "__EFMigrationsHistory"` fails on a database where that table does not
     # exist yet - which is exactly the first-start case. Probe 1 asks the catalogue only; probe 2 runs the
@@ -102,7 +112,7 @@ SELECT
    WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname IN (CORE_LIST))
 '@
     $presenceSql = $presenceSql.Replace('CORE_LIST', $coreList)
-    $presenceText = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $presenceSql -OutputArguments @('-tA')).Trim()
+    $presenceText = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $presenceSql -OutputArguments @('-tA') -User $User).Trim()
     if ($presenceText -notmatch '^[01],[01],[01],[01],[01],[0-9]+$') {
         throw "The schema of database '$Database' could not be classified: the catalogue probe answered '$presenceText'."
     }
@@ -125,7 +135,7 @@ SELECT (SELECT count(*)::text FROM "__EFMigrationsHistory") || ',' ||
  (SELECT count(*)::text FROM "__EFMigrationsHistory" WHERE "MigrationId" = 'ATOMIC_MIGRATION')
 '@
         $countSql = $countSql.Replace('ATTACHMENTS_MIGRATION', $script:AttachmentsMigrationId).Replace('LIFECYCLE_MIGRATION', $script:DocumentLifecycleMigrationId).Replace('ATOMIC_MIGRATION', $script:AtomicStorageMigrationId)
-        $countText = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $countSql -OutputArguments @('-tA')).Trim()
+        $countText = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $countSql -OutputArguments @('-tA') -User $User).Trim()
         if ($countText -notmatch '^[0-9]+,[0-9]+,[0-9]+,[0-9]+$') {
             throw "The schema of database '$Database' could not be classified: the migration-history probe answered '$countText'."
         }
@@ -181,13 +191,13 @@ SELECT (SELECT count(*)::text FROM "__EFMigrationsHistory") || ',' ||
 }
 
 function Get-AeroLinkAttachmentInventory {
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port,[string]$User = 'postgres')
     # A database with no applied schema, or one that genuinely predates the attachment migration, has no
     # controlled attachments to inventory; the verified backup of a first start must not query a table that does
     # not exist yet (#1055). The CAPABILITY decides, not the state name: a supported older schema that has the
     # attachment table is inventoried even when atomic-storage bookkeeping does not exist yet (Astra R2-1), and
     # anything partial, malformed or unreadable fails closed in the classifier.
-    $schema = Get-AeroLinkDatabaseSchemaState -Psql $Psql -Database $Database -Port $Port
+    $schema = Get-AeroLinkDatabaseSchemaState -Psql $Psql -Database $Database -Port $Port -User $User
     if ($schema.State -eq 'PartialOrCorrupt') { throw "The controlled-attachment inventory refused database '$Database': $($schema.Detail)." }
     if (-not $schema.AttachmentsPresent) {
         if ($schema.State -in @('Fresh','FreshSchema')) {
@@ -201,7 +211,7 @@ function Get-AeroLinkAttachmentInventory {
         throw "The controlled-attachment inventory refused database '$Database': $($schema.Detail)."
     }
     $sql = 'COPY (SELECT "Id", "StorageKey", "Size", lower("Sha256") AS "Sha256", "ArtifactType", "ArtifactId", "RevisionId" FROM controlled_attachments ORDER BY "StorageKey", "Id") TO STDOUT WITH (FORMAT CSV, HEADER TRUE)'
-    $csv = Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql
+    $csv = Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql -User $User
     return @($csv | ConvertFrom-Csv)
 }
 
@@ -228,13 +238,13 @@ function Test-AeroLinkAttachmentInventory {
 }
 
 function Assert-AeroLinkStorageLifecycleHealthy {
-    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[Parameter(Mandatory)][int]$Port,[string]$User = 'postgres')
     # A database that has never had the AeroLink schema applied - a genuine first start - has no controlled
     # storage to verify; so does a supported older schema that predates the ATOMIC-STORAGE bookkeeping (its
     # attachment inventory is still taken by the reader above). Measured in the #1055 INT first start: the
     # launcher's verified-backup step refused an empty cluster before the schema it was about to create existed.
     # Everything partial, malformed or unreadable fails closed in the classifier.
-    $schema = Get-AeroLinkDatabaseSchemaState -Psql $Psql -Database $Database -Port $Port
+    $schema = Get-AeroLinkDatabaseSchemaState -Psql $Psql -Database $Database -Port $Port -User $User
     if ($schema.State -eq 'PartialOrCorrupt') { throw "The controlled-document storage check refused database '$Database': $($schema.Detail)." }
     if (-not $schema.StorageOperationsPresent) {
         if ($schema.State -in @('Fresh','FreshSchema')) {
@@ -253,7 +263,7 @@ SELECT
  (SELECT count(*) FROM managed_document_revisions WHERE ("ReleaseCandidateDocxAttachmentId" IS NULL) <> ("ReleaseCandidatePdfAttachmentId" IS NULL)) AS partial_candidates,
  (SELECT count(*) FROM managed_document_revisions WHERE "State" = 'Released' AND (("ReleasedDocxAttachmentId" IS NULL) OR ("ReleasedPdfAttachmentId" IS NULL))) AS incomplete_releases;
 '@
-    $value = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA', '-F', ',')).Trim()
+    $value = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA', '-F', ',') -User $User).Trim()
     if ($value -notmatch '^\d+,\d+,\d+$') { throw "Could not evaluate managed-document storage health in database '$Database'." }
     $parts = $value.Split(','); if ([int]$parts[0] -ne 0 -or [int]$parts[1] -ne 0 -or [int]$parts[2] -ne 0) { throw "Managed-document storage is not backup/restore ready: pending=$($parts[0]), partialCandidates=$($parts[1]), incompleteReleases=$($parts[2])." }
 }

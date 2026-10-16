@@ -164,17 +164,20 @@ public sealed class ProjectSetupAuthorizationApiTests
         var configuredSource = await configuredSourceResponse.Content.ReadFromJsonAsync<JsonElement>();
         var sourceAssertionHash = configuredSource.GetProperty("assertion").GetProperty("hash").GetString();
 
-        // This is the current identity model's administrator boundary: administrator authority is derived from
-        // the persisted reserved username. Rename the actual draft creator, preserve its source membership, and
-        // install a different current administrator so both sessions resolve authority from the database.
+        // Administrator authority is the built-in administrator's persisted marker and grant (#1639). Strip both
+        // from the actual draft creator and rename it, preserve its source membership, and install a different
+        // built-in administrator so both sessions resolve authority from the database.
         using (var demotion = factory.Services.CreateScope())
         {
             var db = demotion.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var updated = await db.UserAccounts.Where(x => x.Id == originalAdministratorId)
-                .ExecuteUpdateAsync(set => set.SetProperty(x => x.UserName, demotedName));
+                .ExecuteUpdateAsync(set => set.SetProperty(x => x.UserName, demotedName)
+                    .SetProperty(x => x.IsBuiltInAdministrator, false).SetProperty(x => x.IsGlobalAdministrator, false));
             Assert.Equal(1, updated);
-            db.UserAccounts.Add(new UserAccount("admin", "Replacement Administrator", "replacement.admin@example.test",
-                IdentityService.HashPassword(administratorPassword), now));
+            var replacement = new UserAccount("admin", "Replacement Administrator", "replacement.admin@example.test",
+                IdentityService.HashPassword(administratorPassword), now);
+            replacement.DesignateBuiltInAdministrator("test.setup", now);
+            db.UserAccounts.Add(replacement);
             await db.SaveChangesAsync();
         }
 

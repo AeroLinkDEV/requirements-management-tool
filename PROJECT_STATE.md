@@ -600,6 +600,11 @@ See [Controlled Document Publication Standard](docs/product-definition/CONTROLLE
 
 The product includes local identity/session controls, scoped roles/administration, MFA/recovery support, delegations, secure approval/signature behavior, and security/audit records appropriate to the current on-premises product foundation.
 
+Windows sign-in (DEC-154, #1615), when enabled, signs people in with their domain logon through Negotiate, creates
+their account on first sign-in keyed on the Windows SID with Engineer in every Program, and lets the administrator
+link a Windows logon to `admin`. Signature re-authentication with the Windows password is separate work (#1615 B2).
+Global administration is a persisted grant that an administrator gives and revokes, and each grant and revoke is recorded in the security audit (#1639). The last active administrator cannot be revoked or disabled. A granted administrator gets system administration only: accounts, roles and grants, identity links, review/approval configuration, assurance policy, artifact schemas, project creation and setup acceptance, and system diagnostics. Configuration applies in the Programs they can see. Creating a project makes its creator that Program's Administrator, as it always has. They keep their normal engineering authority. Showcase seeding and upgrade stay with `admin`. The authority override stays with the built-in `admin` bootstrap/break-glass account, as it always has. That override covers administrator substitution at signing, every review stage's candidate list, access to every Program, the self-review exemption and exclusion from document stewardship. Only `admin` itself may revoke its own grant, and no other account can disable it.
+
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
 
 ## Project authority: base roles, Project Leadership, and review workflow authority
@@ -668,6 +673,13 @@ There are three supported operating modes, and they are deliberately independent
 - **Protected remote demo** — `START_AEROLINK_REMOTE_DEMO.bat` on HOME or its recovery task, from the same
   dedicated production source. A remote-demo browser session is a view of HOME; the work-laptop repository
   and database are irrelevant to it.
+
+A fourth, the **site server** on the company host (#1614), is being built and is not yet live; production
+there waits for Windows sign-in (#1615). Its launch path is `product/scripts/Start-AeroLinkSite.ps1`, for an
+installation declared `SiteProduction` or `SiteDevelopment`, which every other launcher refuses. It runs the
+API as `Production`, serving HTTPS from Kestrel with HSTS and `__Host-` cookies, and the API refuses to start
+a site server without HTTPS, with demonstration data or accounts, or with no way to create the first
+administrator. Outside a site server, `Production` may listen on plain HTTP only on loopback.
 
 A checkout is **source**; the persistent PostgreSQL cluster, evidence, attachments and backups are an
 **installation** it points at. An ordinary clone is its own installation (`product/.local`, unchanged); a
@@ -752,6 +764,13 @@ Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_B
 - No AI product feature.
 - No automatic external test execution.
 - Deployment-owned services such as customer TLS/reverse proxy, real SMTP/provider qualification, protected off-device backup storage, external monitoring/alerting, customer RPO/RTO/SLOs, and identity-provider contracts remain deployment-specific where not otherwise implemented.
+- The #1614 A2 installer source now defines a signed-package fresh-install/repair boundary for the planned
+  Production and Development site installations, including per-site virtual service identities, non-secret
+  service configuration with protected secrets, certificate-key ACL setup, and a 15-day daily-backup registration
+  contract.
+  The company-host site is not live or qualified: the A3 source contract now defines clone-validated package
+  upgrade/rollback and attended recovery, while host qualification remains pending. HOME remote-demo retirement remains
+  an attended D6 operation only after exact SiteProduction identity/source and private full-DNS/VPN go-live proof.
 - Scale/performance claims must match measured evidence; do not turn database-client or synthetic-harness evidence into a broader browser-user claim.
 - Legacy information is not given fabricated historical precision merely because today's schema is richer.
 

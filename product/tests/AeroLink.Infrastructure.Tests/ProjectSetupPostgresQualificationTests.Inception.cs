@@ -35,7 +35,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 accountId = account.Id;
             }
             var actor = new AuthenticatedUser(accountId, "pg-inception-owner", "PG Inception Owner",
-                "pg-inception-owner@example.test", true, []);
+                "pg-inception-owner@example.test", IsAdministrator: true, Programs: [], IsSystemAdministrator: true);
 
             foreach (var fileName in new[] { "inception.csv", "inception.xlsx", "inception.reqif" })
             {
@@ -166,7 +166,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 sourceBaselineId = baseline.Id;
             }
             var actor = new AuthenticatedUser(accountId, "pg-native-owner", "PG Native Owner",
-                "pg-native-owner@example.test", true, []);
+                "pg-native-owner@example.test", IsAdministrator: true, Programs: [], IsSystemAdministrator: true);
             Guid draftId;
             long configuredVersion;
             string assertionHash;

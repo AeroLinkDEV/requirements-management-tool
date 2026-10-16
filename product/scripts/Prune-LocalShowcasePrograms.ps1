@@ -10,7 +10,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
-$postgresBin = (Get-AeroLinkInstallationPaths -ProductRoot $productRoot).PostgresBin
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+Assert-AeroLinkNotSiteInstallation -InstallationRoot $installation.InstallationRoot -Operation 'Showcase program pruning'
+$postgresBin = $installation.PostgresBin
+$postgresPort = (Get-AeroLinkServiceEndpoints -InstallationRoot $installation.InstallationRoot).DeclaredPostgresPort
 $psql = Join-Path $postgresBin 'psql.exe'
 
 if ($KeepProgramCode -notmatch '^[A-Za-z0-9 _-]{1,30}$') { throw 'The retained Program code is unsafe.' }
@@ -23,7 +26,7 @@ if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL is not available.' }
 
 function Invoke-AeroLinkSql {
     param([Parameter(Mandatory)][string]$Sql, [switch]$TuplesOnly)
-    $arguments = @('-h', '127.0.0.1', '-p', '54329', '-U', 'postgres', '-d', $Database, '-v', 'ON_ERROR_STOP=1')
+    $arguments = @('-h', '127.0.0.1', '-p', "$postgresPort", '-U', 'postgres', '-d', $Database, '-v', 'ON_ERROR_STOP=1')
     if ($TuplesOnly) { $arguments += @('-A', '-t') }
     $output = $Sql | & $psql @arguments
     if ($LASTEXITCODE -ne 0) { throw "PostgreSQL command failed for database '$Database'." }

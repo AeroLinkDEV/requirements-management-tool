@@ -3,8 +3,12 @@ param(
     [Parameter(Mandatory)][string]$Database,
     [Parameter(Mandatory)][string]$EvidenceRoot,
     [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AttachmentInventory,
-    [int]$PostgresPort = 54329,
+    # The caller's resolved port: Restore-AeroLink, which takes it from the installation.
+    [Parameter(Mandatory)][int]$PostgresPort,
     [int]$ApiPort = 5091,
+    # The login the validation API uses. A site restore passes its application role, with the password in
+    # PGPASSWORD, which Npgsql reads; HOME keeps postgres over trust.
+    [string]$DatabaseUser = 'postgres',
     [string]$LogRoot,
     # The exact build to validate with. Named by the caller, never guessed - see below.
     [Parameter(Mandatory)][string]$ApiExecutable
@@ -45,7 +49,7 @@ $previous = @{}
 $settings = [ordered]@{
     'ASPNETCORE_ENVIRONMENT' = 'Production'
     'ASPNETCORE_URLS' = "http://127.0.0.1:$ApiPort"
-    'ConnectionStrings__AeroLink' = "Host=127.0.0.1;Port=$PostgresPort;Database=$Database;Username=postgres"
+    'ConnectionStrings__AeroLink' = "Host=127.0.0.1;Port=$PostgresPort;Database=$Database;Username=$DatabaseUser"
     'Evidence__Root' = [IO.Path]::GetFullPath($EvidenceRoot)
     'RestoreValidation__ReadOnly' = 'true'
     'RestoreValidation__Token' = ([Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N'))

@@ -27,10 +27,20 @@ function Set-AeroLinkNotificationAccessRules {
 
 function Get-AeroLinkNotificationAuthorityPath {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$InstanceId)
+    param(
+        [Parameter(Mandatory)][string]$InstanceId,
+        # A site server installation (#1614) owns its authority root under the installation, not the operator's
+        # profile; revoking under %LOCALAPPDATA% there would revoke nothing.
+        [string]$InstallationRoot
+    )
     $parsed = [guid]::Empty
     if (-not [guid]::TryParse($InstanceId, [ref]$parsed)) { throw 'Notification authority requires an existing installation instance identity.' }
     $authorityRoot = $env:AEROLINK_NOTIFICATION_AUTHORITY_ROOT
+    if ([string]::IsNullOrWhiteSpace($authorityRoot) -and -not [string]::IsNullOrWhiteSpace($InstallationRoot)) {
+        if (-not (Get-Command Get-AeroLinkSiteDeclaration -ErrorAction SilentlyContinue)) { Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') }
+        $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
+        if ($site) { $authorityRoot = $site.NotificationAuthorityRoot }
+    }
     if ([string]::IsNullOrWhiteSpace($authorityRoot)) { $authorityRoot = Join-Path $env:LOCALAPPDATA 'AeroLink\notification-authority' }
     $authorityRoot = [IO.Path]::GetFullPath($authorityRoot)
     return Join-Path $authorityRoot ($parsed.ToString('D') + '.json')
@@ -40,14 +50,28 @@ function Revoke-AeroLinkNotificationSendGeneration {
     <# This authority is deliberately outside database/configuration archives. Rollback never restores it. #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ProductRoot)
-    Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+    # The caller may already have imported the installation authority. Re-importing it with -Force from this module
+    # scope removes its exported commands from the caller after this function returns, so load it only when absent.
+    if (-not (Get-Command Get-AeroLinkInstallationPaths -ErrorAction SilentlyContinue)) {
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1')
+    }
     $installation = Get-AeroLinkInstallationPaths -ProductRoot $ProductRoot
-    $instance = Get-AeroLinkInstanceConfig -ProductRoot $ProductRoot -Mode Development
+    # A site installation (#1614) is read in Site mode: it has its own authority root, and every other mode refuses it.
+    $mode = if (Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot) { 'Site' } else { 'Development' }
+    $instance = Get-AeroLinkInstanceConfig -ProductRoot $ProductRoot -InstallationRoot $installation.InstallationRoot -Mode $mode
     if ([string]::IsNullOrWhiteSpace([string]$instance.InstanceId)) {
         # A host without an instance identity cannot match any external send authority.
         return [pscustomobject]@{ State = 'DisabledWithoutInstallationIdentity'; SendGeneration = $null }
     }
-    $path = Get-AeroLinkNotificationAuthorityPath -InstanceId $instance.InstanceId
+    $path = Get-AeroLinkNotificationAuthorityPath -InstanceId $instance.InstanceId -InstallationRoot $installation.InstallationRoot
+    # On a site installation (#1614) the API runs as its own virtual account, which must read both authority files or
+    # notifications stay disabled (#1647). Read only: the account never writes the authority. Provision keeps the
+    # files' permissions as written here.
+    $siteDeclaration = Get-AeroLinkSiteDeclaration -InstallationRoot $installation.InstallationRoot
+    $siteReader = if ($siteDeclaration) {
+        Assert-AeroLinkSiteServiceSid -Site $siteDeclaration -Role Api | Out-Null
+        [Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($siteDeclaration.RunAsSid), [Security.AccessControl.FileSystemRights]::Read, [Security.AccessControl.AccessControlType]::Allow)
+    } else { $null }
     $root = Split-Path $path -Parent
     $installationPrefix = [IO.Path]::GetFullPath($installation.InstallationRoot).TrimEnd('\') + '\'
     if (($root.TrimEnd('\') + '\').StartsWith($installationPrefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -86,6 +110,7 @@ function Revoke-AeroLinkNotificationSendGeneration {
         foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
             [void]$witnessSecurity.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow))
         }
+        if ($siteReader) { [void]$witnessSecurity.AddAccessRule($siteReader) }
         Set-AeroLinkNotificationAccessRules -Path $witnessTemporary -Security $witnessSecurity
         if (Test-Path -LiteralPath $witnessPath) { [IO.File]::Replace($witnessTemporary, $witnessPath, $witnessBackup) }
         else { [IO.File]::Move($witnessTemporary, $witnessPath) }
@@ -108,6 +133,7 @@ function Revoke-AeroLinkNotificationSendGeneration {
             $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)
             [void]$security.AddAccessRule($rule)
         }
+        if ($siteReader) { [void]$security.AddAccessRule($siteReader) }
         Set-AeroLinkNotificationAccessRules -Path $temporary -Security $security
         if (Test-Path -LiteralPath $path) { [IO.File]::Replace($temporary, $path, $policyBackup) }
         else { [IO.File]::Move($temporary, $path) }

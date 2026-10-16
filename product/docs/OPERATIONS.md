@@ -79,6 +79,215 @@ a running process instead of a commit SHA pretending nothing changed.
 A remote-demo browser session is a view of HOME. The work-laptop repository and work-laptop database are
 irrelevant to it, and it never writes to them.
 
+### Site server installation (#1614)
+
+A site server installation is one of the two installations planned for the company host
+(`C:\AeroLink\AeroLink Production` and `C:\AeroLink\AeroLink Development`). It is not yet a supported operating
+mode: the release package, installer and boot supervision are now defined by the A2 source contract, but no
+company-host site is live, supported or qualified by this source change. The elevated
+`product/scripts/Install-AeroLinkServer.ps1` entry point consumes a signed release package, refuses a different
+existing release before backup/stop/switch/migration. New retained release directories use the signed
+`<version>+<full source SHA>` identity; an existing version-only directory is reused only for an exact
+byte-identical repair. The A3 updater source contract below owns later
+clone-validated package upgrades, rollback and attended recovery; no company-host site is live, supported or qualified by this
+source change. None of this changes HOME, laptop or demo installations, which remain on their existing ports, per-user
+key ring and trust-mode development cluster.
+
+- **Service accounts.** Each installation runs as its own virtual service accounts (D2, revised):
+  `NT SERVICE\AeroLink-Production` for the API and `NT SERVICE\AeroLink-Production-PostgreSQL` for its cluster, and
+  the same pair for Development. PostgreSQL has its own account because the API needs only a database connection,
+  not pgdata, and PostgreSQL needs none of the API's keys, evidence or secrets. Their SIDs (`S-1-5-80-...`) are
+  computed from the service names, so folders and secrets are granted before the services exist.
+- **Installation boundary and service configuration.** The service names and their computed SIDs are per-site
+  values; the Production and Development API/PostgreSQL pairs cannot share the installation grants. The API
+  service environment contains only composed non-secret settings, including the installation root, declared
+  endpoints, evidence root, Data Protection key-ring path, `ApplicationName=AeroLink`,
+  `ProtectKeysWith=DpapiLocalMachine`, and the persisted `Instance__InstanceId`. The service environment carries
+  no database password or bootstrap secret. At API startup, `SiteProtectedSecrets` reads the `postgres-application`
+  record from the installation's DPAPI-LocalMachine protected-config store as the API virtual account, appends that
+  value to the passwordless connection string, and reads the optional `api-bootstrap` record. Records are refused
+  when their installation binding, reader identity, or reader/SYSTEM/Administrators ACL is unexpected. The
+  PostgreSQL application and maintenance passwords remain protected secrets; the bootstrap value is shown only
+  when first generated and the operator removes its record with `-RemoveBootstrapSecret` after first-administrator
+  activation.
+- **Declared ports.** `Set-AeroLinkSiteDeclaration` writes a `site` block into `instance.json`: API port,
+  PostgreSQL port, the two service names, database role, an optional `publicHostName`, and an explicit connector
+  deployment id and `instanceId`, each minted once and never replaced. Only a `SiteProduction` or
+  `SiteDevelopment` installation may carry one, and a port another process is listening on is refused. The site
+  block is the single source of the API port. `Get-AeroLinkServiceEndpoints` returns the declared ports, and stop,
+  diagnostics and the HOME-shaped scripts take their default port from it instead of a literal.
+- **Backup and restore on a site.** These are supported with the site's own credentials; see "Site server
+  backup and restore" under Backup and verification.
+- **Not on a site.** The clone-validated upgrade, snapshot import, showcase pruning and the FMS history repair are
+  HOME tools. They connect as `postgres` without a password, so on a site they refuse at once rather than wait at
+  a hidden password prompt.
+  Diagnostics never prompts (`psql -w`), and probes a site at `https://<publicHostName>:<apiPort>`, or reports the
+  API as not probed while no public name is declared.
+- **Hardened PostgreSQL.** `Initialize-AeroLinkSitePostgres` creates the cluster with `scram-sha-256` for every
+  connection, listening on `127.0.0.1` only, with a non-superuser role that owns `aerolink`. It generates both
+  passwords and stores them in the DPAPI-LocalMachine protected-config store: the application password readable by
+  the API's account, the superuser password by Administrators only, for maintenance. It refuses an existing
+  cluster, and keeps its logs under `<root>\logs` if it fails. `Register-AeroLinkSitePostgresService` (elevated)
+  creates the service under its declared name, running as its virtual account with no password, through
+  `pg_ctl register` or, failing that, `Win32_Service.Create`. `Start-Postgres.ps1` never initialises or starts a
+  site cluster; it only confirms, from `postmaster.pid`, that the listener on the declared port is this
+  installation's cluster.
+- **Supplied PostgreSQL binaries.** The company host is treated as offline for this step. Until the installation
+  already contains `postgres.exe`, the operator must supply `-PostgresBinaries` as a `pgsql` folder or ZIP; the
+  installer copies it into the installation-owned PostgreSQL area before initialization. The installer does not
+  download a runtime or build one from source.
+- **HTTPS certificate and key access.** The operator supplies an existing `LocalMachine\My` certificate thumbprint
+  or an enterprise-CA enrollment template. The installer writes the site-server binding and grants the API
+  virtual account read access to the private-key file, retaining only that read grant plus SYSTEM and
+  Administrators full control and reading the DACL back. The certificate's host name and host readiness remain
+  deployment checks; this source contract is not a certificate-store qualification receipt.
+- **Installation-owned state.** `Get-AeroLinkSiteRuntimeEnvironment` gives the API its key ring
+  (`<root>\keys\data-protection`, with `DataProtection:ApplicationName=AeroLink` and keys protected with
+  DPAPI-LocalMachine), `Evidence:Root` (`<root>\evidence`), `Connector:SigningKeyPath`, `Connector:DeploymentId`,
+  the instance id and `AEROLINK_NOTIFICATION_AUTHORITY_ROOT`, which stays outside the installation, by default under
+  `%ProgramData%\AeroLink\notification-authority\<installation hash>`. Run as the API's account with
+  `-IncludeConnectionSecret`, it also returns the connection string with the application password.
+  `DataProtection:ApplicationName` and `DataProtection:ProtectKeysWith` are opt-in. HOME sets neither, because
+  changing its discriminator or key location would orphan existing MFA secrets.
+- **Folder ownership and permissions by SID.** `Set-AeroLinkSiteFolderAcl` makes Administrators the owner and
+  refuses a folder somebody else already owns. The installation root and `program` are read-only to the API's
+  account; the PostgreSQL binaries are read and execute for Users, because initdb and pg_ctl run with
+  Administrators deny-only; `pgdata` is writable by the PostgreSQL account and Administrators only; every other
+  data folder (evidence, connector key, logs, backups and restore space) by the API's account and Administrators
+  only; the key ring additionally grants SYSTEM full control for its machine-protected key material. Permissions
+  are written and read by SID, never by parsing `icacls`, `schtasks` or `netsh` text. Creating and locking
+  `C:\AeroLink` itself is the installer's job (#1614 1.7).
+- **Daily site backup.** The installer requests a versioned `Invoke-AeroLinkScheduledBackup.ps1` runner under
+  `\AeroLink\`, using the API virtual account with no interactive password, a daily trigger (02:00 by default),
+  start-when-available/ignore-overlap settings, and local retention of 15 days. The registration path refuses a
+  missing runner before changing Task Scheduler and fails closed on registration refusal. This remains the source
+  contract, not evidence that a task has been registered on the company host. The existing current-user workstation
+  schedule below remains a separate HOME/laptop convenience mode.
+- **Readiness.** Unless `-NoStart` is supplied, the installer starts PostgreSQL and the API and invokes
+  `Test-AeroLinkHost.ps1`. That check is read-only and reports `PASS`, `WARN`, `FAIL` and `SKIP`; a `FAIL` makes
+  the result failed, while any `SKIP` makes the final qualification state `INCOMPLETE - rerun elevated before
+  treating host as qualified`. `-NoStart` deliberately skips service start and the host check, so it never
+  establishes readiness. No site-host readiness result is claimed here.
+
+- **A3 package update boundary.** The updater admits one operation only after acquiring the installation transition
+  lease and reading a valid completed update journal; malformed or nonterminal journal state requires attended
+  recovery. It verifies the offered package and its signed source identity before retaining it, records the exact
+  prior `current` junction, creates a new `<version>+<full source SHA>` target, refuses an exact retained-target
+  collision, and uses the explicit
+  packaged `AeroLink.Api.exe` for every clone-maintenance and readiness phase. Clone upgrade, isolated evidence and
+  current-code readiness must pass before the real database is changed. After schema or semantic/data/evidence
+  mutation, the old binary is never restarted automatically; the journal retains the backup and attended recovery
+  obligation. Final readiness uses the configured full-DNS HTTPS origin with normal TLS and no redirects, and joins
+  the redacted public identity to the owned service PID/birth time, exact image, signed tree and current junction.
+  `-WhatIf` returns before package, database, service, junction or journal mutation. This is a source contract only;
+  it is not a company-host deployment or qualification result.
+
+### D6 remote-demo retirement boundary
+
+Retiring the HOME remote demo is an attended after-go-live operation, never an installer side effect. Before any
+destructive action, the operator must obtain fresh proof from the exact configured full-DNS HTTPS origin that the
+expected `SiteProduction` instance and source identity are live and ready, then provide the explicit attended
+confirmation. A private/internal company DNS name reached through the approved VPN is valid; loopback, localhost,
+redirected or substituted origins are refused. The retirement path recomputes its canonical HOME scope and refuses
+before mutation when proof is incomplete. The company-host site is not live or qualified, so do not run this
+retirement against HOME yet.
+
+#### Declaring and starting a site server
+
+Not yet live: production on the company host waits for Windows sign-in (#1615). The installer (#1614 1.7) will
+run these steps; until it exists, run them by hand, in this order. The HOME launchers and root `.bat` files are
+unchanged. They, and every other script that reads `instance.json` without a site-aware mode, refuse a site
+installation, and the site launcher refuses everything else.
+
+1. **Classify the installation:**
+
+   ```powershell
+   Import-Module .\product\scripts\AeroLinkInstallation.psm1
+   Set-AeroLinkInstanceConfig -ProductRoot .\product -InstallationRoot 'C:\AeroLink\AeroLink Production' `
+       -Label 'SITE PRODUCTION' -Classification SiteProduction
+   ```
+
+2. **Declare it.** `Set-AeroLinkSiteDeclaration` sets the ports, service accounts and ids described above, and
+   the full public host name. The site block is the single source of the API port and the public host name; the
+   launcher, Stop, Restore and Diagnostics all read it.
+
+   ```powershell
+   Import-Module .\product\scripts\AeroLinkSiteInstallation.psm1
+   Set-AeroLinkSiteDeclaration -InstallationRoot 'C:\AeroLink\AeroLink Production' -ApiPort <port> `
+       -PostgresPort <port> -PublicHostName '<full host name>'
+   ```
+
+3. **Name the rest of the HTTPS endpoint** in the non-secret `site-server.json`, beside `instance.json`. It
+   names no port and no host name; either one is refused as a second source.
+
+   ```json
+   { "bindAddress": "0.0.0.0", "http1Only": false,
+     "certificate": { "thumbprint": "<LocalMachine\\My thumbprint>" } }
+   ```
+
+   The certificate is one of these:
+   - `thumbprint`, or `subject` (the newest current match wins, so a renewal is picked up at restart), from
+     `LocalMachine\My`, or another store named by `store`;
+   - `path` plus `keyPath`, a PEM certificate and key, imported into a machine key set.
+
+   The certificate's private key must be readable by the installation's API account
+   (`NT SERVICE\AeroLink-Production` or `NT SERVICE\AeroLink-Development`). `http1Only` keeps HTTP/2 off, which
+   Windows sign-in will need.
+
+4. **Start it:**
+
+   ```powershell
+   $env:ConnectionStrings__AeroLink = 'Host=127.0.0.1;Port=<declared port>;Database=aerolink;Username=<application role>'
+   powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Start-AeroLinkSite.ps1 `
+       -InstallationRoot 'C:\AeroLink\AeroLink Production' -ApiPath '<publish folder>\AeroLink.Api.exe'
+   ```
+
+   `-ValidateOnly` returns the composed settings and starts nothing. The launcher writes nothing, and refuses a
+   declaration without an `instanceId` or a public host name.
+
+The launcher runs the API with these settings:
+- `Production`, with `SiteServer:Enabled`;
+- no demonstration data or accounts;
+- `Identity:CookieSecure=true`, and insecure webhooks off;
+- the installation-owned state from `Get-AeroLinkSiteRuntimeEnvironment`, including the persisted instance id.
+  The inherited connection string is passwordless; the API reads and appends the application password from the
+  protected store during startup.
+
+The API then does the following:
+
+- Listens only on `https://<bindAddress>:<apiPort>`. An inherited `ASPNETCORE_URLS` or `HTTP_PORTS` is
+  overridden; a configured `Kestrel:Endpoints` is refused, since Kestrel would bind it beside the HTTPS port.
+- Sends HSTS (one year, this host name only).
+- Sets `AllowedHosts` to the public name plus `localhost`, `127.0.0.1` and `[::1]`.
+- Derives `Notifications:BaseUrl` and `Connector:PublicOrigin` from the HTTPS origin, and refuses either when
+  it is set to anything else.
+- Names its declared-site cookies from the persisted `InstanceId` GUID. For `SiteProduction` and
+  `SiteDevelopment` they are `__Host-aerolink_session-<InstanceId:N>`,
+  `__Host-AeroLink.PreferenceConfirmation-<InstanceId:N>` and
+  `__Host-AeroLink.WindowsLink-<InstanceId:N>`; a missing or malformed GUID refuses startup before cookies are
+  registered. The prefix makes the browser accept them only as Secure, `Path=/` and host-only. Session and
+  antiforgery readers, plus the Windows-link issue/read/delete path, use these same derived names. A plain-HTTP
+  origin, a `Domain=` cookie from a parent or sibling host, or a path-scoped cookie therefore cannot plant or
+  shadow them. Non-site launches retain their existing names: `aerolink_session` or `__Host-aerolink_session` for
+  the session according to Secure, the unprefixed `AeroLink.PreferenceConfirmation` antiforgery name, and
+  `AeroLink.WindowsLink` or `__Host-AeroLink.WindowsLink` for the Windows-link ticket according to Secure. These names do **not**
+  isolate AeroLink from other applications on the shared host name: cookies are not isolated by port, so those
+  applications can still receive and overwrite a host's cookie. The owner accepted this risk on 15 Oct 2026
+  (#1614 D3); a dedicated DNS alias for AeroLink removes it.
+
+The API refuses to start, naming every problem, when any of these holds:
+
+- the environment is not `Production`;
+- HTTPS is not configured, or the certificate is missing or expired, does not name the public host in its
+  subject alternative names, or has a private key the running account cannot open and sign with;
+- `Kestrel:Endpoints` is configured;
+- the public name is a short name, `localhost` or an address;
+- demonstration data or accounts are enabled, cookies are not secure, or insecure webhooks are allowed;
+- the database has no account and no bootstrap secret is set.
+
+In any other `Production` launch, plain HTTP is allowed only on loopback, whether it comes from `urls`,
+`HTTP_PORTS` (which binds every interface) or `Kestrel:Endpoints`.
+
 ### Dedicated HOME production source
 
 HOME production and the protected remote demo run from a **separate clone**, used by nothing else:
@@ -724,6 +933,69 @@ directly. In the dated 2026-08-26 #783 read-only host audit, a desktop shortcut 
 `START_AEROLINK.bat`; the scheduled tasks pointed directly to their deeper PowerShell runners. These observations
 confirm compatibility risk but do not expose credentials or claim to cover other machines.
 
+## Release package (site server)
+
+The site server (#1614) installs a signed package and never builds from source, so it needs no SDK, Node, npm,
+git or internet access. The package is built on a developer machine from protected `main`:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File product/scripts/Build-AeroLinkRelease.ps1 ^
+  -SigningCertificateThumbprint <thumbprint> -OutputDirectory <folder outside the repository>
+```
+
+It refuses unless `HEAD` equals the freshly fetched `origin/main` on a clean tree with no untracked files, and it
+checks that again after the build. It also refuses when a `VITE_*` environment variable is set or a
+`product/client/.env*` file exists, because Git ignores those and Vite would build them into the client. Run it
+from a dedicated clone, because `npm ci` replaces the client's `node_modules`. It writes `AeroLink-<semver>+<sha>.zip` and a detached `.sig` beside it. The zip holds:
+
+- `manifest.json`: the version, source SHA, latest schema migration, bundled .NET runtime and the SHA-256 of every
+  file;
+- `app\`: the self-contained `win-x64` publish of the API, with the built client in `app\wwwroot`;
+- `scripts\`: the server scripts.
+
+**Build prerequisite.** The package is self-contained, so it ships the .NET runtime of the builder's SDK. The build
+refuses a publish whose `System.Security.Cryptography.Pkcs.dll` is below 10.0.13, because 10.0.0 to 10.0.12 are
+affected by GHSA-846f-f764-76mx and GHSA-2fmv-rv2c-59x7. The pinned package normally satisfies this. Still, build
+releases with an SDK whose bundled runtime is 10.0.13 or later, so the rest of the shipped runtime carries the same
+servicing fixes. The manifest's `bundledRuntime` records which runtime went out.
+
+The version comes from `product/release/VERSION`. Any build not made by this script reports `0.0.0-dev` at
+`/health/identity`. A packaged build reports its release `version` there to every caller. It reads its source SHA
+from `app\release-identity.json`, so the host sets no `Runtime__SourceSha`. The API also runs as a Windows service
+(`UseWindowsService`), which does nothing when it is started any other way. `Invoke-AeroLinkMaintenanceCommand
+-ApiExecutable <app>\AeroLink.Api.exe` runs the maintenance host from a package as `Production`.
+
+**Signing key.** The signature is ECDSA P-256 over SHA-256 of the zip, in IEEE P1363 form. The key is a
+non-exportable CNG key behind a self-signed certificate, "AeroLink Release Signing", in the builder's
+`CurrentUser\My`. Create it once:
+
+```text
+Import-Module product/scripts/AeroLinkReleasePackage.psm1
+New-AeroLinkReleaseSigningCertificate -CertificateOutputPath product/release/release-signing.cer
+```
+
+The private key never leaves that store. Commit only the public `product/release/release-signing.cer`, which the
+owner does once, when the real key exists. No key is committed until then.
+
+**Verification on the host.** `Test-AeroLinkReleasePackage -Package <zip> -TrustedCertificate <cer> [-Destination
+<new folder>]` checks the signature before it extracts anything. It then extracts the bytes it verified and checks
+every file against the manifest, and refuses any file the manifest does not list. It refuses a missing `.sig`, a
+signature from another key and any altered byte, and removes a partly extracted tree. The host trusts only the
+certificate path that its installer gives it, never a certificate inside a package. The command runs under Windows
+PowerShell 5.1.
+
+`-SkipPostureCheck` is for development only and is refused when a CI variable is set. It builds whatever is checked
+out, and marks the result on every identity surface:
+
+- the version becomes `<VERSION>-dev.unverified`, in the zip name, the executable's product version and
+  `/health/identity`;
+- the loopback `sourceIdentity` becomes `<sha>+unverified-development`;
+- the signed manifest records `sourcePosture: unverified-development`.
+
+`Test-AeroLinkReleasePackage` refuses such a package unless it is given `-AllowUnverifiedDevelopment`, which only a
+development installation should pass. `VERSION` is not bumped for every build, so two `main` builds can share a
+version; the source SHA, not the version alone, identifies what is installed.
+
 ## Microsoft Word desktop connector
 
 Run `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat` once for each Windows user who edits managed documents. It
@@ -1028,7 +1300,10 @@ production upgrade requires the separately supported operator procedure and auth
 
 ## Production first-install administrator
 
-Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.
+Production does not seed identities. The installer generates a random bootstrap value, stores it in the
+installation's protected-config record for the API virtual account, and shows it once. Do not place it in
+`appsettings.json`, source control, a command-line argument, the service environment, or an operator transcript.
+`GET /api/setup/status` reports only whether bootstrap is required and enabled.
 
 While the API is reachable only from the administrative network, open the website. An empty, bootstrap-enabled deployment automatically presents the one-time activation screen; enter the protected bootstrap secret and choose the administrator display name, email, and password. The administrator username is always `admin`. The password must contain at least 14 characters with uppercase, lowercase, numeric, and symbol characters. The equivalent API procedure is retained below for headless installations.
 
@@ -1043,9 +1318,51 @@ Invoke-RestMethod 'https://aerolink.example.org/api/setup/bootstrap' -Method Pos
 Remove-Variable secureBootstrapSecret, bootstrapSecret, securePassword, administratorPassword, body
 ```
 
-The operation uses a serializable zero-user transaction and permanently closes after the first account exists. Confirm `GET /api/setup/status` returns `bootstrapRequired: false`, remove `Identity__BootstrapSecret` from the service environment, restart the API, and sign in with the chosen password. If the database already contains any user, recovery requires the approved database/identity recovery procedure; bootstrap cannot overwrite or add an administrator.
+The operation uses a serializable zero-user transaction and permanently closes after the first account exists. Confirm
+`GET /api/setup/status` returns `bootstrapRequired: false`, then run the elevated installer with
+`-Name Production -RemoveBootstrapSecret` (or `Development` for that installation); it removes the protected
+record and restarts the API service. Sign in with the chosen password. If the database already contains any user,
+recovery requires the approved database/identity recovery procedure; bootstrap cannot overwrite or add an administrator.
 
 Demo identity seeding fails closed outside the `Development` environment. `Identity__AllowDemoAccounts=true` is an explicit escape hatch only for an isolated, non-production showcase and must never be used for an operational deployment.
+
+## Windows sign-in
+
+Windows sign-in (DEC-154, #1615) is off until configured, and it waits for first-install setup above: nobody is
+provisioned until `admin` exists. The policy it enforces is in
+[SECURITY_AND_IDENTITY_MODEL.md](../../docs/product-definition/SECURITY_AND_IDENTITY_MODEL.md#windows-sign-in).
+
+**Configuration** (service environment, `__` for `:`):
+
+| Key | Value |
+|---|---|
+| `Identity__Windows__Enabled` | `true` |
+| `Identity__Windows__AllowedDomainSids__0` (`__1`, ...) | Each allowed domain's SID, `S-1-5-21-a-b-c` |
+| `Kestrel__EndpointDefaults__Protocols` or the site server's HTTP/1.1-only option | `Http1`. Negotiate cannot run over HTTP/2. |
+
+Leave `Identity__Windows__Scheme` unset: it is `Negotiate`, and Production refuses to start with anything else. Production
+also refuses an empty or malformed allow-list, running as SYSTEM (run as the installation's virtual service account),
+and a listener that is not configured HTTP/1.1-only.
+
+**Finding a domain SID.** On any domain-joined machine, signed in as a domain user, run `whoami /user`. The domain SID is
+the user SID without its last `-RID` part: `S-1-5-21-1111-2222-3333-1104` belongs to domain `S-1-5-21-1111-2222-3333`.
+With the AD module, `(Get-ADDomain).DomainSID.Value` gives it directly.
+
+**Linking the administrator.** Sign in to the website on your own domain account, choose **Link an existing account**,
+check that the form names *your* Windows logon, and enter `admin`'s password and authenticator code once. Do it at
+your own machine, never at somebody else's signed-in session. From then on Windows signs you in to `admin` without
+MFA, and `admin`'s password plus MFA remains the break-glass (reach it from the sign-in page, or `/?windows=password`
+when Windows sign-in cannot complete). If you signed in with Windows before linking, an account was created for you:
+disable it under People & Authority first, then link. A wrong link is removed with **Unlink Windows** on the account's
+row, which also ends its sessions.
+
+**No intermediary.** Windows sign-in must be reached directly on the AeroLink listener: no reverse proxy, tunnel or
+any device that shares upstream connections between users. Negotiate authenticates a connection, and a shared one
+would carry one person's identity to the next.
+
+**Name reuse.** An account keeps its `DOMAIN\user` name for good. If the directory later gives that name to a
+different person (a new SID), their sign-in is refused as `account_name_in_use`. No route renames an account yet, so
+raise it as an issue rather than editing the database.
 
 ## Local credentials warning
 
@@ -1209,6 +1526,99 @@ retention policy and reconciliation/request policy are unchanged; refusal does n
 successful deployment.
 
 Ordinary repository CSV exports expire after seven days; completed job metadata remains attributable and the download returns `410 export_expired` after expiry. The worker reclaims files from the dedicated temporary-export namespace every ten minutes. Controlled publications, signed packages, uploaded documents, legacy job outputs and their exact historical files are retained. Browser harnesses use owned temporary database/evidence storage, including across a restart-recovery run, and release it after the run.
+
+### Site server backup and restore (#1614 1.9)
+
+A site installation keeps its backups on the host, under `<root>\backups`, for DEC-130's 15 days. Under D7 there
+is no off-machine copy yet. Backup, verification and restore take `-InstallationRoot <root>`, and refuse it for a
+root that has no site declaration. Without it they resolve the installation from the program, exactly as on HOME.
+
+**Who runs what, and with which password.** The site cluster accepts only SCRAM passwords. Each password has one
+reader, and no process holds both (#1614 1.4):
+- the application password (`aerolink_app`) is readable by the API's service account;
+- the superuser password (`postgres`) is readable by the maintenance identity, Administrators unless
+  initialisation named another.
+
+So:
+- **The scheduled backup** runs as the API's service account, `NT SERVICE\AeroLink-<name>`. It backs up as
+  `aerolink_app`, which owns every object in `aerolink`.
+- **An operator's backup** is a backup taken by anyone else: manual, pre-restore or updater. It runs elevated and
+  backs up as `postgres`.
+- **Every restore** runs elevated and logs in only as `postgres`: the isolated drill, Phase 3 and a production
+  restore.
+
+A process that is neither the service account nor the maintenance identity is refused, and the message names both
+routes. A password reaches `pg_dump`, `pg_restore` and `psql` only through `PGPASSWORD`, never their command lines,
+and every tool runs with `-w`. A missing or wrong password is therefore a refusal, not a hidden prompt.
+
+**Ownership after a restore.** The target database is created `OWNER aerolink_app` and closed to `PUBLIC`, as
+`aerolink` is. `pg_restore` logs in as `postgres` and runs with `--role=aerolink_app --no-owner --no-privileges`,
+so every object is created by, and belongs to, the application role. That includes a HOME archive whose objects
+`postgres` owned.
+
+The restore then refuses if any relation, function, type or schema belongs to another role. PostgreSQL's own rules
+are allowed:
+- the members of a trusted extension such as `pg_trgm` belong to the bootstrap superuser;
+- `public` belongs to `pg_database_owner`.
+
+It also refuses if the role cannot create and write a table.
+
+**Evidence after a production restore.** The incoming evidence is built inside the installation root and moved into
+place, so it would keep the root's read-only permissions. The restore re-applies the evidence folder's own
+permissions, from `Get-AeroLinkSiteFolderPlan`, to the folder and everything in it, and proves the API account can
+write.
+
+**Isolated drill** (elevated):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File <program>\scripts\Restore-AeroLink.ps1 `
+    -InstallationRoot 'C:\AeroLink\AeroLink Production' -BackupArchive <zip> -TargetDatabase aerolink_restore_validation
+```
+
+**Production restore, including Phase 3's HOME archive:**
+- **Run from that installation's own program.** The program must resolve to the installation: the installer
+  (#1614 1.7) writes `<program>\.local\installation.json` naming the root (`Set-AeroLinkInstallationPointer`).
+  Until then, an operator sets that pointer by hand. The restore refuses a program that resolves elsewhere.
+- **Stop the site's AeroLink service first.** The restore refuses while the API port listens, and checks again
+  immediately before it renames the live database.
+- **Add** `-TargetDatabase aerolink -AllowProductionRestore -Confirmation RESTORE-AEROLINK`.
+- **Match the classification.** The archive's recorded classification must match the site's (D8). Phase 3
+  restores HOME's archive into SiteProduction deliberately, with `-AllowArchiveFromOtherClassification`.
+
+The restore takes an operator's pre-restore backup. It never starts or stops the site cluster or the API service,
+and it never runs a HOME launcher; start the service afterwards. The notification revocation it performs needs the
+site-aware reader from #1642.
+
+**From the release package.** A site runs the scripts from its release package (#1614 1.6): `app\`, `scripts\` and
+`manifest.json`, with no source tree or git. From there:
+- a backup records `app\appsettings.json` and the manifest's source SHA and latest migration;
+- the restore's validation API is the package's own `app\AeroLink.Api.exe`.
+
+From a source checkout, as on HOME, nothing changes.
+
+**Daily backup.** `Register-AeroLinkSiteBackupTask` (in `AeroLinkSiteInstallation.psm1`) registers it, elevated,
+through the Task Scheduler API; the installer (#1614 1.7) calls it. `New-AeroLinkSiteBackupTaskDefinition` shows
+what it registers. The task:
+- runs `<program>\scripts\Invoke-AeroLinkScheduledBackup.ps1 -InstallationRoot <root>` daily, which backs up and
+  then verifies;
+- runs as `NT SERVICE\AeroLink-<name>`, with logon type ServiceAccount: no password and no interactive user;
+- logs to `<root>\logs\scheduled-backup.log`.
+
+Whether Task Scheduler on the host accepts a virtual service account as a task principal still has to be proved on
+the host (Phase 2).
+
+**Proof.** `AeroLinkSiteBackup.Acceptance.ps1 -PostgresBin <bin>` (by hand, non-elevated, on a disposable cluster)
+keeps the two passwords in two separate protected stores, one per caller, so it cannot pass with the identities
+collapsed. It checks:
+1. the scheduled backup from a release-package layout, with the application password only;
+2. verification;
+3. the drill and an operator's backup with the superuser password only;
+4. a HOME-format archive restored into the site;
+5. ownership, rows, trigram search and writes;
+6. the evidence permissions after a move.
+
+It does not run a full production activation: that needs the site notification revocation from #1642, and a
+virtual account this machine cannot create.
 
 ## Isolated restore drill
 

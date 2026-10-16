@@ -110,7 +110,7 @@ public static class GitLabMetadataEndpoints
         AeroLinkDbContext db, CancellationToken ct)
     {
         var actorId = http.UserAccount().Id;
-        var tokenHash = IdentityService.TokenDigest(http.Request.Cookies[IdentityService.CookieName]);
+        var tokenHash = IdentityService.TokenDigest(http.SessionToken());
         if (tokenHash is null) return Results.Unauthorized();
         var session = await db.UserSessions.AsNoTracking()
             .SingleOrDefaultAsync(x => x.UserId == actorId && x.TokenHash == tokenHash, ct);
@@ -121,7 +121,7 @@ public static class GitLabMetadataEndpoints
         var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
             .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null) return Results.Forbid();
-        var allowed = account.UserName == IdentityService.SystemAdministratorUserName
+        var allowed = account.HoldsAuthorityOverride
             || await db.ProgramMemberships.AsNoTracking()
                 .AnyAsync(x => x.UserId == actorId && x.ProgramId == programId.Value && x.EndedAt == null, ct);
         return allowed ? null : Results.Forbid();
