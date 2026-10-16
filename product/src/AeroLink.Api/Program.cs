@@ -76,15 +76,15 @@ var siteServer = SiteServerHosting.Configure(builder);
 // Secure cookies take the __Host- prefix, which stops plain-HTTP origins, Domain= cookies from other hosts and
 // path-scoped cookies from planting or shadowing them. A declared site also carries its persisted instance identity
 // in every cookie name, so two AeroLink installations on one host cannot consume each other's sessions, antiforgery
-// confirmations or Windows-link tickets. SessionCookie validates that identity before service registration.
-var sessionCookie = SessionCookie.FromConfiguration(builder.Configuration, builder.Environment, siteServer is not null);
-builder.Services.AddSingleton(sessionCookie);
+// confirmations or Windows-link tickets. Resolve the owner through DI after the host's final configuration layers
+// are present; this matters to hosted tests and to any composition host that adds settings during Build.
+builder.Services.AddSingleton<SessionCookie>(services => SessionCookie.FromConfiguration(
+    services.GetRequiredService<IConfiguration>(), services.GetRequiredService<IHostEnvironment>(), siteServer is not null));
 builder.Services.AddAntiforgery(options =>
 {
     // Prefixed only where AeroLink terminates TLS itself. Antiforgery decides Secure from the request, and with
     // SecurePolicy=Always it refuses any request that did not arrive over HTTPS - which is every request behind a
     // TLS-terminating proxy, where Identity:CookieSecure is also true. A site server always sees HTTPS.
-    options.Cookie.Name = sessionCookie.AntiforgeryName;
     options.Cookie.SameSite = SameSiteMode.Strict;
     options.Cookie.HttpOnly = true;
     if (siteServer is not null)
@@ -93,6 +93,7 @@ builder.Services.AddAntiforgery(options =>
         options.Cookie.Path = "/";
     }
 });
+builder.Services.AddOptions<AntiforgeryOptions>().Configure<SessionCookie>((options, cookie) => options.Cookie.Name = cookie.AntiforgeryName);
 // A year, this host name only: the other applications on a shared site host send their own HSTS, and their
 // subdomains are not AeroLink's to pin. Sent only on HTTPS and never for localhost or loopback addresses.
 builder.Services.AddHsts(options =>
@@ -159,6 +160,10 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 }));
 
 var app = builder.Build();
+// Force the shared owner and antiforgery options to resolve during startup, so a malformed declared-site identity
+// refuses the service before it can accept a request rather than on the first request that happens to use a cookie.
+_ = app.Services.GetRequiredService<SessionCookie>();
+_ = app.Services.GetRequiredService<IOptions<AntiforgeryOptions>>().Value;
 // The certificate's imported machine key is temporary; release it with the host rather than leave it behind.
 if (siteServer is not null) app.Lifetime.ApplicationStopped.Register(siteServer.Certificate.Dispose);
 await WindowsSignInStartupGuard.EnforceAsync(app.Services, builder.Configuration, app.Environment);
