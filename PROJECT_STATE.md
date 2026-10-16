@@ -763,6 +763,13 @@ Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_B
 - No AI product feature.
 - No automatic external test execution.
 - Deployment-owned services such as customer TLS/reverse proxy, real SMTP/provider qualification, protected off-device backup storage, external monitoring/alerting, customer RPO/RTO/SLOs, and identity-provider contracts remain deployment-specific where not otherwise implemented.
+- The #1614 A2 installer source now defines a signed-package fresh-install/repair boundary for the planned
+  Production and Development site installations, including per-site virtual service identities, non-secret
+  service configuration with protected secrets, certificate-key ACL setup, and a 15-day daily-backup registration
+  contract.
+  The company-host site is not live or qualified: clone-validated A3 upgrade/rollback, #1649 site-aware runner
+  and B1/admin integration, and attended host qualification remain pending. HOME remote-demo retirement remains
+  an attended D6 operation only after exact SiteProduction identity/source and private full-DNS/VPN go-live proof.
 - Scale/performance claims must match measured evidence; do not turn database-client or synthetic-harness evidence into a broader browser-user claim.
 - Legacy information is not given fabricated historical precision merely because today's schema is richer.
 
