@@ -27,7 +27,7 @@ namespace AeroLink.Infrastructure.Persistence;
 public sealed class ProjectSetupInceptionService(
     AeroLinkDbContext db,
     IProjectLadderPolicyResolver policyResolver,
-    IdentityService identity)
+    SignatureReauthenticationService reauthentication)
 {
     private const long MaxUploadBytes = 50L * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -520,7 +520,7 @@ public sealed class ProjectSetupInceptionService(
 
     internal async Task MaterializeAsync(ProjectSetupDraft draft, ProjectRecord project, CandidateBaseline targetBaseline,
         AuthenticatedUser actor, string? password, string? suppliedAssertionHash, bool sourceAssertionAccepted,
-        ILadderPolicy ladder, CancellationToken ct)
+        ILadderPolicy ladder, CancellationToken ct, string remoteAddress = "local")
     {
         if (draft.StartKind == ProjectSetupStartKind.Fresh) return;
         RequireAdministrator(actor);
@@ -537,7 +537,8 @@ public sealed class ProjectSetupInceptionService(
         var assertion = BuildAssertion(package, draft, project, targetBaseline, ladder, reconciliation);
         if (!sourceAssertionAccepted || !string.Equals(suppliedAssertionHash, assertion.Hash, StringComparison.OrdinalIgnoreCase))
             throw new ProjectSetupInvalidException("Explicit acceptance of the exact source assertion is required.");
-        if (string.IsNullOrWhiteSpace(password) || !await identity.ConfirmPasswordAsync(actor.Id, password, ct))
+        var authentication = await reauthentication.AuthenticateAsync(actor.Id, password, remoteAddress, DateTimeOffset.UtcNow, ct);
+        if (authentication is null)
             throw new ProjectSetupInvalidException("The accepting administrator password was not confirmed.");
         if (!actor.IsAdministrator && actor.Id != draft.CreatorUserId)
             throw new ProjectSetupAccessException();
@@ -746,7 +747,8 @@ public sealed class ProjectSetupInceptionService(
         package.MarkMaterialized(project.Id, targetBaseline.Id, assertion.Hash, now);
         db.ElectronicSignatures.Add(new ElectronicSignature(actor.Id, actor.UserName, actor.DisplayName, project.ProgramId,
             "ProjectInceptionSourceAssertion", targetBaseline.Id, "1", "AcceptSource", assertion.Meaning,
-            assertion.Hash, "local", now, "ProjectAdministrator", rationale: "Accepted exact source provenance and reconciliation."));
+            assertion.Hash, remoteAddress, now, "ProjectAdministrator", rationale: "Accepted exact source provenance and reconciliation.",
+            authenticationMethod: authentication.AuthenticationMethod));
     }
 
     private async Task<ProjectSetupDraft?> LoadDraftAsync(Guid id, AuthenticatedUser actor, CancellationToken ct,

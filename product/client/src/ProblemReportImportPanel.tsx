@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { ApiError, apiRequest, operationError } from "./apiClient";
 import { useCategoryVocabulary } from "./problemReportCategories";
+import type { AuthUser } from "./IdentityCenter";
 import "./ProblemReportImportPanel.css";
 
 type Row = { row: number; sourceKey: string; title: string; action: string; reason?: string | null; landingState?: string | null; severity?: string | null; responsibleEngineer?: string | null };
@@ -57,10 +58,11 @@ const priorities = ["Urgent", "High", "Normal", "Low"];
  * Skip with its reason before anything is written; the import is then signed with the importer's password
  * over the exact file and mapping that was previewed.
  */
-export default function ProblemReportImportPanel({ api, projectId, releases, onClose, onImported }: {
+export default function ProblemReportImportPanel({ api, projectId, releases, user, onClose, onImported }: {
   api: string;
   projectId: string;
   releases: { id: string; version: string }[];
+  user: AuthUser;
   onClose: () => void;
   onImported: () => void;
 }) {
@@ -207,7 +209,7 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
           </table>
 
           <div className="prImportCommit">
-            <label>Confirm with your password<input disabled={busy} type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            <label>Confirm with your {user.windowsLinked ? "Windows" : "AeroLink"} password<input disabled={busy} type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
             <button type="button" disabled={busy || stale || preview.create === 0 || !password} onClick={() => void commit()}>
               Sign and import {preview.create} Problem Report{preview.create === 1 ? "" : "s"}
             </button>

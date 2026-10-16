@@ -1085,6 +1085,7 @@ export default function ProblemReportCenter({
           api={api}
           projectId={projectId}
           releases={releases}
+          user={user}
           onClose={() => setShowImport(false)}
           onImported={() => void refresh()}
         />
@@ -1094,6 +1095,7 @@ export default function ProblemReportCenter({
           api={api}
           projectId={projectId}
           releases={releases}
+          user={user}
           onClose={() => setShowIntegrityImport(false)}
           onImported={() => void refresh()}
         />

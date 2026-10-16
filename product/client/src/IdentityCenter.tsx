@@ -23,6 +23,7 @@ export type AuthUser = {
   email: string;
   isAdministrator: boolean;
   mustChangePassword: boolean;
+  windowsLinked?: boolean;
   programs: { programId: string; roles: string[] }[];
 };
 export function LoginPage({
@@ -1548,11 +1549,13 @@ function CreateAccount({ api, onDone }: { api: string; onDone: () => void }) {
 export function SignatureDialog({
   title,
   meaning,
+  windowsLinked = false,
   onCancel,
   onSign,
 }: {
   title: string;
   meaning: string;
+  windowsLinked?: boolean;
   onCancel: () => void;
   onSign: (password: string, meaning: string) => Promise<void>;
 }) {
@@ -1574,7 +1577,7 @@ export function SignatureDialog({
           <textarea value={meaning} readOnly />
         </label>
         <label>
-          Re-enter your password
+          Re-enter your {windowsLinked ? "Windows" : "AeroLink"} password
           <input
             type="password"
             value={password}

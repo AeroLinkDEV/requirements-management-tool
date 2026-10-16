@@ -192,7 +192,7 @@ public sealed class ProjectSetupService(
 
     public async Task<ProjectSetupFinalizationResult> FinalizeAsync(Guid draftId, AuthenticatedUser actor,
         long expectedVersion, string operationKey, CancellationToken ct, string? password = null,
-        string? sourceAssertionHash = null, bool sourceAssertionAccepted = false)
+        string? sourceAssertionHash = null, bool sourceAssertionAccepted = false, string remoteAddress = "local")
     {
         // Draft management is intentionally broader than project creation: the creator can save, read, and
         // resume their draft, while only a currently authenticated AeroLink administrator may create the
@@ -282,7 +282,7 @@ public sealed class ProjectSetupService(
                 var effectivePolicy = new ResolvedProjectLadderPolicy(
                     ProjectLadderResolver.Resolve(ladder, LegacyLadderPolicy.Instance), LegacyLadderPolicy.Instance);
                 await inception!.MaterializeAsync(draft, project, inceptionBaseline, actor, password,
-                    sourceAssertionHash, sourceAssertionAccepted, effectivePolicy, ct);
+                    sourceAssertionHash, sourceAssertionAccepted, effectivePolicy, ct, remoteAddress);
                 // The accepted source is the history of inception. The newly created build is a separate,
                 // explicitly In-Work context that points at the materialized target baseline.
                 db.SoftwareBuilds.Add(new SoftwareBuild(project.Id, release.Id, inceptionBaseline.Id,

@@ -48,7 +48,8 @@ public sealed class TestChangeReviewWorkflowService(
     AeroLinkDbContext db,
     IdentityService identity,
     VerificationImpactService verificationImpact,
-    WorkflowAuthorityService workflowAuthority)
+    WorkflowAuthorityService workflowAuthority,
+    SignatureReauthenticationService reauthentication)
 {
     public async Task<TestChangeReviewSubmitted> SubmitAsync(TestChangeReview review,
         SubmitTestChangeReviewCommand command, AuthenticatedUser actor, ILadderPolicy ladderPolicy,
@@ -122,7 +123,9 @@ public sealed class TestChangeReviewWorkflowService(
                 DateTimeOffset.UtcNow, ct))
             throw new TestChangeReviewWorkflowForbiddenException(
                 "The active approver does not hold current Approver authority.");
-        if (!await identity.ConfirmPasswordAsync(actor.Id, command.Password ?? "", ct))
+        var authentication = await reauthentication.AuthenticateAsync(actor.Id, command.Password, remoteIp,
+            DateTimeOffset.UtcNow, ct);
+        if (authentication is null)
             throw new ElectronicSignatureConfirmationException();
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -145,7 +148,8 @@ public sealed class TestChangeReviewWorkflowService(
             reviewCycle: cycle.Sequence, reviewStepPosition: activeStep.Position,
             rationale: command.Rationale.Trim(), authoritySource: activeStep.AuthoritySource?.ToString() ?? "",
             workflowId: cycle.WorkflowId, workflowVersion: cycle.WorkflowVersion,
-            authoritySourceId: activeStep.AuthoritySourceId));
+            authoritySourceId: activeStep.AuthoritySourceId,
+            authenticationMethod: authentication.AuthenticationMethod));
         await db.SaveChangesAsync(ct);
         if (review.State == TestChangeReviewState.Approved
             && review.ArtifactKind == VerificationArtifactKind.Case)

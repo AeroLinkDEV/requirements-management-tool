@@ -132,6 +132,7 @@ if (windowsSignIn.Enabled && windowsSignIn.Scheme == Microsoft.AspNetCore.Authen
     // already off by default.
     authentication.AddNegotiate(options => options.PersistNtlmCredentials = false);
 if (OperatingSystem.IsWindows()) builder.Services.AddSingleton<IWindowsDirectory, ActiveDirectoryWindowsDirectory>();
+if (OperatingSystem.IsWindows()) builder.Services.AddSingleton<IWindowsCredentialValidator, ActiveDirectoryWindowsCredentialValidator>();
 builder.Services.AddSingleton<BrowserMutationProtector>();
 builder.Services.AddSingleton<ConnectorSigningService>();
 var loginRateLimit = Math.Max(1, builder.Configuration.GetValue<int?>("Identity:LoginRateLimitPerMinute") ?? 600);
@@ -148,6 +149,9 @@ builder.Services.AddRateLimiter(options =>
     // users showed a hundred and twenty of them refused at sign-in on an ordinary morning — a denial of
     // service the product inflicted on itself. The default now assumes a site, not a person.
     options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "local",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = loginRateLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("signature-authentication", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "local",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = loginRateLimit, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("service-api", context => RateLimitPartition.GetFixedWindowLimiter(IntegrationSecurityService.Hash(context.Request.Headers.Authorization.ToString()), _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(10,builder.Configuration.GetValue<int?>("Integrations:ApiRateLimitPerMinute")??240), Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));

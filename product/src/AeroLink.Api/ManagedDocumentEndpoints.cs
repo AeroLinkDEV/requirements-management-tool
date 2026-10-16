@@ -40,8 +40,8 @@ public static class ManagedDocumentEndpoints
         group.MapPatch("/revisions/{revisionId:guid}/formal-summary", ReviseFormalSummaryAsync);
         group.MapPatch("/{id:guid}/steward", ReassignStewardAsync);
         group.MapPatch("/revisions/{revisionId:guid}/responsible-owner", ReassignResponsibleOwnerAsync);
-        group.MapPost("/revisions/{revisionId:guid}/review/approve", ApproveAsync);
-        group.MapPost("/revisions/{revisionId:guid}/review/return", ReturnAsync);
+        group.MapPost("/revisions/{revisionId:guid}/review/approve", ApproveAsync).RequireRateLimiting("signature-authentication");
+        group.MapPost("/revisions/{revisionId:guid}/review/return", ReturnAsync).RequireRateLimiting("signature-authentication");
         group.MapPost("/revisions/{revisionId:guid}/release-preparation", PrepareReleaseAsync);
         group.MapPost("/revisions/{revisionId:guid}/force-unlock", ForceUnlockAsync);
         group.MapPost("/revisions/{revisionId:guid}/withdraw", WithdrawAsync);
@@ -207,7 +207,7 @@ public static class ManagedDocumentEndpoints
                     x.Id, x.UserName, x.DisplayName, x.ArtifactRevision, x.Action, x.Authority,
                     x.AuthoritySource, x.AuthoritySourceId, x.WorkflowId, x.WorkflowVersion,
                     x.ReviewStepId, x.ReviewCycle, x.ReviewStepPosition, x.Meaning, x.Rationale,
-                    x.ContentHash, x.SignedAt, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority),
+                    x.ContentHash, x.SignedAt, x.AuthenticationMethod, isLegacyAuthority = string.IsNullOrWhiteSpace(x.Authority),
                     signatureStatus = status.Status, isSuperseded = status.IsSuperseded,
                     supersession = status.Supersession
                 };
@@ -642,13 +642,15 @@ public static class ManagedDocumentEndpoints
         catch (DbUpdateConcurrencyException) { return Results.Conflict(new { error = "The document revision changed after this page loaded. Refresh and try again." }); }
     }
 
-    private static async Task<IResult> ApproveAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    private static async Task<IResult> ApproveAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, SignatureReauthenticationService reauthentication, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var inputError = ValidateReviewDecision(request); if (inputError is not null) return inputError;
         var payloadHash = OperationPayloadHash($"Approve:{http.UserAccount().UserName}", ReviewDecisionPayload(request));
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid(); var actor = http.UserAccount();
         if (!await db.UserAccounts.AsNoTracking().AnyAsync(x => x.Id == actor.Id && x.State == AccountState.Active, ct)) return Results.Forbid();
-        if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+        var authentication = await reauthentication.AuthenticateAsync(actor.Id, request.Password,
+            http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct);
+        if (authentication is null) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
         var priorOperation = await OperationResultAsync(db, revisionId, "Approve", request.OperationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
         try
         {
@@ -675,7 +677,7 @@ public static class ManagedDocumentEndpoints
                 request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.ExpectedCandidateDocxAttachmentId,
                 request.ExpectedCandidatePdfAttachmentId, request.ExpectedCandidateManifestHash, request.Rationale, now);
             var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct); var contentHash = final ? data.Revision.ReleaseManifestHash : data.Revision.SnapshotHash;
-            db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", final ? "Release" : "Approve", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId)); db.ManagedDocumentEvents.Add(new(data.Document.Id, final ? "DocumentReleased" : "DocumentReviewApproved", actor.UserName, final ? $"Released {data.Document.DocumentNumber}.{data.Revision.Revision:D2} as the exact approved DOCX/PDF pair under {step.GrantedAuthority} authority ({step.AuthoritySource})." : $"Approved {step.StageName} for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} under {step.GrantedAuthority} authority ({step.AuthoritySource}).", now));
+            db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", final ? "Release" : "Approve", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId, authentication.AuthenticationMethod)); db.ManagedDocumentEvents.Add(new(data.Document.Id, final ? "DocumentReleased" : "DocumentReviewApproved", actor.UserName, final ? $"Released {data.Document.DocumentNumber}.{data.Revision.Revision:D2} as the exact approved DOCX/PDF pair under {step.GrantedAuthority} authority ({step.AuthoritySource})." : $"Approved {step.StageName} for {data.Document.DocumentNumber}.{data.Revision.Revision:D2} under {step.GrantedAuthority} authority ({step.AuthoritySource}).", now));
             if (final)
             {
                 var older = await db.ManagedDocumentRevisions.Where(x => x.DocumentId == data.Document.Id && x.Id != data.Revision.Id && x.State == ManagedDocumentState.Released).ToListAsync(ct); foreach (var prior in older.Where(x => x.Revision < data.Revision.Revision)) prior.Supersede(now);
@@ -692,13 +694,15 @@ public static class ManagedDocumentEndpoints
         { db.ChangeTracker.Clear(); return await OperationResultAsync(db, revisionId, "Approve", request.OperationKey, payloadHash, ct) ?? Results.Conflict(new { error = "The decision operation key was used concurrently.", code = "operation_key_conflict" }); }
     }
 
-    private static async Task<IResult> ReturnAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentIntegrityService integrity, CancellationToken ct)
+    private static async Task<IResult> ReturnAsync(Guid revisionId, DocumentReviewDecisionRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, SignatureReauthenticationService reauthentication, ManagedDocumentIntegrityService integrity, CancellationToken ct)
     {
         var inputError = ValidateReviewDecision(request); if (inputError is not null) return inputError;
         var payloadHash = OperationPayloadHash($"Return:{http.UserAccount().UserName}", ReviewDecisionPayload(request));
         var data = await RevisionDataAsync(db, revisionId, ct, true); if (data is null) return Results.NotFound(); if (!await http.HasProjectAccessAsync(db, data.Document.ProjectId, ct)) return Results.Forbid(); var actor = http.UserAccount();
         if (!await db.UserAccounts.AsNoTracking().AnyAsync(x => x.Id == actor.Id && x.State == AccountState.Active, ct)) return Results.Forbid();
-        if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+        var authentication = await reauthentication.AuthenticateAsync(actor.Id, request.Password,
+            http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct);
+        if (authentication is null) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
         var priorOperation = await OperationResultAsync(db, revisionId, "Return", request.OperationKey, payloadHash, ct); if (priorOperation is not null) return priorOperation;
         try
         {
@@ -722,7 +726,7 @@ public static class ManagedDocumentEndpoints
             }
             data.Revision.Return(actor.UserName, request.ExpectedStepId, request.ExpectedCycle, request.ExpectedVersion, request.ExpectedStepVersion, request.ExpectedSnapshotHash, request.Rationale, now);
             var programId = await db.Projects.Where(x => x.Id == data.Document.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
-            db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Return", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId));
+            db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ManagedDocument", data.Document.Id, $"{data.Document.DocumentNumber}.{data.Revision.Revision:D2}", "Return", request.Meaning.Trim(), contentHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now, step.GrantedAuthority, step.Id, step.Cycle, step.Position, request.Rationale, step.AuthoritySource, step.WorkflowId, step.WorkflowVersion, step.AuthoritySourceId, authentication.AuthenticationMethod));
             var returned = new ManagedDocumentEvent(data.Document.Id, "DocumentReturned", actor.UserName, $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2} from {step.StageName} under {step.GrantedAuthority} authority ({step.AuthoritySource}): {request.Rationale.Trim()}", now);
             db.ManagedDocumentEvents.Add(returned);
             var notice = new UserNotification(data.Document.ProjectId, data.Revision.ResponsibleOwnerId, "DocumentReturned", $"Returned {data.Document.DocumentNumber}.{data.Revision.Revision:D2}", request.Rationale.Trim(), $"managed-document:{data.Document.Id}", data.Document.Id, now);

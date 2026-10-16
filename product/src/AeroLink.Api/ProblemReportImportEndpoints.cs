@@ -33,12 +33,14 @@ public static class ProblemReportImportEndpoints
         }).DisableAntiforgery();
 
         app.MapPost("/api/problem-reports/import/commit", async (HttpContext http, AeroLinkDbContext db,
-            IdentityService identity, ProblemReportImportService service, CancellationToken ct) =>
+            IdentityService identity, SignatureReauthenticationService reauthentication, ProblemReportImportService service, CancellationToken ct) =>
         {
             var form = await ReadAsync(http, db, identity, ct);
             if (form.Refusal is not null) return form.Refusal;
             var actor = http.UserAccount();
-            if (!await identity.ConfirmPasswordAsync(actor.Id, form.Password, ct))
+            var authentication = await reauthentication.AuthenticateAsync(actor.Id, form.Password,
+                http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow, ct);
+            if (authentication is null)
                 return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
             if (form.OperationId == Guid.Empty)
                 return Results.BadRequest(new { error = "An import operation identity is required." });
@@ -48,7 +50,8 @@ public static class ProblemReportImportEndpoints
                     form.Mapping, form.PreviewHash, actor, http.Connection.RemoteIpAddress?.ToString() ?? "local",
                     async scope => await http.HasFreshProjectRoleAsync(db, identity, scope, ct,
                         ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator)
-                        && (await ProjectFeatureService.EffectiveAsync(db, form.ProjectId, ct)).HasFlag(ProjectFeature.ProblemReports), ct));
+                        && (await ProjectFeatureService.EffectiveAsync(db, form.ProjectId, ct)).HasFlag(ProjectFeature.ProblemReports), ct,
+                    authentication.AuthenticationMethod));
             }
             catch (ProblemReportImportAuthorityChanged ex)
             { return Results.Json(new { error = ex.Message }, statusCode: 403); }
@@ -57,7 +60,7 @@ public static class ProblemReportImportEndpoints
             catch (Exception ex) when (IsRetryableImportConflict(ex))
             { return Results.Conflict(new { error = "The database refused this import because of a serialization or source/operation uniqueness conflict. Retry the same operation to recover or complete its result.", code = "problem_report_import_concurrency", retryable = true }); }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        }).DisableAntiforgery();
+        }).DisableAntiforgery().RequireRateLimiting("signature-authentication");
 
         app.MapGet("/api/problem-reports/import/batches", async (Guid projectId, bool? unsignedOnly, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
         {

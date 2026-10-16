@@ -102,7 +102,7 @@ public static class ProjectSetupEndpoints
                     ? http.Request.Headers["Idempotency-Key"].ToString() : request.IdempotencyKey;
                 var result = await service.FinalizeAsync(draftId, http.UserAccount(), request.ExpectedVersion,
                     operationKey, ct, request.Password, request.SourceAssertionHash,
-                    request.SourceAssertionAccepted);
+                    request.SourceAssertionAccepted, http.Connection.RemoteIpAddress?.ToString() ?? "local");
                 return Results.Ok(new
                 {
                     state = "Completed",
@@ -119,7 +119,7 @@ public static class ProjectSetupEndpoints
             catch (ProjectSetupConflictException ex) { return Results.Conflict(new { code = "finalization_conflict", error = ex.Message }); }
             catch (ProjectSetupInvalidException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message, findings = ex.Findings }); }
             catch (DomainException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message }); }
-        });
+        }).RequireRateLimiting("signature-authentication");
     }
 
     private static object ListView(ProjectSetupDraft draft) => new

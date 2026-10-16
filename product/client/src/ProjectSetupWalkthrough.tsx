@@ -1580,6 +1580,7 @@ export default function ProjectSetupWalkthrough({
           {values.startKind && values.startKind !== "Fresh" && draft && (
             <ProjectSetupSourcePanel
               api={api}
+              user={user}
               draftId={draft.draftId}
               draftVersion={draft.version}
               kind={values.startKind as SourceKind}

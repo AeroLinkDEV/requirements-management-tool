@@ -219,7 +219,7 @@ export default function SoftwareBuildsLanding({
           )}
         </section>
         {api && projectId && onBuildsChanged && features && !features.includes("Release") && (
-          <ReleaseWithoutReadinessPanel api={api} projectId={projectId} releases={ordered} onChanged={onBuildsChanged} />
+          <ReleaseWithoutReadinessPanel api={api} projectId={projectId} releases={ordered} user={user} onChanged={onBuildsChanged} />
         )}
       </main>
     </div>
