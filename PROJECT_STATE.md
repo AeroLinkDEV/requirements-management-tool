@@ -602,7 +602,10 @@ The product includes local identity/session controls, scoped roles/administratio
 
 Windows sign-in (DEC-154, #1615), when enabled, signs people in with their domain logon through Negotiate, creates
 their account on first sign-in keyed on the Windows SID with Engineer in every Program, and lets the administrator
-link a Windows logon to `admin`. Signature re-authentication with the Windows password is separate work (#1615 B2).
+link a Windows logon to `admin`. New electronic signatures use the shared B2 reauthentication boundary (DEC-155):
+accounts with a durable Windows link re-enter the Windows password with persisted-principal/SID validation, while
+unlinked Local accounts use the AeroLink password. The recorded method is preserved in the signature projection;
+historical signatures retain an empty method for compatibility.
 
 Deployment-specific federation/provider/TLS/monitoring/service-objective work remains dependent on a real deployment/customer contract where documented.
 

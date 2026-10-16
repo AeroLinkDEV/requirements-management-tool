@@ -61,8 +61,8 @@ Where `Identity:Windows:Enabled` is set ([DEC-154](../../DECISIONS_AND_OPEN_QUES
   linking is freed. A linked Local account (the administrator) keeps its own profile and signs in with Windows
   without MFA; its password plus MFA remains the break-glass.
 - **Audit.** Every sign-in audit event records `AuthenticationMethod` (`password` or `windows`) and, for Windows,
-  the `DOMAIN\user` principal. Electronic signatures carry an `AuthenticationMethod` column for the
-  re-authentication work that follows (#1615 B2); signatures recorded before it have it empty.
+  the `DOMAIN\user` principal. New electronic signatures record `windows-password` when the account has a durable
+  Windows link and `password` for an unlinked Local account; signatures recorded before B2 retain an empty method.
 - **Startup.** Production refuses to start Windows sign-in with a scheme other than Negotiate (which keeps the
   test scheme out of real deployments), with no allowed domain, when running as SYSTEM, or without an HTTP/1.1-only
   listener (`SiteServer:Http1Only` or `Kestrel:EndpointDefaults:Protocols=Http1`).
@@ -78,6 +78,20 @@ Where `Identity:Windows:Enabled` is set ([DEC-154](../../DECISIONS_AND_OPEN_QUES
 
 Global administration is still the `admin` account alone: Program roles, including a Program's Administrator role,
 can be granted to Windows accounts like any other, but no route grants the global administrator to another account (#1639).
+
+### Electronic-signature reauthentication
+
+Every signature action re-reads the actor's account and uses one shared server boundary immediately before the
+controlled mutation. An account with a durable `WindowsSid` (including a linked Local account) must re-enter its
+persisted `DOMAIN\\user` Windows password. The production validator uses `LogonUser` with
+`LOGON32_LOGON_NETWORK` and requires the returned token SID to match the persisted SID; the browser cannot supply
+the identity. An unlinked Local account uses the existing PBKDF2 AeroLink password verifier. Ambient Negotiate
+session state never signs, and credentials are transient, never stored or logged.
+
+Failed proofs retain the existing generic refusal and lockout transition and do not create a signature. Successful
+signatures persist the method (`windows-password` or `password`) in the audit projection. Cancellation is checked
+before the signature transaction commits. Password change and MFA-disable remain separate break-glass operations
+using the Local password verifier.
 
 The Documentation Center desktop connector never receives a reusable browser session. AeroLink issues a
 short-lived one-use launch token scoped to one document revision and mode. After redemption, the connector keeps
@@ -123,7 +137,7 @@ The required electronic-signature contract is:
 - the user has an active authenticated session;
 - the user is the person assigned to an active review stage;
 - the applicable configured-stage or no-workflow fallback authority is satisfied;
-- the user re-enters the correct password immediately before signing;
+- the user re-enters the verifier-specific Windows or AeroLink password immediately before signing;
 - the user provides an explicit signature meaning distinct from engineering rationale; and
 - the server applies the domain transition and immutable signature record in one successful unit of work.
 
@@ -134,9 +148,11 @@ Each signature captures the user identifier, username and display-name snapshot,
 Ordinary System/Software Change Request approvals use password re-confirmation and configured-stage authority.
 Managed-document and release approval paths retain their own qualified contracts.
 
-Test Change Request approval now re-confirms the current user's password, records a distinct signature meaning,
-preserves frozen configured-stage authority, and requires current Approver authority on the no-workflow fallback.
-PR #408 closed #398 without rewriting historical TCR signatures.
+All nine signature callers use the shared reauthentication boundary, including Change Request, Test Change Review,
+release campaign, release-without-readiness, managed-document, integrity-import, problem-report-import, and project
+setup source-acceptance actions. The two password-confirmation operations for changing a Local password and
+disabling Local MFA remain separate. Every new signature records its method in the API read projection without
+rewriting historical signatures.
 
 ## Separation of duties
 
