@@ -57,25 +57,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                 column: "IsBuiltInAdministrator",
                 unique: true,
                 filter: "\"IsBuiltInAdministrator\"");
-
-            // #1639: global administration was the account named `admin`. That account becomes the built-in
-            // administrator and keeps administration as an attributable grant from the migration, recorded in
-            // the security audit log the same way an in-app grant is.
-            migrationBuilder.Sql("""
-                UPDATE user_accounts
-                SET "IsBuiltInAdministrator" = TRUE,
-                    "IsGlobalAdministrator" = TRUE,
-                    "GlobalAdministratorGrantedBy" = 'system.migration',
-                    "GlobalAdministratorGrantedAt" = now()
-                WHERE "UserName" = 'admin';
-
-                INSERT INTO security_audit_events ("Id", "EventType", "ActorId", "Target", "Outcome", "Detail", "IpAddress", "OccurredAt")
-                SELECT gen_random_uuid(), 'GlobalAdministratorGranted', 'system.migration', "UserName", 'Success',
-                    'Global administrator carried over from the built-in admin account when administration became a persisted grant (#1639).',
-                    'local', now()
-                FROM user_accounts
-                WHERE "UserName" = 'admin';
-                """);
         }
 
         /// <inheritdoc />
