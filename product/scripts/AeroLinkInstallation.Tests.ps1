@@ -181,7 +181,7 @@ try {
     foreach ($siteClassification in @('SiteProduction', 'SiteDevelopment')) {
         $siteIdentity = New-FixtureProductRoot -WithLocal
         Set-AeroLinkInstanceConfig -ProductRoot $siteIdentity -Label $siteClassification -Classification $siteClassification | Out-Null
-        $readSiteIdentity = Get-AeroLinkInstanceConfig -ProductRoot $siteIdentity -Mode Development
+        $readSiteIdentity = Get-AeroLinkInstanceConfig -ProductRoot $siteIdentity -Mode Site
         Assert-True ($readSiteIdentity.Classification -eq $siteClassification) "The $siteClassification classification must survive the shared instance write/read path."
     }
 
