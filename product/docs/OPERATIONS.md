@@ -86,8 +86,11 @@ A site server installation is one of the two installations planned for the compa
 mode: the release package, installer and boot supervision are now defined by the A2 source contract, but no
 company-host site is live, supported or qualified by this source change. The elevated
 `product/scripts/Install-AeroLinkServer.ps1` entry point consumes a signed release package, refuses a different
-existing release before backup/stop/switch/migration, and leaves clone-validated upgrades and rollback to the future
-A3 updater. None of this changes HOME, laptop or demo installations, which remain on their existing ports, per-user
+existing release before backup/stop/switch/migration. New retained release directories use the signed
+`<version>+<full source SHA>` identity; an existing version-only directory is reused only for an exact
+byte-identical repair. The A3 updater source contract below owns later
+clone-validated package upgrades, rollback and attended recovery; no company-host site is live, supported or qualified by this
+source change. None of this changes HOME, laptop or demo installations, which remain on their existing ports, per-user
 key ring and trust-mode development cluster.
 
 - **Service accounts.** Each installation runs as its own virtual service accounts (D2, revised):
@@ -165,6 +168,19 @@ key ring and trust-mode development cluster.
   the result failed, while any `SKIP` makes the final qualification state `INCOMPLETE - rerun elevated before
   treating host as qualified`. `-NoStart` deliberately skips service start and the host check, so it never
   establishes readiness. No site-host readiness result is claimed here.
+
+- **A3 package update boundary.** The updater admits one operation only after acquiring the installation transition
+  lease and reading a valid completed update journal; malformed or nonterminal journal state requires attended
+  recovery. It verifies the offered package and its signed source identity before retaining it, records the exact
+  prior `current` junction, creates a new `<version>+<full source SHA>` target, refuses an exact retained-target
+  collision, and uses the explicit
+  packaged `AeroLink.Api.exe` for every clone-maintenance and readiness phase. Clone upgrade, isolated evidence and
+  current-code readiness must pass before the real database is changed. After schema or semantic/data/evidence
+  mutation, the old binary is never restarted automatically; the journal retains the backup and attended recovery
+  obligation. Final readiness uses the configured full-DNS HTTPS origin with normal TLS and no redirects, and joins
+  the redacted public identity to the owned service PID/birth time, exact image, signed tree and current junction.
+  `-WhatIf` returns before package, database, service, junction or journal mutation. This is a source contract only;
+  it is not a company-host deployment or qualification result.
 
 ### D6 remote-demo retirement boundary
 
