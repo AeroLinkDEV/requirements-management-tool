@@ -58,20 +58,195 @@ function Test-AeroLinkHostServiceLogonRight {
         [AllowNull()][string[]]$AllowHolders,
         [AllowNull()][string[]]$DenyHolders,
         [Parameter(Mandatory)][string]$ServiceSid,
-        [string]$ServiceAccount
+        [string]$ServiceAccount,
+        [AllowNull()][string[]]$EffectiveTokenGroups,
+        [bool]$EffectiveTokenGroupsKnown = $false
     )
-    $allow = Test-AeroLinkServiceLogonRight -Holders $AllowHolders -ServiceSid $ServiceSid -ServiceAccount $ServiceAccount
-    $applicable = @($ServiceSid, $ServiceAccount, 'S-1-5-80-0', 'NT SERVICE\ALL SERVICES') |
-        Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
-        ForEach-Object { ([string]$_).ToUpperInvariant() }
-    $denied = @($DenyHolders | Where-Object { $applicable -contains ([string]$_).ToUpperInvariant() })
+    if (-not $EffectiveTokenGroupsKnown) {
+        return [pscustomobject]@{ Allowed = $false; Complete = $false; Detail = 'The service token group membership could not be read; logon-right qualification is incomplete.' }
+    }
+    $identifiers = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($identifier in @($EffectiveTokenGroups, $ServiceSid, $ServiceAccount)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$identifier)) { [void]$identifiers.Add(([string]$identifier).Trim()) }
+    }
+    $aliases = @{
+        'S-1-5-80-0' = 'NT SERVICE\ALL SERVICES'
+        'S-1-5-6'    = 'SERVICE'
+        'S-1-5-11'   = 'AUTHENTICATED USERS'
+        'S-1-1-0'    = 'EVERYONE'
+    }
+    foreach ($sid in @($EffectiveTokenGroups)) {
+        if ($aliases.ContainsKey([string]$sid)) { [void]$identifiers.Add($aliases[[string]$sid]) }
+    }
+    $normalized = @($identifiers | ForEach-Object { ([string]$_).ToUpperInvariant() })
+    $denied = @($DenyHolders | Where-Object { $normalized -contains ([string]$_.Trim().ToUpperInvariant()) })
     if ($denied.Count -gt 0) {
         return [pscustomobject]@{
             Allowed = $false
+            Complete = $true
             Detail = "SeDenyServiceLogonRight overrides the allow right for $($denied -join ', '); the service would fail to start with error 1069."
         }
     }
-    return $allow
+    $allowed = $null -eq $AllowHolders -or @($AllowHolders | Where-Object { $normalized -contains ([string]$_.Trim().ToUpperInvariant()) }).Count -gt 0
+    return [pscustomobject]@{ Allowed = $allowed; Complete = $true; Detail = $(if ($allowed) { 'SeServiceLogonRight includes the service token or one of its effective groups.' } else { "SeServiceLogonRight names no member of the observed service token; holders: $($AllowHolders -join ', ')" }) }
+}
+function Get-AeroLinkHostProcessTokenGroupSids {
+    <# Read the actual groups of a running service process; failure is an incomplete qualification, never an allow. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$ProcessId)
+    try {
+        if ($ProcessId -le 0) { throw 'the service has no running process ID' }
+        if (-not ('AeroLink.HostTokenV1.Native' -as [type])) {
+            Add-Type -TypeDefinition @"
+using System;
+using System.ComponentModel;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+namespace AeroLink.HostTokenV1 {
+    public static class Native {
+        [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+        [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int id);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr info, int length, out int returned);
+        [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr text);
+        [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr value);
+        [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr value);
+        public static string[] Groups(int processId) {
+            IntPtr process = OpenProcess(0x1000, false, processId);
+            if (process == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+            IntPtr token = IntPtr.Zero, buffer = IntPtr.Zero;
+            try {
+                if (!OpenProcessToken(process, 0x0008, out token)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                int needed;
+                GetTokenInformation(token, 2, IntPtr.Zero, 0, out needed);
+                if (needed <= 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+                buffer = Marshal.AllocHGlobal(needed);
+                if (!GetTokenInformation(token, 2, buffer, needed, out needed)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                int count = Marshal.ReadInt32(buffer), offset = IntPtr.Size, entry = Marshal.SizeOf(typeof(SidAndAttributes));
+                var result = new List<string>();
+                for (int i = 0; i < count; i++) {
+                    IntPtr sid = Marshal.ReadIntPtr(buffer, offset + i * entry);
+                    IntPtr text;
+                    if (!ConvertSidToStringSidW(sid, out text)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    try { result.Add(Marshal.PtrToStringUni(text)); } finally { LocalFree(text); }
+                }
+                return result.ToArray();
+            } finally {
+                if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+                if (token != IntPtr.Zero) CloseHandle(token);
+                CloseHandle(process);
+            }
+        }
+    }
+}
+"@
+        }
+        $groups = @([AeroLink.HostTokenV1.Native]::Groups($ProcessId))
+        return [pscustomobject]@{ Known = $true; Groups = $groups; Detail = "read $($groups.Count) effective token group(s)" }
+    }
+    catch { return [pscustomobject]@{ Known = $false; Groups = @(); Detail = $_.Exception.Message } }
+}
+
+function Get-AeroLinkHostAclRuleKey {
+    param([Parameter(Mandatory)]$Rule)
+    '{0}|{1}|{2}|{3}|{4}|{5}' -f $Rule.IdentityReference.Value, [int]$Rule.FileSystemRights, [int]$Rule.AccessControlType,
+        [int]$Rule.InheritanceFlags, [int]$Rule.PropagationFlags, [bool]$Rule.IsInherited
+}
+
+function Test-AeroLinkHostExactProtectedDacl {
+    <# The DACL is a small exact set; any extra allow or deny, inherited rule, or changed rights fails closed. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Acl, [Parameter(Mandatory)][object[]]$ExpectedRules)
+    $actual = @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { Get-AeroLinkHostAclRuleKey $_ } | Sort-Object)
+    $expected = @($ExpectedRules | ForEach-Object {
+        '{0}|{1}|{2}|{3}|{4}|{5}' -f $_.Sid, [int]$_.Rights, [int]$_.Type, [int]$_.Inheritance, [int]$_.Propagation, [bool]$_.Inherited
+    } | Sort-Object)
+    if (-not $Acl.AreAccessRulesProtected) { return [pscustomobject]@{ Passed = $false; Detail = 'DACL inherits permissions.' } }
+    if (($actual -join ';') -ne ($expected -join ';')) {
+        return [pscustomobject]@{ Passed = $false; Detail = "DACL is not the exact protected set; expected '$($expected -join ';')', observed '$($actual -join ';')'." }
+    }
+    return [pscustomobject]@{ Passed = $true; Detail = 'protected DACL exactly matches the installation boundary' }
+}
+
+function Test-AeroLinkHostPostgresDataRootArgument {
+    param([AllowNull()][string]$CommandLine, [Parameter(Mandatory)][string]$DataRoot)
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $false }
+    $expected = [IO.Path]::GetFullPath($DataRoot).TrimEnd('\')
+    foreach ($match in [regex]::Matches($CommandLine, '(?i)(?:^|\s)(?:-D|--pgdata)(?:=|\s+)(?:"(?<quoted>[^"]+)"|(?<bare>[^\s]+))')) {
+        $candidate = if ($match.Groups['quoted'].Success) { $match.Groups['quoted'].Value } else { $match.Groups['bare'].Value }
+        try { if ([string]::Equals([IO.Path]::GetFullPath($candidate).TrimEnd('\'), $expected, [StringComparison]::OrdinalIgnoreCase)) { return $true } } catch { }
+    }
+    return $false
+}
+
+function Test-AeroLinkHostPostgresListenerOwnership {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$ListenerProcess,
+        [Parameter(Mandatory)][int]$ServiceProcessId,
+        [Parameter(Mandatory)][string]$InstalledPostgresExecutable,
+        [Parameter(Mandatory)][string]$DataRoot,
+        [Parameter(Mandatory)][object[]]$ProcessTable
+    )
+    if ($ServiceProcessId -le 0) { return [pscustomobject]@{ Passed = $false; Detail = 'the declared PostgreSQL service has no process ID' } }
+    if (-not $ListenerProcess.ExecutablePath) { return [pscustomobject]@{ Passed = $false; Detail = 'the listener executable path could not be read' } }
+    try { $actualExe = [IO.Path]::GetFullPath([string]$ListenerProcess.ExecutablePath); $expectedExe = [IO.Path]::GetFullPath($InstalledPostgresExecutable) } catch { return [pscustomobject]@{ Passed = $false; Detail = $_.Exception.Message } }
+    if (-not [string]::Equals($actualExe, $expectedExe, [StringComparison]::OrdinalIgnoreCase)) { return [pscustomobject]@{ Passed = $false; Detail = "listener executable '$actualExe' is not the installed postgres.exe '$expectedExe'" } }
+    if (-not (Test-AeroLinkHostPostgresDataRootArgument -CommandLine ([string]$ListenerProcess.CommandLine) -DataRoot $DataRoot)) { return [pscustomobject]@{ Passed = $false; Detail = 'listener command line has no exact -D/--pgdata argument for the declared data root' } }
+    $records = @{}
+    foreach ($record in $ProcessTable) { if ([int]$record.ProcessId -gt 0) { $records[[int]$record.ProcessId] = $record } }
+    $seen = New-Object 'System.Collections.Generic.HashSet[int]'
+    $current = $ListenerProcess
+    for ($i = 0; $i -lt 64; $i++) {
+        $currentPid = [int]$current.ProcessId
+        if (-not $seen.Add($currentPid)) { return [pscustomobject]@{ Passed = $false; Detail = 'listener process ancestry contains a cycle' } }
+        $parentPid = [int]$current.ParentProcessId
+        if ($currentPid -eq $ServiceProcessId -or $parentPid -eq $ServiceProcessId) { return [pscustomobject]@{ Passed = $true; Detail = "listener is postgres.exe for data root $DataRoot and descends from service PID $ServiceProcessId" } }
+        if ($parentPid -le 0 -or -not $records.ContainsKey($parentPid)) { return [pscustomobject]@{ Passed = $false; Detail = "listener ancestry cannot be verified to service PID $ServiceProcessId" } }
+        $current = $records[$parentPid]
+    }
+    return [pscustomobject]@{ Passed = $false; Detail = 'listener process ancestry exceeded the verification limit' }
+}
+function Test-AeroLinkHostVerifiedBackup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$BackupRoot,
+        [Parameter(Mandatory)][string]$LogPath,
+        [Parameter(Mandatory)][int]$WarningHours,
+        [datetime]$Now = (Get-Date)
+    )
+    $archives = @(Get-ChildItem -LiteralPath $BackupRoot -Filter 'aerolink-*.zip' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+    if ($archives.Count -eq 0) { return [pscustomobject]@{ Passed = $false; Fresh = $false; Detail = "no verified backup in $BackupRoot" } }
+    $verificationLines = if (Test-Path -LiteralPath $LogPath -PathType Leaf) { @(Get-Content -LiteralPath $LogPath -ErrorAction Stop) } else { @() }
+    $verified = $null
+    foreach ($archive in $archives) {
+        $sidecarPath = "$($archive.FullName).sha256"
+        if (-not (Test-Path -LiteralPath $sidecarPath -PathType Leaf)) { continue }
+        $sidecar = (Get-Content -LiteralPath $sidecarPath -Raw).Trim()
+        if ($sidecar -notmatch '^\s*(?<hash>[0-9a-fA-F]{64})\s+(?<name>\S+)\s*$') { continue }
+        $sidecarHash = $Matches.hash
+        $sidecarName = $Matches.name
+        if ($sidecarName -ne $archive.Name) { continue }
+        $actualHash = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
+        if (-not [string]::Equals($sidecarHash, $actualHash, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        foreach ($line in $verificationLines) {
+            if ($line -match '^\[(?<when>[^\]]+)\]\s+Scheduled backup verified successfully:\s+(?<path>.+)$') {
+                try { $verifiedAt = [DateTime]::Parse($Matches.when) } catch { continue }
+                if ([IO.Path]::GetFullPath($Matches.path) -eq $archive.FullName -and $verifiedAt -ge $archive.LastWriteTime.AddMinutes(-1)) {
+                    $verified = [pscustomobject]@{ Archive = $archive; VerifiedAt = $verifiedAt }
+                    break
+                }
+            }
+        }
+        if ($null -ne $verified) { break }
+    }
+    if (-not $verified) { return [pscustomobject]@{ Passed = $false; Fresh = $false; Detail = "no backup has both a matching SHA-256 sidecar and scheduled verification evidence in $LogPath" } }
+    $hours = [int](($Now - $verified.Archive.LastWriteTime).TotalHours)
+    return [pscustomobject]@{
+        Passed = $true
+        Fresh = $hours -le $WarningHours
+        Detail = "$($verified.Archive.Name), $hours hour(s) old; verified $($verified.VerifiedAt.ToString('o'))"
+    }
 }
 $elevated = (New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -131,11 +306,13 @@ foreach ($installationName in $Name) {
             $sid = (New-Object Security.Principal.NTAccount([string]$service.StartName)).Translate([Security.Principal.SecurityIdentifier]).Value
             $allowHolders = if ($userRights) { $userRights.Allow } else { $null }
             $denyHolders = if ($userRights) { $userRights.Deny } else { $null }
-            $logon = Test-AeroLinkHostServiceLogonRight -AllowHolders $allowHolders -DenyHolders $denyHolders -ServiceSid $sid -ServiceAccount ([string]$service.StartName)
+            $tokenGroups = if ($service.State -eq 'Running') { Get-AeroLinkHostProcessTokenGroupSids -ProcessId ([int]$service.ProcessId) } else { [pscustomobject]@{ Known = $false; Groups = @(); Detail = 'the service is not running' } }
+            $logon = Test-AeroLinkHostServiceLogonRight -AllowHolders $allowHolders -DenyHolders $denyHolders -ServiceSid $sid -ServiceAccount ([string]$service.StartName) -EffectiveTokenGroups $tokenGroups.Groups -EffectiveTokenGroupsKnown:$tokenGroups.Known
             if ($sid -ne $pair[1]) { Report $scope "Service $($pair[0])" 'FAIL' "runs as $($service.StartName) ($sid), declared $($pair[1])" }
-            elseif (-not $logon.Allowed) { Report $scope "Service $($pair[0])" 'FAIL' $logon.Detail }
             elseif ($service.State -ne 'Running') { Report $scope "Service $($pair[0])" 'FAIL' "$($service.State) (start mode $($service.StartMode)); the installation is not ready" }
-            else { Report $scope "Service $($pair[0])" 'PASS' "running as $($service.StartName)" }
+            elseif (-not $logon.Complete) { Report $scope "Service $($pair[0])" 'SKIP' $tokenGroups.Detail }
+            elseif (-not $logon.Allowed) { Report $scope "Service $($pair[0])" 'FAIL' $logon.Detail }
+            else { Report $scope "Service $($pair[0])" 'PASS' "running as $($service.StartName) with observed service-token groups" }
         }
     }
     $apiService = $script:apiService
@@ -177,23 +354,13 @@ foreach ($installationName in $Name) {
         try {
             $keyPath = Get-AeroLinkCertificatePrivateKeyFile -Certificate $certificate
             $keyAcl = Get-Acl -LiteralPath $keyPath
-            $keyRules = @($keyAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
             $apiSid = $site.RunAsSid.ToUpperInvariant()
-            $apiAllow = @($keyRules | Where-Object {
-                $_.IdentityReference.Value.ToUpperInvariant() -eq $apiSid -and
-                $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-                (([int]$_.FileSystemRights -band [int][Security.AccessControl.FileSystemRights]::Read) -ne 0)
-            })
-            $apiDeny = @($keyRules | Where-Object { $_.IdentityReference.Value.ToUpperInvariant() -eq $apiSid -and $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny })
-            $broadReaders = @($keyRules | Where-Object {
-                $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-                $_.IdentityReference.Value.ToUpperInvariant() -in @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-80-0') -and
-                (([int]$_.FileSystemRights -band [int][Security.AccessControl.FileSystemRights]::Read) -ne 0)
-            })
-            if (-not $keyAcl.AreAccessRulesProtected) { $keyAclProblems.Add('private-key ACL inherits permissions') }
-            if ($apiAllow.Count -eq 0) { $keyAclProblems.Add("private-key ACL has no explicit read grant for $($site.RunAsAccount)") }
-            if ($apiDeny.Count -gt 0) { $keyAclProblems.Add("private-key ACL denies $($site.RunAsAccount)") }
-            if ($broadReaders.Count -gt 0) { $keyAclProblems.Add('private-key ACL grants read access to a broad principal') }
+            $keyAclCheck = Test-AeroLinkHostExactProtectedDacl -Acl $keyAcl -ExpectedRules @(
+                @{ Sid = $apiSid; Rights = ([Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Synchronize); Type = [Security.AccessControl.AccessControlType]::Allow; Inheritance = [Security.AccessControl.InheritanceFlags]::None; Propagation = [Security.AccessControl.PropagationFlags]::None; Inherited = $false }
+                @{ Sid = 'S-1-5-18'; Rights = [Security.AccessControl.FileSystemRights]::FullControl; Type = [Security.AccessControl.AccessControlType]::Allow; Inheritance = [Security.AccessControl.InheritanceFlags]::None; Propagation = [Security.AccessControl.PropagationFlags]::None; Inherited = $false }
+                @{ Sid = 'S-1-5-32-544'; Rights = [Security.AccessControl.FileSystemRights]::FullControl; Type = [Security.AccessControl.AccessControlType]::Allow; Inheritance = [Security.AccessControl.InheritanceFlags]::None; Propagation = [Security.AccessControl.PropagationFlags]::None; Inherited = $false }
+            )
+            if (-not $keyAclCheck.Passed) { $keyAclProblems.Add($keyAclCheck.Detail) }
         } catch { $keyAclProblems.Add($_.Exception.Message) }
         if (-not (Test-AeroLinkHostNameCovered -HostName $site.PublicHostName -DnsNames $names)) { Report $scope 'Certificate' 'FAIL' "$thumbprint does not name $($site.PublicHostName) in its SAN ($($names -join ', '))" }
         elseif (-not $chainOk) { Report $scope 'Certificate' 'FAIL' "$thumbprint does not chain: $(@($chain.ChainStatus | ForEach-Object { $_.Status }) -join ', ')" }
@@ -236,53 +403,47 @@ foreach ($installationName in $Name) {
         $nonLoopback = @($listeners | Where-Object { $_.LocalAddress -ne '127.0.0.1' })
         $loopback = @($listeners | Where-Object { $_.LocalAddress -eq '127.0.0.1' })
         $dataRoot = [IO.Path]::GetFullPath($paths.PostgresData).TrimEnd('\')
-        $ownedListeners = @()
+        $installedPostgres = Join-Path $paths.PostgresBin 'postgres.exe'
+        $ownershipResults = New-Object System.Collections.Generic.List[object]
         foreach ($listener in $loopback) {
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
-            if ($process -and [string]$process.CommandLine -match [regex]::Escape($dataRoot)) { $ownedListeners += $listener }
+            $processChain = New-Object System.Collections.Generic.List[object]
+            $nextPid = [int]$listener.OwningProcess
+            for ($depth = 0; $depth -lt 64 -and $nextPid -gt 0; $depth++) {
+                $process = Get-CimInstance Win32_Process -Filter "ProcessId=$nextPid" -ErrorAction SilentlyContinue
+                if (-not $process) { break }
+                $processChain.Add($process)
+                $nextPid = [int]$process.ParentProcessId
+            }
+            $listenerProcess = @($processChain | Where-Object { [int]$_.ProcessId -eq [int]$listener.OwningProcess }) | Select-Object -First 1
+            if (-not $listenerProcess) {
+                $ownershipResults.Add([pscustomobject]@{ Passed = $false; Detail = "listener PID $($listener.OwningProcess) could not be read" })
+            }
+            else {
+                $ownershipResults.Add((Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess $listenerProcess -ServiceProcessId ([int]$pgService.ProcessId) -InstalledPostgresExecutable $installedPostgres -DataRoot $dataRoot -ProcessTable @($processChain)))
+            }
         }
         if (-not $hba.Passed) { Report $scope 'PostgreSQL' 'FAIL' "pg_hba is not loopback SCRAM only: $(@($hba.WeakRules + $hba.NonLoopbackRules | ForEach-Object { $_.Line } | Sort-Object -Unique) -join ' | ')" }
         elseif ($listen -ne '127.0.0.1' -or [string]$pgPort -ne [string]$site.PostgresPort) { Report $scope 'PostgreSQL' 'FAIL' "listen_addresses '$listen', port $pgPort; expected 127.0.0.1:$($site.PostgresPort)" }
         elseif ($loopback.Count -eq 0) { Report $scope 'PostgreSQL' 'FAIL' "nothing listens on 127.0.0.1:$($site.PostgresPort); PostgreSQL is not ready" }
         elseif ($nonLoopback.Count -gt 0) { Report $scope 'PostgreSQL' 'FAIL' "PostgreSQL port $($site.PostgresPort) also listens on $(@($nonLoopback | ForEach-Object { $_.LocalAddress }) -join ', ')" }
-        elseif ($ownedListeners.Count -eq 0) { Report $scope 'PostgreSQL' 'FAIL' "127.0.0.1:$($site.PostgresPort) is not owned by a process for $dataRoot" }
+        elseif ($ownershipResults.Count -ne $loopback.Count -or @($ownershipResults | Where-Object { -not $_.Passed }).Count -gt 0) { Report $scope 'PostgreSQL' 'FAIL' "127.0.0.1:$($site.PostgresPort) is not owned by installed postgres.exe through the declared service for ${dataRoot}: $(@($ownershipResults | Where-Object { -not $_.Passed } | ForEach-Object { $_.Detail }) -join '; ')" }
         else { Report $scope 'PostgreSQL' 'PASS' "127.0.0.1:$($site.PostgresPort), scram-sha-256 only, no trust" }
     }
     Try-Check $scope 'Key ring' {
-        $access = Get-AeroLinkDirectoryAccessBySid -Path $site.KeyRingPath
-        $apiWrite = @($access.Rules | Where-Object { $_.Sid -eq $site.RunAsSid -and $_.Allow -and $_.CanWrite })
-        $broad = @($access.Rules | Where-Object { $_.Allow -and $_.Sid -in @('S-1-5-32-545', 'S-1-5-11', 'S-1-1-0') })
-        if (-not $access.Protected -or $apiWrite.Count -eq 0 -or $broad.Count -gt 0) { Report $scope 'Key ring' 'FAIL' "protected=$($access.Protected), API write=$($apiWrite.Count -gt 0), broad grants=$($broad.Count)" }
-        else { Report $scope 'Key ring' 'PASS' 'protected, writable by the API account only' }
+        $keyRingAcl = Get-Acl -LiteralPath $site.KeyRingPath
+        $keyRingCheck = Test-AeroLinkHostExactProtectedDacl -Acl $keyRingAcl -ExpectedRules @(
+            @{ Sid = $site.RunAsSid.ToUpperInvariant(); Rights = ([Security.AccessControl.FileSystemRights]::Modify -bor [Security.AccessControl.FileSystemRights]::Synchronize); Type = [Security.AccessControl.AccessControlType]::Allow; Inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'; Propagation = [Security.AccessControl.PropagationFlags]::None; Inherited = $false }
+            @{ Sid = 'S-1-5-18'; Rights = [Security.AccessControl.FileSystemRights]::FullControl; Type = [Security.AccessControl.AccessControlType]::Allow; Inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'; Propagation = [Security.AccessControl.PropagationFlags]::None; Inherited = $false }
+            @{ Sid = 'S-1-5-32-544'; Rights = [Security.AccessControl.FileSystemRights]::FullControl; Type = [Security.AccessControl.AccessControlType]::Allow; Inheritance = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'; Propagation = [Security.AccessControl.PropagationFlags]::None; Inherited = $false }
+        )
+        if (-not $keyRingCheck.Passed) { Report $scope 'Key ring' 'FAIL' $keyRingCheck.Detail }
+        else { Report $scope 'Key ring' 'PASS' 'protected exact DACL: API modify, SYSTEM and Administrators full control' }
     }
     Try-Check $scope 'Backup age' {
-        $archives = @(Get-ChildItem -LiteralPath $paths.Backups -Filter 'aerolink-*.zip' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
-        if ($archives.Count -eq 0) { Report $scope 'Backup age' 'WARN' "no backup in $($paths.Backups) yet"; return }
-        $logPath = Join-Path $paths.Logs 'scheduled-backup.log'
-        $verificationLines = if (Test-Path -LiteralPath $logPath -PathType Leaf) { @(Get-Content -LiteralPath $logPath -ErrorAction Stop) } else { @() }
-        $verified = $null
-        foreach ($archive in $archives) {
-            $sidecarPath = "$($archive.FullName).sha256"
-            if (-not (Test-Path -LiteralPath $sidecarPath -PathType Leaf)) { continue }
-            $sidecar = (Get-Content -LiteralPath $sidecarPath -Raw).Trim()
-            if ($sidecar -notmatch '^\s*(?<hash>[0-9a-fA-F]{64})\s+(?<name>\S+)\s*$') { continue }
-            $sidecarHash = $Matches.hash
-            $sidecarName = $Matches.name
-            if ($sidecarName -ne $archive.Name) { continue }
-            $actualHash = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
-            if (-not [string]::Equals($sidecarHash, $actualHash, [StringComparison]::OrdinalIgnoreCase)) { continue }
-            $verifiedAt = $null
-            foreach ($line in $verificationLines) {
-                if ($line -match '^\[(?<when>[^\]]+)\]\s+Scheduled backup verified successfully:\s+(?<path>.+)$') {
-                    try { $when = [DateTime]::Parse($Matches.when) } catch { continue }
-                    if ([IO.Path]::GetFullPath($Matches.path) -eq $archive.FullName -and $when -ge $archive.LastWriteTime.AddMinutes(-1)) { $verifiedAt = $when; break }
-                }
-            }
-            if ($null -ne $verifiedAt) { $verified = [pscustomobject]@{ Archive = $archive; VerifiedAt = $verifiedAt }; break }
-        }
-        if (-not $verified) { Report $scope 'Backup age' 'FAIL' "no backup has both a matching SHA-256 sidecar and scheduled verification evidence in $logPath"; return }
-        $hours = [int]((Get-Date) - $verified.Archive.LastWriteTime).TotalHours
-        Report $scope 'Backup age' $(if ($hours -le $BackupWarningHours) { 'PASS' } else { 'FAIL' }) "$($verified.Archive.Name), $hours hour(s) old; verified $($verified.VerifiedAt.ToString('o'))"
+        $backup = Test-AeroLinkHostVerifiedBackup -BackupRoot $paths.Backups -LogPath (Join-Path $paths.Logs 'scheduled-backup.log') -WarningHours $BackupWarningHours
+        if (-not $backup.Passed) { Report $scope 'Backup age' 'FAIL' $backup.Detail }
+        elseif (-not $backup.Fresh) { Report $scope 'Backup age' 'FAIL' $backup.Detail }
+        else { Report $scope 'Backup age' 'PASS' $backup.Detail }
     }
     Try-Check $scope 'Disk' {
         $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($site.InstallationRoot))

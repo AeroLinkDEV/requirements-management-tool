@@ -679,6 +679,87 @@ try {
     Assert-True (-not (Test-AeroLinkServiceLogonRight -Holders @('S-1-5-20') -ServiceSid $fakeSite.RunAsSid -ServiceAccount 'NT SERVICE\AeroLink-Production').Allowed) 'A policy without ALL SERVICES or the account predicts error 1069.'
     Assert-True ($null -eq (Get-AeroLinkUserRightSids -Text "[Privilege Rights]`r`nSeBatchLogonRight = *S-1-5-32-544`r`n" -Right 'SeServiceLogonRight') -and
         (Test-AeroLinkServiceLogonRight -Holders $null -ServiceSid $fakeSite.RunAsSid).Allowed) 'No policy for the right means the Windows default, which admits services.'
+
+    # --- 14. Host readiness false-ready contracts: token groups, exact DACLs, listener ancestry, backups ---
+    # The old helper-boundary fail-before is retained externally at host-move\hostcheck-edf4a0fe-evidence-20261015\probe-fail-before-helper-boundary-edf4a0fe.txt.
+    $hostCheckPath = Join-Path $PSScriptRoot 'Test-AeroLinkHost.ps1'
+    $hostCheckTokens = $null; $hostCheckParseErrors = $null
+    $hostCheckAst = [System.Management.Automation.Language.Parser]::ParseFile($hostCheckPath, [ref]$hostCheckTokens, [ref]$hostCheckParseErrors)
+    Assert-True (@($hostCheckParseErrors).Count -eq 0) 'HostCheck source must parse for its focused readiness contracts.'
+    foreach ($helperName in @('Test-AeroLinkHostServiceLogonRight', 'Get-AeroLinkHostAclRuleKey', 'Test-AeroLinkHostExactProtectedDacl',
+                              'Test-AeroLinkHostPostgresDataRootArgument', 'Test-AeroLinkHostPostgresListenerOwnership', 'Test-AeroLinkHostVerifiedBackup')) {
+        $helperAst = $hostCheckAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $helperName }, $true)
+        Assert-True ($null -ne $helperAst) "HostCheck helper $helperName must remain source-visible for its contract fixture."
+        if ($helperAst) { . ([scriptblock]::Create($helperAst.Extent.Text)) }
+    }
+    function New-HostCheckFixtureAclRule {
+        param([string]$Sid, [int]$Rights, [object]$Type, [object]$Inheritance, [object]$Propagation, [bool]$Inherited)
+        [pscustomobject]@{ IdentityReference = [pscustomobject]@{ Value = $Sid }; FileSystemRights = $Rights; AccessControlType = $Type; InheritanceFlags = $Inheritance; PropagationFlags = $Propagation; IsInherited = $Inherited }
+    }
+    function New-HostCheckFixtureAcl {
+        param([bool]$Protected, [object[]]$Rules)
+        $acl = [pscustomobject]@{ AreAccessRulesProtected = $Protected; Rules = $Rules }
+        $acl | Add-Member -MemberType ScriptMethod -Name GetAccessRules -Value { param($IncludeExplicit, $IncludeInherited, $TargetType) return $this.Rules }
+        return $acl
+    }
+    $tokenGroups = @('S-1-5-80-0', 'S-1-5-6', 'S-1-5-11', 'S-1-1-0')
+    foreach ($denyGroup in $tokenGroups) {
+        $decision = Test-AeroLinkHostServiceLogonRight -AllowHolders @('S-1-5-80-0') -DenyHolders @($denyGroup) -ServiceSid 'S-1-5-80-1' -ServiceAccount 'NT SERVICE\AeroLink-Production' -EffectiveTokenGroups $tokenGroups -EffectiveTokenGroupsKnown:$true
+        Assert-True (-not $decision.Allowed -and $decision.Complete) "Applicable deny group $denyGroup must override an allowed service right."
+    }
+    $unknown = Test-AeroLinkHostServiceLogonRight -AllowHolders $null -DenyHolders @() -ServiceSid 'S-1-5-80-1' -EffectiveTokenGroups @() -EffectiveTokenGroupsKnown:$false
+    Assert-True (-not $unknown.Allowed -and -not $unknown.Complete) 'Unknown effective token membership must remain incomplete, never an allow.'
+
+    $none = [Security.AccessControl.InheritanceFlags]::None
+    $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $noPropagation = [Security.AccessControl.PropagationFlags]::None
+    $allow = [Security.AccessControl.AccessControlType]::Allow
+    $deny = [Security.AccessControl.AccessControlType]::Deny
+    $read = [int]([Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Synchronize)
+    $modify = [int]([Security.AccessControl.FileSystemRights]::Modify -bor [Security.AccessControl.FileSystemRights]::Synchronize)
+    $full = [int][Security.AccessControl.FileSystemRights]::FullControl
+    $certExpected = @(
+        @{ Sid = 'S-1-5-80-1'; Rights = $read; Type = $allow; Inheritance = $none; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-18'; Rights = $full; Type = $allow; Inheritance = $none; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-32-544'; Rights = $full; Type = $allow; Inheritance = $none; Propagation = $noPropagation; Inherited = $false }
+    )
+    $certRules = @($certExpected | ForEach-Object { New-HostCheckFixtureAclRule $_.Sid $_.Rights $_.Type $_.Inheritance $_.Propagation $_.Inherited })
+    Assert-True ((Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true $certRules) -ExpectedRules $certExpected).Passed) 'The exact protected certificate-key DACL must pass.'
+    Assert-True (-not (Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true @($certRules + (New-HostCheckFixtureAclRule 'S-1-5-6' $read $allow $none $noPropagation $false))) -ExpectedRules $certExpected).Passed) 'A wildcard service allow on the certificate key must fail.'
+    Assert-True (-not (Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true @($certRules + (New-HostCheckFixtureAclRule 'S-1-5-11' $read $deny $none $noPropagation $false))) -ExpectedRules $certExpected).Passed) 'A broad certificate-key deny must fail.'
+    $keyExpected = @(
+        @{ Sid = 'S-1-5-80-1'; Rights = $modify; Type = $allow; Inheritance = $inherit; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-18'; Rights = $full; Type = $allow; Inheritance = $inherit; Propagation = $noPropagation; Inherited = $false }
+        @{ Sid = 'S-1-5-32-544'; Rights = $full; Type = $allow; Inheritance = $inherit; Propagation = $noPropagation; Inherited = $false }
+    )
+    $keyRules = @($keyExpected | ForEach-Object { New-HostCheckFixtureAclRule $_.Sid $_.Rights $_.Type $_.Inheritance $_.Propagation $_.Inherited })
+    Assert-True ((Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true $keyRules) -ExpectedRules $keyExpected).Passed) 'The exact protected key-ring DACL must pass.'
+    Assert-True (-not (Test-AeroLinkHostExactProtectedDacl -Acl (New-HostCheckFixtureAcl $true @($keyRules + (New-HostCheckFixtureAclRule 'S-1-5-80-99' $modify $allow $inherit $noPropagation $false))) -ExpectedRules $keyExpected).Passed) 'A neighboring service allow on the key ring must fail.'
+
+    $postgresExe = 'C:\AeroLink\Production\postgresql\pgsql\bin\postgres.exe'; $dataRoot = 'C:\AeroLink\Production\pgdata'
+    $goodListener = [pscustomobject]@{ ProcessId = 100; ParentProcessId = 200; ExecutablePath = $postgresExe; CommandLine = '"' + $postgresExe + '" -D "' + $dataRoot + '"' }
+    $serviceProcess = [pscustomobject]@{ ProcessId = 200; ParentProcessId = 4; ExecutablePath = 'C:\AeroLink\Production\postgresql\pgsql\bin\pg_ctl.exe'; CommandLine = 'pg_ctl.exe runservice -D "' + $dataRoot + '"' }
+    $goodOwnership = Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess $goodListener -ServiceProcessId 200 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)
+    Assert-True $goodOwnership.Passed 'A postgres.exe listener with exact data root and declared service ancestry must pass.'
+    Assert-True (-not (Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess $goodListener -ServiceProcessId 300 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)).Passed) 'Listener ancestry that does not reach the declared service must fail.'
+    Assert-True (-not (Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess ([pscustomobject]@{ ProcessId = 100; ParentProcessId = 200; ExecutablePath = $postgresExe; CommandLine = 'postgres.exe -D "C:\AeroLink\Production\pgdata-copy"' }) -ServiceProcessId 200 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)).Passed) 'A data-root prefix must not satisfy ownership.'
+    Assert-True (-not (Test-AeroLinkHostPostgresListenerOwnership -ListenerProcess ([pscustomobject]@{ ProcessId = 100; ParentProcessId = 200; ExecutablePath = 'C:\Temp\postgres.exe'; CommandLine = 'postgres.exe -D "' + $dataRoot + '"' }) -ServiceProcessId 200 -InstalledPostgresExecutable $postgresExe -DataRoot $dataRoot -ProcessTable @($goodListener, $serviceProcess)).Passed) 'A same-named postgres.exe outside the installed bin must fail.'
+
+    $hostFixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-hostcheck-contract-' + [Guid]::NewGuid().ToString('N'))
+    $hostBackupRoot = Join-Path $hostFixtureRoot 'backups'; $hostLogPath = Join-Path $hostFixtureRoot 'logs\scheduled-backup.log'; $fixtures.Add($hostFixtureRoot)
+    New-Item -ItemType Directory -Path $hostBackupRoot,(Split-Path $hostLogPath) -Force | Out-Null
+    $absent = Test-AeroLinkHostVerifiedBackup -BackupRoot $hostBackupRoot -LogPath $hostLogPath -WarningHours 30 -Now ([datetime]'2026-01-03T00:00:00')
+    Assert-True (-not $absent.Passed) 'An absent backup must fail verification.'
+    $unverifiedArchive = Join-Path $hostBackupRoot 'aerolink-unverified.zip'; Set-Content -LiteralPath $unverifiedArchive -Value 'unverified' -Encoding ASCII
+    $unverified = Test-AeroLinkHostVerifiedBackup -BackupRoot $hostBackupRoot -LogPath $hostLogPath -WarningHours 30 -Now ([datetime]'2026-01-03T00:00:00')
+    Assert-True (-not $unverified.Passed) 'An archive without matching sidecar and scheduled verification must fail.'
+    $staleArchive = Join-Path $hostBackupRoot 'aerolink-stale.zip'; Set-Content -LiteralPath $staleArchive -Value 'stale' -Encoding ASCII
+    $staleHash = (Get-FileHash -LiteralPath $staleArchive -Algorithm SHA256).Hash
+    "$staleHash  aerolink-stale.zip" | Set-Content -LiteralPath "$staleArchive.sha256" -Encoding ASCII
+    (Get-Item -LiteralPath $staleArchive).LastWriteTime = [datetime]'2026-01-01T00:00:00'
+    "[2026-01-01T00:00:00] Scheduled backup verified successfully: $staleArchive" | Set-Content -LiteralPath $hostLogPath -Encoding UTF8
+    $stale = Test-AeroLinkHostVerifiedBackup -BackupRoot $hostBackupRoot -LogPath $hostLogPath -WarningHours 30 -Now ([datetime]'2026-01-03T00:00:00')
+    Assert-True ($stale.Passed -and -not $stale.Fresh) 'A verified archive older than the freshness bound must fail freshness.'
     $sanKey = [Security.Cryptography.RSA]::Create(2048)
     try {
         $request = New-Object Security.Cryptography.X509Certificates.CertificateRequest('CN=not-the-host.example.test', $sanKey, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
