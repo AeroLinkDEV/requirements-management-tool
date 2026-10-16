@@ -498,7 +498,10 @@ try {
         '-ContinuityOperationId',"$continuityOperationId")
     $cleanupProcess = Start-Process -FilePath $cleanupEngine -ArgumentList $cleanupArguments -RedirectStandardOutput $cleanupStdout -RedirectStandardError $cleanupStderr -WindowStyle Hidden -PassThru
     [void]$cleanupProcess.Handle
-    $cleanupProcess.WaitForExit()
+    if (-not $cleanupProcess.WaitForExit(120000)) {
+        try { Stop-Process -Id $cleanupProcess.Id -Force -ErrorAction Stop; [void]$cleanupProcess.WaitForExit(10000) } catch { }
+        throw 'The real continuity cleanup authority exceeded its bounded test wait and was terminated as the directly owned child.'
+    }
     if ($cleanupProcess.ExitCode -ne 0) { throw "The real continuity cleanup authority failed with exit code $($cleanupProcess.ExitCode)." }
     $cleanupJournal = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $continuityJournal -Raw)
     if ([string]$cleanupJournal.Status -ne 'cleaned' -or [string]$cleanupJournal.Phase -ne 'cleanup-complete') { throw 'The real continuity cleanup authority did not persist a cleaned terminal journal.' }
