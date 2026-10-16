@@ -26,7 +26,7 @@ async function openImport(page: Page, request: APIRequestContext) {
   await panel.getByLabel('Map Closed').selectOption('ClosedInSource')
   await panel.getByRole('button', { name: 'Preview again' }).click()
   await expect(panel.locator('caption')).toHaveText('1 will be created · 0 will be skipped')
-  await panel.getByLabel('Confirm with your password').fill('AeroLink!2026')
+  await panel.getByLabel('Confirm with your AeroLink password').fill('AeroLink!2026')
   return { panel, projectId: workspace.project.id }
 }
 
@@ -62,15 +62,15 @@ test(`a committed import with ${loss} can recover its original receipt after a r
   expect(await panel.getByLabel('Export file (.csv or .xlsx)').evaluate((input: HTMLInputElement) => input.files?.[0]?.name)).toBe('reviewed.csv')
   await expect(panel.getByLabel('Source system')).toHaveValue('Jira')
   await expect(panel.getByLabel('Map Closed')).toHaveValue('ClosedInSource')
-  await expect(panel.getByLabel('Confirm with your password')).toHaveValue('AeroLink!2026')
-  await panel.getByLabel('Confirm with your password').fill('wrong password')
+  await expect(panel.getByLabel('Confirm with your AeroLink password')).toHaveValue('AeroLink!2026')
+  await panel.getByLabel('Confirm with your AeroLink password').fill('wrong password')
   const rejected = page.waitForResponse(response => response.url().endsWith('/api/problem-reports/import/commit') && response.status() === 401)
   await panel.getByRole('button', { name: 'Sign and import 1 Problem Report', exact: true }).click()
   await rejected
   await expect(panel.getByRole('alert')).toHaveText('Electronic signature confirmation failed.')
   await expect(panel.getByText(/Retry this same import/)).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Preview again' })).toBeDisabled()
-  await panel.getByLabel('Confirm with your password').fill('AeroLink!2026')
+  await panel.getByLabel('Confirm with your AeroLink password').fill('AeroLink!2026')
   const completed = page.waitForResponse(response => response.url().endsWith('/api/problem-reports/import/commit') && response.status() === 200)
   await panel.getByRole('button', { name: 'Sign and import 1 Problem Report', exact: true }).click()
   await completed
