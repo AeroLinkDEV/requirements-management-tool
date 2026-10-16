@@ -22,7 +22,7 @@ internal static class ManagedDocumentAssignmentPolicy
         if (programId is null) return false;
         var account = await db.UserAccounts.AsNoTracking().SingleOrDefaultAsync(
             x => x.UserName == userName.Trim().ToLower() && x.State == AccountState.Active, ct);
-        if (account is null || account.UserName == IdentityService.SystemAdministratorUserName) return false;
+        if (account is null || account.HoldsAuthorityOverride) return false;
         var hasMembership = await db.ProgramMemberships.AsNoTracking().AnyAsync(
             x => x.UserId == account.Id && x.ProgramId == programId && x.EndedAt == null, ct);
         var delegations = await db.RoleDelegations.AsNoTracking().Where(
@@ -46,7 +46,7 @@ internal static class ManagedDocumentAssignmentPolicy
     public static async Task<bool> HasExplicitAuthorityAsync(AeroLinkDbContext db, Guid projectId,
         AuthenticatedUser actor, DateTimeOffset now, CancellationToken ct, params ProgramRole[] roles)
     {
-        if (actor.UserName == IdentityService.SystemAdministratorUserName) return false;
+        if (actor.IsAdministrator) return false;
         var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId).Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         if (programId is null) return false;
         // Position roles go through the resolver, base roles through membership. This gate read all of them
