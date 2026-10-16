@@ -3,10 +3,11 @@
     Contract coverage for the A3 site updater (#1614).
 
     Authoring gate: these tests protect the updater's phase ordering, exact current target boundary, public
-    source/instance binding and secret-free recovery journal. The regressions are package validation after a
-    pointer mutation, old-binary execution after a schema change, and a health check that proves only readiness
-    without the promoted source/installation identity. Existing release, backup and runtime-identity suites own
-    their underlying contracts; this suite injects only normal operation boundaries and uses disposable folders.
+    instance binding joined to the redacted response's owned process and signed tree, and secret-free recovery
+    journal. The regressions are package validation after a pointer mutation, old-binary execution after a schema
+    change, and a health check that proves only readiness without the promoted source/installation identity or
+    same-process evidence. Existing release, backup and runtime-identity suites own their underlying contracts;
+    this suite injects only normal operation boundaries and uses disposable folders.
 #>
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteUpdater.psm1') -Force
@@ -53,20 +54,49 @@ try {
     Assert-Throws { Get-AeroLinkSiteCurrentTarget -Layout $missingLayout } 'missing.*exact prior target' `
         'An installation without a current junction must fail closed because no exact rollback target exists.'
 
-    # Public full-DNS health owns both readiness and promoted source/instance identity.
-    $health = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('a' * 40) `
-        -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' `
+    # Public full-DNS health owns the installation identity and joins the intentionally redacted response to the
+    # exact service PID, process birth time, image, current target and signed-tree source identity.
+    $publicStarted = '2026-10-15T12:00:00.0000000Z'
+    $publicIdentity = [pscustomobject]@{
+        version = '1.0.0'; startedAtUtc = $publicStarted
+        instance = [pscustomobject]@{ id = $instanceId; classification = 'SiteProduction' }
+    }
+    $owner = [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $true; ProcessId = 1701; StartedAt = $publicStarted; ExecutablePath = (Join-Path $oldRoot 'app\AeroLink.Api.exe') }
+    $service = [pscustomobject]@{ ProcessId = 1701; State = 'Running'; PathName = '"' + $layout.ApiExecutable + '"' }
+    $ownerProbe = { param($Port) $owner }.GetNewClosure()
+    $serviceProbe = { param($Name) $service }.GetNewClosure()
+    $health = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('b' * 40) `
+        -ExpectedVersion '1.0.0' -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -Site $site `
+        -ExpectedExecutable $owner.ExecutablePath -ExpectedCurrentTarget $oldRoot `
         -ReadyProbe { param($Uri) $Uri -eq 'https://aerolink-updater.example.test:5443' } `
-        -IdentityProbe { param($Uri) [pscustomobject]@{ sourceSha = ('a' * 40); instance = [pscustomobject]@{ id = $instanceId; classification = 'SiteProduction' } } }
-    Assert-True ($health.Passed) 'A full-DNS readiness and identity match must pass.'
-    $httpHealth = Test-AeroLinkSiteUpdateHealth -BaseUri 'http://aerolink-updater.example.test:5443' -ExpectedSourceSha ('a' * 40) -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -ReadyProbe { $true } -IdentityProbe { $null }
+        -IdentityProbe { param($Uri) $publicIdentity } -ProcessOwnerProbe $ownerProbe -ServiceProbe $serviceProbe
+    Assert-True ($health.Passed) 'A full-DNS readiness and redacted identity joined to the owned service must pass.'
+    $httpHealth = Test-AeroLinkSiteUpdateHealth -BaseUri 'http://aerolink-updater.example.test:5443' -ExpectedSourceSha ('b' * 40) -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -ReadyProbe { $true } -IdentityProbe { $null }
     Assert-True (-not $httpHealth.Passed -and $httpHealth.Detail -match 'HTTPS origin') 'A substituted non-HTTPS origin must fail before readiness or identity probes.'
     Assert-Throws { Assert-AeroLinkSiteUpdatePublicHostName -PublicHostName '127.0.0.1' } 'IP address|full-DNS' 'A loopback IP must not qualify as the production HTTPS origin.'
     Assert-Throws { Assert-AeroLinkSiteUpdatePublicHostName -PublicHostName 'localhost' } 'loopback|localhost' 'A localhost name must not qualify as the production HTTPS origin.'
-    $sourceMismatch = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('a' * 40) `
-        -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -ReadyProbe { $true } `
-        -IdentityProbe { [pscustomobject]@{ sourceSha = ('c' * 40); instance = [pscustomobject]@{ id = $instanceId; classification = 'SiteProduction' } } }
-    Assert-True (-not $sourceMismatch.Passed) 'A source identity mismatch must fail even when readiness is green.'
+    $sourceMismatch = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('b' * 40) `
+        -ExpectedVersion '1.0.0' -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -Site $site `
+        -ExpectedExecutable $owner.ExecutablePath -ExpectedCurrentTarget $oldRoot -ReadyProbe { $true } `
+        -IdentityProbe { [pscustomobject]@{ sourceSha = ('c' * 40); version = '1.0.0'; startedAtUtc = $publicStarted; instance = [pscustomobject]@{ id = $instanceId; classification = 'SiteProduction' } } } `
+        -ProcessOwnerProbe $ownerProbe -ServiceProbe $serviceProbe
+    Assert-True (-not $sourceMismatch.Passed) 'An explicitly exposed source mismatch must fail even when readiness is green.'
+    $treeMismatch = Test-AeroLinkSitePublicProcessBinding -Identity $publicIdentity -Site $site -ExpectedSourceSha ('c' * 40) `
+        -ExpectedExecutable $owner.ExecutablePath -ExpectedCurrentTarget $oldRoot -ProcessOwnerProbe $ownerProbe -ServiceProbe $serviceProbe
+    Assert-True (-not $treeMismatch.Passed -and $treeMismatch.Detail -match 'current tree source') 'A signed-tree source mismatch must fail when public source is redacted.'
+    $wrongInstance = [pscustomobject]@{ version = '1.0.0'; startedAtUtc = $publicStarted; instance = [pscustomobject]@{ id = ([guid]::NewGuid().ToString()); classification = 'SiteProduction' } }
+    $wrongInstanceHealth = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('b' * 40) `
+        -ExpectedVersion '1.0.0' -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -Site $site `
+        -ExpectedExecutable $owner.ExecutablePath -ExpectedCurrentTarget $oldRoot -ReadyProbe { $true } `
+        -IdentityProbe { $wrongInstance } -ProcessOwnerProbe $ownerProbe -ServiceProbe $serviceProbe
+    Assert-True (-not $wrongInstanceHealth.Passed -and $wrongInstanceHealth.Detail -match 'declared installation') 'A wrong public instance must fail before process proof.'
+    $wrongProcess = [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $true; ProcessId = 1702; StartedAt = '2026-10-15T12:00:01.0000000Z'; ExecutablePath = $owner.ExecutablePath }
+    $wrongProcessProbe = { param($Port) $wrongProcess }.GetNewClosure()
+    $wrongProcessHealth = Test-AeroLinkSiteUpdateHealth -BaseUri 'https://aerolink-updater.example.test:5443' -ExpectedSourceSha ('b' * 40) `
+        -ExpectedVersion '1.0.0' -ExpectedInstanceId $instanceId -ExpectedClassification 'SiteProduction' -Site $site `
+        -ExpectedExecutable $owner.ExecutablePath -ExpectedCurrentTarget $oldRoot -ReadyProbe { $true } `
+        -IdentityProbe { $publicIdentity } -ProcessOwnerProbe $wrongProcessProbe -ServiceProbe $serviceProbe
+    Assert-True (-not $wrongProcessHealth.Passed -and $wrongProcessHealth.Detail -match 'service process|birth time') 'A stale or substituted process must fail the same-process proof.'
 
     # Full updater ordering: package verification, clone proof, stop, current switch, start, public proof.
     $events = [System.Collections.Generic.List[string]]::new()

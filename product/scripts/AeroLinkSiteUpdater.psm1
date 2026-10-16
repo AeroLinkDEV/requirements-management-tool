@@ -134,10 +134,17 @@ function Test-AeroLinkSiteUpdateHealth {
     param(
         [Parameter(Mandatory)][string]$BaseUri,
         [Parameter(Mandatory)][string]$ExpectedSourceSha,
+        [string]$ExpectedVersion,
         [Parameter(Mandatory)][string]$ExpectedInstanceId,
         [Parameter(Mandatory)][string]$ExpectedClassification,
+        [AllowNull()][pscustomobject]$Site,
+        [AllowEmptyString()][string]$ExpectedExecutable,
+        [AllowEmptyString()][string]$ExpectedCurrentTarget,
         [scriptblock]$ReadyProbe,
-        [scriptblock]$IdentityProbe
+        [scriptblock]$IdentityProbe,
+        [scriptblock]$ProcessOwnerProbe,
+        [scriptblock]$ServiceProbe,
+        [scriptblock]$CurrentTargetProbe
     )
     try {
         $origin = [Uri]$BaseUri
@@ -153,13 +160,98 @@ function Test-AeroLinkSiteUpdateHealth {
     if (-not $ready) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS readiness failed at $BaseUri." } }
     $identity = if ($IdentityProbe) { & $IdentityProbe $BaseUri } else { Get-AeroLinkRuntimeIdentity -BaseUri $BaseUri }
     if (-not $identity) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS identity was unavailable at $BaseUri." } }
-    $source = if ($identity.PSObject.Properties['sourceIdentity']) { [string]$identity.sourceIdentity } elseif ($identity.PSObject.Properties['sourceSha']) { [string]$identity.sourceSha } else { '' }
-    if ($source -cne $ExpectedSourceSha) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS identity source '$source' does not match verified package '$ExpectedSourceSha'." } }
+    if ($ExpectedVersion) {
+        $actualVersion = if ($identity.PSObject.Properties['version']) { [string]$identity.version } else { '' }
+        if ($actualVersion -cne $ExpectedVersion) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS identity version '$actualVersion' does not match verified package '$ExpectedVersion'." } }
+    }
+    # Public callers intentionally receive no source revision. If a loopback or qualification probe does expose
+    # one, compare it as an additional observation; the production proof below binds the redacted response to the
+    # owned service process and the signed tree on disk instead of weakening redaction or trusting semver alone.
+    $source = if ($identity.PSObject.Properties['sourceIdentity'] -and $identity.sourceIdentity) { [string]$identity.sourceIdentity }
+        elseif ($identity.PSObject.Properties['sourceSha'] -and $identity.sourceSha) { [string]$identity.sourceSha } else { '' }
+    if ($source -and $source -cne $ExpectedSourceSha) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS identity source '$source' does not match verified package '$ExpectedSourceSha'." } }
     $instance = if ($identity.PSObject.Properties['instance']) { $identity.instance } else { $null }
     $actualId = if ($instance -and $instance.PSObject.Properties['id']) { [string]$instance.id } else { '' }
     $actualClass = if ($instance -and $instance.PSObject.Properties['classification']) { [string]$instance.classification } else { '' }
     if ($actualId -ine $ExpectedInstanceId -or $actualClass -ine $ExpectedClassification) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS identity does not match the declared installation ($actualClass/$actualId)." } }
-    return [pscustomobject]@{ Passed = $true; Detail = "Public HTTPS readiness and identity match $ExpectedSourceSha for $ExpectedClassification/$ExpectedInstanceId." }
+    $proof = if ($Site -and $ExpectedExecutable -and $ExpectedCurrentTarget) {
+        Test-AeroLinkSitePublicProcessBinding -Identity $identity -Site $Site -ExpectedSourceSha $ExpectedSourceSha `
+            -ExpectedExecutable $ExpectedExecutable -ExpectedCurrentTarget $ExpectedCurrentTarget `
+            -ProcessOwnerProbe $ProcessOwnerProbe -ServiceProbe $ServiceProbe -CurrentTargetProbe $CurrentTargetProbe
+    } else {
+        [pscustomobject]@{ Passed = $false; Detail = 'Public identity is redacted and no owned-process proof was supplied.' }
+    }
+    if (-not $proof -or -not $proof.Passed) { return [pscustomobject]@{ Passed = $false; Detail = if ($proof) { $proof.Detail } else { 'The public response could not be joined to the owned API process.' } } }
+    return [pscustomobject]@{ Passed = $true; Detail = "Public HTTPS readiness and identity match the verified package for $ExpectedClassification/$ExpectedInstanceId; $($proof.Detail)" }
+}
+
+function Test-AeroLinkSitePublicProcessBinding {
+    <#
+        Joins a redacted public identity response to the exact service process and verified release tree.
+        Public source SHA remains redacted. A semver or instance label alone is insufficient: the service PID,
+        listener, executable, current junction, signed-tree source SHA and operating-system process birth time all
+        have to agree with the response.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Identity,
+        [Parameter(Mandatory)]$Site,
+        [Parameter(Mandatory)][string]$ExpectedSourceSha,
+        [Parameter(Mandatory)][string]$ExpectedExecutable,
+        [Parameter(Mandatory)][string]$ExpectedCurrentTarget,
+        [scriptblock]$ProcessOwnerProbe,
+        [scriptblock]$ServiceProbe,
+        [scriptblock]$CurrentTargetProbe
+    )
+    $fail = { param($Detail) [pscustomobject]@{ Passed = $false; Detail = $Detail } }
+    try {
+        $expectedExe = [IO.Path]::GetFullPath($ExpectedExecutable)
+        $expectedTarget = [IO.Path]::GetFullPath($ExpectedCurrentTarget).TrimEnd('\', '/')
+        $targetExe = [IO.Path]::GetFullPath((Join-Path $expectedTarget 'app\AeroLink.Api.exe'))
+        if ($targetExe -ine $expectedExe) { return & $fail "The expected API executable '$expectedExe' is not under the expected current target '$expectedTarget'." }
+        $layout = Get-AeroLinkServerLayout -InstallationRoot $Site.InstallationRoot
+
+        $owner = if ($ProcessOwnerProbe) { & $ProcessOwnerProbe $Site.ApiPort } else { Get-AeroLinkPortOwner -Port $Site.ApiPort }
+        if (-not $owner -or -not $owner.Found -or $owner.Ambiguous -or -not $owner.Attributable) {
+            return & $fail "The declared API port does not have one attributable owned listener; public identity cannot be joined to this installation."
+        }
+        if ([int]$owner.ProcessId -le 0 -or [string]::IsNullOrWhiteSpace([string]$owner.StartedAt) -or [string]::IsNullOrWhiteSpace([string]$owner.ExecutablePath)) {
+            return & $fail 'The API listener did not provide a complete PID, birth-time and image proof.'
+        }
+        if ([IO.Path]::GetFullPath([string]$owner.ExecutablePath) -ine $expectedExe) {
+            return & $fail "The API listener runs '$($owner.ExecutablePath)', not the verified package executable '$expectedExe'."
+        }
+
+        $service = if ($ServiceProbe) { & $ServiceProbe $Site.ServiceName } else {
+            Get-CimInstance -ClassName Win32_Service -Filter ("Name='{0}'" -f ([string]$Site.ServiceName -replace "'", "''")) -ErrorAction Stop
+        }
+        if (-not $service -or [int]$service.ProcessId -ne [int]$owner.ProcessId -or [string]$service.State -ne 'Running') {
+            return & $fail 'The public response was not joined to the running API Windows service process.'
+        }
+        $serviceExecutable = ''
+        $servicePath = [string]$service.PathName
+        if ($servicePath -match '^\s*"([^"]+)"') { $serviceExecutable = $Matches[1] }
+        elseif ($servicePath -match '^\s*(\S+)') { $serviceExecutable = $Matches[1] }
+        if ([string]::IsNullOrWhiteSpace($serviceExecutable) -or [IO.Path]::GetFullPath($serviceExecutable) -ine [IO.Path]::GetFullPath($layout.ApiExecutable)) {
+            return & $fail "The API service is configured with '$servicePath', not the stable current executable '$($layout.ApiExecutable)'."
+        }
+
+        $currentTarget = if ($CurrentTargetProbe) { & $CurrentTargetProbe $layout } else { Get-AeroLinkSiteCurrentTarget -Layout $layout }
+        $currentTarget = [IO.Path]::GetFullPath([string]$currentTarget).TrimEnd('\', '/')
+        if ($currentTarget -ine $expectedTarget) { return & $fail "The current junction resolves to '$currentTarget', not the verified target '$expectedTarget'." }
+        $program = Get-AeroLinkProgramLayout -ProductRoot $currentTarget
+        if ($program.SourceSha -cne $ExpectedSourceSha) { return & $fail "The live current tree source '$($program.SourceSha)' does not match the verified package '$ExpectedSourceSha'." }
+
+        $publicStarted = if ($Identity.PSObject.Properties['startedAtUtc']) { [string]$Identity.startedAtUtc } else { '' }
+        if ([string]::IsNullOrWhiteSpace($publicStarted)) { return & $fail 'The public identity has no process birth time to join to the owned service.' }
+        $processStarted = [DateTimeOffset]::Parse([string]$owner.StartedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        $responseStarted = [DateTimeOffset]::Parse($publicStarted, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        if ($processStarted.UtcDateTime.Ticks -ne $responseStarted.UtcDateTime.Ticks) {
+            return & $fail "The public response birth time '$publicStarted' does not match the owned API process '$($owner.StartedAt)'."
+        }
+        return [pscustomobject]@{ Passed = $true; Detail = "public response joined to service PID $([int]$owner.ProcessId), exact package image and current target" }
+    }
+    catch { return & $fail "The public response could not be joined to the owned API process: $($_.Exception.Message)" }
 }
 
 function Assert-AeroLinkSiteUpdatePublicHostName {
@@ -257,7 +349,11 @@ function Invoke-AeroLinkSiteUpdate {
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'StartingAndCheckingPublicHealth' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified $true -Recovery 'The database was upgraded; do not start the old binary. Retain the backup and use the attended RESTORE-AEROLINK procedure.' | Out-Null
         if ($ServiceStarter) { & $ServiceStarter $site } else { Start-Service -Name $site.ServiceName -ErrorAction Stop }
         $baseUri = "https://$($publicHostName):$($site.ApiPort)"
-        $health = if ($HealthProver) { & $HealthProver $baseUri $verified $site } else { Test-AeroLinkSiteUpdateHealth -BaseUri $baseUri -ExpectedSourceSha $verified.SourceSha -ExpectedInstanceId $declaredInstanceId -ExpectedClassification $site.Classification }
+        $health = if ($HealthProver) { & $HealthProver $baseUri $verified $site } else {
+            Test-AeroLinkSiteUpdateHealth -BaseUri $baseUri -ExpectedSourceSha $verified.SourceSha -ExpectedVersion $verified.Version `
+                -ExpectedInstanceId $declaredInstanceId -ExpectedClassification $site.Classification -Site $site `
+                -ExpectedExecutable $packageExecutable -ExpectedCurrentTarget $versionRoot
+        }
         if (-not $health.Passed) { throw $health.Detail }
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'Completed' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified $true -Detail $health.Detail -Recovery 'No recovery action required.' | Out-Null
         return [pscustomobject]@{ Applied = $true; Version = $verified.Version; SourceSha = $verified.SourceSha; Archive = $clone.Archive; Detail = $health.Detail }
@@ -283,6 +379,7 @@ Export-ModuleMember -Function @(
     'Assert-AeroLinkSiteVersionRoot',
     'Set-AeroLinkSiteCurrentTarget',
     'Test-AeroLinkSiteUpdateHealth',
+    'Test-AeroLinkSitePublicProcessBinding',
     'Assert-AeroLinkSiteUpdatePublicHostName',
     'Invoke-AeroLinkSiteUpdate'
 )
