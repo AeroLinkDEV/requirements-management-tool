@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.AccessControl;
 using System.Xml.Linq;
+using AeroLink.ConnectorProtocol;
 using AeroLink.Infrastructure.Persistence.Maintenance;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
@@ -68,8 +70,16 @@ public sealed class HomeContinuityTests
     {
         var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-continuity-{Guid.NewGuid():N}");
         var package = Path.Combine(root, "package");
-        var destination = Path.Combine(root, "destination-ring");
+        var sourceInstallation = Path.Combine(root, "source-installation");
+        var destinationInstallation = Path.Combine(root, "destination-installation");
+        var destination = Path.Combine(destinationInstallation, "keys", "data-protection");
+        var destinationConnectorDirectory = Path.Combine(destinationInstallation, "keys", "connector");
+        var destinationConnector = Path.Combine(destinationConnectorDirectory, "connector-signing-key.pem");
+        var sourceConnectorDirectory = Path.Combine(sourceInstallation, "keys", "connector");
+        var sourceConnector = Path.Combine(sourceConnectorDirectory, "connector-signing-key.pem");
         Directory.CreateDirectory(root);
+        Directory.CreateDirectory(sourceConnectorDirectory);
+        Directory.CreateDirectory(destinationConnectorDirectory);
         try
         {
             const string sourceApplication = "source-content-root-discriminator";
@@ -88,20 +98,41 @@ public sealed class HomeContinuityTests
             var request = new CertificateRequest("CN=AeroLink continuity test", transportKey,
                 HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
             using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+            using var connectorSigningKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var connectorPem = connectorSigningKey.ExportPkcs8PrivateKeyPem();
+            File.WriteAllText(sourceConnector, connectorPem);
+            var connectorFingerprint = ConnectorLaunchProtocol.PublicKeyFingerprint(
+                connectorSigningKey.ExportSubjectPublicKeyInfoPem());
             var binding = new HomeContinuityIdentityBinding(
                 "source-installation", sourceApplication, targetApplication, "DpapiCurrentUser",
-                new string('a', 64), "connector-deployment", "connector-key", new string('b', 64), new string('a', 64));
+                new string('a', 64), "connector-deployment", connectorFingerprint[..24], connectorFingerprint, new string('a', 64));
+            var connector = new HomeContinuityConnectorMaterial(
+                "connector-deployment", connectorFingerprint[..24], connectorFingerprint, connectorPem,
+                sourceInstallation, sourceConnector, "S-1-5-80-1234");
             var manifest = HomeContinuityKeyTransfer.ExportPackage(
-                sourceManager, repository, certificate, binding, package);
+                sourceManager, repository, certificate, binding, connector, package);
             var manifestHash = Sha256File(Path.Combine(package, "manifest.json"));
+            ProtectDirectoryInheritance(destinationConnectorDirectory);
+            var destinationServiceSid = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
 
             var applied = HomeContinuityKeyTransfer.ApplyPackage(
-                package, destination, certificate, targetApplication, binding, manifestHash);
+                package, destination, certificate, targetApplication, binding, manifestHash,
+                destinationInstallation, destinationConnector, destinationServiceSid);
 
             Assert.Equal(manifest.PackageId, applied.PackageId);
             Assert.Equal(2, applied.Keys.Count);
             Assert.Single(applied.Revocations);
             Assert.Equal(revoked.KeyId, Assert.Single(manifest.Revocations).KeyId);
+            Assert.True(File.Exists(destinationConnector));
+            using (var restoredConnector = ECDsa.Create())
+            {
+                restoredConnector.ImportFromPem(File.ReadAllText(destinationConnector));
+                Assert.Equal(connectorFingerprint,
+                    ConnectorLaunchProtocol.PublicKeyFingerprint(
+                        restoredConnector.ExportSubjectPublicKeyInfoPem()));
+            }
+            Assert.DoesNotContain(File.ReadAllText(Path.Combine(package, manifest.Connector.FileName)),
+                "BEGIN PRIVATE KEY", StringComparison.Ordinal);
             Assert.DoesNotContain(Directory.EnumerateFiles(package, "*.xml"),
                 path => File.ReadAllText(path).Contains("<masterKey", StringComparison.Ordinal));
             Assert.DoesNotContain(Directory.EnumerateFiles(destination, "*.xml"),
@@ -154,6 +185,13 @@ public sealed class HomeContinuityTests
     {
         using var stream = File.OpenRead(path);
         return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    private static void ProtectDirectoryInheritance(string path)
+    {
+        var security = new DirectoryInfo(path).GetAccessControl();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: true);
+        new DirectoryInfo(path).SetAccessControl(security);
     }
 
     private sealed class MemoryXmlRepository : IXmlRepository

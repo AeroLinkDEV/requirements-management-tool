@@ -882,8 +882,10 @@ dotnet AeroLink.Api.dll maintenance home-continuity apply `
 Export constructs a separate source Data Protection provider against the exact captured ring, discriminator and
 captured protection mode; it never combines a separately supplied ring with the maintenance host's default manager.
 It verifies the final HOME backup archive and its SHA-256 sidecar, reads the connector PEM only in memory to record
-its public fingerprint/key ID, and writes only certificate-wrapped envelopes plus a manifest containing exact key
-IDs, dates, revocations, source discriminator/provider and binding identities. The destination operator carries the
+its public fingerprint/key ID, and writes an RSA-CMS certificate-encrypted connector envelope alongside the
+certificate-wrapped Data Protection descriptors. The package manifest contains exact key IDs, dates, revocations,
+source discriminator/provider, connector deployment/key/path identity and binding identities; the connector private
+PEM is never written to the package in plaintext. The destination operator carries the
 package through the existing verified backup/evidence channel, records the manifest SHA-256, and independently
 checks the package, final-backup SHA-256 and connector public fingerprint as one attended handoff. Certificate
 encryption provides confidentiality; it does not replace that operator-trusted provenance channel.
@@ -894,21 +896,25 @@ protection mode, and the export checks that its key metadata and revocation set 
 
 Before apply, the destination must explicitly configure exactly `DataProtection:ApplicationName=AeroLink`, the
 target `DataProtection:KeyRingPath`, and `DataProtection:ProtectKeysWith=DpapiLocalMachine`; all three are checked
-before staging. Apply requires the exact source binding, final-backup SHA-256 and manifest hash, rejects malformed or
-unexpected XML, reparse-point parents and any pre-existing destination ring, decrypts the certificate envelopes only
-in memory, rewraps them with LocalMachine DPAPI in a staging directory, validates key metadata and the exact
-revocation set, records a durable continuity receipt beside the installed ring, and atomically installs the new
-ring. A failed or mixed transfer leaves the source and destination untouched. The destination certificate
-private key stays on the destination and must be transferred/imported through the existing attended certificate and
-ACL procedure; it is never placed in the package or repository.
+before staging. The maintenance runtime must also expose the declared installation root, connector path, effective
+deployment ID and API service SID; source export checks those values against the actual configured source key, while
+apply refuses a connector path outside the destination root or a pre-existing ring/key. Apply requires the exact
+source binding, final-backup SHA-256 and manifest hash, rejects malformed or unexpected XML, reparse-point parents
+and any pre-existing destination ring or connector key, decrypts certificate envelopes only in memory, rewraps the
+Data Protection descriptors with LocalMachine DPAPI in a staging directory, validates key metadata, the exact
+revocation set and connector public identity, then publishes the new ring and connector key under a durable pending
+receipt. A pending receipt refuses unattended commissioning after a crash or partial publish; recovery may remove
+only artifacts owned by that receipt. The destination certificate private key stays on the destination and must be
+transferred/imported through the existing attended certificate and ACL procedure; it is never placed in the package
+or repository.
 
 When the captured source discriminator differs from canonical `AeroLink`, set the attended temporary
 `DataProtection:LegacyApplicationName` to that exact captured value. AeroLink protects new durable values with the
 canonical provider and reads existing purpose-specific values through the exact legacy provider until those values
 are deliberately reprotected. This preserves MFA, webhook, Jira and notification compatibility without rewriting
-immutable notification history. Sessions, antiforgery and other time-limited tokens are reissued. Connector signing
-key material, deployment ID, external protected configuration, certificate private-key ACLs and final backup
-verification remain separate attended transfer steps; the current database backup does not contain all of them.
+immutable notification history. Sessions, antiforgery and other time-limited tokens are reissued. Connector
+enrollment/trust, external protected configuration, certificate private-key ACLs and final backup verification remain
+separate attended transfer steps; the current database backup does not contain all of them.
 
 Each concrete generation freezes protected destination, MIME, Message-ID, Date, body hash, template/content
 policy and original admission window. Known transient refusal retries use approximately 30, 60, then 120

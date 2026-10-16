@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
 
 namespace AeroLink.Api;
@@ -324,16 +325,17 @@ public static class AeroLinkMaintenanceHost
         if (!string.Equals(targetApplication, HomeContinuityKeyTransfer.CanonicalTargetApplicationName, StringComparison.Ordinal))
             return Fail("The continuity destination application must be exactly 'AeroLink'.");
         var backupHash = VerifySourceBackup(verifiedBackupArchive, verifiedBackup, sourceInstallation);
-        var connectorFingerprint = ReadConnectorPublicFingerprint(services.GetRequiredService<IConfiguration>(), connectorKey);
+        var configuration = services.GetRequiredService<IConfiguration>();
+        var connector = ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation);
         using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
         var sourceManager = sourceServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
         var sourceRepository = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(
             new DirectoryInfo(sourceRingPath), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
         using var certificate = LoadCertificate(certificatePath, keyPath: null, requirePrivateKey: false);
         var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator, targetApplication,
-            sourceProtection, backupHash, connectorDeployment, connectorKey, connectorFingerprint, backupHash);
+            sourceProtection, backupHash, connectorDeployment, connectorKey, connector.PublicKeyFingerprint, backupHash);
         var manifest = HomeContinuityKeyTransfer.ExportPackage(
-            sourceManager, sourceRepository, certificate, binding, package);
+            sourceManager, sourceRepository, certificate, binding, connector, package);
         Console.WriteLine($"HOME CONTINUITY PACKAGE EXPORTED: {manifest.PackageId:D}");
         Console.WriteLine($"Keys: {manifest.Keys.Count}; revocations: {manifest.Revocations.Count}");
         Console.WriteLine($"Manifest SHA-256: {Sha256File(Path.Combine(package, "manifest.json"))}");
@@ -367,12 +369,15 @@ public static class AeroLinkMaintenanceHost
         if (!IsSha256(connectorFingerprint))
             return Fail("--connector-public-fingerprint must be a SHA-256 fingerprint.");
 
+        var destination = ReadDestinationIdentity(configuration, connectorDeployment);
+
         using var certificate = LoadCertificate(certificatePath, certificateKeyPath, requirePrivateKey: true);
         var binding = new HomeContinuityIdentityBinding(sourceInstallation, sourceDiscriminator,
             HomeContinuityKeyTransfer.CanonicalTargetApplicationName, sourceProtection, verifiedBackup,
             connectorDeployment, connectorKey, connectorFingerprint, verifiedBackupArchiveHash);
         var applied = HomeContinuityKeyTransfer.ApplyPackage(package, destinationRing, certificate,
-            HomeContinuityKeyTransfer.CanonicalTargetApplicationName, binding, manifestSha256);
+            HomeContinuityKeyTransfer.CanonicalTargetApplicationName, binding, manifestSha256,
+            destination.InstallationRoot, destination.ConnectorPath, destination.ServiceSid);
         Console.WriteLine($"HOME CONTINUITY RING INSTALLED: {applied.PackageId:D}");
         Console.WriteLine($"Keys: {applied.Keys.Count}; revocations: {applied.Revocations.Count}");
         Console.WriteLine("Destination key files were rewrapped with LocalMachine DPAPI; no source file was modified.");
@@ -440,19 +445,70 @@ public static class AeroLinkMaintenanceHost
         return actual;
     }
 
-    private static string ReadConnectorPublicFingerprint(IConfiguration configuration, string expectedKeyId)
+    private static HomeContinuityConnectorMaterial ReadConnectorIdentity(
+        IConfiguration configuration, string expectedDeploymentId, string expectedKeyId, string sourceInstallation)
     {
-        var keyPath = configuration["Connector:SigningKeyPath"];
-        if (string.IsNullOrWhiteSpace(keyPath))
-            keyPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AeroLink", "keys", "connector-signing-key.pem");
+        var installationRoot = RequiredConfiguration(configuration, "SiteServer:InstallationRoot");
+        var configuredInstance = RequiredConfiguration(configuration, "Instance:InstanceId");
+        if (!string.Equals(configuredInstance, sourceInstallation, StringComparison.Ordinal))
+            throw new InvalidOperationException("The source runtime Instance:InstanceId does not match --source-installation.");
+        var serviceSid = RequiredConfiguration(configuration, "SiteServer:ServiceSid", "SiteServer:RunAsSid");
+        var keyPath = RequiredConfiguration(configuration, "Connector:SigningKeyPath");
+        var effectiveDeployment = ResolveEffectiveDeploymentId(configuration);
+        if (!string.Equals(effectiveDeployment, expectedDeploymentId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The supplied connector deployment does not match the effective configured runtime deployment.");
+        keyPath = Path.GetFullPath(keyPath);
+        var root = Path.GetFullPath(installationRoot);
+        RequireUnderRoot(root, keyPath, "The source connector signing key");
         if (!File.Exists(keyPath)) throw new FileNotFoundException("The source connector signing key is missing.", keyPath);
         using var key = ECDsa.Create();
-        key.ImportFromPem(File.ReadAllText(keyPath));
+        var pem = File.ReadAllText(keyPath);
+        key.ImportFromPem(pem);
         var fingerprint = ConnectorLaunchProtocol.PublicKeyFingerprint(key.ExportSubjectPublicKeyInfoPem());
         if (!string.Equals(expectedKeyId, fingerprint[..24], StringComparison.Ordinal))
             throw new InvalidOperationException("The supplied connector key ID does not match the source signing key.");
-        return fingerprint;
+        return new HomeContinuityConnectorMaterial(effectiveDeployment, expectedKeyId, fingerprint, pem,
+            root, keyPath, serviceSid);
+    }
+
+    private static (string InstallationRoot, string ConnectorPath, string ServiceSid) ReadDestinationIdentity(
+        IConfiguration configuration, string expectedDeploymentId)
+    {
+        var root = Path.GetFullPath(RequiredConfiguration(configuration, "SiteServer:InstallationRoot"));
+        var connectorPath = Path.GetFullPath(RequiredConfiguration(configuration, "Connector:SigningKeyPath"));
+        var serviceSid = RequiredConfiguration(configuration, "SiteServer:ServiceSid", "SiteServer:RunAsSid");
+        var effectiveDeployment = ResolveEffectiveDeploymentId(configuration);
+        if (!string.Equals(effectiveDeployment, expectedDeploymentId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The supplied connector deployment does not match the effective configured destination deployment.");
+        RequireUnderRoot(root, connectorPath, "The destination connector signing key");
+        return (root, connectorPath, serviceSid);
+    }
+
+    private static string ResolveEffectiveDeploymentId(IConfiguration configuration)
+    {
+        var configured = configuration["Connector:DeploymentId"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured)) return configured;
+        var machine = Encoding.UTF8.GetBytes($"{Environment.MachineName}|{Environment.UserDomainName}");
+        return "aerolink-local-" + Convert.ToHexString(SHA256.HashData(machine))[..16].ToLowerInvariant();
+    }
+
+    private static string RequiredConfiguration(IConfiguration configuration, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = configuration[key]?.Trim();
+            if (!string.IsNullOrWhiteSpace(value)) return value;
+        }
+        throw new InvalidOperationException($"The maintenance runtime configuration is missing {string.Join(" or ", keys)}.");
+    }
+
+    private static void RequireUnderRoot(string root, string path, string description)
+    {
+        if (!Directory.Exists(root)) throw new DirectoryNotFoundException("The configured installation root is not provisioned.");
+        var prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        if (!Path.GetFullPath(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"{description} must be under SiteServer:InstallationRoot.");
     }
 
     private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);

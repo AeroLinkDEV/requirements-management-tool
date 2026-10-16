@@ -2,6 +2,9 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.AccessControl;
 using System.Globalization;
+using System.Security.Cryptography.Pkcs;
+using System.Security.Principal;
+using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.DataProtection;
@@ -105,12 +108,14 @@ public static class HomeContinuityKeyTransfer
         IXmlRepository sourceRepository,
         X509Certificate2 destinationTransportCertificate,
         HomeContinuityIdentityBinding binding,
+        HomeContinuityConnectorMaterial connector,
         string packageDirectory)
     {
         ArgumentNullException.ThrowIfNull(sourceKeyManager);
         ArgumentNullException.ThrowIfNull(sourceRepository);
         ArgumentNullException.ThrowIfNull(destinationTransportCertificate);
         ValidateBinding(binding);
+        ValidateConnectorMaterial(connector, binding);
         RequireDirectoryDoesNotExist(packageDirectory, "The continuity package directory");
 
         var sourceElements = sourceRepository.GetAllElements().Select(x => new XElement(x)).ToArray();
@@ -183,8 +188,16 @@ public static class HomeContinuityKeyTransfer
                     relativeName, Sha256File(path), revocation.KeyId, revocation.RevocationDate));
             }
 
+            var connectorName = "connector-key.cms";
+            var connectorPath = Path.Combine(stagingDirectory, connectorName);
+            WriteConnectorEnvelope(connectorPath, connector.PrivateKeyPem, destinationTransportCertificate);
+            var connectorManifest = new HomeContinuityConnectorManifest(
+                connectorName, Sha256File(connectorPath), connector.DeploymentId, connector.KeyId,
+                connector.PublicKeyFingerprint, connector.SourceInstallationRoot, connector.SourceConnectorPath,
+                connector.SourceServiceSid);
+
             var manifest = new HomeContinuityPackageManifest(
-                SchemaVersion: 1,
+                SchemaVersion: 2,
                 PackageId: Guid.NewGuid(),
                 CreatedAt: DateTimeOffset.UtcNow,
                 SourceApplicationDiscriminator: binding.SourceApplicationDiscriminator,
@@ -193,7 +206,8 @@ public static class HomeContinuityKeyTransfer
                 SourceRingDigest: DigestElements(sourceElements),
                 Binding: binding,
                 Keys: keys,
-                Revocations: revocations);
+                Revocations: revocations,
+                Connector: connectorManifest);
 
             var manifestPath = Path.Combine(stagingDirectory, "manifest.json");
             WriteJsonFile(manifestPath, manifest);
@@ -222,7 +236,10 @@ public static class HomeContinuityKeyTransfer
         X509Certificate2 destinationTransportCertificate,
         string expectedTargetApplicationName,
         HomeContinuityIdentityBinding expectedBinding,
-        string expectedManifestSha256)
+        string expectedManifestSha256,
+        string destinationInstallationRoot,
+        string destinationConnectorPath,
+        string destinationServiceSid)
     {
         ArgumentNullException.ThrowIfNull(destinationTransportCertificate);
         if (!OperatingSystem.IsWindows())
@@ -230,6 +247,8 @@ public static class HomeContinuityKeyTransfer
         if (string.IsNullOrWhiteSpace(expectedTargetApplicationName))
             throw new ArgumentException("A target application name is required.", nameof(expectedTargetApplicationName));
         ValidateBinding(expectedBinding);
+        ValidateDestinationBoundary(destinationInstallationRoot, destinationConnectorPath, destinationServiceSid,
+            destinationRingDirectory);
         if (!string.Equals(expectedTargetApplicationName, CanonicalTargetApplicationName, StringComparison.Ordinal))
             throw new InvalidOperationException("Continuity can only install the canonical AeroLink application boundary.");
 
@@ -239,7 +258,10 @@ public static class HomeContinuityKeyTransfer
             throw new InvalidOperationException("The continuity manifest hash does not match the operator-verified handoff; nothing was installed.");
         var manifest = ReadManifest(manifestPath);
         ValidateManifest(manifest, packageDirectory, expectedTargetApplicationName, expectedBinding);
+        ValidateConnectorManifest(manifest.Connector, expectedBinding);
         RequireDestinationRingEmpty(destinationRingDirectory);
+        var pendingPath = PendingPath(destinationRingDirectory);
+        RequireFileDoesNotExist(pendingPath, "The continuity pending receipt");
 
         var sourceRepository = new MemoryXmlRepository();
         foreach (var key in manifest.Keys)
@@ -259,6 +281,12 @@ public static class HomeContinuityKeyTransfer
             sourceRepository.StoreElement(element, revocation.FileName);
         }
 
+        var connectorEnvelopePath = CheckedPackageFile(packageDirectory, manifest.Connector.FileName,
+            manifest.Connector.Sha256);
+        var connectorPem = ReadConnectorEnvelope(connectorEnvelopePath, destinationTransportCertificate,
+            manifest.Connector);
+        ValidateConnectorPem(connectorPem, manifest.Connector, expectedBinding);
+
         using var sourceServices = BuildCertificateUnwrapServices(
             sourceRepository, manifest.SourceApplicationDiscriminator, destinationTransportCertificate);
         var sourceManager = sourceServices.GetRequiredService<IKeyManager>();
@@ -274,8 +302,15 @@ public static class HomeContinuityKeyTransfer
             + $".continuity-stage-{manifest.PackageId:N}";
         RequireDirectoryDoesNotExist(stagedDirectory, "The destination staging directory");
         Directory.CreateDirectory(stagedDirectory);
+        var connectorPublished = false;
+        var ringPublished = false;
+        var pending = new HomeContinuityPendingReceipt(
+            1, manifest.PackageId, expectedManifestSha256, destinationInstallationRoot,
+            Path.GetFullPath(destinationRingDirectory), Path.GetFullPath(destinationConnectorPath),
+            destinationServiceSid, "staged", DateTimeOffset.UtcNow);
         try
         {
+            WriteJsonFile(pendingPath, pending);
             var dpapiEncryptor = new DpapiXmlEncryptor(protectToLocalMachine: true, NullLoggerFactory.Instance);
             foreach (var keyEntry in manifest.Keys)
             {
@@ -294,19 +329,28 @@ public static class HomeContinuityKeyTransfer
             }
 
             ValidateRewrappedRing(stagedDirectory, expectedTargetApplicationName, manifest);
+            WriteConnectorFile(destinationConnectorPath, connectorPem);
+            connectorPublished = true;
             WriteJsonFile(Path.Combine(stagedDirectory, "continuity-receipt.json"), new HomeContinuityApplyReceipt(
-                1, manifest.PackageId, expectedManifestSha256, manifest.SourceRingDigest,
+                2, manifest.PackageId, expectedManifestSha256, manifest.SourceRingDigest,
                 expectedTargetApplicationName, CanonicalTargetProtectionProvider, manifest.Keys.Count,
-                manifest.Revocations.Count, DateTimeOffset.UtcNow));
+                manifest.Revocations.Count, manifest.Connector.KeyId, manifest.Connector.PublicKeyFingerprint,
+                manifest.Connector.DeploymentId, Path.GetFullPath(destinationConnectorPath), DateTimeOffset.UtcNow));
             Directory.CreateDirectory(Path.GetDirectoryName(destinationRingDirectory)
                 ?? throw new InvalidOperationException("The destination ring has no parent directory."));
             if (Directory.Exists(destinationRingDirectory) || File.Exists(destinationRingDirectory))
                 throw new InvalidOperationException("The destination Data Protection ring appeared during preparation; nothing was installed.");
             Directory.Move(stagedDirectory, destinationRingDirectory);
+            ringPublished = true;
+            File.Delete(pendingPath);
         }
         catch
         {
             if (Directory.Exists(stagedDirectory)) Directory.Delete(stagedDirectory, recursive: true);
+            if (connectorPublished && !ringPublished && File.Exists(destinationConnectorPath))
+            {
+                try { File.Delete(destinationConnectorPath); } catch { /* pending receipt keeps recovery attended */ }
+            }
             throw;
         }
 
@@ -370,7 +414,8 @@ public static class HomeContinuityKeyTransfer
     private static void ValidateManifest(HomeContinuityPackageManifest manifest, string packageDirectory,
         string targetApplicationName, HomeContinuityIdentityBinding expectedBinding)
     {
-        if (manifest.SchemaVersion != 1 || manifest.PackageId == Guid.Empty || manifest.Keys.Count == 0)
+        if (manifest.SchemaVersion != 2 || manifest.PackageId == Guid.Empty || manifest.Keys.Count == 0
+            || manifest.Connector is null)
             throw new InvalidOperationException("The HOME continuity package manifest is unsupported or incomplete.");
         if (!IsSha256(manifest.SourceRingDigest))
             throw new InvalidOperationException("The HOME continuity package has no valid source ring digest.");
@@ -390,7 +435,9 @@ public static class HomeContinuityKeyTransfer
             || !string.Equals(manifest.Binding.VerifiedBackupArchiveSha256, expectedBinding.VerifiedBackupArchiveSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The continuity package is bound to a different source installation, backup, or connector identity.");
 
-        var allNames = manifest.Keys.Select(x => x.FileName).Concat(manifest.Revocations.Select(x => x.FileName)).ToArray();
+        var allNames = manifest.Keys.Select(x => x.FileName)
+            .Concat(manifest.Revocations.Select(x => x.FileName))
+            .Append(manifest.Connector.FileName).ToArray();
         if (allNames.Any(x => Path.IsPathRooted(x) || x.Contains("..", StringComparison.Ordinal) || Path.GetFileName(x) != x)
             || allNames.Distinct(StringComparer.OrdinalIgnoreCase).Count() != allNames.Length)
             throw new InvalidOperationException("The continuity package contains an unsafe or duplicate file name.");
@@ -403,6 +450,182 @@ public static class HomeContinuityKeyTransfer
             throw new InvalidOperationException("The continuity package contains an invalid or duplicate revocation identity.");
         foreach (var key in manifest.Keys) _ = CheckedPackageFile(packageDirectory, key.FileName, key.Sha256);
         foreach (var revocation in manifest.Revocations) _ = CheckedPackageFile(packageDirectory, revocation.FileName, revocation.Sha256);
+        _ = CheckedPackageFile(packageDirectory, manifest.Connector.FileName, manifest.Connector.Sha256);
+    }
+
+    private static void ValidateConnectorManifest(HomeContinuityConnectorManifest connector,
+        HomeContinuityIdentityBinding expectedBinding)
+    {
+        if (string.IsNullOrWhiteSpace(connector.FileName) || !IsSha256(connector.Sha256)
+            || string.IsNullOrWhiteSpace(connector.DeploymentId) || string.IsNullOrWhiteSpace(connector.KeyId)
+            || !IsSha256(connector.PublicKeyFingerprint)
+            || string.IsNullOrWhiteSpace(connector.SourceInstallationRoot)
+            || string.IsNullOrWhiteSpace(connector.SourceConnectorPath)
+            || string.IsNullOrWhiteSpace(connector.SourceServiceSid))
+            throw new InvalidOperationException("The HOME continuity connector manifest is incomplete.");
+        if (!string.Equals(connector.DeploymentId, expectedBinding.ConnectorDeploymentId, StringComparison.Ordinal)
+            || !string.Equals(connector.KeyId, expectedBinding.ConnectorKeyId, StringComparison.Ordinal)
+            || !string.Equals(connector.PublicKeyFingerprint, expectedBinding.ConnectorPublicKeyFingerprint, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The continuity connector identity does not match the operator-verified source identity.");
+        if (Path.IsPathRooted(connector.FileName) || connector.FileName.Contains("..", StringComparison.Ordinal)
+            || Path.GetFileName(connector.FileName) != connector.FileName)
+            throw new InvalidOperationException("The continuity connector envelope has an unsafe file name.");
+    }
+
+    private static void ValidateConnectorMaterial(HomeContinuityConnectorMaterial connector,
+        HomeContinuityIdentityBinding binding)
+    {
+        if (string.IsNullOrWhiteSpace(connector.DeploymentId)
+            || !string.Equals(connector.DeploymentId, binding.ConnectorDeploymentId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(connector.KeyId)
+            || !string.Equals(connector.KeyId, binding.ConnectorKeyId, StringComparison.Ordinal)
+            || !IsSha256(connector.PublicKeyFingerprint)
+            || !string.Equals(connector.PublicKeyFingerprint, binding.ConnectorPublicKeyFingerprint, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(connector.PrivateKeyPem)
+            || string.IsNullOrWhiteSpace(connector.SourceInstallationRoot)
+            || string.IsNullOrWhiteSpace(connector.SourceConnectorPath)
+            || string.IsNullOrWhiteSpace(connector.SourceServiceSid))
+            throw new ArgumentException("The source connector transfer material is incomplete.", nameof(connector));
+        var root = RequireExistingAbsoluteDirectory(connector.SourceInstallationRoot, "The source connector installation root");
+        var keyPath = RequireExistingFile(connector.SourceConnectorPath, "The source connector signing key");
+        RequireUnderRoot(root, keyPath, "The source connector signing key");
+        RequireNoReparsePoints(root, "The source connector installation root");
+        RequireNoReparsePoints(keyPath, "The source connector signing key");
+        ValidateServiceSid(connector.SourceServiceSid, "The source connector service SID");
+        using var key = ECDsa.Create();
+        try { key.ImportFromPem(connector.PrivateKeyPem); }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
+        { throw new InvalidOperationException("The source connector signing key is not a valid ECDSA PEM.", ex); }
+        var fingerprint = ConnectorFingerprint(key);
+        if (!string.Equals(fingerprint, connector.PublicKeyFingerprint, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(fingerprint[..24], connector.KeyId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The source connector signing key does not match its verified public identity.");
+    }
+
+    private static void ValidateDestinationBoundary(string installationRoot, string connectorPath,
+        string serviceSid, string destinationRing)
+    {
+        var root = RequireExistingAbsoluteDirectory(installationRoot, "The destination installation root");
+        var ring = Path.GetFullPath(destinationRing);
+        RequireUnderRoot(root, ring, "The destination Data Protection ring");
+        var connector = Path.GetFullPath(connectorPath);
+        RequireUnderRoot(root, connector, "The destination connector signing key");
+        if (File.Exists(connector) || Directory.Exists(connector))
+            throw new InvalidOperationException("The destination connector signing key already exists; continuity refuses replacement.");
+        var parent = Path.GetDirectoryName(connector) ?? throw new InvalidOperationException("The destination connector path has no parent.");
+        if (!Directory.Exists(parent)) throw new DirectoryNotFoundException("The destination connector directory is not provisioned.");
+        RequireNoReparsePoints(root, "The destination installation root");
+        RequireNoReparsePoints(parent, "The destination connector directory");
+        ValidateServiceSid(serviceSid, "The destination connector service SID");
+        RequireConnectorDirectoryAcl(parent, serviceSid);
+    }
+
+    private static string ReadConnectorEnvelope(string path, X509Certificate2 certificate,
+        HomeContinuityConnectorManifest connector)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var cms = new EnvelopedCms();
+        try
+        {
+            cms.Decode(bytes);
+            cms.Decrypt(new X509Certificate2Collection(certificate));
+            var pem = Encoding.UTF8.GetString(cms.ContentInfo.Content);
+            if (string.IsNullOrWhiteSpace(pem)) throw new InvalidOperationException("The connector envelope was empty.");
+            return pem;
+        }
+        catch (CryptographicException ex)
+        {
+            throw new InvalidOperationException("The connector envelope could not be decrypted by the destination certificate.", ex);
+        }
+    }
+
+    private static void WriteConnectorEnvelope(string path, string privateKeyPem, X509Certificate2 certificate)
+    {
+        if (certificate.GetRSAPublicKey() is null)
+            throw new InvalidOperationException("The continuity transport certificate must contain an RSA public key for connector transfer.");
+        var content = new ContentInfo(Encoding.UTF8.GetBytes(privateKeyPem));
+        var cms = new EnvelopedCms(content);
+        cms.Encrypt(new CmsRecipient(SubjectIdentifierType.IssuerAndSerialNumber, certificate));
+        WriteBytesFile(path, cms.Encode());
+    }
+
+    private static void ValidateConnectorPem(string pem, HomeContinuityConnectorManifest connector,
+        HomeContinuityIdentityBinding expectedBinding)
+    {
+        using var key = ECDsa.Create();
+        try { key.ImportFromPem(pem); }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
+        { throw new InvalidOperationException("The connector envelope did not contain a valid ECDSA PEM.", ex); }
+        var fingerprint = ConnectorFingerprint(key);
+        if (!string.Equals(fingerprint, connector.PublicKeyFingerprint, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(fingerprint, expectedBinding.ConnectorPublicKeyFingerprint, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(fingerprint[..24], connector.KeyId, StringComparison.Ordinal)
+            || !string.Equals(connector.DeploymentId, expectedBinding.ConnectorDeploymentId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The connector envelope's key or deployment identity did not verify.");
+    }
+
+    private static string ConnectorFingerprint(ECDsa key) =>
+        Convert.ToHexString(SHA256.HashData(key.ExportSubjectPublicKeyInfo())).ToLowerInvariant();
+
+    private static void WriteConnectorFile(string path, string pem)
+    {
+        if (File.Exists(path) || Directory.Exists(path))
+            throw new InvalidOperationException("The destination connector signing key appeared during preparation; nothing was installed.");
+        var parent = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("The destination connector path has no parent.");
+        Directory.CreateDirectory(parent);
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false), 4096, leaveOpen: true);
+        writer.Write(pem);
+        writer.Flush();
+        stream.Flush(flushToDisk: true);
+    }
+
+    private static string RequireExistingAbsoluteDirectory(string path, string description)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path) || !Directory.Exists(path))
+            throw new InvalidOperationException($"{description} must be an existing absolute directory.");
+        return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
+
+    private static string RequireExistingFile(string path, string description)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path) || !File.Exists(path))
+            throw new InvalidOperationException($"{description} must be an existing absolute file.");
+        return Path.GetFullPath(path);
+    }
+
+    private static void RequireUnderRoot(string root, string path, string description)
+    {
+        var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(path);
+        if (!fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"{description} must be under the declared installation root.");
+    }
+
+    private static void ValidateServiceSid(string sid, string description)
+    {
+        if (string.IsNullOrWhiteSpace(sid) || !sid.StartsWith("S-", StringComparison.OrdinalIgnoreCase)
+            || sid.Count(c => c == '-') < 2)
+            throw new InvalidOperationException($"{description} is missing or malformed.");
+    }
+
+    private static void RequireConnectorDirectoryAcl(string path, string serviceSid)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Continuity connector ACL validation requires Windows.");
+        var security = new DirectoryInfo(path).GetAccessControl();
+        if (!security.AreAccessRulesProtected)
+            throw new InvalidOperationException("The destination connector directory inherits permissions; continuity refuses an unprotected key boundary.");
+        var expected = new SecurityIdentifier(serviceSid);
+        var hasModify = security.GetAccessRules(true, true, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>()
+            .Any(rule => rule.AccessControlType == AccessControlType.Allow
+                && rule.IdentityReference is SecurityIdentifier identity
+                && identity == expected
+                && (rule.FileSystemRights & FileSystemRights.Modify) == FileSystemRights.Modify);
+        if (!hasModify)
+            throw new InvalidOperationException("The destination connector directory does not grant Modify to the declared API service SID.");
     }
 
     private static void EnsureMetadata(IKey key, HomeContinuityKeyManifestEntry entry)
@@ -506,6 +729,16 @@ public static class HomeContinuityKeyTransfer
             throw new InvalidOperationException($"{description} already exists; continuity refuses to overwrite it.");
     }
 
+    private static void RequireFileDoesNotExist(string path, string description)
+    {
+        if (File.Exists(path) || Directory.Exists(path))
+            throw new InvalidOperationException($"{description} already exists; continuity refuses to resume or overwrite it.");
+    }
+
+    private static string PendingPath(string destinationRingDirectory) =>
+        Path.GetFullPath(destinationRingDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+        + ".continuity-pending.json";
+
     private static void RequireDestinationRingEmpty(string path)
     {
         RequireNoReparsePoints(Path.GetDirectoryName(Path.GetFullPath(path))
@@ -532,6 +765,18 @@ public static class HomeContinuityKeyTransfer
         using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
         {
             element.Save(stream, SaveOptions.DisableFormatting);
+            stream.Flush(flushToDisk: true);
+        }
+        File.Move(temp, path);
+    }
+
+    private static void WriteBytesFile(string path, byte[] bytes)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        {
+            stream.Write(bytes, 0, bytes.Length);
             stream.Flush(flushToDisk: true);
         }
         File.Move(temp, path);
@@ -641,7 +886,41 @@ public sealed record HomeContinuityApplyReceipt(
     string TargetProtectionProvider,
     int KeyCount,
     int RevocationCount,
+    string ConnectorKeyId,
+    string ConnectorPublicKeyFingerprint,
+    string ConnectorDeploymentId,
+    string ConnectorPath,
     DateTimeOffset AppliedAt);
+
+public sealed record HomeContinuityPendingReceipt(
+    int SchemaVersion,
+    Guid PackageId,
+    string ManifestSha256,
+    string DestinationInstallationRoot,
+    string DestinationRingPath,
+    string DestinationConnectorPath,
+    string DestinationServiceSid,
+    string Phase,
+    DateTimeOffset RecordedAt);
+
+public sealed record HomeContinuityConnectorMaterial(
+    string DeploymentId,
+    string KeyId,
+    string PublicKeyFingerprint,
+    string PrivateKeyPem,
+    string SourceInstallationRoot,
+    string SourceConnectorPath,
+    string SourceServiceSid);
+
+public sealed record HomeContinuityConnectorManifest(
+    string FileName,
+    string Sha256,
+    string DeploymentId,
+    string KeyId,
+    string PublicKeyFingerprint,
+    string SourceInstallationRoot,
+    string SourceConnectorPath,
+    string SourceServiceSid);
 
 public sealed record HomeContinuityPackageManifest(
     int SchemaVersion,
@@ -653,4 +932,5 @@ public sealed record HomeContinuityPackageManifest(
     string SourceRingDigest,
     HomeContinuityIdentityBinding Binding,
     IReadOnlyList<HomeContinuityKeyManifestEntry> Keys,
-    IReadOnlyList<HomeContinuityRevocationManifestEntry> Revocations);
+    IReadOnlyList<HomeContinuityRevocationManifestEntry> Revocations,
+    HomeContinuityConnectorManifest Connector);
