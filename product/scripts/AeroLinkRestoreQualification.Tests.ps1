@@ -456,9 +456,28 @@ try {
     if ($foreignOidAfter -ne $foreignOidBefore -or $foreignCommentAfter -ne $foreignMarker) { throw 'Fresh restore changed a foreign target database identity or marker.' }
     Invoke-Checked (Join-Path $PostgresBin 'dropdb.exe') @('-h','127.0.0.1','-p',"$pgPort",'-U','postgres',$foreignTarget)
 
+    # Primary continuity-journal owner: this is the real Restore-AeroLink authority, with a disposable
+    # PostgreSQL target and the caller-built API identity. The immutable extracted Write-ContinuityJournal
+    # witness fails at this boundary before the null backup-path fix; the existing owner tests did not write
+    # an operation journal, so they could not see that regression. No test-only production seam is involved.
+    $continuityOwnerRoot = Join-Path $installationRoot "restore-validation\q-$shortToken\continuity-owner"
+    New-Item -ItemType Directory -Path $continuityOwnerRoot -Force | Out-Null
+    $continuityOperationId = [guid]::NewGuid().ToString('D')
+    $continuityJournal = Join-Path $continuityOwnerRoot 'operation.json'
+    $continuityReceipt = Join-Path $continuityOwnerRoot 'proof.json'
+    [ordered]@{ OperationId = $continuityOperationId; Status = 'admitted'; Phase = 'admission'; TargetDatabase = 'aerolink_restore_validation' } |
+        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $continuityJournal -Encoding UTF8
+    $continuityApiHash = (Get-FileHash -LiteralPath $apiExecutable -Algorithm SHA256).Hash
     & (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -BackupArchive $archive -TargetDatabase aerolink_restore_validation `
-        -EvidenceTarget $isolatedEvidence -PostgresPort $pgPort -PostgresBin $PostgresBin -ValidationApiPort (Get-FreePort)
+        -EvidenceTarget $isolatedEvidence -PostgresPort $pgPort -PostgresBin $PostgresBin -ValidationApiPort (Get-FreePort) `
+        -ContinuityReceiptPath $continuityReceipt -ContinuityOperationJournalPath $continuityJournal `
+        -ContinuityOperationId $continuityOperationId -ContinuityApiAssemblyPath $apiExecutable -ContinuityApiAssemblySha256 $continuityApiHash
     if ($LASTEXITCODE -ne 0) { throw 'Isolated restore and API-download validation failed.' }
+    $continuityJournalResult = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $continuityJournal -Raw)
+    if ([string]$continuityJournalResult.Status -ne 'completed' -or [string]$continuityJournalResult.OperationId -ne $continuityOperationId) {
+        throw 'The real restore authority did not persist a completed continuity journal.'
+    }
+    if (-not (Test-Path -LiteralPath $continuityReceipt -PathType Leaf)) { throw 'The real restore authority did not persist its write-once continuity proof.' }
     if ([IO.File]::ReadAllText($authorityPath) -ne $authorityBeforeValidation) { throw 'Read-only isolated restore validation changed send authority.' }
     if ([IO.File]::ReadAllText($authorityPath+'.generation') -ne $witnessBeforeValidation) { throw 'Read-only isolated restore validation changed the independent send-generation witness.' }
     if ((Invoke-QualificationSql 'aerolink_restore_validation' $notificationSnapshotSql) -ne $backedUpGeneration) { throw 'Read-only validation mutated the backed-up Pending generation.' }
@@ -554,7 +573,7 @@ try {
     $retainedEvidence=@(Get-ChildItem -LiteralPath (Split-Path $oldEvidence -Parent) -Directory -Filter 'evidence-pre-restore-*')
     if([int]$retainedDatabase -lt 1 -or $retainedEvidence.Count -lt 1){throw 'Successful activation did not retain the prior database/evidence pair for rollback.'}
 
-    [pscustomobject]@{Passed=$true;PersistentPortUntouched=($pgPort -ne 54329);PostgresPort=$pgPort;IsolatedAttachments=[int]$attachmentCount;ActivatedAttachments=[int]$activatedCount;FaultPhasesProved=$faults.Count;RollbackProved=$true;PriorDatabaseRetained=$true;PriorEvidenceRetained=$true;
+    [pscustomobject]@{Passed=$true;PersistentPortUntouched=($pgPort -ne 54329);PostgresPort=$pgPort;IsolatedAttachments=[int]$attachmentCount;ActivatedAttachments=[int]$activatedCount;ContinuityJournalProved=$true;FaultPhasesProved=$faults.Count;RollbackProved=$true;PriorDatabaseRetained=$true;PriorEvidenceRetained=$true;
         NotificationRevocationProved=$true;NotificationRollbackRevocationProved=$true;OldConfigurationCannotReviveG1=$true;IndependentWitnessProved=$true;
         RestoredDispatcherZeroSocketsProved=$true;RestoredG1HeldAdmissionProved=$true;G2FutureOnlyAdmissionProved=$true;OrdinaryRestartPreservedAdmissionAndDue=$true;
         NotificationFullScenarioProved=$true;PostBackupSmtpAcceptance='Proved: real STARTTLS final DATA acceptance and matching durable disposed SMTP receipt';

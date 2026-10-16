@@ -231,7 +231,7 @@ function Write-ContinuityJournal([string]$Status, [string]$Phase, [hashtable]$Up
     $temporaryJournal = "$ContinuityOperationJournalPath.writing-$([Guid]::NewGuid().ToString('N'))"
     try {
         [IO.File]::WriteAllText($temporaryJournal, $json, [Text.UTF8Encoding]::new($false))
-        if ([IO.File]::Exists($ContinuityOperationJournalPath)) { [IO.File]::Replace($temporaryJournal, $ContinuityOperationJournalPath, $null) }
+        if ([IO.File]::Exists($ContinuityOperationJournalPath)) { [IO.File]::Replace($temporaryJournal, $ContinuityOperationJournalPath, [NullString]::Value) }
         else { [IO.File]::Move($temporaryJournal, $ContinuityOperationJournalPath) }
     } finally { if (Test-Path -LiteralPath $temporaryJournal) { Remove-Item -LiteralPath $temporaryJournal -Force } }
 }
