@@ -187,9 +187,12 @@ function Invoke-AeroLinkSiteUpdate {
         $versionRoot = Join-Path $layout.Versions ([string]$verified.Version)
         if (Test-Path -LiteralPath $versionRoot) { throw "Version $($verified.Version) is already present at '$versionRoot'; refusing to reuse an unverified retained tree." }
         $packageProgram = Assert-AeroLinkSiteVersionRoot -Layout $layout -VersionRoot $incoming -Verified $verified
-        $packageExecutable = $packageProgram.ApiExecutable
         Move-Item -LiteralPath $incoming -Destination $versionRoot
         $incoming = $null
+        $packageExecutable = Join-Path $versionRoot 'app\AeroLink.Api.exe'
+        if (-not (Test-Path -LiteralPath $packageExecutable -PathType Leaf)) {
+            throw "The retained release '$versionRoot' has no packaged API executable at '$packageExecutable'."
+        }
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'ValidatingClone' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -Recovery 'The current junction is unchanged; the retained package can be removed after review.' | Out-Null
         $beforeRealUpgrade = {
                 Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'SwitchingBeforeRealUpgrade' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive $null -Recovery 'The verified package is current; if maintenance fails after mutation, use the retained backup and attended restore procedure.' | Out-Null

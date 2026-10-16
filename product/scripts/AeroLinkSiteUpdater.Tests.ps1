@@ -10,6 +10,8 @@
 #>
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteUpdater.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteServer.psm1') -Force
 
 $failures = [System.Collections.Generic.List[string]]::new()
 $fixtures = [System.Collections.Generic.List[string]]::new()
@@ -42,7 +44,9 @@ try {
     New-Item -ItemType Junction -Path $layout.Current -Target $oldRoot | Out-Null
     $outside = Join-Path $root 'outside-release'
     New-Item -ItemType Directory -Path $outside -Force | Out-Null
-    $outsideLayout = [pscustomobject]@{ Current = $layout.Current; Versions = $layout.Versions }
+    $outsideCurrent = Join-Path $outside 'current'
+    New-Item -ItemType Junction -Path $outsideCurrent -Target $outside | Out-Null
+    $outsideLayout = [pscustomobject]@{ Current = $outsideCurrent; Versions = $layout.Versions }
     Assert-Throws { Get-AeroLinkSiteCurrentTarget -Layout $outsideLayout } 'outside|missing release' `
         'A current alias outside the installation versions directory must fail closed.'
 
