@@ -2,17 +2,22 @@
 <#
     Contract coverage for the A3 site updater (#1614).
 
-    Authoring gate: these tests protect the updater's phase ordering, exact current target boundary, public
+    Authoring gate: these tests protect the updater's admission boundaries, exact current target boundary, public
     instance binding joined to the redacted response's owned process and signed tree, and secret-free recovery
     journal. The regressions are package validation after a pointer mutation, old-binary execution after a schema
     change, and a health check that proves only readiness without the promoted source/installation identity or
     same-process evidence. Existing release, backup and runtime-identity suites own their underlying contracts;
     this suite injects only normal operation boundaries and uses disposable folders.
+
+    The former full-order fixture supplied destructive callbacks that production no longer accepts. Its package,
+    clone, and maintenance ordering is owned by the release/upgrade contract suites; this file retains the
+    updater-specific lease, public-proof, WhatIf, and interrupted-journal failures that those suites cannot see.
 #>
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteUpdater.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteInstallation.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkSiteServer.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
 
 $failures = [System.Collections.Generic.List[string]]::new()
 $fixtures = [System.Collections.Generic.List[string]]::new()
@@ -36,6 +41,28 @@ try {
     $site = Set-AeroLinkSiteDeclaration -InstallationRoot $root -ApiPort $apiPort -PostgresPort $postgresPort -PublicHostName 'aerolink-updater.example.test'
     $instanceId = [string]((Get-Content -LiteralPath $production -Raw | ConvertFrom-Json).instanceId)
     $layout = Get-AeroLinkServerLayout -InstallationRoot $root
+
+    # The updater owns one transition lease through backup/clone/real maintenance. The real backup helper is
+    # called in this PowerShell process and must authenticate/reuse that lease rather than deadlocking on a second
+    # read/write handle or releasing the outer lease on return.
+    $leaseRoot = Join-Path $root 'lease-reentry'
+    New-Item -ItemType Directory -Path $leaseRoot -Force | Out-Null
+    $outerLease = Enter-AeroLinkTransition -InstallationRoot $leaseRoot -Policy Preserve
+    try {
+        Assert-True (-not [string]::IsNullOrWhiteSpace($outerLease.OperationId) -and $outerLease.OwnerProcessId -eq $PID -and
+            -not [string]::IsNullOrWhiteSpace($outerLease.OwnerCreatedAt) -and $outerLease.Phase -eq 'Transition' -and
+            [IO.Path]::GetFileName($outerLease.LeasePath) -eq 'home-transition.lock') `
+            'A transition lease must carry operation, owner lifetime, phase and exact lock-path identity.'
+        Set-AeroLinkTransitionPhase -Lease $outerLease -Phase 'NestedBackup'
+        $nestedLease = Enter-AeroLinkTransition -InstallationRoot $leaseRoot -Policy Preserve
+        Assert-True ($nestedLease.Shared -and $nestedLease.OperationId -eq $outerLease.OperationId -and
+            $nestedLease.OwnerProcessId -eq $outerLease.OwnerProcessId -and $nestedLease.OwnerCreatedAt -eq $outerLease.OwnerCreatedAt -and
+            $nestedLease.Phase -eq 'NestedBackup' -and $nestedLease.LeasePath -eq $outerLease.LeasePath) `
+            'A nested same-process backup helper must reuse and revalidate the authenticated outer transition lease.'
+        Exit-AeroLinkTransition -Lease $nestedLease
+        Assert-True ($outerLease.Stream.CanRead) 'The outer transition lease remains owned after nested helper return.'
+    }
+    finally { Exit-AeroLinkTransition -Lease $outerLease }
 
     # Exact version-root/current boundary: a current alias outside versions is refused before mutation.
     $oldRoot = Join-Path $versions '1.0.0'
@@ -98,43 +125,28 @@ try {
         -IdentityProbe { $publicIdentity } -ProcessOwnerProbe $wrongProcessProbe -ServiceProbe $serviceProbe
     Assert-True (-not $wrongProcessHealth.Passed -and $wrongProcessHealth.Detail -match 'service process|birth time') 'A stale or substituted process must fail the same-process proof.'
 
-    # Full updater ordering: package verification, clone proof, stop, current switch, start, public proof.
-    $events = [System.Collections.Generic.List[string]]::new()
+    # A public proof must refuse redirects at the HTTP boundary while retaining normal TLS validation.
+    $updaterSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AeroLinkSiteUpdater.psm1') -Raw
+    Assert-True ($updaterSource -match 'Invoke-WebRequest[\s\S]*MaximumRedirection\s+0') 'The public HTTP probe must disable redirects.'
+
+    # WhatIf is a read-only preflight and must return before lease, journal, package, service or pointer mutation.
     $package = Join-Path $root 'incoming-package.zip'; 'package' | Set-Content $package
     $certificate = Join-Path $root 'trusted.cer'; 'certificate' | Set-Content $certificate
-    $backup = Join-Path $root 'backups\aerolink-20261015-120000.zip'
-    New-Item -ItemType Directory -Path (Split-Path -Parent $backup) -Force | Out-Null
-    'verified backup fixture' | Set-Content -LiteralPath $backup
-    $verify = {
-        param($PackagePath, $TrustedPath, $Destination)
-        $events.Add('verify')
-        New-Item -ItemType Directory -Path (Join-Path $Destination 'app') -Force | Out-Null
-        @{ sourceSha = ('a' * 40); latestMigration = 'new-migration' } | ConvertTo-Json | Set-Content (Join-Path $Destination 'manifest.json')
-        '' | Set-Content (Join-Path $Destination 'app\AeroLink.Api.exe')
-        [pscustomobject]@{ Version = '2.0.0'; SourceSha = ('a' * 40); LatestMigration = 'new-migration' }
-    }.GetNewClosure()
-    $switcher = { param($Current, $Target) $events.Add("switch:$([IO.Path]::GetFileName($Target))") }.GetNewClosure()
-    $stopper = { param($DeclaredSite) $events.Add('stop') }.GetNewClosure()
-    $starter = { param($DeclaredSite) $events.Add('start') }.GetNewClosure()
-    $healthProver = { param($BaseUri, $Verified, $DeclaredSite) $events.Add("health:$BaseUri"); [pscustomobject]@{ Passed = $true; Detail = 'public proof passed' } }.GetNewClosure()
-    $clone = {
-        param($Executable, $BeforeReal)
-        if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw 'clone received no packaged executable' }
-        $events.Add('clone')
-        & $BeforeReal
-        [pscustomobject]@{ Applied = $true; DatabaseModified = $true; Archive = $backup; Detail = 'clone and real upgrade passed' }
-    }.GetNewClosure()
-    $result = Invoke-AeroLinkSiteUpdate -ProductRoot (Split-Path -Parent $PSScriptRoot) -InstallationRoot $root -Package $package -TrustedCertificate $certificate `
-        -VerifyPackage $verify -CloneRunner $clone -ServiceStopper $stopper -ServiceStarter $starter -HealthProver $healthProver -Switcher $switcher
-    Assert-True ($result.Applied) 'A fully proven update must report Applied.'
-    Assert-True (($events -join ' -> ') -eq 'verify -> clone -> stop -> switch:2.0.0 -> start -> health:https://aerolink-updater.example.test:' + $apiPort) `
-        "The updater must verify, prove the clone, stop before real mutation, switch, start and prove public health. Order: $($events -join ' -> ')"
+    $whatIf = Invoke-AeroLinkSiteUpdate -ProductRoot (Split-Path -Parent $PSScriptRoot) -InstallationRoot $root `
+        -Package $package -TrustedCertificate $certificate -WhatIf
+    Assert-True ($whatIf.WhatIf -and -not (Test-Path -LiteralPath (Get-AeroLinkSiteUpdateJournalPath -InstallationRoot $root))) `
+        'WhatIf must return before creating an update journal or performing a mutation.'
+
+    # Only a completed journal admits another update. A crash after switch/start/health remains an attended
+    # recovery obligation even when the transition lease itself is no longer held.
     $journalPath = Get-AeroLinkSiteUpdateJournalPath -InstallationRoot $root
-    $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
-    Assert-True ($journal.stage -eq 'Completed' -and $journal.sourceSha -eq ('a' * 40) -and $journal.databaseModified -and
-        $journal.backupSha256 -match '^[0-9a-f]{64}$' -and
-        ($journal.PSObject.Properties.Name -notcontains 'Password') -and ($journal.PSObject.Properties.Name -notcontains 'ConnectionString')) `
-        'The completed journal must retain package, backup hash and recovery identity without credentials.'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $journalPath) -Force | Out-Null
+    @{ stage = 'StartingAndCheckingPublicHealth'; recovery = 'retain the package and inspect the running service' } |
+        ConvertTo-Json | Set-Content -LiteralPath $journalPath -Encoding UTF8
+    Assert-Throws {
+        Invoke-AeroLinkSiteUpdate -ProductRoot (Split-Path -Parent $PSScriptRoot) -InstallationRoot $root `
+            -Package $package -TrustedCertificate $certificate
+    } 'incomplete.*attended recovery' 'An interrupted updater journal must refuse a second update before package or service mutation.'
 }
 finally { foreach ($fixture in $fixtures) { if (Test-Path -LiteralPath $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue } } }
 

@@ -227,6 +227,16 @@ try {
     Assert-True (($steps | Where-Object { $_ -like 'cleanup:*' }).Count -eq 1) 'The disposable copy is cleaned up even when validation fails.'
     Assert-True ($failed.Detail -match 'never touched and is unchanged') 'The failure must state plainly that the real database is unchanged.'
 
+    # Cleanup is part of the clone safety gate. A generated database/evidence tree that cannot be removed must
+    # refuse before the real upgrade rather than continue with a dirty validation boundary.
+    $steps.Clear()
+    $cleanupFailure = { param($Database) $steps.Add("cleanup-failed:$Database"); throw 'fixture cleanup refusal' }.GetNewClosure()
+    Assert-Throws {
+        Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -BackupRunner $backup -RestoreRunner $restore `
+            -UpgradeRunner $upgradeRunner -AnalysisRunner $cloneCurrent -CleanupRunner $cleanupFailure -CurrentCodeValidator $cloneHealthy
+    } 'cleanup failed|generated validation copy' 'A clone cleanup refusal must fail closed before real mutation.'
+    Assert-True ($steps -notcontains 'upgrade:real') 'A clone cleanup refusal must leave the real database untouched.'
+
     # --- 8. The clone upgrades but is still not current: also refuses ---
     $steps.Clear()
     $cloneNotCurrent = { param($ConnectionString) $steps.Add('analyze:clone'); [pscustomobject]@{ Status = 'upgrade-required'; Analysis = $null; ExitCode = 10; Detail = '' } }.GetNewClosure()

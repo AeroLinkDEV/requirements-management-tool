@@ -99,20 +99,32 @@ function Assert-AeroLinkSiteVersionRoot {
     return $program
 }
 
+function Assert-AeroLinkSiteUpdateAdmission {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$InstallationRoot)
+    $path = Get-AeroLinkSiteUpdateJournalPath -InstallationRoot $InstallationRoot
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
+    try { $journal = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
+    catch { throw "The site updater journal at $path is malformed; attended recovery is required before another update. $($_.Exception.Message)" }
+    $stage = if ($journal.PSObject.Properties['stage']) { [string]$journal.stage } else { '' }
+    if ($stage -ne 'Completed') {
+        $recovery = if ($journal.PSObject.Properties['recovery']) { [string]$journal.recovery } else { 'Inspect the journal and complete the attended recovery procedure.' }
+        throw "The prior site update at $path is incomplete (stage '$stage'); refusing another package, backup or service mutation until attended recovery is complete. $recovery"
+    }
+}
+
 function Set-AeroLinkSiteCurrentTarget {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Layout,
         [Parameter(Mandatory)][string]$VersionRoot,
-        [string]$PriorTarget,
-        [scriptblock]$Switcher
+        [string]$PriorTarget
     )
     $target = [IO.Path]::GetFullPath($VersionRoot).TrimEnd('\', '/')
     $versions = [IO.Path]::GetFullPath($Layout.Versions).TrimEnd('\', '/') + '\'
     if (-not $target.StartsWith($versions, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $target -PathType Container)) {
         throw "Refusing to point current at '$target': it is not an existing release under $($Layout.Versions)."
     }
-    if ($Switcher) { & $Switcher $Layout.Current $target; return $target }
     try {
         if (Test-Path -LiteralPath $Layout.Current) {
             $current = Get-Item -LiteralPath $Layout.Current -Force
@@ -156,9 +168,19 @@ function Test-AeroLinkSiteUpdateHealth {
     } catch {
         return [pscustomobject]@{ Passed = $false; Detail = $_.Exception.Message }
     }
-    $ready = if ($ReadyProbe) { [bool](& $ReadyProbe $BaseUri) } else { Test-AeroLinkReadyEndpoint -BaseUri $BaseUri }
-    if (-not $ready) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS readiness failed at $BaseUri." } }
-    $identity = if ($IdentityProbe) { & $IdentityProbe $BaseUri } else { Get-AeroLinkRuntimeIdentity -BaseUri $BaseUri }
+    if ($ReadyProbe) {
+        if (-not [bool](& $ReadyProbe $BaseUri)) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS readiness failed at $BaseUri." } }
+    } else {
+        $readyResponse = Invoke-AeroLinkSitePublicJson -BaseUri $BaseUri -Path '/health/ready'
+        if (-not $readyResponse.Succeeded -or $readyResponse.Value.status -ne 'ready' -or $readyResponse.Value.database -ne 'connected') {
+            return [pscustomobject]@{ Passed = $false; Detail = if ($readyResponse.Succeeded) { "Public HTTPS readiness failed at $BaseUri." } else { $readyResponse.Detail } }
+        }
+    }
+    $identity = if ($IdentityProbe) { & $IdentityProbe $BaseUri } else {
+        $identityResponse = Invoke-AeroLinkSitePublicJson -BaseUri $BaseUri -Path '/health/identity'
+        if (-not $identityResponse.Succeeded) { return [pscustomobject]@{ Passed = $false; Detail = $identityResponse.Detail } }
+        $identityResponse.Value
+    }
     if (-not $identity) { return [pscustomobject]@{ Passed = $false; Detail = "Public HTTPS identity was unavailable at $BaseUri." } }
     if ($ExpectedVersion) {
         $actualVersion = if ($identity.PSObject.Properties['version']) { [string]$identity.version } else { '' }
@@ -271,8 +293,31 @@ function Assert-AeroLinkSiteUpdatePublicHostName {
     return $hostName
 }
 
+function Invoke-AeroLinkSitePublicJson {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$BaseUri, [Parameter(Mandatory)][string]$Path)
+    $uri = $BaseUri.TrimEnd('/') + $Path
+    try {
+        # A public proof must remain on the configured origin. PowerShell otherwise follows a 3xx and can prove a
+        # different host while the configured full-DNS endpoint itself never answered.
+        $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 10 -MaximumRedirection 0
+        $status = [int]$response.StatusCode
+        if ($status -ge 300 -and $status -lt 400) { throw "The public endpoint redirected at $uri; refusing a substituted origin." }
+        if ($status -ne 200) { throw "The public endpoint at $uri returned HTTP $status, not 200." }
+        return [pscustomobject]@{ Succeeded = $true; Value = ([string]$response.Content | ConvertFrom-Json); Detail = '' }
+    }
+    catch {
+        $status = $null
+        try { if ($_.Exception.Response -and $_.Exception.Response.StatusCode) { $status = [int]$_.Exception.Response.StatusCode } } catch { }
+        if ($status -ge 300 -and $status -lt 400) {
+            return [pscustomobject]@{ Succeeded = $false; Value = $null; Detail = "The public endpoint at $uri redirected (HTTP $status); refusing a substituted origin." }
+        }
+        return [pscustomobject]@{ Succeeded = $false; Value = $null; Detail = "The public endpoint at $uri could not be proved: $($_.Exception.Message)" }
+    }
+}
+
 function Invoke-AeroLinkSiteUpdate {
-    <# The production entry point. All destructive callbacks are injectable only to exercise contracts. #>
+    <# The production entry point. Its destructive boundaries are always the installed production authorities. #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$ProductRoot,
@@ -280,13 +325,7 @@ function Invoke-AeroLinkSiteUpdate {
         [Parameter(Mandatory)][string]$Package,
         [Parameter(Mandatory)][string]$TrustedCertificate,
         [string]$ProtectedConfigRoot,
-        [switch]$AllowUnverifiedDevelopment,
-        [scriptblock]$VerifyPackage,
-        [scriptblock]$CloneRunner,
-        [scriptblock]$ServiceStopper,
-        [scriptblock]$ServiceStarter,
-        [scriptblock]$HealthProver,
-        [scriptblock]$Switcher
+        [switch]$AllowUnverifiedDevelopment
     )
     $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
     if (-not $site) { throw "The installation '$InstallationRoot' has no site declaration." }
@@ -297,17 +336,21 @@ function Invoke-AeroLinkSiteUpdate {
     $publicHostName = Assert-AeroLinkSiteUpdatePublicHostName -PublicHostName $site.PublicHostName
     Assert-AeroLinkSiteServiceSid -Site $site -Role Api | Out-Null
     $layout = Get-AeroLinkServerLayout -InstallationRoot $site.InstallationRoot
+    Assert-AeroLinkSiteUpdateAdmission -InstallationRoot $site.InstallationRoot
+    if (-not $PSCmdlet.ShouldProcess($site.InstallationRoot, "Verify and apply signed AeroLink package '$Package'")) {
+        return [pscustomobject]@{ Applied = $false; WhatIf = $true; Detail = 'WhatIf requested; no package, database, service, junction or journal mutation was performed.' }
+    }
+    $operationId = [guid]::NewGuid().ToString('N')
     $lease = $null; $incoming = $null; $versionRoot = $null; $priorTarget = $null; $verified = $null; $clone = $null; $backupSha256 = $null
     $state = [pscustomobject]@{ Switched = $false; ServiceStopped = $false }
     try {
-        $lease = Enter-AeroLinkTransition -InstallationRoot $site.InstallationRoot -Policy Preserve
+        $lease = Enter-AeroLinkTransition -InstallationRoot $site.InstallationRoot -Policy Preserve -OperationId $operationId -Phase 'Admission'
         if ($lease.Pending) { throw 'An interrupted site update requires attended recovery before another update can start.' }
         $priorTarget = Get-AeroLinkSiteCurrentTarget -Layout $layout
         $incoming = Join-Path $layout.Versions ('.incoming-' + [guid]::NewGuid().ToString('N'))
+        Set-AeroLinkTransitionPhase -Lease $lease -Phase 'VerifyingPackage'
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'VerifyingPackage' -PriorTarget $priorTarget -Recovery 'No database change; remove any incomplete incoming tree after inspection.' | Out-Null
-        $verified = if ($VerifyPackage) { & $VerifyPackage $Package $TrustedCertificate $incoming } else {
-            Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $TrustedCertificate -Destination $incoming -AllowUnverifiedDevelopment:$AllowUnverifiedDevelopment
-        }
+        $verified = Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $TrustedCertificate -Destination $incoming -AllowUnverifiedDevelopment:$AllowUnverifiedDevelopment
         $versionRoot = Join-Path $layout.Versions ([string]$verified.Version)
         if (Test-Path -LiteralPath $versionRoot) { throw "Version $($verified.Version) is already present at '$versionRoot'; refusing to reuse an unverified retained tree." }
         $packageProgram = Assert-AeroLinkSiteVersionRoot -Layout $layout -VersionRoot $incoming -Verified $verified
@@ -317,17 +360,17 @@ function Invoke-AeroLinkSiteUpdate {
         if (-not (Test-Path -LiteralPath $packageExecutable -PathType Leaf)) {
             throw "The retained release '$versionRoot' has no packaged API executable at '$packageExecutable'."
         }
+        Set-AeroLinkTransitionPhase -Lease $lease -Phase 'ValidatingClone'
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'ValidatingClone' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -Recovery 'The current junction is unchanged; the retained package can be removed after review.' | Out-Null
         $beforeRealUpgrade = {
+                Set-AeroLinkTransitionPhase -Lease $lease -Phase 'SwitchingBeforeRealUpgrade'
                 Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'SwitchingBeforeRealUpgrade' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive $null -Recovery 'The verified package is current; if maintenance fails after mutation, use the retained backup and attended restore procedure.' | Out-Null
-                if ($ServiceStopper) { & $ServiceStopper $site } else { Stop-Service -Name $site.ServiceName -ErrorAction Stop }
+                Stop-Service -Name $site.ServiceName -ErrorAction Stop
                 $state.ServiceStopped = $true
-                Set-AeroLinkSiteCurrentTarget -Layout $layout -VersionRoot $versionRoot -PriorTarget $priorTarget -Switcher $Switcher | Out-Null
+                Set-AeroLinkSiteCurrentTarget -Layout $layout -VersionRoot $versionRoot -PriorTarget $priorTarget | Out-Null
                 $state.Switched = $true
         }.GetNewClosure()
-        $clone = if ($CloneRunner) { & $CloneRunner $packageExecutable $beforeRealUpgrade } else {
-            Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $ProductRoot -InstallationRoot $site.InstallationRoot -ProtectedConfigRoot $ProtectedConfigRoot -ApiExecutable $packageExecutable -BeforeRealUpgrade $beforeRealUpgrade
-        }
+        $clone = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $ProductRoot -InstallationRoot $site.InstallationRoot -ProtectedConfigRoot $ProtectedConfigRoot -ApiExecutable $packageExecutable -BeforeRealUpgrade $beforeRealUpgrade
         if ($clone -and $clone.Archive -and (Test-Path -LiteralPath $clone.Archive -PathType Leaf)) {
             $backupSha256 = (Get-FileHash -LiteralPath $clone.Archive -Algorithm SHA256).Hash
         }
@@ -343,28 +386,36 @@ function Invoke-AeroLinkSiteUpdate {
             return [pscustomobject]@{ Applied = $false; Version = $verified.Version; Detail = if ($clone) { $clone.Detail } else { 'The clone validation did not return a result.' } }
         }
         if (-not $state.Switched) {
-            Set-AeroLinkSiteCurrentTarget -Layout $layout -VersionRoot $versionRoot -PriorTarget $priorTarget -Switcher $Switcher | Out-Null
+            Set-AeroLinkSiteCurrentTarget -Layout $layout -VersionRoot $versionRoot -PriorTarget $priorTarget | Out-Null
             $state.Switched = $true
         }
+        Set-AeroLinkTransitionPhase -Lease $lease -Phase 'StartingAndCheckingPublicHealth'
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'StartingAndCheckingPublicHealth' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified $true -Recovery 'The database was upgraded; do not start the old binary. Retain the backup and use the attended RESTORE-AEROLINK procedure.' | Out-Null
-        if ($ServiceStarter) { & $ServiceStarter $site } else { Start-Service -Name $site.ServiceName -ErrorAction Stop }
+        Start-Service -Name $site.ServiceName -ErrorAction Stop
         $baseUri = "https://$($publicHostName):$($site.ApiPort)"
-        $health = if ($HealthProver) { & $HealthProver $baseUri $verified $site } else {
-            Test-AeroLinkSiteUpdateHealth -BaseUri $baseUri -ExpectedSourceSha $verified.SourceSha -ExpectedVersion $verified.Version `
-                -ExpectedInstanceId $declaredInstanceId -ExpectedClassification $site.Classification -Site $site `
-                -ExpectedExecutable $packageExecutable -ExpectedCurrentTarget $versionRoot
-        }
+        $health = Test-AeroLinkSiteUpdateHealth -BaseUri $baseUri -ExpectedSourceSha $verified.SourceSha -ExpectedVersion $verified.Version `
+            -ExpectedInstanceId $declaredInstanceId -ExpectedClassification $site.Classification -Site $site `
+            -ExpectedExecutable $packageExecutable -ExpectedCurrentTarget $versionRoot
         if (-not $health.Passed) { throw $health.Detail }
+        Set-AeroLinkTransitionPhase -Lease $lease -Phase 'Completed'
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'Completed' -Version $verified.Version -SourceSha $verified.SourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified $true -Detail $health.Detail -Recovery 'No recovery action required.' | Out-Null
         return [pscustomobject]@{ Applied = $true; Version = $verified.Version; SourceSha = $verified.SourceSha; Archive = $clone.Archive; Detail = $health.Detail }
     } catch {
         if ($state.Switched -and -not $clone) {
-            try { Set-AeroLinkSiteCurrentTarget -Layout $layout -VersionRoot $priorTarget -Switcher $Switcher | Out-Null } catch { }
+            try { Set-AeroLinkSiteCurrentTarget -Layout $layout -VersionRoot $priorTarget | Out-Null } catch { }
         }
         $failedVersion = if ($verified) { [string]$verified.Version } else { $null }
         $failedSourceSha = if ($verified) { [string]$verified.SourceSha } else { $null }
-        if ($state.ServiceStopped -and -not $state.Switched) { try { if ($ServiceStarter) { & $ServiceStarter $site } else { Start-Service -Name $site.ServiceName -ErrorAction SilentlyContinue } } catch { } }
-        Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'Failed' -Version $failedVersion -SourceSha $failedSourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified ([bool]($clone -and ($clone.Applied -or $clone.DatabaseModified))) -Detail $_.Exception.Message -Recovery 'Inspect update-state.json. If the database was modified, keep the new binary and use the retained backup with attended RESTORE-AEROLINK; never start the old binary against changed schema.' | Out-Null
+        if ($state.ServiceStopped -and -not $state.Switched) { try { Start-Service -Name $site.ServiceName -ErrorAction SilentlyContinue } catch { } }
+        if ($lease -and $lease.Owner) {
+            try { Set-AeroLinkTransitionPhase -Lease $lease -Phase 'Failed' } catch { }
+        }
+        $recovery = if ($_.Exception.Message -match 'cleanup') {
+            'An isolated validation copy or evidence tree may remain; inspect and remove that generated copy before retry. The persistent database was not changed.'
+        } else {
+            'Inspect update-state.json. If the database was modified, keep the new binary and use the retained backup with attended RESTORE-AEROLINK; never start the old binary against changed schema.'
+        }
+        Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'Failed' -Version $failedVersion -SourceSha $failedSourceSha -PriorTarget $priorTarget -BackupArchive ([string]$clone.Archive) -BackupSha256 $backupSha256 -DatabaseModified ([bool]($clone -and ($clone.Applied -or $clone.DatabaseModified))) -Detail $_.Exception.Message -Recovery $recovery | Out-Null
         throw
     } finally {
         if ($lease) { Exit-AeroLinkTransition -Lease $lease }

@@ -370,7 +370,12 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
                 if ($CleanupRunner) { & $CleanupRunner $cloneDatabase }
                 else { Remove-AeroLinkUpgradeValidationDatabase -ProductRoot $ProductRoot -InstallationRoot $InstallationRoot -ProtectedConfigRoot $ProtectedConfigRoot -Database $cloneDatabase -PostgresPort $PostgresPort }
             }
-            catch { Write-Host "      The disposable validation copy could not be removed: $($_.Exception.Message)" -ForegroundColor Yellow }
+            catch {
+                # Proceeding to the real database while a generated clone or its controlled evidence remains is
+                # unsafe: the persistent mutation would no longer have a clean, disposable validation boundary.
+                # Throw from finally so every return above is replaced by a durable refusal before BeforeRealUpgrade.
+                throw "The disposable validation cleanup failed for '$cloneDatabase' under '$($installation.RestoreValidation)'; the real database was not changed and the generated validation copy requires attended cleanup before retry. $($_.Exception.Message)"
+            }
             $cleanedUp = $true
         }
     }
