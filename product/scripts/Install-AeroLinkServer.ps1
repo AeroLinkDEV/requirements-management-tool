@@ -129,25 +129,37 @@ function Assert-AeroLinkInstallReleasePreflight {
     param(
         [AllowNull()][string]$CurrentTarget,
         [Parameter(Mandatory)][string]$VersionRoot,
+        [string]$LegacyVersionRoot,
         [Parameter(Mandatory)][string]$IncomingRoot,
         [Parameter(Mandatory)]$Verified
     )
+    if ([string]$Verified.Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+        throw "The verified release version '$($Verified.Version)' is not a safe semantic version directory name."
+    }
+    if ([string]$Verified.SourceSha -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "The verified release source SHA '$($Verified.SourceSha)' is not a full 40-character hexadecimal identity."
+    }
+    $candidate = [IO.Path]::GetFullPath($VersionRoot).TrimEnd('\')
+    $legacy = if ($LegacyVersionRoot) { [IO.Path]::GetFullPath($LegacyVersionRoot).TrimEnd('\') } else { $null }
+    $selected = $candidate
     if ($CurrentTarget) {
         $current = [IO.Path]::GetFullPath($CurrentTarget).TrimEnd('\')
-        $offered = [IO.Path]::GetFullPath($VersionRoot).TrimEnd('\')
-        if (-not [string]::Equals($current, $offered, [StringComparison]::OrdinalIgnoreCase)) {
+        if ([string]::Equals($current, $candidate, [StringComparison]::OrdinalIgnoreCase)) { $selected = $candidate }
+        elseif ($legacy -and [string]::Equals($current, $legacy, [StringComparison]::OrdinalIgnoreCase)) { $selected = $legacy }
+        else {
             throw "A different release is already current at '$CurrentTarget'. A2 refuses the transition before backup, service stop, junction switch or migration; use the A3 clone-validated updater."
         }
     }
-    if (Test-Path -LiteralPath $VersionRoot) {
-        if (-not (Test-Path -LiteralPath $VersionRoot -PathType Container)) {
-            throw "The existing release path '$VersionRoot' is not a directory; A2 refuses to replace it."
+    if (Test-Path -LiteralPath $selected) {
+        if (-not (Test-Path -LiteralPath $selected -PathType Container)) {
+            throw "The existing release path '$selected' is not a directory; A2 refuses to replace it."
         }
-        $retained = Compare-AeroLinkRetainedRelease -ExistingRoot $VersionRoot -IncomingRoot $IncomingRoot -Verified $Verified
+        $retained = Compare-AeroLinkRetainedRelease -ExistingRoot $selected -IncomingRoot $IncomingRoot -Verified $Verified
         if (-not $retained.Matches) {
-            throw "The existing release directory '$VersionRoot' cannot be reused: $($retained.Reason). A2 refuses the operation before changing the current release."
+            throw "The existing release directory '$selected' cannot be reused: $($retained.Reason). A2 refuses the operation before changing the current release."
         }
     }
+    return $selected
 }
 
 if ($RemoveBootstrapSecret) {
@@ -178,11 +190,12 @@ try {
     if ($AllowUnverifiedDevelopment -and $Name -ne 'Development') { throw 'An unverified development package is never installed as Production.' }
     # Validate the offered package against the certificate the operator supplied before changing the installed trust anchor.
     $verified = Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $TrustedCertificate -Destination $incoming -AllowUnverifiedDevelopment:$AllowUnverifiedDevelopment
-    $versionRoot = (Get-AeroLinkServerLayout -InstallationRoot $root -Version $verified.Version).VersionRoot
+    $versionRoot = (Get-AeroLinkServerLayout -InstallationRoot $root -Version $verified.Version -SourceSha $verified.SourceSha).VersionRoot
+    $legacyVersionRoot = (Get-AeroLinkServerLayout -InstallationRoot $root -Version $verified.Version).VersionRoot
     $currentItem = if (Test-Path -LiteralPath $layout.Current) { Get-Item -LiteralPath $layout.Current -ErrorAction Stop } else { $null }
     $previousTarget = if ($currentItem) { [string]$currentItem.Target } else { $null }
     if ($currentItem -and [string]::IsNullOrWhiteSpace($previousTarget)) { throw "The existing current path '$($layout.Current)' is not a readable junction; refusing to replace it." }
-    Assert-AeroLinkInstallReleasePreflight -CurrentTarget $previousTarget -VersionRoot $versionRoot -IncomingRoot $incoming -Verified $verified
+    $versionRoot = Assert-AeroLinkInstallReleasePreflight -CurrentTarget $previousTarget -VersionRoot $versionRoot -LegacyVersionRoot $legacyVersionRoot -IncomingRoot $incoming -Verified $verified
 
     $installed = if (Test-Path -LiteralPath $layout.TrustedCertificate -PathType Leaf) {
         New-Object Security.Cryptography.X509Certificates.X509Certificate2(, [IO.File]::ReadAllBytes($layout.TrustedCertificate))

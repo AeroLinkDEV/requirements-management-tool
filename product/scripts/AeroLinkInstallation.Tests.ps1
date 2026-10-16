@@ -718,6 +718,14 @@ try {
     Assert-True ($layout.VersionRoot -eq 'C:\AeroLink\AeroLink Production\program\versions\1.2.3' -and $layout.Current -eq 'C:\AeroLink\AeroLink Production\program\current' -and
         $layout.ApiExecutable -eq 'C:\AeroLink\AeroLink Production\program\current\app\AeroLink.Api.exe' -and $layout.TrustedCertificate -eq 'C:\AeroLink\AeroLink Production\trust\release-signing.cer') `
         'The layout: versions\<version>, a current junction, the API under current\app, the trusted certificate under trust\.'
+    $identityLayout = Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2.3' -SourceSha ('b' * 40)
+    Assert-True ($identityLayout.VersionRoot -eq ('C:\AeroLink\AeroLink Production\program\versions\1.2.3+' + ('b' * 40)) -and
+        $identityLayout.VersionDirectory -eq ('1.2.3+' + ('b' * 40))) `
+        'A verified release directory must include the full source identity while the legacy version-only layout remains available.'
+    Assert-Throws { Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2/3' -SourceSha ('b' * 40) } 'safe semantic' `
+        'A version path component outside semantic-version syntax must be refused.'
+    Assert-Throws { Get-AeroLinkServerLayout -InstallationRoot 'C:\AeroLink\AeroLink Production\' -Version '1.2.3' -SourceSha ('b' * 39) } 'full 40-character' `
+        'A release directory identity must carry a full source SHA.'
 
     # --- 13a. A2 entry-point release preflight (#1614): exact identity/idempotence and no unsafe update path ---
     # Authoring gate: this protects the observable refusal boundary before backup, service stop, junction switch,
@@ -762,6 +770,32 @@ try {
     'not-a-directory' | Set-Content -LiteralPath $retained -NoNewline
     Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease } 'not a directory' `
         'A release path occupied by a file must fail closed before replacement.'
+    Remove-Item -LiteralPath $retained -Force
+    New-Item -ItemType Directory -Path $retained -Force | Out-Null
+    'payload' | Set-Content -LiteralPath (Join-Path $retained 'app.bin') -NoNewline
+    $manifest | Set-Content -LiteralPath (Join-Path $retained 'manifest.json') -NoNewline
+    $newSha = ('b' * 40)
+    $safeA = Join-Path $installerFixture ('program\versions\1.0.0+' + ('a' * 40))
+    $safeB = Join-Path $installerFixture ('program\versions\1.0.0+' + $newSha)
+    $safeLayoutA = Get-AeroLinkServerLayout -InstallationRoot $installerFixture -Version '1.0.0' -SourceSha ('a' * 40)
+    $safeLayoutB = Get-AeroLinkServerLayout -InstallationRoot $installerFixture -Version '1.0.0' -SourceSha $newSha
+    Assert-True ($safeLayoutA.VersionRoot -eq $safeA -and $safeLayoutB.VersionRoot -eq $safeB -and $safeA -ne $safeB) `
+        'Same-version releases with different verified source identities must resolve to distinct safe targets.'
+    $selectedLegacy = Assert-AeroLinkInstallReleasePreflight -CurrentTarget $retained -VersionRoot $safeLayoutA.VersionRoot -LegacyVersionRoot $retained -IncomingRoot $incoming -Verified $verifiedRelease
+    Assert-True ($selectedLegacy -eq [IO.Path]::GetFullPath($retained)) `
+        'An exact byte-identical legacy version directory may be reused for an A2 repair.'
+    $otherVerified = [pscustomobject]@{ Version = '1.0.0'; SourceSha = $newSha }
+    $beforeTarget = [IO.Path]::GetFullPath($retained)
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -CurrentTarget $beforeTarget -VersionRoot $safeLayoutB.VersionRoot -LegacyVersionRoot $retained -IncomingRoot $incoming -Verified $otherVerified } 'A2 refuses' `
+        'A same-version different-source release must refuse while the original current target remains selected.'
+    Assert-True ($beforeTarget -eq [IO.Path]::GetFullPath($retained)) 'A refused source collision must leave the original target unchanged.'
+    New-Item -ItemType Directory -Path $safeLayoutB.VersionRoot -Force | Out-Null
+    $otherManifest = [ordered]@{ formatVersion = 1; version = '1.0.0'; sourceSha = $newSha; files = @(@{ path = 'app.bin'; sha256 = $payloadHash }) } | ConvertTo-Json -Depth 5
+    $otherManifest | Set-Content -LiteralPath (Join-Path $safeLayoutB.VersionRoot 'manifest.json') -NoNewline
+    'payload' | Set-Content -LiteralPath (Join-Path $safeLayoutB.VersionRoot 'app.bin') -NoNewline
+    Set-Content -LiteralPath (Join-Path $incoming 'app.bin') -Value 'different-source' -NoNewline
+    Assert-Throws { Assert-AeroLinkInstallReleasePreflight -VersionRoot $safeLayoutB.VersionRoot -IncomingRoot $incoming -Verified $otherVerified } 'cannot be reused' `
+        'A retained identity directory with different bytes must refuse instead of being overwritten.'
     $installerSource = [IO.File]::ReadAllText($installerPath)
     $releaseStart = $installerSource.IndexOf('$layout = Get-AeroLinkServerLayout -InstallationRoot $root')
     $pointerStart = $installerSource.IndexOf("Step 'Installation pointer'")

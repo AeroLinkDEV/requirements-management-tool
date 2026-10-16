@@ -99,6 +99,17 @@ function Assert-AeroLinkSiteVersionRoot {
     return $program
 }
 
+function Get-AeroLinkSiteUpdateVersionRoot {
+    <# A new updater target is identified by both the signed SemVer and its full source identity. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Layout, [Parameter(Mandatory)]$Verified)
+    $target = (Get-AeroLinkServerLayout -InstallationRoot $Layout.InstallationRoot -Version ([string]$Verified.Version) -SourceSha ([string]$Verified.SourceSha)).VersionRoot
+    if (Test-Path -LiteralPath $target) {
+        throw "The verified release target '$target' is already retained; refusing an exact identity collision instead of overwriting it."
+    }
+    return $target
+}
+
 function Assert-AeroLinkSiteUpdateAdmission {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$InstallationRoot)
@@ -351,8 +362,7 @@ function Invoke-AeroLinkSiteUpdate {
         Set-AeroLinkTransitionPhase -Lease $lease -Phase 'VerifyingPackage'
         Write-AeroLinkSiteUpdateJournal -InstallationRoot $site.InstallationRoot -Stage 'VerifyingPackage' -PriorTarget $priorTarget -Recovery 'No database change; remove any incomplete incoming tree after inspection.' | Out-Null
         $verified = Test-AeroLinkReleasePackage -Package $Package -TrustedCertificate $TrustedCertificate -Destination $incoming -AllowUnverifiedDevelopment:$AllowUnverifiedDevelopment
-        $versionRoot = Join-Path $layout.Versions ([string]$verified.Version)
-        if (Test-Path -LiteralPath $versionRoot) { throw "Version $($verified.Version) is already present at '$versionRoot'; refusing to reuse an unverified retained tree." }
+        $versionRoot = Get-AeroLinkSiteUpdateVersionRoot -Layout $layout -Verified $verified
         $packageProgram = Assert-AeroLinkSiteVersionRoot -Layout $layout -VersionRoot $incoming -Verified $verified
         Move-Item -LiteralPath $incoming -Destination $versionRoot
         $incoming = $null
@@ -428,6 +438,7 @@ Export-ModuleMember -Function @(
     'Write-AeroLinkSiteUpdateJournal',
     'Get-AeroLinkSiteCurrentTarget',
     'Assert-AeroLinkSiteVersionRoot',
+    'Get-AeroLinkSiteUpdateVersionRoot',
     'Set-AeroLinkSiteCurrentTarget',
     'Test-AeroLinkSiteUpdateHealth',
     'Test-AeroLinkSitePublicProcessBinding',
