@@ -81,6 +81,24 @@ try {
     Assert-Throws { Get-AeroLinkSiteCurrentTarget -Layout $missingLayout } 'missing.*exact prior target' `
         'An installation without a current junction must fail closed because no exact rollback target exists.'
 
+    # New update targets carry the signed SemVer and complete source identity. A retained target is an exact
+    # collision and must refuse without changing the old current junction; a legacy version-only target remains
+    # a valid rollback/repair target for A2, but is never overwritten by this updater.
+    $verifiedA = [pscustomobject]@{ Version = '1.0.0'; SourceSha = ('a' * 40) }
+    $verifiedB = [pscustomobject]@{ Version = '1.0.0'; SourceSha = ('b' * 40) }
+    $targetA = Get-AeroLinkSiteUpdateVersionRoot -Layout $layout -Verified $verifiedA
+    $targetB = Get-AeroLinkSiteUpdateVersionRoot -Layout $layout -Verified $verifiedB
+    Assert-True ($targetA -ne $targetB -and $targetA -match '1\.0\.0\+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa$' -and
+        $targetB -match '1\.0\.0\+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb$') `
+        'Same-version packages with different source identities must receive distinct updater targets.'
+    $legacyCurrent = Join-Path $versions '1.0.0'
+    $beforeCurrent = [IO.Path]::GetFullPath($legacyCurrent)
+    New-Item -ItemType Directory -Path $targetB -Force | Out-Null
+    Assert-Throws { Get-AeroLinkSiteUpdateVersionRoot -Layout $layout -Verified $verifiedB } 'exact identity collision|already retained' `
+        'An exact retained identity collision must refuse instead of overwriting a release target.'
+    Assert-True ($beforeCurrent -eq [IO.Path]::GetFullPath($legacyCurrent) -and (Test-Path -LiteralPath $layout.Current)) `
+        'A retained-target refusal must leave the prior current junction and legacy rollback target untouched.'
+
     # Public full-DNS health owns the installation identity and joins the intentionally redacted response to the
     # exact service PID, process birth time, image, current target and signed-tree source identity.
     $publicStarted = '2026-10-15T12:00:00.0000000Z'
