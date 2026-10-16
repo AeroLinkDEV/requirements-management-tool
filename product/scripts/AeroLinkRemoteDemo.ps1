@@ -37,8 +37,12 @@ param(
     # Retire only: act on the plan instead of previewing it.
     [switch]$Apply,
     # Retire only: the public HTTPS origin of the live SiteProduction host. The gate probes its existing health
-    # endpoints immediately before any HOME task/configuration removal.
+    # endpoints immediately before any HOME task/configuration removal. This must be the configured full-DNS
+    # company origin, not a discovered redirect or a loopback stand-in.
     [string]$CompanyHostPublicHttpsOrigin,
+    # Retire only: configured production identity/source expected at that exact company origin.
+    [string]$CompanyHostExpectedInstanceId,
+    [string]$CompanyHostExpectedSourceIdentity,
     # Retire only: explicit attended confirmation that the company host is live and HOME may be retired.
     [switch]$ConfirmCompanyHostGoLive
 )
@@ -53,7 +57,9 @@ $localDemoRoot = Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo'
 # #1614 D6: retired once the company host is live. Decided before the configuration is read, because Retire removes it.
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemoRetirement.psm1') -Force
 if ($Action -eq 'Retire') {
-    $goLiveProof = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $CompanyHostPublicHttpsOrigin -OperatorConfirmed:$ConfirmCompanyHostGoLive
+    $goLiveProof = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $CompanyHostPublicHttpsOrigin `
+        -ExpectedProductionInstanceId $CompanyHostExpectedInstanceId -ExpectedProductionSourceIdentity $CompanyHostExpectedSourceIdentity `
+        -OperatorConfirmed:$ConfirmCompanyHostGoLive
     $retireConfig = $null
     try { $retireConfig = Get-AeroLinkRemoteDemoConfig } catch { }
     $registered = @(@('AeroLinkRemoteDemoRecovery', 'AeroLinkProductionSourceReconcile') | Where-Object { Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue })
@@ -69,7 +75,8 @@ if ($Action -eq 'Retire') {
     Write-Host "  Launchers that will then print 'retired': $($plan.Launchers -join ', ')" -ForegroundColor DarkGray
     foreach ($note in $plan.Operator) { Write-Host "  Afterwards: $note" -ForegroundColor Yellow }
     if (-not $Apply) { Write-Host 'Preview only; nothing was changed. Run again with -Apply to retire the remote demo.' -ForegroundColor Yellow; exit 0 }
-    Invoke-AeroLinkRemoteDemoRetirePlan -Plan $plan
+    Invoke-AeroLinkRemoteDemoRetirePlan -Plan $plan -ExpectedPublicHttpsOrigin $CompanyHostPublicHttpsOrigin `
+        -ExpectedProductionInstanceId $CompanyHostExpectedInstanceId -ExpectedProductionSourceIdentity $CompanyHostExpectedSourceIdentity
     Write-Host 'The remote demo is retired.' -ForegroundColor Green
     exit 0
 }

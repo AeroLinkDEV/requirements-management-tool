@@ -394,17 +394,58 @@ $retirePolicy = Join-Path $retireRoot 'policy.yml'
 $foreignPolicy = Join-Path $tempRoot 'elsewhere-policy.yml'
  $foreignConfig = Join-Path $tempRoot 'elsewhere.config.psd1'
 foreach ($file in @($retireConfig, $retirePolicy, $foreignPolicy, $foreignConfig)) { Set-Content -LiteralPath $file -Value 'x' -Encoding ASCII }
-$goLiveProof = [pscustomobject]@{
-    Ready = $true; OperatorConfirmed = $true; PublicHttpsOrigin = 'https://aerolink.company.example:5443'
-    ObservedAtUtc = (Get-Date).ToUniversalTime().ToString('o'); ReadyStatus = 'ready'; ReadyDatabase = 'connected'
-    Identity = [pscustomobject]@{ Mode = 'SITE-PRODUCTION'; Classification = 'SiteProduction'; InstanceId = ([guid]::NewGuid().ToString()); InstanceLabel = 'SITE PRODUCTION' }
+$expectedOrigin = 'https://aerolink.internal.example'
+$expectedInstanceId = ([guid]::NewGuid()).ToString('D')
+$expectedSourceIdentity = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+$global:retireProofCalls = @()
+$global:retireScheduledTaskFixtures = @()
+$global:retireTaskXml = @{}
+$global:retireUnregisterCalls = @()
+function global:Invoke-RestMethod {
+    param([string]$Uri, [switch]$UseBasicParsing, [int]$TimeoutSec, [int]$MaximumRedirection)
+    $global:retireProofCalls += [pscustomobject]@{ Uri = $Uri; MaximumRedirection = $MaximumRedirection }
+    if ($Uri -match '/health/ready$') { return [pscustomobject]@{ status = 'ready'; database = 'connected' } }
+    return [pscustomobject]@{
+        mode = 'SITE-PRODUCTION'; sourceIdentity = $expectedSourceIdentity
+        instance = [pscustomobject]@{ id = $expectedInstanceId; label = 'SITE PRODUCTION'; classification = 'SiteProduction' }
+    }
 }
+function global:Get-Process { [CmdletBinding()] param([string]$Name); return @() }
+function global:Get-ScheduledTask {
+    [CmdletBinding()] param([string]$TaskName, [string]$TaskPath)
+    $rows = @($global:retireScheduledTaskFixtures | Where-Object { $_.TaskName -eq $TaskName })
+    if ($PSBoundParameters.ContainsKey('TaskPath')) { $rows = @($rows | Where-Object { $_.TaskPath -eq $TaskPath }) }
+    return $rows
+}
+function global:Export-ScheduledTask {
+    [CmdletBinding()] param([string]$TaskName, [string]$TaskPath)
+    return $global:retireTaskXml[$TaskName]
+}
+function global:Unregister-ScheduledTask {
+    [CmdletBinding()] param([string]$TaskName, [string]$TaskPath, [switch]$Confirm)
+    $global:retireUnregisterCalls += [pscustomobject]@{ TaskName = $TaskName; TaskPath = $TaskPath }
+    $global:retireScheduledTaskFixtures = @($global:retireScheduledTaskFixtures | Where-Object { $_.TaskName -ne $TaskName -or $_.TaskPath -ne $TaskPath })
+}
+$goLiveProof = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId `
+    -ExpectedProductionSourceIdentity $expectedSourceIdentity -OperatorConfirmed
+Assert-True ($goLiveProof.Ready -and $goLiveProof.PublicHttpsOrigin -eq $expectedOrigin) 'A configured private company DNS origin with matching production identity/source must be accepted.'
+Assert-True (@($global:retireProofCalls | Where-Object MaximumRedirection -ne 0).Count -eq 0) 'Go-live proof must disable redirects for every health request.'
 $preGoLive = Get-AeroLinkRemoteDemoRetirePlan -RegisteredTaskNames @('AeroLinkRemoteDemoRecovery') `
     -ConfigPath $retireConfig -TrafficPolicyPath $retirePolicy -LocalRoot $retireRoot
 Assert-True ($preGoLive.Refused -and @($preGoLive.Actions).Count -eq 0 -and $preGoLive.Refusal -match 'go-live|confirmation') `
     'Retire must refuse before any action when no verified company-host go-live proof is supplied.'
-$invalidOrigin = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin 'http://aerolink.company.example' -OperatorConfirmed
+$invalidOrigin = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin 'http://aerolink.company.example' -ExpectedProductionInstanceId $expectedInstanceId `
+    -ExpectedProductionSourceIdentity $expectedSourceIdentity -OperatorConfirmed
 Assert-True (-not $invalidOrigin.Ready -and $invalidOrigin.Refusal -match 'HTTPS') 'The D6 proof must reject a non-HTTPS company-host origin.'
+$loopbackOrigin = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin 'https://127.0.0.1' -ExpectedProductionInstanceId $expectedInstanceId `
+    -ExpectedProductionSourceIdentity $expectedSourceIdentity -OperatorConfirmed
+Assert-True (-not $loopbackOrigin.Ready -and $loopbackOrigin.Refusal -match 'loopback|DNS') 'The D6 proof must reject a loopback or non-DNS stand-in origin.'
+$localhostOrigin = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin 'https://localhost' -ExpectedProductionInstanceId $expectedInstanceId `
+    -ExpectedProductionSourceIdentity $expectedSourceIdentity -OperatorConfirmed
+Assert-True (-not $localhostOrigin.Ready -and $localhostOrigin.Refusal -match 'localhost|DNS') 'The D6 proof must reject localhost.'
+$wrongSource = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId `
+    -ExpectedProductionSourceIdentity 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' -OperatorConfirmed
+Assert-True (-not $wrongSource.Ready -and $wrongSource.Refusal -match 'source') 'The D6 proof must bind the response to the configured production source identity.'
 $plan = Get-AeroLinkRemoteDemoRetirePlan -RegisteredTaskNames @('AeroLinkRemoteDemoRecovery', 'AeroLinkProductionSourceReconcile', 'SomethingElse') `
     -ConfigPath $retireConfig -TrafficPolicyPath $retirePolicy -BasicAuthSecretName 'aerolink-demo' -VaultName 'AeroLinkVault' -LocalRoot $retireRoot -GoLiveProof $goLiveProof
 $kinds = @($plan.Actions | ForEach-Object { "$($_.Kind)|$(Split-Path $_.Target -Leaf)" })
@@ -419,18 +460,60 @@ Assert-True ($foreignConfigPlan.Refused -and @($foreignConfigPlan.Actions).Count
 $running = Get-AeroLinkRemoteDemoRetirePlan -ConfigPath $retireConfig -LocalRoot $retireRoot -NgrokRunning $true -GoLiveProof $goLiveProof
 Assert-True ($running.Refused -and $running.Refusal -match 'Stop the remote demo first') 'Retire refuses while ngrok is running.'
 $threw = $false
-try { Invoke-AeroLinkRemoteDemoRetirePlan -Plan $running } catch { $threw = $true }
+try { Invoke-AeroLinkRemoteDemoRetirePlan -Plan $running -ExpectedPublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId -ExpectedProductionSourceIdentity $expectedSourceIdentity } catch { $threw = $true }
 Assert-True $threw 'A refused retire plan cannot be applied.'
 Assert-True ($null -eq (Get-AeroLinkRemoteDemoRetirement -LocalRoot $retireRoot)) 'Until retired, the demo reports no retirement.'
-# Applying a plan with no tasks: files deleted, marker written, and the marker is what the launchers read.
-$logPath = Join-Path $retireRoot 'logs\remote-demo.log'
+# Apply must ignore a forged plan root/actions and recompute the canonical HOME RemoteDemo targets.
+$previousLocalAppData = $env:LOCALAPPDATA
+$applyProfile = Join-Path $tempRoot 'home-profile'
+$canonicalRoot = Join-Path $applyProfile 'AeroLink\RemoteDemo'
+$canonicalConfig = Join-Path $canonicalRoot 'remote-demo.config.psd1'
+$canonicalPolicy = Join-Path $canonicalRoot 'policy.yml'
+$outsideConfig = Join-Path $tempRoot 'outside.config.psd1'
+New-Item -ItemType Directory -Path $canonicalRoot -Force | Out-Null
+@"
+@{
+    TrafficPolicyPath = '$canonicalPolicy'
+    BasicAuthSecretName = 'aerolink-demo'
+    VaultName = 'AeroLinkVault'
+}
+"@ | Set-Content -LiteralPath $canonicalConfig -Encoding UTF8
+Set-Content -LiteralPath $canonicalPolicy -Value 'policy' -Encoding ASCII
+Set-Content -LiteralPath $outsideConfig -Value 'must remain' -Encoding ASCII
+$logPath = Join-Path $canonicalRoot 'logs\remote-demo.log'
 New-Item -ItemType Directory -Path (Split-Path $logPath -Parent) -Force | Out-Null
 Set-Content -LiteralPath $logPath -Value 'retirement evidence' -Encoding ASCII
-$fileOnly = Get-AeroLinkRemoteDemoRetirePlan -ConfigPath $retireConfig -TrafficPolicyPath $retirePolicy -LocalRoot $retireRoot -GoLiveProof $goLiveProof
-Invoke-AeroLinkRemoteDemoRetirePlan -Plan $fileOnly
-Assert-True (-not (Test-Path -LiteralPath $retireConfig) -and -not (Test-Path -LiteralPath $retirePolicy) -and (Test-Path -LiteralPath $foreignPolicy) -and (Test-Path -LiteralPath $logPath)) 'Retire deletes the demo''s config and policy, and preserves foreign files and logs.'
-$retirement = Get-AeroLinkRemoteDemoRetirement -LocalRoot $retireRoot
-Assert-True ($null -ne $retirement -and $retirement.goLiveProof.PublicHttpsOrigin -eq $goLiveProof.PublicHttpsOrigin -and $retirement.goLiveProof.Identity.Classification -eq 'SiteProduction') 'After Retire the marker preserves the public HTTPS and production identity evidence.'
+$env:LOCALAPPDATA = $applyProfile
+$forgedPlan = [pscustomobject]@{
+    Refused = $false; ScopeRoot = $tempRoot; ConfigPath = $outsideConfig; TrafficPolicyPath = $outsideConfig; MarkerPath = (Join-Path $tempRoot 'forged-marker.json')
+    GoLiveProof = [pscustomobject]@{ Ready = $true }
+    Actions = @([pscustomobject]@{ Kind = 'DeleteFile'; Target = $outsideConfig })
+}
+# Same-name tasks in another folder are an ambiguity, not a candidate for name-only deletion.
+$global:retireScheduledTaskFixtures = @(
+    [pscustomobject]@{ TaskName = 'AeroLinkRemoteDemoRecovery'; TaskPath = '\' },
+    [pscustomobject]@{ TaskName = 'AeroLinkRemoteDemoRecovery'; TaskPath = '\Other\' }
+)
+$duplicateThrew = $false
+try { Invoke-AeroLinkRemoteDemoRetirePlan -Plan $forgedPlan -ExpectedPublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId -ExpectedProductionSourceIdentity $expectedSourceIdentity } catch { $duplicateThrew = $true }
+Assert-True ($duplicateThrew -and (Test-Path -LiteralPath $canonicalConfig) -and (Test-Path -LiteralPath $canonicalPolicy)) 'Apply must refuse duplicate same-name tasks before deleting canonical files.'
+# A task at the right path with the wrong owned definition is equally unsafe.
+$global:retireScheduledTaskFixtures = @([pscustomobject]@{ TaskName = 'AeroLinkRemoteDemoRecovery'; TaskPath = '\' })
+$global:retireTaskXml['AeroLinkRemoteDemoRecovery'] = '<Task><RegistrationInfo><URI>\Unexpected</URI></RegistrationInfo><Actions><Exec><Command>cmd.exe</Command><Arguments>/c erase</Arguments></Exec></Actions></Task>'
+$wrongDefinitionThrew = $false
+try { Invoke-AeroLinkRemoteDemoRetirePlan -Plan $forgedPlan -ExpectedPublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId -ExpectedProductionSourceIdentity $expectedSourceIdentity } catch { $wrongDefinitionThrew = $true }
+Assert-True ($wrongDefinitionThrew -and (Test-Path -LiteralPath $canonicalConfig) -and (Test-Path -LiteralPath $canonicalPolicy)) 'Apply must refuse an unexpected owned task definition before deleting canonical files.'
+$global:retireScheduledTaskFixtures = @([pscustomobject]@{ TaskName = 'AeroLinkRemoteDemoRecovery'; TaskPath = '\' })
+$global:retireTaskXml['AeroLinkRemoteDemoRecovery'] = '<Task><RegistrationInfo><URI>\AeroLinkRemoteDemoRecovery</URI></RegistrationInfo><Actions><Exec><Command>powershell.exe</Command><Arguments>-File "C:\AeroLinkRemoteDemo.ps1" -Action Start -Scheduled</Arguments></Exec></Actions></Task>'
+Invoke-AeroLinkRemoteDemoRetirePlan -Plan $forgedPlan -ExpectedPublicHttpsOrigin $expectedOrigin -ExpectedProductionInstanceId $expectedInstanceId `
+    -ExpectedProductionSourceIdentity $expectedSourceIdentity
+Assert-True (-not (Test-Path -LiteralPath $canonicalConfig) -and -not (Test-Path -LiteralPath $canonicalPolicy) -and
+    (Test-Path -LiteralPath $outsideConfig) -and (Test-Path -LiteralPath $logPath)) 'Apply must recompute canonical targets, preserve foreign files/logs, and ignore forged plan paths.'
+Assert-True (@($global:retireUnregisterCalls | Where-Object TaskPath -eq '\').Count -eq 1) 'Apply must unregister only the exact root task path.'
+$retirement = Get-AeroLinkRemoteDemoRetirement -LocalRoot $canonicalRoot
+Assert-True ($null -ne $retirement -and $retirement.goLiveProof.PublicHttpsOrigin -eq $expectedOrigin -and
+    $retirement.goLiveProof.Identity.Classification -eq 'SiteProduction' -and $retirement.goLiveProof.Identity.SourceIdentity -eq $expectedSourceIdentity) 'The retirement marker must preserve fresh exact-host identity/source evidence.'
+$env:LOCALAPPDATA = $previousLocalAppData
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }

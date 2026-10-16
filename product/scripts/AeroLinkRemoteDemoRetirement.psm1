@@ -41,6 +41,12 @@ function Get-AeroLinkRemoteDemoRetirement {
     catch { return [pscustomobject]@{ retiredAtUtc = 'unknown'; reason = '#1614 D6' } }
 }
 
+function Get-AeroLinkRemoteDemoProperty {
+    param([AllowNull()]$Object, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Object -or $null -eq $Object.PSObject.Properties[$Name]) { return $null }
+    return $Object.PSObject.Properties[$Name].Value
+}
+
 function Get-AeroLinkRemoteDemoGoLiveProof {
     <#
         .SYNOPSIS Proves the attended D6 prerequisite without changing the HOME demo.
@@ -52,6 +58,8 @@ function Get-AeroLinkRemoteDemoGoLiveProof {
     [CmdletBinding()]
     param(
         [AllowNull()][string]$PublicHttpsOrigin,
+        [AllowNull()][string]$ExpectedProductionInstanceId,
+        [AllowNull()][string]$ExpectedProductionSourceIdentity,
         [switch]$OperatorConfirmed
     )
     if (-not $OperatorConfirmed) {
@@ -60,31 +68,50 @@ function Get-AeroLinkRemoteDemoGoLiveProof {
     if ([string]::IsNullOrWhiteSpace($PublicHttpsOrigin)) {
         return [pscustomobject]@{ Ready = $false; Refusal = 'D6 retirement requires the company host public HTTPS origin.' }
     }
+    if ([string]::IsNullOrWhiteSpace($ExpectedProductionInstanceId) -or
+        [string]::IsNullOrWhiteSpace($ExpectedProductionSourceIdentity)) {
+        return [pscustomobject]@{ Ready = $false; Refusal = 'D6 retirement requires the configured expected SiteProduction instance and source identity.' }
+    }
     $origin = $null
     if (-not [Uri]::TryCreate($PublicHttpsOrigin.Trim(), [UriKind]::Absolute, [ref]$origin) -or
-        $origin.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($origin.Host) -or $origin.AbsolutePath -ne '/' -or
+        $origin.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($origin.Host) -or $origin.HostNameType -ne [UriHostNameType]::Dns -or
+        $origin.IsLoopback -or $origin.DnsSafeHost -ieq 'localhost' -or $origin.AbsolutePath -ne '/' -or
         -not [string]::IsNullOrEmpty($origin.UserInfo) -or -not [string]::IsNullOrEmpty($origin.Query) -or
         -not [string]::IsNullOrEmpty($origin.Fragment)) {
-        return [pscustomobject]@{ Ready = $false; Refusal = 'D6 retirement requires an absolute public HTTPS origin with no credentials, path, query or fragment.' }
+        return [pscustomobject]@{ Ready = $false; Refusal = 'D6 retirement requires the configured full-DNS HTTPS origin with no credentials, path, query, fragment, loopback address or localhost.' }
     }
     $base = $origin.GetLeftPart([UriPartial]::Authority).TrimEnd('/')
     try {
-        $ready = Invoke-RestMethod -Uri ($base + '/health/ready') -UseBasicParsing -TimeoutSec 10
+        # A redirect is not an identity proof: the exact configured origin must answer both endpoints itself.
+        $ready = Invoke-RestMethod -Uri ($base + '/health/ready') -UseBasicParsing -TimeoutSec 10 -MaximumRedirection 0
         if ([string]$ready.status -ne 'ready' -or [string]$ready.database -ne 'connected') {
             return [pscustomobject]@{ Ready = $false; Refusal = "The company host readiness endpoint did not report ready/connected (status=$($ready.status), database=$($ready.database))." }
         }
-        $identity = Invoke-RestMethod -Uri ($base + '/health/identity') -UseBasicParsing -TimeoutSec 10
-        $classification = [string]$identity.instance.classification
-        $mode = [string]$identity.mode
-        $instanceId = [string]$identity.instance.id
-        if ($classification -ne 'SiteProduction' -or $mode -ne 'SITE-PRODUCTION' -or [string]::IsNullOrWhiteSpace($instanceId) -or $instanceId -eq 'unknown') {
-            return [pscustomobject]@{ Ready = $false; Refusal = "The company host identity is not SiteProduction (mode=$mode, classification=$classification, instanceId=$instanceId)." }
+        $identity = Invoke-RestMethod -Uri ($base + '/health/identity') -UseBasicParsing -TimeoutSec 10 -MaximumRedirection 0
+        $identityInstance = Get-AeroLinkRemoteDemoProperty -Object $identity -Name 'instance'
+        $classification = [string](Get-AeroLinkRemoteDemoProperty -Object $identityInstance -Name 'classification')
+        $mode = [string](Get-AeroLinkRemoteDemoProperty -Object $identity -Name 'mode')
+        $instanceId = [string](Get-AeroLinkRemoteDemoProperty -Object $identityInstance -Name 'id')
+        $sourceCandidates = @(
+            [string](Get-AeroLinkRemoteDemoProperty -Object $identity -Name 'sourceIdentity'),
+            [string](Get-AeroLinkRemoteDemoProperty -Object $identity -Name 'sourceSha'),
+            [string](Get-AeroLinkRemoteDemoProperty -Object (Get-AeroLinkRemoteDemoProperty -Object $identityInstance -Name 'snapshot') -Name 'sourceSha')
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -ne 'unknown' }
+        $sourceCandidates = @($sourceCandidates)
+        if ($classification -ne 'SiteProduction' -or $mode -ne 'SITE-PRODUCTION' -or
+            [string]::IsNullOrWhiteSpace($instanceId) -or $instanceId -eq 'unknown' -or
+            $instanceId -cne $ExpectedProductionInstanceId -or
+            $sourceCandidates -notcontains $ExpectedProductionSourceIdentity) {
+            $observedSource = if ($sourceCandidates.Count) { $sourceCandidates -join ',' } else { 'unknown' }
+            return [pscustomobject]@{ Ready = $false; Refusal = "The company host identity/source did not match the configured SiteProduction expectation (mode=$mode, classification=$classification, instanceId=$instanceId, source=$observedSource)." }
         }
         return [pscustomobject]@{
             Ready               = $true
             Refusal             = $null
             OperatorConfirmed   = $true
             PublicHttpsOrigin   = $base
+            ExpectedInstanceId  = $ExpectedProductionInstanceId
+            ExpectedSourceIdentity = $ExpectedProductionSourceIdentity
             ObservedAtUtc       = (Get-Date).ToUniversalTime().ToString('o')
             ReadyStatus         = [string]$ready.status
             ReadyDatabase       = [string]$ready.database
@@ -93,6 +120,7 @@ function Get-AeroLinkRemoteDemoGoLiveProof {
                 Classification = $classification
                 InstanceId     = $instanceId
                 InstanceLabel  = [string]$identity.instance.label
+                SourceIdentity = $ExpectedProductionSourceIdentity
             }
         }
     }
@@ -145,6 +173,80 @@ function Get-AeroLinkRemoteDemoTargetAudit {
     catch {
         return [pscustomobject]@{ Allowed = $false; Path = $Path; Reason = "Retirement target '$Path' could not be audited: $($_.Exception.Message)" }
     }
+}
+
+function Get-AeroLinkRemoteDemoCanonicalContext {
+    <#
+        The HOME RemoteDemo root is an installation-owned target, not plan input. Configuration is read only to
+        discover the policy path and operator-facing secret names; all paths are audited against this canonical root.
+    #>
+    [CmdletBinding()]
+    param()
+    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { throw 'D6 retirement requires LOCALAPPDATA to identify the HOME RemoteDemo root.' }
+    $root = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo')).TrimEnd('\')
+    $configPath = Join-Path $root 'remote-demo.config.psd1'
+    $values = $null
+    if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+        try { $values = Import-PowerShellDataFile -LiteralPath $configPath }
+        catch { throw "The canonical remote-demo configuration could not be read at '$configPath': $($_.Exception.Message)" }
+    }
+    $policyPath = if ($values -and $values.ContainsKey('TrafficPolicyPath')) { [string]$values['TrafficPolicyPath'] } else { $null }
+    return [pscustomobject]@{
+        ScopeRoot = $root
+        ConfigPath = $configPath
+        TrafficPolicyPath = $policyPath
+        BasicAuthSecretName = if ($values -and $values.ContainsKey('BasicAuthSecretName')) { [string]$values['BasicAuthSecretName'] } else { $null }
+        VaultName = if ($values -and $values.ContainsKey('VaultName')) { [string]$values['VaultName'] } else { $null }
+    }
+}
+
+function Get-AeroLinkRemoteDemoExpectedTaskDefinition {
+    param([Parameter(Mandatory)][string]$TaskName)
+    switch ($TaskName) {
+        'AeroLinkRemoteDemoRecovery' {
+            return [pscustomobject]@{ TaskName = $TaskName; TaskPath = '\'; Uri = '\AeroLinkRemoteDemoRecovery'; Action = 'Start' }
+        }
+        'AeroLinkProductionSourceReconcile' {
+            return [pscustomobject]@{ TaskName = $TaskName; TaskPath = '\'; Uri = '\AeroLinkProductionSourceReconcile'; Action = 'Reconcile' }
+        }
+        default { throw "The task '$TaskName' is not an AeroLink remote-demo retirement task." }
+    }
+}
+
+function Get-AeroLinkRemoteDemoTaskInventory {
+    <# Read and validate the exact owned task object before it can enter the closed retirement action set. #>
+    [CmdletBinding()]
+    param()
+    $inventory = New-Object System.Collections.Generic.List[object]
+    foreach ($name in $script:RetiredTaskNames) {
+        $expected = Get-AeroLinkRemoteDemoExpectedTaskDefinition -TaskName $name
+        $matches = @(Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)
+        if ($matches.Count -gt 1) { throw "Retirement refused: more than one scheduled task is named '$name'; no task was changed." }
+        if ($matches.Count -eq 0) { continue }
+        $task = $matches[0]
+        if ([string]$task.TaskPath -cne $expected.TaskPath) {
+            throw "Retirement refused: scheduled task '$name' is at '$($task.TaskPath)', expected '$($expected.TaskPath)'; no task was changed."
+        }
+        $xmlText = Export-ScheduledTask -TaskName $name -TaskPath $expected.TaskPath -ErrorAction Stop
+        try { $xml = [xml]$xmlText } catch { throw "Retirement refused: scheduled task '$name' has no readable definition; no task was changed." }
+        $uri = [string]$xml.Task.RegistrationInfo.URI
+        $exec = $xml.Task.Actions.Exec
+        $arguments = [string]$exec.Arguments
+        $commandMatches = [string]$exec.Command -match '(?i)(^|\\)powershell\.exe$'
+        $scriptMatches = $arguments -match '(?i)AeroLinkRemoteDemo\.ps1'
+        $actionMatches = $arguments -match [regex]::Escape("-Action $($expected.Action)")
+        $scheduleMatches = $arguments -match '(?i)(^|\s)-Scheduled(\s|$)'
+        if ($uri -cne $expected.Uri -or -not $commandMatches -or -not $scriptMatches -or -not $actionMatches -or -not $scheduleMatches) {
+            throw "Retirement refused: scheduled task '$name' does not match its expected owned definition; no task was changed."
+        }
+        $inventory.Add([pscustomobject]@{ TaskName = $name; TaskPath = $expected.TaskPath; Uri = $expected.Uri; Action = $expected.Action })
+    }
+    return $inventory.ToArray()
+}
+
+function Assert-AeroLinkRemoteDemoNgrokStopped {
+    $running = @(Get-Process -Name 'ngrok' -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) { throw 'An ngrok process is running. Stop the remote demo first (STOP_AEROLINK_REMOTE_DEMO.bat), then retire it.' }
 }
 
 function Get-AeroLinkRemoteDemoRetirePlan {
@@ -223,20 +325,57 @@ function Get-AeroLinkRemoteDemoRetirePlan {
 }
 
 function Invoke-AeroLinkRemoteDemoRetirePlan {
-    <# .SYNOPSIS Applies a retire plan. Tasks are removed through the Task Scheduler API, never schtasks. #>
+    <#
+        .SYNOPSIS Applies a retire plan. Tasks are removed through the Task Scheduler API, never schtasks.
+        .DESCRIPTION
+            The supplied plan is preview evidence only. Apply recomputes the canonical HOME target, exact task
+            inventory and closed action set, then obtains a fresh proof from the configured company origin. This
+            keeps a stale or hand-built PSObject from becoming a destructive instruction.
+    #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Plan)
+    param(
+        [Parameter(Mandatory)]$Plan,
+        [Parameter(Mandatory)][string]$ExpectedPublicHttpsOrigin,
+        [Parameter(Mandatory)][string]$ExpectedProductionInstanceId,
+        [Parameter(Mandatory)][string]$ExpectedProductionSourceIdentity
+    )
     if ($Plan.Refused) { throw $Plan.Refusal }
-    if ($null -eq $Plan.GoLiveProof -or -not [bool]$Plan.GoLiveProof.Ready) { throw 'D6 retirement requires a verified company-host go-live proof before any destructive action.' }
-    $allowedTasks = @($script:RetiredTaskNames)
-    $allowedFiles = @([IO.Path]::GetFullPath([string]$Plan.ConfigPath))
-    if ($Plan.TrafficPolicyPath) { $allowedFiles += [IO.Path]::GetFullPath([string]$Plan.TrafficPolicyPath) }
-    $allowedMarker = [IO.Path]::GetFullPath([string]$Plan.MarkerPath)
-    foreach ($action in $Plan.Actions) {
+    $context = Get-AeroLinkRemoteDemoCanonicalContext
+    $proof = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $ExpectedPublicHttpsOrigin `
+        -ExpectedProductionInstanceId $ExpectedProductionInstanceId -ExpectedProductionSourceIdentity $ExpectedProductionSourceIdentity -OperatorConfirmed
+    if (-not $proof.Ready) { throw $proof.Refusal }
+    Assert-AeroLinkRemoteDemoNgrokStopped
+    $taskInventory = @(Get-AeroLinkRemoteDemoTaskInventory)
+    $canonicalPlan = Get-AeroLinkRemoteDemoRetirePlan -RegisteredTaskNames @($taskInventory | ForEach-Object TaskName) `
+        -ConfigPath $context.ConfigPath -TrafficPolicyPath $context.TrafficPolicyPath -BasicAuthSecretName $context.BasicAuthSecretName `
+        -VaultName $context.VaultName -LocalRoot $context.ScopeRoot -GoLiveProof $proof
+    if ($canonicalPlan.Refused) { throw $canonicalPlan.Refusal }
+
+    $allowedTasks = @($taskInventory | ForEach-Object TaskName)
+    $allowedFiles = @($context.ConfigPath)
+    if ($context.TrafficPolicyPath) { $allowedFiles += [IO.Path]::GetFullPath([string]$context.TrafficPolicyPath) }
+    $allowedMarker = [IO.Path]::GetFullPath((Join-Path $context.ScopeRoot 'retired.json'))
+    $closedActions = @($canonicalPlan.Actions)
+    foreach ($action in $closedActions) {
+        # Recheck the live boundary immediately before every destructive task/file mutation. A plan made while
+        # ngrok was stopped or the host was healthy is not permission to proceed after either fact changes.
+        if ($action.Kind -in @('UnregisterTask', 'DeleteFile')) {
+            $fresh = Get-AeroLinkRemoteDemoGoLiveProof -PublicHttpsOrigin $ExpectedPublicHttpsOrigin `
+                -ExpectedProductionInstanceId $ExpectedProductionInstanceId -ExpectedProductionSourceIdentity $ExpectedProductionSourceIdentity -OperatorConfirmed
+            if (-not $fresh.Ready) { throw $fresh.Refusal }
+            Assert-AeroLinkRemoteDemoNgrokStopped
+        }
         switch ($action.Kind) {
             'UnregisterTask' {
-                if ($action.Target -notin $allowedTasks) { throw "Retirement plan names an unapproved scheduled task '$($action.Target)'." }
-                if ($PSCmdlet.ShouldProcess($action.Target, 'Unregister remote-demo task')) { Get-ScheduledTask -TaskName $action.Target -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false }
+                $expected = Get-AeroLinkRemoteDemoExpectedTaskDefinition -TaskName ([string]$action.Target)
+                if ($action.Target -notin $allowedTasks -or $expected.TaskPath -ne '\') { throw "Retirement plan names an unapproved scheduled task '$($action.Target)'." }
+                $recheckedInventory = @(Get-AeroLinkRemoteDemoTaskInventory)
+                if (@($recheckedInventory | Where-Object TaskName -eq $expected.TaskName).Count -ne 1) { throw "The scheduled task '$($expected.TaskName)' changed before retirement; no task was changed for it." }
+                $current = @(Get-ScheduledTask -TaskName $expected.TaskName -ErrorAction SilentlyContinue)
+                if ($current.Count -ne 1 -or [string]$current[0].TaskPath -cne $expected.TaskPath) { throw "The scheduled task '$($expected.TaskName)' changed before retirement; no task was changed for it." }
+                if ($PSCmdlet.ShouldProcess("$($expected.TaskPath)$($expected.TaskName)", 'Unregister remote-demo task')) {
+                    Unregister-ScheduledTask -TaskName $expected.TaskName -TaskPath $expected.TaskPath -Confirm:$false
+                }
             }
             'DeleteFile' {
                 $target = [IO.Path]::GetFullPath([string]$action.Target)
@@ -256,15 +395,17 @@ function Invoke-AeroLinkRemoteDemoRetirePlan {
                         schema       = 'aerolink-remote-demo-retirement/v1'
                         retiredAtUtc = (Get-Date).ToUniversalTime().ToString('o')
                         reason       = '#1614 D6: the company host is live; the ngrok remote demo is retired.'
-                        goLiveProof  = $Plan.GoLiveProof
-                        targets      = @($Plan.Actions | Where-Object Kind -ne 'WriteMarker' | ForEach-Object { [ordered]@{ kind = $_.Kind; target = $_.Target } })
+                        goLiveProof  = $proof
+                        targets      = @($closedActions | Where-Object Kind -ne 'WriteMarker' | ForEach-Object { [ordered]@{ kind = $_.Kind; target = $_.Target } })
                     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $target -Encoding UTF8
                 }
             }
+            default { throw "Retirement plan contains an unsupported action kind '$($action.Kind)'." }
         }
     }
-    foreach ($task in @($Plan.Actions | Where-Object Kind -eq 'UnregisterTask' | ForEach-Object Target)) {
-        if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) { throw "The scheduled task $task is still registered after Retire." }
+    foreach ($task in @($closedActions | Where-Object Kind -eq 'UnregisterTask' | ForEach-Object Target)) {
+        $expected = Get-AeroLinkRemoteDemoExpectedTaskDefinition -TaskName ([string]$task)
+        if (Get-ScheduledTask -TaskName $expected.TaskName -TaskPath $expected.TaskPath -ErrorAction SilentlyContinue) { throw "The scheduled task $($expected.TaskName) is still registered after Retire." }
     }
 }
 
