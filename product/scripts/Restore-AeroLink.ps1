@@ -440,8 +440,10 @@ if ($ContinuityOperationJournalPath) {
             $cleanupRuntimeBefore = Get-ContinuityRuntimeIdentity
             Invoke-ContinuityOwnedCleanup
             $cleanupRuntimeAfter = Get-ContinuityRuntimeIdentity
+            Write-ContinuityJournal 'cleanup-verified' 'cleanup-diagnostic-pending' @{ CleanupDisposition = 'Physical cleanup was verified; the redacted diagnostic receipt is being written before terminal completion.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json"; CleanupRuntimeBefore = $cleanupRuntimeBefore; CleanupRuntimeAfter = $cleanupRuntimeAfter }
+            $diagnosticReceipt = Write-ContinuityDiagnosticReceipt
+            if ([string]::IsNullOrWhiteSpace([string]$diagnosticReceipt) -or -not (Test-Path -LiteralPath ([string]$diagnosticReceipt) -PathType Leaf)) { throw 'The continuity cleanup diagnostic receipt could not be verified.' }
             Write-ContinuityJournal 'cleaned' 'cleanup-complete' @{ CleanupDisposition = 'Only the operation-owned database and staging paths were removed.'; DiagnosticReceiptPath = "$ContinuityOperationJournalPath.receipt.json"; CleanupRuntimeBefore = $cleanupRuntimeBefore; CleanupRuntimeAfter = $cleanupRuntimeAfter }
-            [void](Write-ContinuityDiagnosticReceipt)
             exit 0
         }
         catch {
