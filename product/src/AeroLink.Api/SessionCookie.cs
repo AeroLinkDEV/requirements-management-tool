@@ -34,7 +34,9 @@ public sealed class SessionCookie
         Secure = secure;
         Suffix = suffix;
         Name = SecureName(BaseName);
-        AntiforgeryName = SecureName(AntiforgeryBaseName);
+        // Antiforgery retained its historical non-site name even when a secure non-site launch prefixes the
+        // session and Windows-link cookies. Declared sites are the one intentional new namespace.
+        AntiforgeryName = suffix is null ? AntiforgeryBaseName : SecureName(AntiforgeryBaseName);
         WindowsLinkName = SecureName(WindowsLinkBaseName);
     }
 

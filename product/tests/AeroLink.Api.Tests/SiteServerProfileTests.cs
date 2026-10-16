@@ -202,7 +202,7 @@ public sealed class SiteServerProfileTests : IDisposable
 
         var nonSite = SessionCookie.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection().Build(), environment, siteServer: false);
         Assert.Equal("__Host-aerolink_session", nonSite.Name);
-        Assert.Equal("__Host-AeroLink.PreferenceConfirmation", nonSite.AntiforgeryName);
+        Assert.Equal("AeroLink.PreferenceConfirmation", nonSite.AntiforgeryName);
         Assert.Equal("__Host-AeroLink.WindowsLink", nonSite.WindowsLinkName);
     }
 

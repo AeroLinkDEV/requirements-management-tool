@@ -98,11 +98,15 @@ key ring and trust-mode development cluster.
 - **Installation boundary and service configuration.** The service names and their computed SIDs are per-site
   values; the Production and Development API/PostgreSQL pairs cannot share the installation grants. The API
   service environment contains only composed non-secret settings, including the installation root, declared
-  endpoints, evidence root, Data Protection key-ring path, `ApplicationName=AeroLink`, and
-  `ProtectKeysWith=DpapiLocalMachine`. The database password is read at API startup from the installation's
-  protected-config store under the API virtual account. The PostgreSQL application and maintenance passwords and
-  the one-time `api-bootstrap` value remain protected secrets; the bootstrap value is shown only when first
-  generated and is removed after first-administrator activation.
+  endpoints, evidence root, Data Protection key-ring path, `ApplicationName=AeroLink`,
+  `ProtectKeysWith=DpapiLocalMachine`, and the persisted `Instance__InstanceId`. The service environment carries
+  no database password or bootstrap secret. At API startup, `SiteProtectedSecrets` reads the `postgres-application`
+  record from the installation's DPAPI-LocalMachine protected-config store as the API virtual account, appends that
+  value to the passwordless connection string, and reads the optional `api-bootstrap` record. Records are refused
+  when their installation binding, reader identity, or reader/SYSTEM/Administrators ACL is unexpected. The
+  PostgreSQL application and maintenance passwords remain protected secrets; the bootstrap value is shown only
+  when first generated and the operator removes its record with `-RemoveBootstrapSecret` after first-administrator
+  activation.
 - **Declared ports.** `Set-AeroLinkSiteDeclaration` writes a `site` block into `instance.json`: API port,
   PostgreSQL port, the two service names, database role, an optional `publicHostName`, and an explicit connector
   deployment id and `instanceId`, each minted once and never replaced. Only a `SiteProduction` or
@@ -217,8 +221,7 @@ installation, and the site launcher refuses everything else.
 4. **Start it:**
 
    ```powershell
-   $env:ConnectionStrings__AeroLink = '<this installation''s database, with the application password>'
-   $env:Identity__BootstrapSecret   = '<first install only; see Production first-install administrator>'
+   $env:ConnectionStrings__AeroLink = 'Host=127.0.0.1;Port=<declared port>;Database=aerolink;Username=<application role>'
    powershell -NoProfile -ExecutionPolicy Bypass -File product\scripts\Start-AeroLinkSite.ps1 `
        -InstallationRoot 'C:\AeroLink\AeroLink Production' -ApiPath '<publish folder>\AeroLink.Api.exe'
    ```
@@ -230,8 +233,9 @@ The launcher runs the API with these settings:
 - `Production`, with `SiteServer:Enabled`;
 - no demonstration data or accounts;
 - `Identity:CookieSecure=true`, and insecure webhooks off;
-- the installation-owned state from `Get-AeroLinkSiteRuntimeEnvironment`. The connection string is the one
-  inherited from the environment, never that function's password-less one.
+- the installation-owned state from `Get-AeroLinkSiteRuntimeEnvironment`, including the persisted instance id.
+  The inherited connection string is passwordless; the API reads and appends the application password from the
+  protected store during startup.
 
 The API then does the following:
 
@@ -241,14 +245,19 @@ The API then does the following:
 - Sets `AllowedHosts` to the public name plus `localhost`, `127.0.0.1` and `[::1]`.
 - Derives `Notifications:BaseUrl` and `Connector:PublicOrigin` from the HTTPS origin, and refuses either when
   it is set to anything else.
-- Names its cookies `__Host-aerolink_session` and `__Host-AeroLink.PreferenceConfirmation`. The prefix makes
-  the browser accept them only as Secure, `Path=/` and host-only. A plain-HTTP origin, a `Domain=` cookie
-  from a parent or sibling host, or a path-scoped cookie therefore cannot plant or shadow them. The distinct
-  names avoid accidental collisions. They do **not** isolate AeroLink from the other applications on the
-  shared host name. Cookies are not isolated by port, so those applications receive AeroLink's session cookie
-  and can overwrite it; `__Host-` blocks only subdomain and path tampering. The owner accepted this risk on
-  15 Oct 2026 (#1614 D3); a dedicated DNS alias for AeroLink removes it. HOME, the work laptop and other plain-HTTP launches
-  keep the old names. Any other launch with `Identity:CookieSecure=true` prefixes the session cookie too.
+- Names its declared-site cookies from the persisted `InstanceId` GUID. For `SiteProduction` and
+  `SiteDevelopment` they are `__Host-aerolink_session-<InstanceId:N>`,
+  `__Host-AeroLink.PreferenceConfirmation-<InstanceId:N>` and
+  `__Host-AeroLink.WindowsLink-<InstanceId:N>`; a missing or malformed GUID refuses startup before cookies are
+  registered. The prefix makes the browser accept them only as Secure, `Path=/` and host-only. Session and
+  antiforgery readers, plus the Windows-link issue/read/delete path, use these same derived names. A plain-HTTP
+  origin, a `Domain=` cookie from a parent or sibling host, or a path-scoped cookie therefore cannot plant or
+  shadow them. Non-site launches retain their existing names: `aerolink_session` or `__Host-aerolink_session` for
+  the session according to Secure, the unprefixed `AeroLink.PreferenceConfirmation` antiforgery name, and
+  `AeroLink.WindowsLink` or `__Host-AeroLink.WindowsLink` for the Windows-link ticket according to Secure. These names do **not**
+  isolate AeroLink from other applications on the shared host name: cookies are not isolated by port, so those
+  applications can still receive and overwrite a host's cookie. The owner accepted this risk on 15 Oct 2026
+  (#1614 D3); a dedicated DNS alias for AeroLink removes it.
 
 The API refuses to start, naming every problem, when any of these holds:
 
@@ -1275,7 +1284,10 @@ production upgrade requires the separately supported operator procedure and auth
 
 ## Production first-install administrator
 
-Production does not seed identities. Before the first API start against an empty database, set `Identity__BootstrapSecret` in the service environment to a randomly generated value of at least 32 characters. Do not place it in `appsettings.json`, source control, a command-line argument, or an operator transcript. `GET /api/setup/status` reports only whether bootstrap is required and enabled.
+Production does not seed identities. The installer generates a random bootstrap value, stores it in the
+installation's protected-config record for the API virtual account, and shows it once. Do not place it in
+`appsettings.json`, source control, a command-line argument, the service environment, or an operator transcript.
+`GET /api/setup/status` reports only whether bootstrap is required and enabled.
 
 While the API is reachable only from the administrative network, open the website. An empty, bootstrap-enabled deployment automatically presents the one-time activation screen; enter the protected bootstrap secret and choose the administrator display name, email, and password. The administrator username is always `admin`. The password must contain at least 14 characters with uppercase, lowercase, numeric, and symbol characters. The equivalent API procedure is retained below for headless installations.
 
@@ -1290,7 +1302,11 @@ Invoke-RestMethod 'https://aerolink.example.org/api/setup/bootstrap' -Method Pos
 Remove-Variable secureBootstrapSecret, bootstrapSecret, securePassword, administratorPassword, body
 ```
 
-The operation uses a serializable zero-user transaction and permanently closes after the first account exists. Confirm `GET /api/setup/status` returns `bootstrapRequired: false`, remove `Identity__BootstrapSecret` from the service environment, restart the API, and sign in with the chosen password. If the database already contains any user, recovery requires the approved database/identity recovery procedure; bootstrap cannot overwrite or add an administrator.
+The operation uses a serializable zero-user transaction and permanently closes after the first account exists. Confirm
+`GET /api/setup/status` returns `bootstrapRequired: false`, then run the elevated installer with
+`-Name Production -RemoveBootstrapSecret` (or `Development` for that installation); it removes the protected
+record and restarts the API service. Sign in with the chosen password. If the database already contains any user,
+recovery requires the approved database/identity recovery procedure; bootstrap cannot overwrite or add an administrator.
 
 Demo identity seeding fails closed outside the `Development` environment. `Identity__AllowDemoAccounts=true` is an explicit escape hatch only for an isolated, non-production showcase and must never be used for an operational deployment.
 
