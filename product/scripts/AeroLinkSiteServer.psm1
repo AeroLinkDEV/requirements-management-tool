@@ -84,15 +84,31 @@ function Get-AeroLinkServerLayout {
         .SYNOPSIS Where one installation keeps its program versions, the current junction, packages and trust.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$InstallationRoot, [string]$Version)
+    param([Parameter(Mandatory)][string]$InstallationRoot, [string]$Version, [string]$SourceSha)
     $root = [IO.Path]::GetFullPath($InstallationRoot).TrimEnd('\')
     $program = Join-Path $root 'program'
     $current = Join-Path $program 'current'
+    $versionDirectory = $null
+    if ($Version) {
+        if ($Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+            throw "Release version '$Version' is not a safe semantic version directory name."
+        }
+        if ($SourceSha) {
+            if ($SourceSha -notmatch '^[0-9a-fA-F]{40}$') {
+                throw "Release source SHA '$SourceSha' is not a full 40-character hexadecimal identity."
+            }
+            $versionDirectory = "$Version+$($SourceSha.ToLowerInvariant())"
+        } else { $versionDirectory = $Version }
+    } elseif ($SourceSha) {
+        throw 'A release source SHA cannot be used without its semantic version.'
+    }
     return [pscustomobject]@{
         InstallationRoot   = $root
         ProgramRoot        = $program
         Versions           = Join-Path $program 'versions'
-        VersionRoot        = $(if ($Version) { Join-Path (Join-Path $program 'versions') $Version } else { $null })
+        VersionRoot        = $(if ($versionDirectory) { Join-Path (Join-Path $program 'versions') $versionDirectory } else { $null })
+        VersionDirectory   = $versionDirectory
+        SourceSha          = $(if ($SourceSha) { $SourceSha.ToLowerInvariant() } else { $null })
         Current            = $current
         Packages           = Join-Path $program 'packages'
         Trust              = Join-Path $root 'trust'
