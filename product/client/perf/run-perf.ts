@@ -535,7 +535,9 @@ function report() {
     const workloads = [...new Set(mainRuns.map(e => e.workload!))]
     const comparison: Record<string, unknown>[] = []
     const excluded5: string[] = []
-    lines.push('## Comparison 5: single -> dual topology (arm B; reference single)', '', '| Workload | Measure | single | dual | dual/single - 1 | 95% CI (descriptive) | permutation p | over 5%? |', '|---|---|---|---|---|---|---|---|')
+    lines.push('## Comparison 5: single -> dual topology (arm B; reference single)', '',
+      'D10 comparison 5 is reported, not budgeted: topology ratios and uncertainty are descriptive.', '',
+      '| Workload | Measure | single | dual | dual/single - 1 | 95% CI (descriptive) | permutation p (descriptive) |', '|---|---|---|---|---|---|---|')
     for (const workload of workloads) {
       const { rows, excludedBlocks } = failedRunRule(recorded, e => e.kind === 'headless' && e.arm === 'B' && e.workload === workload)
       excludedBlocks.forEach(block => excluded5.push(`${workload} block ${block}`))
@@ -544,13 +546,19 @@ function report() {
         if (!runs.some(r => r.arm === 'A') || !runs.some(r => r.arm === 'B')) continue
         const effect = relativeEffect(runs, stats), test = permutationTest(runs, testing)
         const level = (arm: Arm) => medianLevel(runs.filter(r => r.arm === arm).map(r => r.value), stats).estimate
-        const over = measure === 'throughput' ? effect.estimate < -0.05 : effect.estimate > 0.05
-        comparison.push({ workload, measure, single: level('A'), dual: level('B'), effect, test, over })
-        lines.push(`| ${workload} | ${measure} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(effect.estimate)} | ${pct(effect.low)} to ${pct(effect.high)} | ${test.p.toPrecision(3)} | ${over ? '**yes**' : 'no'} |`)
+        comparison.push({ workload, measure, single: level('A'), dual: level('B'), effect, test })
+        lines.push(`| ${workload} | ${measure} | ${fixed(level('A'))} | ${fixed(level('B'))} | ${pct(effect.estimate)} | ${pct(effect.low)} to ${pct(effect.high)} | ${test.p.toPrecision(3)} |`)
       }
     }
-    json.comparison5 = { rows: comparison, excluded: excluded5 }
+    json.comparison5 = { ...protocol.reporting.comparison5, rows: comparison, excluded: excluded5 }
     lines.push('', `Blocks excluded for a failed run: ${excluded5.length ? excluded5.join('; ') : 'none'}.`, '')
+
+    // Comparison 5 has no dual-legacy denominator. Declaring the separate 5a budget does not qualify that comparison.
+    json.comparison5a = { ...protocol.reporting.comparison5a, status: 'NOT_QUALIFIED',
+      reason: 'This topology report has no separately identified dual legacy baseline for comparison 5a.' }
+    lines.push('## Comparison 5a: kernel overhead', '', protocol.reporting.comparison5a.definition + '.',
+      `Budget: p95 increase ≤ ${protocol.reporting.comparison5a.budget.p95 * 100}% and throughput decrease ≤ ${protocol.reporting.comparison5a.budget.throughput * 100}%.`,
+      'Status: **NOT_QUALIFIED**. This topology report has no separately identified dual legacy baseline for comparison 5a; no kernel-overhead budget result is claimed.', '')
 
     // Absolute baselines and the dual topology's SYNC record, arm B. These levels are not blocked (one group of runs),
     // so a failed run leaves no degenerate stratum: they use every passed run, and the runs column shows the count.
