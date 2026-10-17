@@ -166,8 +166,8 @@ if (!isPushEvent && browser) {
   addSkipped('browser-production', 'browser-production', !browser ? 'browser classification is false' : 'push events skip browser-production')
 }
 
-// The browser-full matrix in ci.yml has six shards (#1340); build-run-meta.test.mjs compares the two.
-const browserFullInstances = [1, 2, 3, 4, 5, 6].map((shard) => `browser-full-${shard}`)
+// The browser-full matrix in ci.yml has eight shards (#1630); build-run-meta.test.mjs compares the two.
+const browserFullInstances = [1, 2, 3, 4, 5, 6, 7, 8].map((shard) => `browser-full-${shard}`)
 if (isScheduledEvent && browser) {
   for (const instance of browserFullInstances) addSelected('browser-full', instance, ['changes'])
 } else {

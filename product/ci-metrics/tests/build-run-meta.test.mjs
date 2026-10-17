@@ -64,7 +64,7 @@ test('full pull-request topology has every product instance, exact gate needs, a
       'changes', 'metrics-tooling',
       'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core-domain', 'backend-core-infrastructure',
       'client', 'script-contracts',
-      'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4', 'browser-pr-5', 'browser-pr-6',
+      'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4', 'browser-pr-5', 'browser-pr-6', 'browser-pr-7', 'browser-pr-8',
       'browser-production', 'postgresql-smoke', 'gate',
     ])
     const gate = meta.expectedJobs.find((job) => job.instance === 'gate')
@@ -73,7 +73,7 @@ test('full pull-request topology has every product instance, exact gate needs, a
       'script-contracts', 'browser-pr', 'browser-production', 'postgresql-smoke',
     ])
     assert.deepEqual(meta.skippedJobs.map((job) => job.instance), [
-      'browser-full-1', 'browser-full-2', 'browser-full-3', 'browser-full-4', 'browser-full-5', 'browser-full-6', 'warm-chromium-cache',
+      'browser-full-1', 'browser-full-2', 'browser-full-3', 'browser-full-4', 'browser-full-5', 'browser-full-6', 'browser-full-7', 'browser-full-8', 'warm-chromium-cache',
     ])
     assert.equal(meta.provenance.mode, 'shadow')
   } finally {
@@ -163,7 +163,7 @@ test('schedule and default-branch dispatch select the full browser lanes and ski
       // Every shard of the workflow's browser-full matrix, and no other (#1340).
       const matrix = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8')
         .match(/\n  browser-full:\n[\s\S]*?\n        shard: \[([\d, ]+)\]/)[1].split(',').map((shard) => `browser-full-${shard.trim()}`)
-      assert.deepEqual(matrix, ['browser-full-1', 'browser-full-2', 'browser-full-3', 'browser-full-4', 'browser-full-5', 'browser-full-6'])
+      assert.deepEqual(matrix, ['browser-full-1', 'browser-full-2', 'browser-full-3', 'browser-full-4', 'browser-full-5', 'browser-full-6', 'browser-full-7', 'browser-full-8'])
       assert.deepEqual(instances(meta).filter((instance) => instance.startsWith('browser-full-')), matrix)
       assert.ok(meta.expectedJobs.find((job) => job.instance === 'gate').needs.includes('browser-full'),
         'scheduled critical path must wait for the full browser proof')
@@ -294,7 +294,7 @@ test('expectedRun carries PR, base/head SHA, ref, and workflow identity from the
   }
 })
 
-// #1630 stage 1: metadata follows either accepted PR matrix before the later six-to-eight workflow cutover.
+// #1630 stage 2: selected and skipped PR metadata follows the final eight-shard workflow topology.
 const realWorkflow = readFileSync(fileURLToPath(new URL('../../../.github/workflows/ci.yml', import.meta.url)), 'utf8')
 
 function withBrowserMatrix(shards) {
@@ -309,8 +309,8 @@ function withBrowserMatrix(shards) {
   return { directory, path }
 }
 
-test('the browser-pr instances follow accepted 6 or 8 matrices, selected and skipped alike (#1630)', () => {
-  for (const total of [6, 8]) {
+test('the browser-pr instances follow the accepted 8 matrix, selected and skipped alike (#1630)', () => {
+  for (const total of [8]) {
     const workflow = withBrowserMatrix(Array.from({ length: total }, (_, index) => index + 1))
     const names = Array.from({ length: total }, (_, index) => `browser-pr-${index + 1}`)
     try {
@@ -330,7 +330,7 @@ test('the browser-pr instances follow accepted 6 or 8 matrices, selected and ski
 
 test('a browser-pr matrix the verifier does not accept, or cannot be read, fails closed', () => {
   for (const shards of [
-    [1, 2, 3, 4], [1, 2, 3, 4, 5], [1, 2, 4, 5, 6, 7], [2, 3, 4, 5],
+    [1, 2, 3, 4], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6], [1, 2, 4, 5, 6, 7], [2, 3, 4, 5],
     [1, 2, 3, 4, 5, 6, 7], [1, 2, 3, 4, 5, 6, 7, 8, 9],
     [1, 2, 3, 4, 5, 6, 7, 7], [1, 2, 3, 4, 5, 6, 7, 9], [0, 2, 3, 4, 5, 6, 7, 8],
   ]) {
@@ -345,9 +345,9 @@ test('a browser-pr matrix the verifier does not accept, or cannot be read, fails
     }
   }
   // Two shard lists in the job (a second axis or a stray edit): which one GitHub expands is not the script's to guess.
-  const doubled = withBrowserMatrix([1, 2, 3, 4, 5, 6])
+  const doubled = withBrowserMatrix([1, 2, 3, 4, 5, 6, 7, 8])
   try {
-    const text = readFileSync(doubled.path, 'utf8').replace('        shard: [1, 2, 3, 4, 5, 6]', '        shard: [1, 2, 3, 4, 5, 6]\n        shard: [1, 2, 3, 4]')
+    const text = readFileSync(doubled.path, 'utf8').replace('        shard: [1, 2, 3, 4, 5, 6, 7, 8]', '        shard: [1, 2, 3, 4, 5, 6, 7, 8]\n        shard: [1, 2, 3, 4]')
     writeFileSync(doubled.path, text)
     const { directory, result } = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: doubled.path })
     assert.notEqual(result.status, 0, 'two shard lists must fail')
