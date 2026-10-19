@@ -68,7 +68,7 @@ jobs:
       - name: Mint the repository-scoped maintenance evidence token
         id: maintenance-evidence-token
         if: steps.detect-maintenance.outputs.maintenance-needed == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.MAINTENANCE_EVIDENCE_APP_CLIENT_ID }}
           private-key: ${{ secrets.MAINTENANCE_EVIDENCE_APP_PRIVATE_KEY }}
@@ -79,7 +79,7 @@ jobs:
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
         if: steps.queue-head.outputs.superseded != 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.MERGE_AUTHORITY_APP_CLIENT_ID }}
           private-key: ${{ secrets.MERGE_AUTHORITY_APP_PRIVATE_KEY }}
@@ -144,7 +144,7 @@ jobs:
       - name: Mint the repository-scoped maintenance evidence token
         id: maintenance-evidence-token
         if: steps.detect-maintenance-after-review.outputs.maintenance-needed == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.MAINTENANCE_EVIDENCE_APP_CLIENT_ID }}
           private-key: ${{ secrets.MAINTENANCE_EVIDENCE_APP_PRIVATE_KEY }}
@@ -154,7 +154,7 @@ jobs:
           permission-metadata: read
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.MERGE_AUTHORITY_APP_CLIENT_ID }}
           private-key: ${{ secrets.MERGE_AUTHORITY_APP_PRIVATE_KEY }}
