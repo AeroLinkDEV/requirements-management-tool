@@ -862,6 +862,21 @@ the source is retired. The source operator must capture the actual
 connector deployment/key identity and the exact verified-backup identity. The discriminator is source-derived;
 the transfer must never infer it from a guessed HOME path or application name.
 
+Read `/health/identity/data-protection` over loopback on the actual source process. Its metadata includes the
+effective content root and Windows reader SID, key IDs/dates/revocations and a stable ring digest. When public
+key-management options leave the repository implicit, the diagnostic observes the framework's structured
+ASP.NET Core 10 selection event rather than reconstructing a profile path. Events 62/63 identify profile storage;
+event 63 establishes Windows DPAPI but leaves its scope `unknown`. Event 64 is separately labelled Azure fallback,
+not HOME profile evidence. Events 62/64 report `Unprotected` for the selected write encryptor; serialized existing
+descriptors remain authoritative for reading individual persisted keys. Explicit protector settings retain their
+`IConfiguration` provenance. Missing, conflicting, unsupported or malformed observations remain unproven. The
+diagnostic never selects a replacement ring, generates a key or turns metadata into protected-data compatibility.
+It also reports effective connector configuration and an existing key file's public identity without creating
+the signing service/key, plus the resolved notification-authority identity/status without provisioning it.
+An existing-key-file result is file/configuration evidence, not proof of a previously loaded connector key.
+Connector metadata distinguishes explicit configuration, current-process resolved defaults and request-derived
+origin selection; defaults are not described as explicit configuration.
+
 The maintenance executable provides the bounded transfer boundary:
 
 Before exporting, run the read-only compatibility probe against the verified backup restored into an owned,

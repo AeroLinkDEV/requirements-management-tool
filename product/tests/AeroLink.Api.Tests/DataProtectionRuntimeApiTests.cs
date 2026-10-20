@@ -6,6 +6,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Net.Security;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging;
 
 namespace AeroLink.Api.Tests;
 
@@ -17,11 +18,14 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class DataProtectionRuntimeApiTests
 {
-    [Fact]
-    public async Task Capture_reports_effective_ring_and_refuses_non_loopback_without_mutating_the_ring()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Capture_reports_effective_ring_and_refuses_non_loopback_without_mutating_the_ring(bool implicitRepository)
     {
-        using var fixture = SyntheticApiFixture.Create();
+        using var fixture = SyntheticApiFixture.Create(implicitRepository);
         var before = SnapshotFiles(fixture.KeyRing);
+        var connectorBefore = fixture.ImplicitRepository ? null : File.ReadAllBytes(Path.Combine(fixture.Evidence, "connector.pem"));
         using var api = new OwnedApiProcess(fixture);
         await api.WaitForReadyAsync();
 
@@ -34,13 +38,48 @@ public sealed class DataProtectionRuntimeApiTests
         Assert.Equal(fixture.ApplicationName, firstDataProtection.GetProperty("applicationDiscriminator").GetString());
         Assert.Equal(Path.GetFullPath(fixture.KeyRing),
             firstDataProtection.GetProperty("repositoryPath").GetString(), StringComparer.OrdinalIgnoreCase);
-        Assert.Equal("actual XmlRepository.Directory", firstDataProtection.GetProperty("repositoryPathSource").GetString());
+        Assert.Equal(implicitRepository ? "framework-fallback-event:64/UsingAzureAsKeyRepository" : "actual XmlRepository.Directory",
+            firstDataProtection.GetProperty("repositoryPathSource").GetString());
+        if (implicitRepository)
+        {
+            Assert.Equal(JsonValueKind.Null, firstDataProtection.GetProperty("declaredKeyRingPath").ValueKind);
+            Assert.Equal("Unprotected", firstDataProtection.GetProperty("observedProviderSelection").GetString());
+        }
+        Assert.Equal(implicitRepository ? "Unprotected" : "unknown", firstDataProtection.GetProperty("protectionScopeEvidence").GetString());
+        Assert.Equal("IConfiguration:DataProtection:ProtectKeysWith", firstDataProtection.GetProperty("declaredProtectionSource").GetString());
+        Assert.Equal(before.Count, firstDataProtection.GetProperty("keys").GetArrayLength());
+        Assert.Matches("^[0-9A-F]{64}$", firstDataProtection.GetProperty("ringManifestSha256").GetString());
+        Assert.Equal(Path.GetDirectoryName(typeof(Program).Assembly.Location),
+            firstJson.RootElement.GetProperty("contentRoot").GetString(), StringComparer.OrdinalIgnoreCase);
+        var connector = firstJson.RootElement.GetProperty("connector");
+        Assert.Equal("synthetic-home-capture", connector.GetProperty("deploymentId").GetString());
+        Assert.Equal("IConfiguration:Connector:DeploymentId", connector.GetProperty("deploymentIdSource").GetString());
+        Assert.Equal("IConfiguration:Connector:SigningKeyPath", connector.GetProperty("signingKeyPathSource").GetString());
+        Assert.Equal("IConfiguration:Connector:PublicOrigin", connector.GetProperty("publicOriginSource").GetString());
+        Assert.Equal(Path.Combine(fixture.Evidence, "connector.pem"), connector.GetProperty("signingKeyPath").GetString());
+        if (fixture.ImplicitRepository)
+        {
+            Assert.Equal("absent", connector.GetProperty("status").GetString());
+            Assert.False(File.Exists(Path.Combine(fixture.Evidence, "connector.pem")));
+        }
+        else
+        {
+            Assert.Equal("existing-key-file", connector.GetProperty("status").GetString());
+            Assert.Equal(fixture.ConnectorPublicFingerprint, connector.GetProperty("publicFingerprintSha256").GetString());
+            Assert.Equal(Convert.ToHexString(SHA256.HashData(connectorBefore!)), connector.GetProperty("keyFileSha256").GetString());
+            Assert.Equal(connectorBefore!, File.ReadAllBytes(Path.Combine(fixture.Evidence, "connector.pem")));
+        }
+        Assert.Equal("absent", firstJson.RootElement.GetProperty("notificationAuthority").GetProperty("status").GetString());
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.AuthorityRoot));
+        if (OperatingSystem.IsWindows())
+            Assert.StartsWith("S-", firstJson.RootElement.GetProperty("process").GetProperty("windowsUserSid").GetString());
         Assert.True(firstDataProtection.GetProperty("keyCount").GetInt32() > 0);
         Assert.Equal(0, firstDataProtection.GetProperty("revokedKeyCount").GetInt32());
         Assert.Matches("^[0-9A-F]{64}$", firstDataProtection.GetProperty("keyMetadataSha256").GetString());
         var firstText = await first.Content.ReadAsStringAsync();
         Assert.DoesNotContain("synthetic-canary", firstText);
         Assert.DoesNotContain("encryptedSecret", firstText);
+        Assert.DoesNotContain("PRIVATE KEY", firstText);
         var pid = firstJson.RootElement.GetProperty("process").GetProperty("pid").GetInt32();
         Assert.Equal(api.ProcessId, pid);
         Assert.True(firstJson.RootElement.GetProperty("process").GetProperty("startedAtUtc").GetDateTimeOffset() > DateTimeOffset.MinValue);
@@ -68,6 +107,53 @@ public sealed class DataProtectionRuntimeApiTests
         foreach (var item in before)
             Assert.True(second.TryGetValue(item.Key, out var hash) && hash == item.Value, item.Key);
         Assert.Equal("AeroLink HOME synthetic canary", fixture.UnprotectCanary());
+    }
+
+    [Theory]
+    [InlineData(62, "UsingProfileAsKeyRepository", "User profile is available. Using '{FullName}' as key repository; keys will not be encrypted at rest.", "Unprotected")]
+    [InlineData(63, "UsingProfileAsKeyRepositoryWithDPAPI", "User profile is available. Using '{FullName}' as key repository and Windows DPAPI to encrypt keys at rest.", "WindowsDpapi")]
+    public void Public_profile_selection_event_preserves_unknown_scope_and_refuses_conflicting_evidence(
+        int eventNumber, string eventName, string template, string provider)
+    {
+        // Public .NET 10 event-schema vectors, independent of the parser. The real fallback and Program wiring
+        // are owned by the Kestrel theory above. These rows exercise Windows mapping without reading a profile.
+        var root = Directory.CreateTempSubdirectory("aerolink-dp-event-contract-").FullName;
+        try
+        {
+            using var recorder = new DataProtectionRepositoryCapture();
+            Assert.Null(recorder.Read());
+            var logger = recorder.CreateLogger(DataProtectionRepositoryCapture.Category);
+            var state = new[] { new KeyValuePair<string, object?>("FullName", root),
+                new KeyValuePair<string, object?>("{OriginalFormat}", template) };
+            logger.Log(LogLevel.Information, new EventId(eventNumber, eventName), state, null, (_, _) => throw new Exception("Must not format diagnostic text."));
+            var observed = Assert.IsType<DataProtectionRepositoryObservation>(recorder.Read());
+            Assert.Equal(root, observed.Directory);
+            Assert.Equal(provider, observed.ProviderSelection);
+            Assert.Equal(eventNumber == 63 ? "unknown" : "Unprotected", observed.ProtectionScopeEvidence);
+            Assert.True(observed.HasExistingOrdinaryDirectory());
+            logger.Log(LogLevel.Information, new EventId(eventNumber, eventName), state, null, (_, _) => "unused");
+            Assert.Equal(observed, recorder.Read());
+            // An unsupported selection after a valid one invalidates the observation, rather than preserving
+            // a previously good path as authority for another manager/provider.
+            logger.Log(LogLevel.Warning, new EventId(61, "UsingRegistryAsKeyRepositoryWithDPAPI"), state, null, (_, _) => "unused");
+            Assert.Null(recorder.Read());
+            using var conflicting = new DataProtectionRepositoryCapture();
+            var conflictingLogger = conflicting.CreateLogger(DataProtectionRepositoryCapture.Category);
+            conflictingLogger.Log(LogLevel.Information, new EventId(eventNumber, eventName), state, null, (_, _) => "unused");
+            var otherState = new[] { new KeyValuePair<string, object?>("FullName", Path.Combine(root, "other")),
+                new KeyValuePair<string, object?>("{OriginalFormat}", template) };
+            conflictingLogger.Log(LogLevel.Information, new EventId(eventNumber, eventName), otherState, null, (_, _) => "unused");
+            Assert.Null(conflicting.Read());
+            using var malformed = new DataProtectionRepositoryCapture();
+            var malformedLogger = malformed.CreateLogger(DataProtectionRepositoryCapture.Category);
+            malformedLogger.Log(LogLevel.Warning, new EventId(eventNumber, eventName), state, null, (_, _) => "unused");
+            Assert.Null(malformed.Read());
+            var absent = Path.Combine(root, "not-created");
+            Assert.False(new DataProtectionRepositoryObservation(eventNumber, eventName, absent, provider).HasExistingOrdinaryDirectory());
+            Assert.False(Directory.Exists(absent));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+        }
+        finally { Directory.Delete(root); }
     }
 
     private static HttpClient NewClient() => new(new SocketsHttpHandler
@@ -135,10 +221,16 @@ public sealed class DataProtectionRuntimeApiTests
         public string CertificateKeyPath { get; }
         public int Port { get; }
 
-        public static SyntheticApiFixture Create()
+        public bool ImplicitRepository { get; private init; }
+        public string? ConnectorPublicFingerprint { get; private init; }
+        public string FallbackRoot => Path.GetDirectoryName(Path.GetDirectoryName(KeyRing))!;
+
+        public static SyntheticApiFixture Create(bool implicitRepository)
         {
             var root = Path.Combine(Path.GetTempPath(), "aerolink-home-dp-capture-" + Guid.NewGuid().ToString("N"));
-            var keyRing = Path.Combine(root, "keys");
+            // Use the framework's public isolated Azure fallback in this child process. No real Windows profile
+            // directory is selected or read, and the result must identify event 64 rather than HOME's event 63.
+            var keyRing = implicitRepository ? Path.Combine(root, "fallback", "ASP.NET", "DataProtection-Keys") : Path.Combine(root, "keys");
             var database = Path.Combine(root, "fixture.db");
             var evidence = Path.Combine(root, "evidence");
             var authorityRoot = Path.Combine(root, "authority");
@@ -147,6 +239,13 @@ public sealed class DataProtectionRuntimeApiTests
             Directory.CreateDirectory(keyRing);
             Directory.CreateDirectory(evidence);
             Directory.CreateDirectory(authorityRoot);
+            string? connectorFingerprint = null;
+            if (!implicitRepository)
+            {
+                using var connectorKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+                File.WriteAllText(Path.Combine(evidence, "connector.pem"), connectorKey.ExportPkcs8PrivateKeyPem());
+                connectorFingerprint = Convert.ToHexString(SHA256.HashData(connectorKey.ExportSubjectPublicKeyInfo())).ToLowerInvariant();
+            }
             var certificatePath = Path.Combine(root, "site.crt");
             var certificateKeyPath = Path.Combine(root, "site.key");
             using (var key = RSA.Create(2048))
@@ -174,7 +273,7 @@ public sealed class DataProtectionRuntimeApiTests
             return new SyntheticApiFixture(root, keyRing, database, evidence, authorityRoot, applicationName,
                 publicHost, certificatePath, certificateKeyPath,
                 retainedProvider, retainedProvider.CreateProtector("AeroLink.Home.Continuity.Synthetic.v1"),
-                protectedCanary, port);
+                protectedCanary, port) { ImplicitRepository = implicitRepository, ConnectorPublicFingerprint = connectorFingerprint };
         }
 
         public string UnprotectCanary() => protector.Unprotect(protectedCanary);
@@ -235,7 +334,17 @@ public sealed class DataProtectionRuntimeApiTests
             start.Environment["Runtime__Mode"] = "HOME-SYNTHETIC";
             start.Environment["Runtime__SourceSha"] = "synthetic-source";
             start.Environment["Runtime__SourceIdentity"] = "synthetic-source-identity";
-            start.Environment["DataProtection__KeyRingPath"] = fixture.KeyRing;
+            if (fixture.ImplicitRepository)
+            {
+                start.Environment.Remove("DataProtection__KeyRingPath");
+                start.Environment["WEBSITE_INSTANCE_ID"] = "owned-runtime-capture-fixture";
+                start.Environment["HOME"] = fixture.FallbackRoot;
+            }
+            else
+            {
+                start.Environment["DataProtection__KeyRingPath"] = fixture.KeyRing;
+                start.Environment.Remove("WEBSITE_INSTANCE_ID");
+            }
             start.Environment["DataProtection__ApplicationName"] = fixture.ApplicationName;
             start.Environment["Logging__LogLevel__Default"] = "Warning";
             process = Process.Start(start) ?? throw new InvalidOperationException("The disposable API process did not start.");

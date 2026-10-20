@@ -59,6 +59,12 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     ContentRootPath = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
 });
 builder.Host.UseWindowsService();
+// Observe the framework's real fallback selection without changing HOME's provider or its logging output.
+// The provider-specific rule keeps this in-memory metadata available when console logging is Warning.
+var repositoryCapture = new DataProtectionRepositoryCapture();
+builder.Services.AddSingleton(repositoryCapture);
+builder.Logging.AddProvider(repositoryCapture);
+builder.Logging.AddFilter<DataProtectionRepositoryCapture>(DataProtectionRepositoryCapture.Category, LogLevel.Information);
 // A release package (#1614 1.6) stamps the source revision it was built from beside the executable, so a
 // packaged host reports its own identity without a launcher setting Runtime__SourceSha. Added last, so it wins
 // over anything else that claims a revision for these binaries; development builds have no such file.

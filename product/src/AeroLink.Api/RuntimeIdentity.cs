@@ -11,6 +11,8 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using AeroLink.Infrastructure.Persistence.Maintenance;
+using AeroLink.Infrastructure.Notifications;
 
 namespace AeroLink.Api;
 
@@ -146,7 +148,10 @@ public static class RuntimeIdentityEndpoints
             IConfiguration configuration,
             IOptions<DataProtectionOptions> dataProtectionOptions,
             IOptions<KeyManagementOptions> keyManagementOptions,
-            IKeyManager keyManager) =>
+            IKeyManager keyManager,
+            DataProtectionRepositoryCapture repositoryCapture,
+            IHostEnvironment environment,
+            NotificationInstallationAuthority notificationAuthority) =>
         {
             // This answer contains the effective discriminator, ring location and key metadata fingerprints.
             // A null TestServer address is not loopback evidence, and a forwarded header is deliberately ignored.
@@ -155,7 +160,12 @@ public static class RuntimeIdentityEndpoints
                 return Results.NotFound();
 
             return Results.Ok(DataProtectionRuntimeCapture.Capture(
-                configuration, dataProtectionOptions.Value, keyManagementOptions.Value, keyManager));
+                configuration, dataProtectionOptions.Value, keyManagementOptions.Value, keyManager,
+                repositoryCapture, environment.ContentRootPath) with
+            {
+                Connector = ConnectorSigningService.CaptureExistingIdentity(configuration),
+                NotificationAuthority = NotificationAuthorityRuntimeCapture.Capture(notificationAuthority),
+            });
         });
 
         app.MapGet("/health/identity", async (HttpContext context, IConfiguration configuration, AeroLinkDbContext db, CancellationToken ct) =>
@@ -236,7 +246,9 @@ public static class DataProtectionRuntimeCapture
         IConfiguration configuration,
         DataProtectionOptions dataProtectionOptions,
         KeyManagementOptions keyManagementOptions,
-        IKeyManager keyManager)
+        IKeyManager keyManager,
+        DataProtectionRepositoryCapture? repositoryCapture = null,
+        string? contentRoot = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(dataProtectionOptions);
@@ -250,7 +262,13 @@ public static class DataProtectionRuntimeCapture
         var repositoryPath = repository is FileSystemXmlRepository fileSystemRepository
             ? fileSystemRepository.Directory.FullName
             : null;
-        var repositoryExists = repository is FileSystemXmlRepository && repositoryPath is not null
+        var fallback = repository is null && keyManager is XmlKeyManager ? repositoryCapture?.Read() : null;
+        if (fallback is not null && fallback.HasExistingOrdinaryDirectory())
+        {
+            repositoryPath = Path.GetFullPath(fallback.Directory);
+            repositoryType = typeof(FileSystemXmlRepository).FullName!;
+        }
+        var repositoryExists = repositoryPath is not null
             && Directory.Exists(repositoryPath);
         var applicationDiscriminator = dataProtectionOptions.ApplicationDiscriminator;
         var declaredProtection = ClassifyProtection(configuration["DataProtection:ProtectKeysWith"]);
@@ -259,7 +277,7 @@ public static class DataProtectionRuntimeCapture
             ApplicationDiscriminatorSource: "IOptions<DataProtectionOptions>",
             RepositoryType: repositoryType,
             RepositoryPath: repositoryExists ? repositoryPath : null,
-            RepositoryPathSource: repositoryExists ? "actual XmlRepository.Directory" : "unproven",
+            RepositoryPathSource: repositoryExists ? fallback?.Provenance ?? "actual XmlRepository.Directory" : "unproven",
             DeclaredProtection: declaredProtection,
             XmlEncryptorType: keyManagementOptions.XmlEncryptor?.GetType().FullName,
             AutoGenerateKeys: keyManagementOptions.AutoGenerateKeys,
@@ -267,7 +285,10 @@ public static class DataProtectionRuntimeCapture
             KeyCount: null,
             RevokedKeyCount: null,
             KeyMetadataSha256: null,
-            RevokedMetadataSha256: null);
+            RevokedMetadataSha256: null,
+            ObservedProviderSelection: repositoryExists ? fallback?.ProviderSelection : null,
+            ProtectionScopeEvidence: fallback?.ProtectionScopeEvidence ?? "unknown",
+            DeclaredProtectionSource: "IConfiguration:DataProtection:ProtectKeysWith");
 
         // FileSystemXmlRepository creates its directory when enumerated. Do not ask IKeyManager for metadata
         // unless the resolved directory already exists; a default candidate must remain explicitly unproven.
@@ -277,10 +298,12 @@ public static class DataProtectionRuntimeCapture
                 CapturedAtUtc: DateTimeOffset.UtcNow,
                 Process: process,
                 Instance: CaptureInstance(identity),
-                DataProtection: metadata);
+                DataProtection: metadata,
+                ContentRoot: contentRoot);
 
         try
         {
+            var ringBefore = HomeContinuityCompatibilityReader.ComputeRingManifestSha256(repositoryPath!);
             var keys = keyManager.GetAllKeys()
                 .OrderBy(key => key.KeyId)
                 .ToArray();
@@ -291,14 +314,20 @@ public static class DataProtectionRuntimeCapture
                 RevokedKeyCount = revoked.Length,
                 KeyMetadataSha256 = MetadataDigest(keys),
                 RevokedMetadataSha256 = MetadataDigest(revoked),
+                RingManifestSha256 = ringBefore,
+                Keys = keys.Select(key => new DataProtectionRuntimeKeyMetadata(key.KeyId, key.CreationDate,
+                    key.ActivationDate, key.ExpirationDate, key.IsRevoked)).ToArray(),
             };
+            if (ringBefore != HomeContinuityCompatibilityReader.ComputeRingManifestSha256(repositoryPath!))
+                throw new InvalidOperationException("The ring changed during metadata capture.");
             var status = string.IsNullOrWhiteSpace(applicationDiscriminator) ? "unproven" : "captured";
             return new DataProtectionRuntimeCaptureResult(
                 Status: status,
                 CapturedAtUtc: DateTimeOffset.UtcNow,
                 Process: process,
                 Instance: CaptureInstance(identity),
-                DataProtection: metadata);
+                DataProtection: metadata,
+                ContentRoot: contentRoot);
         }
         catch
         {
@@ -309,7 +338,8 @@ public static class DataProtectionRuntimeCapture
                 CapturedAtUtc: DateTimeOffset.UtcNow,
                 Process: process,
                 Instance: CaptureInstance(identity),
-                DataProtection: metadata);
+                DataProtection: metadata,
+                ContentRoot: contentRoot);
         }
     }
 
@@ -326,12 +356,23 @@ public static class DataProtectionRuntimeCapture
             string? imagePath = null;
             try { imagePath = process.MainModule?.FileName; } catch { }
             return new DataProtectionProcessIdentity(
-                process.Id, process.StartTime.ToUniversalTime(), imagePath);
+                process.Id, process.StartTime.ToUniversalTime(), imagePath, CurrentWindowsSid());
         }
         catch
         {
             return new DataProtectionProcessIdentity(Environment.ProcessId, null, null);
         }
+    }
+
+    private static string? CurrentWindowsSid()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return identity.User?.Value;
+        }
+        catch { return null; }
     }
 
     private static string ClassifyProtection(string? value) => string.IsNullOrWhiteSpace(value)
@@ -357,12 +398,16 @@ public sealed record DataProtectionRuntimeCaptureResult(
     DateTimeOffset CapturedAtUtc,
     DataProtectionProcessIdentity Process,
     DataProtectionRuntimeInstance Instance,
-    DataProtectionRuntimeMetadata DataProtection);
+    DataProtectionRuntimeMetadata DataProtection,
+    string? ContentRoot = null,
+    ConnectorRuntimeIdentityCapture? Connector = null,
+    NotificationAuthorityRuntimeCapture? NotificationAuthority = null);
 
 public sealed record DataProtectionProcessIdentity(
     int Pid,
     DateTimeOffset? StartedAtUtc,
-    string? ImagePath);
+    string? ImagePath,
+    string? WindowsUserSid = null);
 
 public sealed record DataProtectionRuntimeInstance(
     string InstanceId,
@@ -386,4 +431,31 @@ public sealed record DataProtectionRuntimeMetadata(
     int? KeyCount,
     int? RevokedKeyCount,
     string? KeyMetadataSha256,
-    string? RevokedMetadataSha256);
+    string? RevokedMetadataSha256,
+    string? ObservedProviderSelection = null,
+    string ProtectionScopeEvidence = "unknown",
+    string? RingManifestSha256 = null,
+    IReadOnlyList<DataProtectionRuntimeKeyMetadata>? Keys = null,
+    string? DeclaredProtectionSource = null);
+
+public sealed record DataProtectionRuntimeKeyMetadata(Guid KeyId, DateTimeOffset CreatedAtUtc,
+    DateTimeOffset ActivationAtUtc, DateTimeOffset ExpiresAtUtc, bool Revoked);
+
+public sealed record NotificationAuthorityRuntimeCapture(string Status, string InstallationId, string HostIdentity,
+    string? AuthorityPath, Guid? SendGeneration, Guid? PolicyRevision, string? MaximumMode, string? PolicySha256)
+{
+    public static NotificationAuthorityRuntimeCapture Capture(NotificationInstallationAuthority authority)
+    {
+        try
+        {
+            var (policy, hash) = authority.Read();
+            return new(policy is not null ? "captured" : File.Exists(authority.AuthorityPath) ? "unproven" : "absent",
+                authority.InstallationId, authority.HostIdentity, authority.AuthorityPath,
+                policy?.SendGeneration, policy?.PolicyRevision, policy?.MaximumMode.ToString(), hash.Length == 0 ? null : hash);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return new("unavailable", authority.InstallationId, authority.HostIdentity, null, null, null, null, null);
+        }
+    }
+}
