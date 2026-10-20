@@ -24,6 +24,11 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
   const [source, setSource] = useState<CodeSource>()
   const [supplement, setSupplement] = useState<CodeSourceSupplement>()
   const currentSource = source?.projectId === projectId && source.releaseId === releaseId ? source : undefined
+  const sourceCapabilityRead = useCodeRead<CodeSource>(page === 'mergeRequests'
+    ? `${api}/api/projects/${encodeURIComponent(projectId)}/code/source?${codeQuery({ releaseId })}` : undefined)
+  const mergeRequestSource = sourceCapabilityRead.value?.projectId === projectId
+    && sourceCapabilityRead.value.releaseId === releaseId ? sourceCapabilityRead.value : undefined
+  const effectiveSource = page === 'mergeRequests' ? mergeRequestSource : currentSource
   const browseSource = currentSource?.snapshot ? currentSource : supplement ? {
     projectId, releaseId, version: 0, snapshot: supplement.source,
     capabilities: { canSelect: false, sourceSelectionFrozen: true }, provenance: supplement.provenance,
@@ -35,14 +40,21 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
       <button aria-current={page === 'mergeRequests' ? 'page' : undefined} onClick={() => onPage('mergeRequests')}>Merge Requests</button>
       <button aria-current={page === 'explorer' ? 'page' : undefined} onClick={() => onPage('explorer')}>Code Explorer</button>
     </nav>
-    <p className="codeBoundary"><strong>Source and merge review</strong> stay with GitLab. AeroLink records relationships as context; accepted implementation evidence remains a separate engineering decision.</p>
-    {currentSource?.demonstration && <CodeDemonstrationBanner
-      key={`${projectId}/${releaseId}/${currentSource.demonstration.configurationId}/${currentSource.demonstration.configurationVersion}`}
-      {...{ api, projectId }} binding={currentSource.demonstration} />}
-    <CodeSourcePanel {...{ api, projectId, releaseId, readOnly }} onSource={setSource} onSupplement={setSupplement} />
-    {page === 'mergeRequests' ? <MergeRequestRegister {...{ api, projectId, releaseId, traceArtifactHref }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} />
+    {page === 'explorer' && <>
+      <p className="codeBoundary"><strong>Source and merge review</strong> stay with GitLab. AeroLink records relationships as context; accepted implementation evidence remains a separate engineering decision.</p>
+      {currentSource?.demonstration && <CodeDemonstrationBanner
+        key={`${projectId}/${releaseId}/${currentSource.demonstration.configurationId}/${currentSource.demonstration.configurationVersion}`}
+        {...{ api, projectId }} binding={currentSource.demonstration} />}
+      <CodeSourcePanel {...{ api, projectId, releaseId, readOnly }} onSource={setSource} onSupplement={setSupplement} />
+    </>}
+    {page === 'mergeRequests' ? <>
+      {sourceCapabilityRead.error && <p className="codeWorkspaceReadError" role="alert">{sourceCapabilityRead.error}</p>}
+      {sourceCapabilityRead.value && !mergeRequestSource && <p className="codeWorkspaceReadError" role="alert">Source belongs to another workspace.</p>}
+      <MergeRequestRegister {...{ api, projectId, releaseId, traceArtifactHref }} demonstration={mergeRequestSource?.demonstration}
+        readOnly={readOnly || !effectiveSource?.capabilities?.canSelect} />
+    </>
       : <SourceExplorer key={currentSource?.selectionEventId ?? `supplement-${supplement?.source.id ?? 'unselected'}`} {...{ api, projectId, releaseId }}
-        readOnly={readOnly || !currentSource?.capabilities?.canSelect} source={browseSource} traceArtifactHref={traceArtifactHref} />}
+        readOnly={readOnly || !effectiveSource?.capabilities?.canSelect} source={browseSource} traceArtifactHref={traceArtifactHref} />}
     <details className="codeEvidenceSection"><summary>Implementation evidence and build gate</summary>
       <CodeTraceabilityCenter {...{ api, projectId, releaseId, readOnly, onBack }} embedded />
     </details>
@@ -96,7 +108,7 @@ function MergeRequestStatus({ item }: { item?: MergeRequest }) {
   </span>
 }
 
-export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixedTarget, onLinked, traceArtifactHref }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly' | 'traceArtifactHref'> & ArtifactLinkContext) {
+export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixedTarget, onLinked, traceArtifactHref, demonstration }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly' | 'traceArtifactHref'> & ArtifactLinkContext & { demonstration?: CodeSource['demonstration'] }) {
   const [linking, setLinking] = useState(false)
   const [mode, setMode] = useState<'linked' | 'discover'>('linked')
   const [page, setPage] = useState(1)
@@ -124,7 +136,16 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
     ?? (discovered.value && !discovered.value.observation.succeeded ? discovered.value.observation.detail : undefined)
   const loading = mode === 'linked' ? linked.loading : discovered.loading
   const mr = mode === 'linked' ? (detail.value?.metadataKnown ? detail.value.metadata : undefined) : remoteDetail.value?.observation.value
+  const relationships = mode === 'linked' ? [...(detail.value?.mergeRequests ?? []), ...(detail.value?.files ?? [])] : []
   const next = mode === 'linked' ? !!linked.value && page * 25 < linked.value.total : !!discovered.value?.observation.nextPage
+  const selectedRow = rows?.find(row => row.iid === selected?.iid && row.origin === selected.origin && row.remoteProjectId === selected.remoteProjectId)
+  const linkedArtifactsLabel = mode === 'discover' ? 'Linked artifacts (not evaluated)'
+    : selectedRow?.count === undefined ? 'Linked artifacts' : `Linked artifacts (${selectedRow.count})`
+  const registerContext = mode === 'linked' ? 'Recorded relationships for this build, including records whose GitLab metadata is unavailable.'
+    : 'GitLab discovery. Appearing here does not mean a merge request is linked or accepted in AeroLink.'
+  const checkedAt = mode === 'linked' ? linked.value?.metadataCheckedAt : discovered.value?.checkedAt
+  const selectRequest = (row: { iid: number; origin?: string; remoteProjectId?: number }) =>
+    setSelected({ iid: row.iid, origin: row.origin, remoteProjectId: row.remoteProjectId })
   return <section aria-label="Merge request register">
     <div className="codeCommandBar">
       <div role="group" aria-label="Merge request scope">
@@ -139,30 +160,47 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
       </form>}
       <button onClick={() => setRefresh(value => value + 1)}>Refresh merge requests</button>
     </div>
-    <p>{mode === 'linked' ? 'Recorded relationships for this build, including records whose GitLab metadata is unavailable.'
-      : 'GitLab discovery. Appearing here does not mean a merge request is linked or accepted in AeroLink.'}</p>
-    {(mode === 'linked' ? linked.value?.metadataCheckedAt : discovered.value?.checkedAt) && <p>GitLab metadata checked {new Date((mode === 'linked' ? linked.value!.metadataCheckedAt : discovered.value!.checkedAt)!).toLocaleString()} · observations may be reused for up to 15 seconds.</p>}
     {error && <p role="alert">{error}</p>}
-    <CodeRegisterFrame resizableKey="code-merge-request-register" inspector={selected ? <ControlledArtifactInspector artifactType="GitLab merge request" displayNumber={`!${selected.iid}`}
-      subtitle="GitLab metadata and recorded AeroLink context" closeLabel="Close merge request inspector"
-      onClose={() => setSelected(undefined)} tabs={[{ id: 'details', label: 'Details and relationships' }]} activeTab="details" onTab={() => {}}>
-      {(detail.loading || remoteDetail.loading) && <p>Loading merge request details…</p>}
-      {(detail.error || remoteDetail.error) && <p role="alert">{detail.error || remoteDetail.error}</p>}
-      {mr ? <><h3>{mr.title}</h3><p><MergeRequestStatus item={mr} /></p><p>{mr.sourceBranch} → {mr.targetBranch}</p>
-        {(detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt) && <p>Details checked {new Date((detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt)!).toLocaleString()}</p>}
-        <p>{mr.approvals?.known ? `${mr.approvals.approvedBy.length} recorded GitLab approval(s)` : 'GitLab approvals unknown'}</p>
-        {mr.approvals?.known && <ul>{mr.approvals.approvedBy.map(person => <li key={person.id}>{person.name} (@{person.username})</li>)}</ul>}
-        <a href={mr.webUrl} target="_blank" rel="noreferrer">Open in GitLab ↗</a>
-        {!readOnly && <p><button ref={linkButton} onClick={() => setLinking(true)}>Link AeroLink artifact</button></p>}
-      </> : !detail.loading && !remoteDetail.loading && <p>Current GitLab metadata is unknown. Retained relationships remain readable.</p>}
-      {mode === 'linked' && <CodeRelationshipList {...{ api, projectId, readOnly, traceArtifactHref }} onChanged={() => setRefresh(value => value + 1)} items={[...(detail.value?.mergeRequests ?? []), ...(detail.value?.files ?? [])]} />}
-    </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty title="merge request"
+    <CodeRegisterFrame resizableKey="code-merge-request-register" inspector={selected ? <aside className="codeMergeRequestInspector" aria-label={`Merge request !${selected.iid} details`}>
+      <header className="codeMergeRequestInspectorHeader">
+        <div><h2>!{selected.iid}</h2></div>
+        <button type="button" className="codeMergeRequestInspectorClose" aria-label="Close merge request inspector" onClick={() => setSelected(undefined)}>×</button>
+      </header>
+      <div className="codeMergeRequestInspectorBody">
+        {(detail.loading || remoteDetail.loading) && <p>Loading merge request details…</p>}
+        {(detail.error || remoteDetail.error) && <p role="alert">{detail.error || remoteDetail.error}</p>}
+        {mr ? <><h3>{mr.title}</h3><p><MergeRequestStatus item={mr} /></p></> : !detail.loading && !remoteDetail.loading && <p>Current GitLab metadata is unknown. Retained relationships remain readable.</p>}
+        <details className="codeMergeRequestDisclosure">
+          <summary>{linkedArtifactsLabel}</summary>
+          {mode === 'linked' && <CodeRelationshipList {...{ api, projectId, readOnly, traceArtifactHref }} onChanged={() => setRefresh(value => value + 1)} items={relationships} />}
+          {mode === 'discover' && <p>Relationships are evaluated when this request is linked to the build.</p>}
+        </details>
+        <details className="codeMergeRequestDisclosure">
+          <summary>More details</summary>
+          <p>{registerContext}</p>
+          {demonstration && <p>Demonstration data.</p>}
+          {checkedAt && <p>GitLab metadata checked {new Date(checkedAt).toLocaleString()} · observations may be reused for up to 15 seconds.</p>}
+          {mr ? <>
+            <p>{mr.sourceBranch} → {mr.targetBranch}</p>
+            {(detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt) && <p>Details checked {new Date((detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt)!).toLocaleString()}</p>}
+            <p>{mr.approvals?.known ? `${mr.approvals.approvedBy.length} recorded GitLab approval(s)` : 'GitLab approvals unknown'}</p>
+            {mr.approvals?.known && <ul>{mr.approvals.approvedBy.map(person => <li key={person.id}>{person.name} (@{person.username})</li>)}</ul>}
+            <p>GitLab metadata and recorded AeroLink context.</p>
+          </> : <p>Current GitLab metadata is unknown. Retained relationships remain readable.</p>}
+        </details>
+        {mr && <footer className="codeMergeRequestInspectorFooter">
+          <a href={mr.webUrl} target="_blank" rel="noreferrer">View in GitLab ↗</a>
+          {!readOnly && <button ref={linkButton} aria-label="Link AeroLink artifact" onClick={() => setLinking(true)}>Link artifact</button>}
+        </footer>}
+      </div>
+    </aside> : <ControlledArtifactInspectorEmpty title="merge request"
       description="Select a merge request to inspect GitLab metadata and recorded AeroLink relationships." />}>
       {loading ? <p role="status">Loading merge requests…</p> : <>
-        <table><thead><tr><th scope="col">MR</th><th scope="col">Title</th><th scope="col">GitLab state</th><th scope="col">Recorded relationships</th></tr></thead>
+        <table><thead><tr><th scope="col">Request</th><th scope="col">Status</th><th scope="col">Links</th></tr></thead>
           <tbody>{rows?.map(row => <tr key={row.key} aria-selected={selected?.iid === row.iid && selected.origin === row.origin && selected.remoteProjectId === row.remoteProjectId}>
-            <td><button onClick={() => setSelected({ iid: row.iid, origin: row.origin, remoteProjectId: row.remoteProjectId })}>!{row.iid}</button></td>
-            <td>{row.mr ? <a href={row.mr.webUrl} target="_blank" rel="noreferrer">{row.mr.title} ↗</a> : 'Metadata unavailable'}</td><td><MergeRequestStatus item={row.mr} /></td><td>{row.count ?? 'Not evaluated in discovery'}</td>
+            <td className="codeMergeRequestCell"><button onClick={() => selectRequest(row)}>!{row.iid}</button>
+              <button className="codeMergeRequestTitle" onClick={() => selectRequest(row)}>{row.mr?.title ?? 'Metadata unavailable'}</button></td>
+            <td><MergeRequestStatus item={row.mr} /></td><td>{row.count ?? 'Not evaluated in discovery'}</td>
           </tr>)}</tbody></table>
         {rows?.length === 0 && <p>{mode === 'linked' ? 'No merge request relationship is recorded for this build.' : 'No merge requests returned for this GitLab query.'}</p>}
         <div className="codePagination"><button disabled={page <= 1} onClick={() => { setPage(value => value - 1); setSelected(undefined) }}>Previous page</button>

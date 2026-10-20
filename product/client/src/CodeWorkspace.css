@@ -174,3 +174,28 @@ main.codeWorkspace { padding: 18px 28px; }
 .codeWorkspace .codeWorkspaceTabs button[aria-current="page"]:hover,
 .codeWorkspace .codeWorkspaceTabs button[aria-current="page"]:focus-visible { background: #126a73; color: #fff; }
 .codeWorkspace > section[aria-label="Merge request register"] > p { margin: 6px 0; font-size: 12px; color: var(--muted, #536276); }
+.codeWorkspaceReadError { color: #9b2c2c !important; }
+.codeMergeRequestCell { min-width: 0; }
+.codeMergeRequestTitle {
+  display: inline-block; max-width: min(52ch, 100%); margin-left: 8px; border: 0 !important; padding: 0 !important;
+  background: transparent !important; color: #096d8b !important; font-size: 13px; font-weight: 650; text-align: left;
+  vertical-align: middle; white-space: normal; cursor: pointer;
+}
+.codeMergeRequestTitle:hover, .codeMergeRequestTitle:focus-visible { text-decoration: underline; }
+.codeMergeRequestInspector { min-width: 0; overflow: auto; background: #fff; border-left: 1px solid var(--line, #dae1e9); }
+.codeMergeRequestInspectorHeader { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line, #dae1e9); }
+.codeMergeRequestInspectorHeader h2 { margin: 3px 0 0; color: #24475d; font-size: 18px; }
+.codeMergeRequestInspectorClose { border: 0; background: transparent; color: #536276; font-size: 22px; line-height: 1; cursor: pointer; }
+.codeMergeRequestInspectorBody { padding: 14px 16px 16px; }
+.codeMergeRequestInspectorBody h3 { margin: 0 0 8px; color: #24475d; font-size: 16px; line-height: 1.35; }
+.codeMergeRequestInspectorBody > p { margin: 8px 0; }
+.codeMergeRequestDisclosure { margin-top: 12px; border-top: 1px solid #e3e9ef; padding-top: 10px; }
+.codeMergeRequestDisclosure summary { color: #24475d; cursor: pointer; font-size: 12px; font-weight: 700; }
+.codeMergeRequestDisclosure > p { margin: 9px 0; color: var(--muted, #536276); font-size: 12px; }
+.codeMergeRequestDisclosure .codeRelationships { margin-top: 10px; }
+.codeMergeRequestDisclosure .codeRelationships h3 { font-size: 13px; }
+.codeMergeRequestInspectorFooter { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e3e9ef; }
+.codeMergeRequestInspectorFooter button { border: 1px solid #cad5df; border-radius: 5px; padding: 7px 10px; background: white; color: #24475d; cursor: pointer; font: inherit; font-size: 12px; font-weight: 650; }
+@media (max-width: 800px) {
+  .codeMergeRequestInspector { border-left: 0; border-top: 1px solid var(--line, #dae1e9); }
+}
