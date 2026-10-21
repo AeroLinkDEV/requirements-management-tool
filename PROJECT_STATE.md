@@ -729,7 +729,9 @@ AeroLink makes no authority decision itself.
 
 HOME continuity across a user or machine boundary is an attended maintenance operation. The source captures
 its actual Data Protection application discriminator and provider, and exports key descriptors in memory into
-certificate-wrapped envelopes bound to the verified backup and connector identities. The destination requires the
+certificate-wrapped envelopes bound to the verified backup and connector identities. The loopback source diagnostic
+observes ASP.NET Core 10's actual implicit repository-selection events, retains unknown DPAPI scope, and reads
+existing ring/connector/notification-authority metadata without creating identities. The destination requires the
 operator-verified manifest hash and exact binding, rewraps the descriptors with LocalMachine DPAPI in a fresh
 staging ring, validates key IDs/dates/revocations, and atomically installs it without overwriting an existing ring.
 When the source discriminator differs from canonical `AeroLink`, the exact captured value can be configured as a
