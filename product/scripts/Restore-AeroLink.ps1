@@ -43,6 +43,10 @@ param(
     # A site server installation (#1614 1.9), named explicitly. Omitted, the installation resolves from this
     # checkout exactly as before. A production restore on a site must run from that installation's own program.
     [string]$InstallationRoot,
+    # HOME continuity only: exact captured HOME identity and separate short disposable-work root.
+    # This does not turn -InstallationRoot into a HOME override or authorize production restore.
+    [string]$HomeContinuityContextPath,
+    [string]$HomeContinuityContextSha256,
     # Qualification only: where the site's protected secrets live, instead of the machine store.
     [string]$ProtectedConfigRoot,
     # A site production restore refuses an archive taken from an installation of another classification (D8: test
@@ -57,7 +61,19 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 # The installation's own ports. The guards below protect the persistent database, so they compare against the
 # declared port, never a disposable qualification override.
-$restoreInstallationRoot = if ($InstallationRoot) { [IO.Path]::GetFullPath($InstallationRoot) } else { Get-AeroLinkInstallationRoot -ProductRoot $productRoot }
+$homeContinuityContext = $null
+if ($HomeContinuityContextPath -or $HomeContinuityContextSha256) {
+    if ($InstallationRoot -or $ProtectedConfigRoot -or $AllowProductionRestore -or $EvidenceTarget -or $TargetDatabase -eq 'aerolink' -or
+        (-not $CleanupContinuityOperation -and (-not $DisposableQualification -or -not $RequireFreshTarget -or -not $SkipCurrentCodeValidation -or -not $ContinuityReceiptPath)) -or
+        ($CleanupContinuityOperation -and -not $ContinuityOperationJournalPath)) { throw 'The HOME context is restricted to fresh isolated continuity restore and bound cleanup.' }
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkHomeContinuity.psm1') -Force
+    $homeContinuityContext = Get-AeroLinkHomeContinuityContext -Path $HomeContinuityContextPath -Sha256 $HomeContinuityContextSha256
+    foreach ($outputPath in @($ContinuityReceiptPath, $ContinuityOperationJournalPath)) {
+        if ($outputPath -and ([IO.Path]::GetFullPath($outputPath) + '.receipt.json.writing-' + ('x' * 32)).Length -gt 240) { throw 'The HOME proof/journal temporary path exceeds the WinPS operation budget.' }
+    }
+    if (-not [string]::Equals([IO.Path]::GetFullPath($PSCommandPath), [IO.Path]::GetFullPath($homeContinuityContext.RestoreScriptPath), [StringComparison]::OrdinalIgnoreCase)) { throw 'This is not the HOME context restore authority.' }
+}
+$restoreInstallationRoot = if ($homeContinuityContext) { [IO.Path]::GetFullPath($homeContinuityContext.SourceInstallationRoot) } elseif ($InstallationRoot) { [IO.Path]::GetFullPath($InstallationRoot) } else { Get-AeroLinkInstallationRoot -ProductRoot $productRoot }
 # A site cluster requires SCRAM passwords (#1614 1.4). A site restore runs elevated, as the maintenance identity,
 # and logs in only as postgres: the application password is readable by the API's service account alone, and no
 # process holds both. Every object is still created by, and owned by, the application role: pg_restore --role
@@ -83,6 +99,7 @@ if ($site) { Assert-AeroLinkSiteServiceSid -Site $site -Role Api | Out-Null }
 $serviceEndpoints = Get-AeroLinkServiceEndpoints -InstallationRoot $restoreInstallationRoot
 $persistentPostgresPort = $serviceEndpoints.DeclaredPostgresPort
 if (-not $PostgresPort) { $PostgresPort = $persistentPostgresPort }
+if ($homeContinuityContext -and $PostgresPort -eq $persistentPostgresPort) { throw 'HOME continuity restore and cleanup are forbidden on the canonical PostgreSQL port.' }
 if ($TargetDatabase -notmatch '^[a-zA-Z][a-zA-Z0-9_]{0,62}$') { throw 'The target database name is unsafe.' }
 $production = $TargetDatabase -eq 'aerolink'
 if ($production -and (-not $AllowProductionRestore -or $Confirmation -ne 'RESTORE-AEROLINK')) { throw 'Production restore requires -AllowProductionRestore and -Confirmation RESTORE-AEROLINK.' }
@@ -368,7 +385,12 @@ function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory
 }
 
 if (-not $CleanupContinuityOperation) {
-    & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive -InstallationRoot $(if ($site) { $site.InstallationRoot } else { '' }) | Out-Host
+    $continuityVerification = @{}
+    if ($homeContinuityContext) {
+        if (-not [string]::Equals([IO.Path]::GetFullPath($BackupArchive), [IO.Path]::GetFullPath($homeContinuityContext.VerifiedBackupArchivePath), [StringComparison]::OrdinalIgnoreCase)) { throw 'The HOME restore archive does not match its captured context.' }
+        $continuityVerification.VerificationRoot = Join-Path $homeContinuityContext.WorkRoot 'backup-verification'
+    }
+    & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive -InstallationRoot $(if ($site) { $site.InstallationRoot } else { '' }) @continuityVerification | Out-Host
     if ($site) {
         # Which installation the archive came from, decided from its own (just verified) manifest before anything is
         # revoked, backed up or renamed, so a wrong archive is refused while nothing has changed.
@@ -413,6 +435,11 @@ if ($PostgresPort -eq $persistentPostgresPort -and -not $site) { & (Join-Path $P
 # AeroLinkNotificationAuthority, which removes this script's copy of its commands.
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot -InstallationRoot $restoreInstallationRoot
+if ($homeContinuityContext) {
+    # Only disposable staging paths move. Canonical identity, service endpoints and tool defaults remain real HOME.
+    $installation.RestoreWork = Join-Path $homeContinuityContext.WorkRoot 'restore-work'
+    $installation.RestoreValidation = Join-Path $homeContinuityContext.WorkRoot 'restore-validation'
+}
 if (-not $PostgresBin) { $PostgresBin = $installation.PostgresBin }
 $continuityReceipt = $null
 if ($ContinuityReceiptPath) {
@@ -437,6 +464,12 @@ if ($ContinuityOperationJournalPath) {
     $script:continuityJournalState = [ordered]@{}
     $loadedJournal = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $ContinuityOperationJournalPath -Raw)
     foreach ($property in $loadedJournal.PSObject.Properties) { $script:continuityJournalState[$property.Name] = $property.Value }
+    if ($homeContinuityContext) {
+        if ([string]$script:continuityJournalState.HomeSourceContextSha256 -ne $HomeContinuityContextSha256 -or
+            -not [string]::Equals([string]$script:continuityJournalState.SourceInstallationRoot, $restoreInstallationRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals([string]$script:continuityJournalState.RestoreWorkRoot, $installation.RestoreWork, [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals([string]$script:continuityJournalState.RestoreValidationRoot, $installation.RestoreValidation, [StringComparison]::OrdinalIgnoreCase)) { throw 'The HOME operation journal does not match its admitted source and work roots.' }
+    }
     if ([string]$script:continuityJournalState.OperationId -ne $ContinuityOperationId) { throw 'The continuity operation journal ID does not match the requested operation.' }
     if ([string]$script:continuityJournalState.Status -in @('cleaned','recovery-required')) { throw 'The continuity operation journal is already terminal.' }
     if (-not $CleanupContinuityOperation -and [string]$script:continuityJournalState.TargetDatabase -ne $TargetDatabase) { throw 'The continuity operation target database does not match its journal.' }

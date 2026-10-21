@@ -32,6 +32,71 @@ namespace AeroLink.Infrastructure.Tests;
 /// </summary>
 public sealed class HomeContinuityTests
 {
+    // Authoring gate (#1654): HOME's genuine connector key can live outside its persistent installation.
+    // The existing roundtrip uses a Site-shaped key beneath that root and cannot catch the refusal.
+    // This owns admission/encryption at the actual export boundary, without a test-only production seam.
+    // A broad containment removal would incorrectly admit the Site and mismatched-instance rows.
+    [WindowsFact]
+    public void Export_binds_an_external_HOME_connector_to_its_declared_instance_and_user()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-home-layout-{Guid.NewGuid():N}");
+        var installation = Path.Combine(root, "persistent");
+        var connectorPath = Path.Combine(root, "profile", "connector.pem");
+        var package = Path.Combine(root, "package");
+        Directory.CreateDirectory(installation);
+        Directory.CreateDirectory(Path.GetDirectoryName(connectorPath)!);
+        try
+        {
+            var instanceId = Guid.NewGuid().ToString("D");
+            File.WriteAllText(Path.Combine(installation, "instance.json"), JsonSerializer.Serialize(new
+            {
+                classification = "HomeCanonical", instanceId,
+            }));
+            using var signingKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var pem = signingKey.ExportPkcs8PrivateKeyPem();
+            File.WriteAllText(connectorPath, pem);
+            var fingerprint = ConnectorLaunchProtocol.PublicKeyFingerprint(signingKey.ExportSubjectPublicKeyInfoPem());
+            var repository = new MemoryXmlRepository();
+            using var services = BuildServices(repository, "actual-source-discriminator\\");
+            var manager = services.GetRequiredService<IKeyManager>();
+            var sourceKey = manager.CreateNewKey(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+            using var transportKey = RSA.Create(2048);
+            using var certificate = new CertificateRequest("CN=layout fixture", transportKey,
+                HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+                .CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+            var binding = new HomeContinuityIdentityBinding(instanceId, "actual-source-discriminator\\", "AeroLink",
+                "Unprotected", new string('a', 64), "deployment", fingerprint[..24], fingerprint, new string('a', 64));
+            var material = new HomeContinuityConnectorMaterial("deployment", fingerprint[..24], fingerprint,
+                pem, installation, connectorPath, CurrentSid());
+            var manifest = HomeContinuityKeyTransfer.ExportPackage(manager, repository, certificate, binding, material, package);
+            Assert.Equal(sourceKey.KeyId, Assert.Single(manifest.Keys).KeyId);
+            Assert.Equal(installation, manifest.Connector.SourceInstallationRoot);
+            Assert.Equal(connectorPath, manifest.Connector.SourceConnectorPath);
+            Assert.Equal(CurrentSid(), manifest.Connector.SourceServiceSid);
+            Assert.Equal("actual-source-discriminator\\", manifest.SourceApplicationDiscriminator);
+            Assert.DoesNotContain(pem, File.ReadAllText(Path.Combine(package, "manifest.json")));
+            Assert.DoesNotContain(pem, System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(package, manifest.Connector.FileName))));
+            foreach (var declaration in new[] {
+                new { classification = "HomeCanonical", instanceId = Guid.NewGuid().ToString("D") },
+                new { classification = "SiteProduction", instanceId },
+            })
+            {
+                File.WriteAllText(Path.Combine(installation, "instance.json"), JsonSerializer.Serialize(declaration));
+                var refusedPackage = Path.Combine(root, "refused");
+                Assert.Throws<InvalidOperationException>(() => HomeContinuityKeyTransfer.ExportPackage(
+                    manager, repository, certificate, binding, material, refusedPackage));
+                Assert.False(Directory.Exists(refusedPackage));
+            }
+            File.WriteAllText(Path.Combine(installation, "instance.json"), JsonSerializer.Serialize(new
+                { classification = "HomeCanonical", instanceId }));
+            Assert.Throws<InvalidOperationException>(() => HomeContinuityKeyTransfer.ExportPackage(
+                manager, repository, certificate, binding, material with { SourceServiceSid = "S-1-5-18" },
+                Path.Combine(root, "wrong-user")));
+            Assert.False(Directory.Exists(Path.Combine(root, "wrong-user")));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Fact]
     public void Source_provider_is_bound_to_the_captured_ring_and_discriminator()
     {

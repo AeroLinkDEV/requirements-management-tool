@@ -228,3 +228,60 @@ finally {
     Remove-Item -LiteralPath $readinessFixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 $global:LASTEXITCODE=0
+
+# Authoring gate (#1654): the owning PowerShell admission must read a real HOME declaration/pointer,
+# keep work separate and refuse stale context identity. Prior owner cases cover Site/default layouts;
+# neither can see this separate source/persistent/profile layout. No PostgreSQL or key operation is needed.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkHomeContinuity.psm1') -Force
+$homeFixture = Join-Path $env:TEMP ('alhc-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+try {
+    $persistent = Join-Path $homeFixture 'persistent'
+    $product = Join-Path $homeFixture 'product'
+    $work = Join-Path $homeFixture 'work'
+    $ring = Join-Path $homeFixture 'ring'
+    foreach ($directory in @($persistent, (Join-Path $product '.local'), $work, $ring)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+    $instanceId = [Guid]::NewGuid().ToString('D')
+    @{ classification='HomeCanonical'; instanceId=$instanceId } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $persistent 'instance.json') -Encoding UTF8
+    @{ installationRoot=$persistent } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $product '.local\installation.json') -Encoding UTF8
+    $archive = Join-Path $homeFixture 'source.zip'
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $writer = [IO.StreamWriter]::new($zip.CreateEntry('manifest.json').Open())
+        try { $writer.Write((@{FormatVersion=2; Instance=@{Classification='HomeCanonical';InstanceId=$instanceId}} | ConvertTo-Json)) } finally { $writer.Dispose() }
+    } finally { $zip.Dispose() }
+    $contextPath = Join-Path $homeFixture 'context.json'
+    $scriptPath = Join-Path $PSScriptRoot 'Restore-AeroLink.ps1'
+    $context = @{ SchemaVersion=1; SourceInstallationRoot=$persistent; SourceProductRoot=$product; SourceInstanceId=$instanceId;
+        SourceUserSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; WorkRoot=$work; SourceRingDirectory=$ring; SourceEvidenceRoot=$ring;
+        VerifiedBackupArchivePath=$archive; SourceConnectorPath=(Join-Path $homeFixture 'profile\connector.pem');
+        RestoreScriptPath=$scriptPath; RestoreScriptSha256=(Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash }
+    # The archive may share a parent with source fixtures; choose an owned work root outside that parent.
+    $externalWork = Join-Path $env:TEMP ('alhw-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+    New-Item -ItemType Directory -Path $externalWork | Out-Null
+    $context.WorkRoot = $externalWork
+    $context | ConvertTo-Json | Set-Content -LiteralPath $contextPath -Encoding UTF8
+    $hash = (Get-FileHash -LiteralPath $contextPath -Algorithm SHA256).Hash
+    $resolved = Get-AeroLinkHomeContinuityContext -Path $contextPath -Sha256 $hash
+    if ($resolved.SourceInstallationRoot -ne $persistent -or $resolved.WorkRoot -ne $externalWork) { throw 'HOME continuity conflated source identity and disposable work.' }
+    foreach ($change in @('instance','work','hash')) {
+        $savedId=$context.SourceInstanceId; $savedWork=$context.WorkRoot
+        if ($change -eq 'instance') { $context.SourceInstanceId=[Guid]::NewGuid().ToString('D') }
+        if ($change -eq 'work') { $context.WorkRoot=$persistent }
+        $context | ConvertTo-Json | Set-Content -LiteralPath $contextPath -Encoding UTF8
+        $expectedHash=if($change -eq 'hash'){'0'*64}else{(Get-FileHash -LiteralPath $contextPath -Algorithm SHA256).Hash}
+        $refused=$false
+        try { [void](Get-AeroLinkHomeContinuityContext -Path $contextPath -Sha256 $expectedHash) } catch { $refused=$true }
+        if (-not $refused) { throw "HOME continuity admitted changed $change authority." }
+        $context.SourceInstanceId=$savedId; $context.WorkRoot=$savedWork
+    }
+} finally {
+    foreach ($ownedRoot in @($homeFixture,$externalWork)) {
+        if ($ownedRoot -and (Test-Path -LiteralPath $ownedRoot)) {
+            $full=[IO.Path]::GetFullPath($ownedRoot); $tempRoot=[IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')+'\'
+            if (-not $full.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected HOME fixture cleanup root.' }
+            Remove-Item -LiteralPath $full -Recurse -Force
+        }
+    }
+}
+$global:LASTEXITCODE=0

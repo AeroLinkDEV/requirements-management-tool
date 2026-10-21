@@ -728,6 +728,11 @@ conflict is reported in seconds with the affected records and the supported oper
 AeroLink makes no authority decision itself.
 
 HOME continuity across a user or machine boundary is an attended maintenance operation. The source captures
+the genuine HomeCanonical declaration, separate source/persistent pointer and original user/profile connector
+through a private source context; short disposable work roots do not replace those identities. The Site source
+route and destination guards remain separate. A repaired operator reader is built from a separately pinned
+checkout; this does not rebuild or change an existing signed server release or authorize genuine-data execution.
+The source captures
 its actual Data Protection application discriminator and provider, and exports key descriptors in memory into
 certificate-wrapped envelopes bound to the verified backup and connector identities. The loopback source diagnostic
 observes ASP.NET Core 10's actual implicit repository-selection events, retains unknown DPAPI scope, and reads
