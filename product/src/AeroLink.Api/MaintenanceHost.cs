@@ -71,7 +71,7 @@ namespace AeroLink.Api;
 ///       Reads only an already restored disposable database and a frozen source ring. The compiled
 ///       protected-field catalog cannot be supplied or narrowed by the caller.
 /// </summary>
-public static class AeroLinkMaintenanceHost
+public static partial class AeroLinkMaintenanceHost
 {
     /// <summary>True when the process was invoked as the maintenance host rather than as the web API.</summary>
     public static bool IsMaintenanceInvocation(string[] args) =>
@@ -86,7 +86,7 @@ public static class AeroLinkMaintenanceHost
             Console.WriteLine("  maintenance analyze [--json]");
             Console.WriteLine("  maintenance upgrade [--apply]");
             Console.WriteLine("  maintenance resolve --conflict <code> --choice <key> --program <guid> --position <name> --person <guid> --legacy-backup <guid> --operator <reference> [--expect-primary <guid|none>] [--apply]");
-            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory> --compatibility-receipt <receipt.json> --restore-postgres-bin <postgres-bin-directory>");
+            Console.WriteLine("  maintenance home-continuity export --package <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive <verified-backup.zip> --connector-deployment <id> --connector-key <id> --target-application AeroLink --certificate <public-cert.pem|cer> --source-ring <captured-directory> --compatibility-receipt <receipt.json> --restore-postgres-bin <postgres-bin-directory> [--home-source-context <private-context.json>]");
             Console.WriteLine("  maintenance home-continuity apply --package <directory> --destination-ring <new-directory> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256> --manifest-sha256 <hash> --certificate <cert.pem|pfx> [--certificate-key <private-key.pem>]");
             Console.WriteLine("  maintenance home-continuity recover --action complete|abort --package <directory> --destination-ring <directory> --package-id <guid> --manifest-sha256 <hash> --source-installation <id> --source-discriminator <exact-value> --source-protection <provider> --verified-backup <sha256> --verified-backup-archive-sha256 <sha256> --connector-deployment <id> --connector-key <id> --connector-public-fingerprint <sha256>");
             Console.WriteLine("  maintenance home-continuity probe --binding <binding.json> --receipt <receipt.json>");
@@ -385,15 +385,30 @@ public static class AeroLinkMaintenanceHost
         var compatibilityReceipt = ReadCompatibilityReceipt(compatibilityReceiptPath);
         HomeContinuityCompatibilityReader.ValidateReceipt(compatibilityReceipt);
         var configuration = services.GetRequiredService<IConfiguration>();
-        var installationRoot = Path.GetFullPath(RequiredConfiguration(configuration, "SiteServer:InstallationRoot"));
-        var protectedConfigRoot = configuration["SiteServer:ProtectedConfigRoot"]?.Trim();
         ValidateExportSourceContext(compatibilityReceipt.Binding, sourceInstallation, sourceDiscriminator,
             sourceProtection, sourceRingPath, verifiedBackupArchive, backupHash);
+        var homeContextPath = OptionalValue(args, "--home-source-context");
+        var home = homeContextPath is null ? null : ReadHomeExportContext(homeContextPath, compatibilityReceipt.Binding);
+        var installationRoot = home?.SourceInstallationRoot
+            ?? Path.GetFullPath(RequiredConfiguration(configuration, "SiteServer:InstallationRoot"));
+        var operationRoot = home?.WorkRoot ?? installationRoot;
+        if (home is not null && (Path.GetFullPath(operationRoot).Length > 60
+            || Path.GetFullPath(package).Length > 120 || HomePathsOverlap(operationRoot, package)))
+            throw new InvalidOperationException("HOME continuity requires separate short operation/package roots (60/120 characters maximum).");
+        if (home is not null)
+        {
+            RequireHomePath(Path.GetDirectoryName(Path.GetFullPath(package))!, directory: true);
+            foreach (var protectedPath in new[] { home.SourceInstallationRoot, home.SourceProductRoot, sourceRingPath, home.SourceEvidenceRoot,
+                home.SourceConnectorPath, verifiedBackupArchive, home.RestoreScriptPath, homeContextPath! })
+                if (HomePathsOverlap(package, protectedPath))
+                    throw new InvalidOperationException("The HOME package path overlaps protected source or tool custody.");
+        }
+        var protectedConfigRoot = configuration["SiteServer:ProtectedConfigRoot"]?.Trim();
         var restorePort = GetConfiguredRestorePort(configuration);
-        var restoreScript = ResolveCanonicalRestoreScript(installationRoot);
+        var restoreScript = home?.RestoreScriptPath ?? ResolveCanonicalRestoreScript(installationRoot);
         ValidatePostgresBin(restorePostgresBin);
         var restoreDatabase = "aerolink_continuity_restore_" + Guid.NewGuid().ToString("N")[..12];
-        var restoreValidationRoot = Path.Combine(installationRoot, "restore-validation");
+        var restoreValidationRoot = Path.Combine(operationRoot, "restore-validation");
         Directory.CreateDirectory(restoreValidationRoot);
         RefusePendingContinuityOperations(restoreValidationRoot);
         using var operationLease = AcquireContinuityOperationLease(restoreValidationRoot);
@@ -408,7 +423,10 @@ public static class AeroLinkMaintenanceHost
             Phase = "admission",
             TargetDatabase = restoreDatabase,
             RestoreValidationRoot = Path.GetFullPath(restoreValidationRoot),
-            RestoreWorkRoot = Path.Combine(installationRoot, "restore-work"),
+            RestoreWorkRoot = Path.Combine(operationRoot, "restore-work"),
+            SourceInstallationRoot = installationRoot,
+            HomeSourceContextPath = homeContextPath is null ? null : Path.GetFullPath(homeContextPath),
+            HomeSourceContextSha256 = homeContextPath is null ? null : Sha256File(homeContextPath),
             ProofPath = restoreProof,
             ArchivePath = Path.GetFullPath(verifiedBackupArchive),
             ArchiveSha256 = backupHash,
@@ -460,7 +478,7 @@ public static class AeroLinkMaintenanceHost
         {
             var operation = await RunFreshContinuityRestoreAsync(restoreScript, restorePostgresBin, verifiedBackupArchive,
                 restoreDatabase, restorePort, restoreProof, operationJournal, operationId, installationRoot, protectedConfigRoot,
-                apiAssemblyPath, apiAssemblySha256);
+                apiAssemblyPath, apiAssemblySha256, homeContextPath);
             var restoredOid = RequiredJournalValue(operation, "CreatedDatabaseOid");
             freshBinding = freshBinding with
             {
@@ -469,7 +487,9 @@ public static class AeroLinkMaintenanceHost
                 RestoredDatabaseOid = restoredOid,
             };
             HomeContinuityCompatibilityReader.ValidateBinding(freshBinding);
-            var connector = ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation);
+            var connector = home is null
+                ? ReadConnectorIdentity(configuration, connectorDeployment, connectorKey, sourceInstallation)
+                : ReadHomeConnectorIdentity(home, connectorDeployment, connectorKey);
             using var sourceServices = HomeContinuityKeyTransfer.BuildSourceServices(sourceRingPath, sourceDiscriminator, sourceProtection);
             await using var restoredDb = BuildContinuityRestoreDb(services, freshBinding);
             UpdateContinuityOperationJournal(operationJournal, journal =>
@@ -491,8 +511,17 @@ public static class AeroLinkMaintenanceHost
                 throw new InvalidOperationException("The continuity export requires a fresh complete compatibility result from its owned restore; a retained receipt status is not sufficient.");
 
             await CleanupContinuityOperationAsync(restoreScript, restorePostgresBin, restoreDatabase, restorePort,
-                operationJournal, operationId, installationRoot, protectedConfigRoot);
+                operationJournal, operationId, installationRoot, protectedConfigRoot, homeContextPath);
             operationCleaned = true;
+            if (homeContextPath is not null)
+            {
+                var admitted = RequiredJournalValue(ReadContinuityOperationJournal(operationJournal), "HomeSourceContextSha256");
+                if (!string.Equals(Sha256File(homeContextPath), admitted, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The HOME context changed before publication; no package was written.");
+                _ = ReadHomeExportContext(homeContextPath, compatibilityReceipt.Binding);
+                ValidateExportSourceContext(compatibilityReceipt.Binding, sourceInstallation, sourceDiscriminator,
+                    sourceProtection, sourceRingPath, verifiedBackupArchive, backupHash);
+            }
             var sourceManager = sourceServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.KeyManagement.IKeyManager>();
             var sourceRepository = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(
                 new DirectoryInfo(sourceRingPath), Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
@@ -513,7 +542,7 @@ public static class AeroLinkMaintenanceHost
         catch
         {
             if (!operationCleaned) TryCleanupContinuityOperation(restoreScript, restorePostgresBin, restoreDatabase, restorePort,
-                operationJournal, operationId, installationRoot, protectedConfigRoot);
+                operationJournal, operationId, installationRoot, protectedConfigRoot, homeContextPath);
             throw;
         }
     }
@@ -601,7 +630,8 @@ public static class AeroLinkMaintenanceHost
         string installationRoot,
         string? protectedConfigRoot,
         string apiAssemblyPath,
-        string apiAssemblySha256)
+        string apiAssemblySha256,
+        string? homeContextPath)
     {
         var shell = OperatingSystem.IsWindows()
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
@@ -632,11 +662,12 @@ public static class AeroLinkMaintenanceHost
             "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", restoreScript,
             "-BackupArchive", archive, "-TargetDatabase", database, "-PostgresPort", port.ToString(CultureInfo.InvariantCulture),
             "-PostgresBin", postgresBin, "-DisposableQualification", "-SkipCurrentCodeValidation",
-            "-RequireFreshTarget", "-ContinuityReceiptPath", proof, "-InstallationRoot", installationRoot,
+            "-RequireFreshTarget", "-ContinuityReceiptPath", proof,
             "-ContinuityOperationJournalPath", operationJournal, "-ContinuityOperationId", operationId,
             "-ContinuityApiAssemblyPath", apiAssemblyPath, "-ContinuityApiAssemblySha256", apiAssemblySha256,
             "-RetainContinuityRestore",
         }) start.ArgumentList.Add(argument);
+        AddContinuityInstallationArguments(start, installationRoot, homeContextPath, operationJournal);
         if (!string.IsNullOrWhiteSpace(protectedConfigRoot))
         {
             start.ArgumentList.Add("-ProtectedConfigRoot");
@@ -710,12 +741,13 @@ public static class AeroLinkMaintenanceHost
         string operationJournal,
         string operationId,
         string installationRoot,
-        string? protectedConfigRoot)
+        string? protectedConfigRoot,
+        string? homeContextPath)
     {
         try
         {
             await CleanupContinuityOperationCoreAsync(restoreScript, postgresBin, database, port, operationJournal,
-                operationId, installationRoot, protectedConfigRoot);
+                operationId, installationRoot, protectedConfigRoot, homeContextPath);
         }
         catch
         {
@@ -732,7 +764,8 @@ public static class AeroLinkMaintenanceHost
         string operationJournal,
         string operationId,
         string installationRoot,
-        string? protectedConfigRoot)
+        string? protectedConfigRoot,
+        string? homeContextPath)
     {
         var shell = OperatingSystem.IsWindows()
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe")
@@ -760,8 +793,8 @@ public static class AeroLinkMaintenanceHost
             "-CleanupContinuityOperation", "-ContinuityOperationJournalPath", operationJournal,
             "-ContinuityOperationId", operationId, "-TargetDatabase", database,
             "-PostgresPort", port.ToString(CultureInfo.InvariantCulture), "-PostgresBin", postgresBin,
-            "-InstallationRoot", installationRoot,
         }) start.ArgumentList.Add(argument);
+        AddContinuityInstallationArguments(start, installationRoot, homeContextPath, operationJournal);
         if (!string.IsNullOrWhiteSpace(protectedConfigRoot))
         {
             start.ArgumentList.Add("-ProtectedConfigRoot");
@@ -827,14 +860,15 @@ public static class AeroLinkMaintenanceHost
         string operationJournal,
         string operationId,
         string installationRoot,
-        string? protectedConfigRoot)
+        string? protectedConfigRoot,
+        string? homeContextPath)
     {
         try
         {
             var journal = ReadContinuityOperationJournal(operationJournal);
             if (journal["Status"]?.GetValue<string>() is "cleaned" or "recovery-required") return;
             CleanupContinuityOperationAsync(restoreScript, postgresBin, database, port, operationJournal, operationId,
-                installationRoot, protectedConfigRoot).GetAwaiter().GetResult();
+                installationRoot, protectedConfigRoot, homeContextPath).GetAwaiter().GetResult();
         }
         catch { /* The journal remains the attended recovery record; never hide the original refusal. */ }
     }

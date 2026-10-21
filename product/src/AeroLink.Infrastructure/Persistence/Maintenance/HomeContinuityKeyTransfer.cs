@@ -646,10 +646,18 @@ public static class HomeContinuityKeyTransfer
             throw new ArgumentException("The source connector transfer material is incomplete.", nameof(connector));
         var root = RequireExistingAbsoluteDirectory(connector.SourceInstallationRoot, "The source connector installation root");
         var keyPath = RequireExistingFile(connector.SourceConnectorPath, "The source connector signing key");
-        RequireUnderRoot(root, keyPath, "The source connector signing key");
+        var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!keyPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            // Only an actual declared HOME instance, read by its original Windows user, can have a
+            // profile-held source key. Site and destination containment contracts are unchanged.
+            RequireHomeSourceInstallation(root, binding.SourceInstallationId, connector.SourceServiceSid);
+        }
         RequireNoReparsePoints(root, "The source connector installation root");
         RequireNoReparsePoints(keyPath, "The source connector signing key");
         ValidateServiceSid(connector.SourceServiceSid, "The source connector service SID");
+        if (!string.Equals(File.ReadAllText(keyPath), connector.PrivateKeyPem, StringComparison.Ordinal))
+            throw new InvalidOperationException("The source connector file changed or does not match the transfer material.");
         using var key = ECDsa.Create();
         try { key.ImportFromPem(connector.PrivateKeyPem); }
         catch (Exception ex) when (ex is CryptographicException or ArgumentException)
@@ -658,6 +666,24 @@ public static class HomeContinuityKeyTransfer
         if (!string.Equals(fingerprint, connector.PublicKeyFingerprint, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(fingerprint[..24], connector.KeyId, StringComparison.Ordinal))
             throw new InvalidOperationException("The source connector signing key does not match its verified public identity.");
+    }
+
+    /// <summary>Admits the genuine HOME source identity without constructing a Site declaration.</summary>
+    public static void RequireHomeSourceInstallation(string root, string expectedInstanceId, string sourceUserSid)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("HOME source admission requires its Windows user.");
+        root = RequireExistingAbsoluteDirectory(root, "The HOME source installation");
+        RequireNoReparsePoints(root, "The HOME source installation");
+        var declaration = RequireExistingFile(Path.Combine(root, "instance.json"), "The HOME instance declaration");
+        RequireNoReparsePoints(declaration, "The HOME instance declaration");
+        using var document = JsonDocument.Parse(File.ReadAllText(declaration));
+        var instance = document.RootElement;
+        using var user = WindowsIdentity.GetCurrent();
+        if (!Guid.TryParse(expectedInstanceId, out var expected) || expected == Guid.Empty
+            || !instance.TryGetProperty("classification", out var classification) || classification.GetString() != "HomeCanonical"
+            || !instance.TryGetProperty("instanceId", out var id) || !Guid.TryParse(id.GetString(), out var actual) || actual != expected
+            || !string.Equals(user.User?.Value, sourceUserSid, StringComparison.Ordinal))
+            throw new InvalidOperationException("The HOME source classification, instance or original Windows user does not match.");
     }
 
     private static void ValidateDestinationBoundary(string installationRoot, string connectorPath,

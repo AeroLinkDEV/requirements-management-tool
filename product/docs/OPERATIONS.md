@@ -881,6 +881,66 @@ origin selection; defaults are not described as explicit configuration.
 
 The maintenance executable provides the bounded transfer boundary:
 
+**HomeCanonical source layout.** HOME is not a Site installation. For HOME export, pass
+`--home-source-context <private-context.json>`; omit it only for the existing installed Site source route.
+The context binds the actual persistent `instance.json` (`HomeCanonical` and the captured instance ID),
+dedicated source product root and its existing `.local/installation.json` pointer, original Windows user,
+profile-held connector file/hash/public identity, captured ring, exact final archive and candidate restore tool.
+It does not change that pointer, move a key or make the candidate reader the old API process. The legacy
+connector-manifest field `SourceServiceSid` records the original user SID on this HOME route. Site source
+containment and all destination classification, containment, empty-ring, service-SID and ACL guards remain.
+
+Keep this context private. Its JSON properties are:
+
+```json
+{
+  "schemaVersion": 1,
+  "sourceInstallationRoot": "<actual persistent HOME root>",
+  "sourceProductRoot": "<actual dedicated source checkout>/product",
+  "sourceInstanceId": "<captured instance GUID>",
+  "sourceUserSid": "<captured original user SID>",
+  "sourceConnectorPath": "<captured original absolute key path>",
+  "sourceConnectorSha256": "<captured key-file SHA256>",
+  "connectorDeploymentId": "<captured deployment ID>",
+  "connectorKeyId": "<captured key ID>",
+  "connectorPublicKeyFingerprint": "<captured public fingerprint>",
+  "sourceRingDirectory": "<captured original ring>",
+  "sourceEvidenceRoot": "<captured original evidence root>",
+  "verifiedBackupArchivePath": "<exact verified final archive>",
+  "restoreScriptPath": "<separate reviewed tool checkout>/product/scripts/Restore-AeroLink.ps1",
+  "restoreScriptSha256": "<exact candidate script SHA256>",
+  "workRoot": "<new short private owned disposable-work directory>"
+}
+```
+
+For the initial disposable restore, supply `-HomeContinuityContextPath` and
+`-HomeContinuityContextSha256` (the context file hash) instead of `-InstallationRoot`. This route requires
+`-DisposableQualification -RequireFreshTarget -SkipCurrentCodeValidation -ContinuityReceiptPath`, an exact
+archive and a noncanonical PostgreSQL port. It refuses production restore and evidence-target overrides.
+Only verification, restore-work and restore-validation staging move beneath `workRoot`; the genuine HOME
+identity and canonical service endpoints do not. Use different work roots/context files for the initial
+restore/probe and export, retaining the initial proof and state through export. Export still performs its own
+fresh restore, complete compiled probe and owned cleanup; this is two required probes, not a third campaign.
+The export operation pins the context hash into its retained journal and checks it before restore, cleanup
+and publication. Cleanup continues to require the real operation/database OID/runtime/tool/path identities.
+
+Choose a HOME work root of at most 60 characters and separate package path of at most 120 characters.
+Admission preflights derived archive extraction, evidence/incoming/retained paths and journal/receipt atomic
+temporary suffixes against a conservative 240-character Windows PowerShell budget. These bounds are specific
+to this attended route; they do not qualify general deep-path handling. Neither work nor package staging may
+replace source, ring, connector, archive or tool custody.
+
+**Repaired tool delivery.** The immutable signed server release is not the HOME maintenance tool and must not
+be rebuilt, relabelled or modified. After protected merge and review, prepare a separate detached checkout
+of the exact merged commit on HOME, preserving the running production checkout and installation pointer.
+The proposed operator tool is an ordinary `0.0.0-dev` source build of `product/src/AeroLink.Api` in Release
+configuration, not a new signed server release. Use its apphost only with explicit `maintenance` arguments;
+never launch it as a web host or install it. Use restore scripts/modules from that same detached checkout.
+Record actual apphost, API assembly, Infrastructure assembly, script/module hashes and installed .NET runtime
+before admitting the reader. A Git SHA alone is not executable identity. Local source/build evidence does not
+authorize running that tool against genuine HOME data; its concrete use, freeze/recovery sequence and all
+destination operations remain attended approval gates. No signing key or private transport key moves.
+
 Before exporting, run the read-only compatibility probe against the verified backup restored into an owned,
 disposable database. The probe owns a compiled catalog of every durable protected field and purpose; callers cannot
 provide a partial canary list. It reads and unprotects the genuine restored ciphertexts in memory, reports only
