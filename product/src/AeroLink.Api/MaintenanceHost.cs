@@ -426,7 +426,7 @@ public static partial class AeroLinkMaintenanceHost
             RestoreWorkRoot = Path.Combine(operationRoot, "restore-work"),
             SourceInstallationRoot = installationRoot,
             HomeSourceContextPath = homeContextPath is null ? null : Path.GetFullPath(homeContextPath),
-            HomeSourceContextSha256 = homeContextPath is null ? null : Sha256File(homeContextPath),
+            HomeSourceContextSha256 = home?.AdmittedSha256,
             ProofPath = restoreProof,
             ArchivePath = Path.GetFullPath(verifiedBackupArchive),
             ArchiveSha256 = backupHash,

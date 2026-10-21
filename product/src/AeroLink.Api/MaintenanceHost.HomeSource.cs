@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using AeroLink.ConnectorProtocol;
 using AeroLink.Infrastructure.Persistence.Maintenance;
@@ -14,12 +15,17 @@ public static partial class AeroLinkMaintenanceHost
         string SourceUserSid, string SourceConnectorPath, string SourceConnectorSha256,
         string SourceRingDirectory, string SourceEvidenceRoot, string VerifiedBackupArchivePath,
         string ConnectorDeploymentId, string ConnectorKeyId, string ConnectorPublicKeyFingerprint,
-        string RestoreScriptPath, string RestoreScriptSha256, string WorkRoot);
+        string RestoreScriptPath, string RestoreScriptSha256, string WorkRoot)
+    {
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string AdmittedSha256 { get; init; } = "";
+    }
 
     private static HomeExportContext ReadHomeExportContext(string path, HomeContinuityCompatibilityBinding binding)
     {
         RequireHomePath(path, directory: false);
-        var context = JsonSerializer.Deserialize<HomeExportContext>(File.ReadAllText(path),
+        var contextBytes = File.ReadAllBytes(path);
+        var context = JsonSerializer.Deserialize<HomeExportContext>(Encoding.UTF8.GetString(contextBytes).TrimStart('\uFEFF'),
             new JsonSerializerOptions(JsonSerializerDefaults.Web))
             ?? throw new InvalidOperationException("The HOME export context is invalid.");
         if (context.SchemaVersion != 1 || context.SourceInstanceId != binding.SourceInstallationId
@@ -67,7 +73,7 @@ public static partial class AeroLinkMaintenanceHost
         }
         // Validate the key before any restore child/database mutation; no plaintext key is copied.
         _ = ReadHomeConnectorIdentity(context, context.ConnectorDeploymentId, context.ConnectorKeyId);
-        return context;
+        return context with { AdmittedSha256 = Convert.ToHexString(SHA256.HashData(contextBytes)) };
     }
 
     private static HomeContinuityConnectorMaterial ReadHomeConnectorIdentity(

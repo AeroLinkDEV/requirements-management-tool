@@ -16,8 +16,12 @@ function Get-AeroLinkHomeContinuityContext {
         return $full
     }
     $contextPath = Assert-HomePath $Path $false
-    if ($Sha256 -notmatch '^[a-fA-F0-9]{64}$' -or (Get-FileHash -LiteralPath $contextPath -Algorithm SHA256).Hash -ne $Sha256) { throw 'The HOME continuity context hash does not match.' }
-    $context = Get-Content -LiteralPath $contextPath -Raw | ConvertFrom-Json
+    $contextBytes = [IO.File]::ReadAllBytes($contextPath)
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { $actualHash = [BitConverter]::ToString($hasher.ComputeHash($contextBytes)).Replace('-','') }
+    finally { $hasher.Dispose() }
+    if ($Sha256 -notmatch '^[a-fA-F0-9]{64}$' -or $actualHash -ne $Sha256) { throw 'The HOME continuity context hash does not match.' }
+    $context = [Text.Encoding]::UTF8.GetString($contextBytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
     if ($context.SchemaVersion -ne 1) { throw 'The HOME continuity context version is unsupported.' }
     $root = Assert-HomePath $context.SourceInstallationRoot $true
     $sourceProduct = Assert-HomePath $context.SourceProductRoot $true
