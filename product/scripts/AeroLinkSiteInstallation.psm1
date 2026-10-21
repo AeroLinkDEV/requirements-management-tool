@@ -756,12 +756,11 @@ function Get-AeroLinkSitePostgresAccess {
         .DESCRIPTION
             Application: the declared non-superuser role that owns aerolink. pg_dump, the attachment inventory, and
             pg_restore into a database it owns all run as this role, so a restored database's objects belong to
-            it, as the cluster created them. It is the only login the scheduled backup has: the password is
-            readable by the API's service account, which is what the backup task runs as.
+            it, as the cluster created them. Its password remains readable by the API's service account.
 
             Superuser: postgres. Its password is readable by Administrators (or the maintenance identity named at
             initialisation). A restore logs in only as postgres and creates every object as the application role
-            through pg_restore --role; an operator's backup uses it too (Get-AeroLinkSiteBackupAccess).
+            through pg_restore --role; operator and SYSTEM scheduled backups use it too (Get-AeroLinkSiteBackupAccess).
 
             The two passwords have different readers and no real process holds both (#1614 1.4), so nothing may
             ever need both.
@@ -802,9 +801,9 @@ function Get-AeroLinkSiteBackupAccess {
     <#
         .SYNOPSIS The login a site backup uses, chosen by who is running it (#1614 1.9).
         .DESCRIPTION
-            The installation's API service account (the scheduled task) holds only the application password, so it
-            backs up as the application role. Anyone else - an elevated administrator taking a manual, pre-restore or
-            updater backup - is the maintenance identity and backs up as postgres with the superuser password. A
+            The installation's API service account holds only the application password, so a backup under that
+            identity uses the application role. SYSTEM scheduled backups and elevated operator backups use the
+            maintenance identity and back up as postgres with the superuser password. A
             process that is neither cannot read either secret and is refused, naming both routes.
     #>
     [CmdletBinding()]
@@ -846,10 +845,10 @@ function New-AeroLinkSiteBackupTaskDefinition {
     <#
         .SYNOPSIS The daily verified backup of a site installation, as a scheduled task definition (#1614 1.9, D7).
         .DESCRIPTION
-            Runs Invoke-AeroLinkScheduledBackup.ps1 -InstallationRoot <root> as the installation's own API service
-            account (NT SERVICE\AeroLink-<name>, logon type ServiceAccount: no password, no interactive user). That
-            account can read the application password, read the evidence root and write backups and logs, and
-            nothing else. Backups stay on the host for DEC-130's 15 days (D7: local only).
+            Runs Invoke-AeroLinkScheduledBackup.ps1 -InstallationRoot <root> as SYSTEM (DEC-156), using the
+            maintenance/PostgreSQL-superuser route. Task Scheduler's ServiceAccount logon does not accept the API
+            virtual account on the qualified host. No task password is supplied. -Disabled stages the task without
+            arming execution during NoStart preparation. Backups stay on the host for DEC-130's 15 days (D7: local only).
 
             Only builds the definition; Register-AeroLinkSiteBackupTask registers it, elevated, through the Task
             Scheduler API (never schtasks /RU, which hangs on a hidden password prompt for a service account).
@@ -860,7 +859,8 @@ function New-AeroLinkSiteBackupTaskDefinition {
         [Parameter(Mandatory)][string]$InstallationRoot,
         [string]$ScriptRoot = $PSScriptRoot,
         [datetime]$At = ([datetime]::Today.AddHours(2)),
-        [ValidateRange(1, 15)][int]$RetentionDays = 15
+        [ValidateRange(1, 15)][int]$RetentionDays = 15,
+        [switch]$Disabled
     )
     $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
     if (-not $site) { throw "$InstallationRoot has no site declaration; a site backup task is only defined for a site installation." }
@@ -870,25 +870,32 @@ function New-AeroLinkSiteBackupTaskDefinition {
     # following arguments into the path.
     $rootArgument = ([string]$site.InstallationRoot).TrimEnd('\')
     $arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`" -InstallationRoot `"$rootArgument`" -RetentionDays $RetentionDays"
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 4)
+    $settings.Enabled = -not [bool]$Disabled
     return [pscustomobject]@{
         TaskName    = "AeroLink backup ($($site.ServiceName))"
         TaskPath    = '\AeroLink\'
         Description = "Daily verified backup of the AeroLink site installation at $($site.InstallationRoot) (#1614 1.9)."
         Action      = New-ScheduledTaskAction -Execute $powershell -Argument $arguments -WorkingDirectory $site.InstallationRoot
         Trigger     = New-ScheduledTaskTrigger -Daily -At $At
-        Principal   = New-ScheduledTaskPrincipal -UserId $site.RunAsAccount -LogonType ServiceAccount -RunLevel Limited
-        Settings    = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 4)
+        Principal   = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Settings    = $settings
     }
 }
 
 function Register-AeroLinkSiteBackupTask {
     <# .SYNOPSIS Registers (or replaces) the site backup task. Elevated; called by the installer (#1614 1.7). #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$InstallationRoot, [string]$ScriptRoot = $PSScriptRoot, [datetime]$At = ([datetime]::Today.AddHours(2)))
+    param(
+        [Parameter(Mandatory)][string]$InstallationRoot,
+        [string]$ScriptRoot = $PSScriptRoot,
+        [datetime]$At = ([datetime]::Today.AddHours(2)),
+        [switch]$Disabled
+    )
     $site = Get-AeroLinkSiteDeclaration -InstallationRoot $InstallationRoot
     if (-not $site) { throw "$InstallationRoot has no site declaration; a site backup task is only registered for a site installation." }
-    # The task runs as NT SERVICE\<serviceName>. A runAsSid override (disposable qualification only) would make the
-    # declaration name an account the task does not run as, and the application password's reader with it.
+    # SYSTEM maintenance scheduling does not make a qualification-only API SID override a valid site identity.
+    # Keep the real site's API account binding even though the task uses its separate maintenance route.
     if ($site.RunAsSid -ne (Get-AeroLinkServiceSid -ServiceName $site.ServiceName)) {
         throw "The declared API SID $($site.RunAsSid) is an override, not NT SERVICE\$($site.ServiceName). Remove runAsSid from the site declaration before registering the backup task."
     }
@@ -897,10 +904,10 @@ function Register-AeroLinkSiteBackupTask {
         throw "The site backup task runner does not exist at '$runner'; refusing before Task Scheduler registration."
     }
     if (-not (Test-AeroLinkElevatedAdministrator)) { throw 'Registering the site backup task requires an elevated administrator.' }
-    $definition = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $InstallationRoot -ScriptRoot $ScriptRoot -At $At
+    $definition = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $InstallationRoot -ScriptRoot $ScriptRoot -At $At -Disabled:$Disabled
     $task = New-ScheduledTask -Action $definition.Action -Trigger $definition.Trigger -Principal $definition.Principal `
         -Settings $definition.Settings -Description $definition.Description
-    return Register-ScheduledTask -TaskName $definition.TaskName -TaskPath $definition.TaskPath -InputObject $task -Force
+    return Register-ScheduledTask -TaskName $definition.TaskName -TaskPath $definition.TaskPath -InputObject $task -Force -ErrorAction Stop
 }
 
 Export-ModuleMember -Function @(

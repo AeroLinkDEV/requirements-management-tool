@@ -2871,3 +2871,19 @@ choices are created as focused issues only when their trigger and acceptance bou
   create no signature, and cannot weaken authority, content-hash, transaction or concurrency checks. Cancellation
   prevents the signature commit. Historical signatures retain their empty authentication method. Password change
   and MFA-disable remain Local-password break-glass operations. The persisted method is exposed in signature reads.
+
+### DEC-156 - Site Scheduled Backups Use SYSTEM Maintenance Authority
+
+- **Date:** 2026-10-21
+- **Status:** Accepted owner decision after actual Task Scheduler refusal of the API virtual-account principal.
+- **Authority:** Sean explicitly approved the SYSTEM maintenance-backup model and disabled Development task
+  preparation. The API and PostgreSQL services retain their separate virtual accounts.
+- **Decision:** Site scheduled backups run as SYSTEM with ServiceAccount logon and highest run level, using the
+  existing maintenance/PostgreSQL-superuser backup route. No task password is supplied. The default maintenance
+  reader remains Administrators; custom readers must authorize the actual SYSTEM token or the secret read refuses.
+  No application-secret, reader-binding or ACL guard is relaxed for this route. DEC-130's 15-day retention remains.
+- **Stopped preparation:** `-NoStart` creates the task disabled before registration. Enabling and backup execution
+  remain separate attended actions; registration alone does not establish maintenance access, backup success,
+  protected-data continuity, commissioning or go-live. Existing signed releases retain their original identities.
+- **Reason:** The host refused `NT SERVICE` as the Task Scheduler principal with `0x80070534`. This choice replaces
+  the former scheduled-backup identity assumption while preserving per-site API/PostgreSQL identities and state.

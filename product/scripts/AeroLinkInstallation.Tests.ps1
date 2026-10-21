@@ -438,10 +438,10 @@ try {
             'A declared sibling with a malformed instanceId must be rejected before the target declaration is written.'
         Assert-True ((Get-Content -LiteralPath (Join-Path $duplicateDevelopment 'instance.json') -Raw) -eq $malformedSiblingBefore) `
             'A malformed sibling identity refusal must leave the target declaration bytes unchanged.'
-        # #1614 1.9 (D7): the daily verified backup runs as the installation's own API account, never a person.
+        # DEC-156: Task Scheduler uses SYSTEM maintenance authority; the API retains its own virtual account.
         $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
-        Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
-            "The site backup task must run as the API's virtual account with no password; got $($backupTask.Principal.UserId) $($backupTask.Principal.LogonType) $($backupTask.Principal.RunLevel)."
+        Assert-True ($backupTask.Principal.UserId -in @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18') -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Highest') `
+            "The site backup task must use the supported SYSTEM maintenance principal without a password; got $($backupTask.Principal.UserId) $($backupTask.Principal.LogonType) $($backupTask.Principal.RunLevel)."
         Assert-True ($backupTask.Action.Arguments -match [regex]::Escape('Invoke-AeroLinkScheduledBackup.ps1') -and $backupTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot))`"") -and
             $backupTask.Action.Arguments -match '-NonInteractive') `
             "The site backup task must run the verified scheduled backup for exactly this installation, non-interactively: $($backupTask.Action.Arguments)"
@@ -450,8 +450,8 @@ try {
         $slashTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot ($siteRoot.TrimEnd('\') + '\') -ScriptRoot 'C:\AeroLink\AeroLink Production\program\product\scripts'
         Assert-True ($slashTask.Action.Arguments -notmatch '\\"' -and $slashTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot).TrimEnd('\'))`" -RetentionDays")) `
             "A trailing backslash on the root must not reach the task's quoted argument: $($slashTask.Action.Arguments)"
-        # A runAsSid override (qualification only) names an account the task would not run as: refused before anything
-        # is registered, whether or not this run is elevated.
+        # A runAsSid override is qualification-only, not a valid real-site identity. Maintenance scheduling must
+        # still refuse it before registration, whether or not this run is elevated.
         $overrideDocument = Get-Content -LiteralPath $siteConfig -Raw | ConvertFrom-Json
         $overrideDocument.site | Add-Member -NotePropertyName runAsSid -NotePropertyValue ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) -Force
         $overrideDocument | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $siteConfig -Encoding UTF8
@@ -546,16 +546,20 @@ try {
         }
         finally { [IO.File]::WriteAllBytes($siteConfig, $postgresOverrideBytes) }
 
-        # #1649: the installer must define the daily verified backup against the installed version's scripts,
-        # with the API virtual account as the only task identity and the accepted fifteen-day retention. The
-        # registration override case is the regression owner: before the caller guard a qualification SID could
-        # reach Task Scheduler and receive access to the application password.
+        # #1649 / #1680: use the installed runner, supported SYSTEM principal and fifteen-day retention.
+        # Definition-only assertions cannot prove actual task registration or maintenance-secret access.
         $backupScriptRoot = Join-Path $siteFixture 'program\current\scripts'
         New-Item -ItemType Directory -Path $backupScriptRoot -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $backupScriptRoot 'Invoke-AeroLinkScheduledBackup.ps1') -Value '# disposable task-definition fixture' -Encoding UTF8
         $backupTask = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot $backupScriptRoot
-        Assert-True ($backupTask.Principal.UserId -eq $declared.RunAsAccount -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Limited') `
-            "The site backup task must run as the API's computed virtual account with no password; got $($backupTask.Principal.UserId) $($backupTask.Principal.LogonType) $($backupTask.Principal.RunLevel)."
+        Assert-True ($backupTask.Principal.UserId -in @('SYSTEM', 'NT AUTHORITY\SYSTEM', 'S-1-5-18') -and [string]$backupTask.Principal.LogonType -eq 'ServiceAccount' -and [string]$backupTask.Principal.RunLevel -eq 'Highest') `
+            "The site backup task must use SYSTEM maintenance authority without a password; got $($backupTask.Principal.UserId) $($backupTask.Principal.LogonType) $($backupTask.Principal.RunLevel)."
+        # Authoring gate: the public definition is Task Scheduler's execution input. The old virtual principal
+        # fails the SYSTEM assertion; an enabled NoStart definition would arm backup execution. Extend this
+        # existing owner case rather than add a suite, OS-registration mock or test-only production seam.
+        Assert-True ([bool]$backupTask.Settings.Enabled) 'Normal installation retains an enabled daily backup definition.'
+        $stagedBackup = New-AeroLinkSiteBackupTaskDefinition -InstallationRoot $siteRoot -ScriptRoot $backupScriptRoot -Disabled
+        Assert-True (-not [bool]$stagedBackup.Settings.Enabled) 'NoStart preparation must be disabled before Task Scheduler registration.'
         Assert-True ($backupTask.Action.Arguments -match [regex]::Escape('Invoke-AeroLinkScheduledBackup.ps1') -and
             $backupTask.Action.Arguments -match [regex]::Escape("-InstallationRoot `"$([IO.Path]::GetFullPath($siteRoot))`" -RetentionDays 15") -and
             $backupTask.Action.Arguments -match '-NonInteractive') `

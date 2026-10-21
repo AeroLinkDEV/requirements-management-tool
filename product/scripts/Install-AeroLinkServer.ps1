@@ -331,7 +331,8 @@ Set-AeroLinkApiFirewallRule -RuleName $identity.FirewallRuleName -Port $ApiPort 
 
 Step 'Daily verified backup task'
 if (Get-Command -Name Register-AeroLinkSiteBackupTask -ErrorAction SilentlyContinue) {
-    Register-AeroLinkSiteBackupTask -InstallationRoot $root -ScriptRoot $layout.Scripts | Out-Null
+    Register-AeroLinkSiteBackupTask -InstallationRoot $root -ScriptRoot $layout.Scripts -Disabled:$NoStart | Out-Null
+    if ($NoStart) { Write-Host '    Daily backup task staged disabled; enable it explicitly after attended acceptance.' }
 }
 else { throw 'This program has no Register-AeroLinkSiteBackupTask (#1649); a site is not installed without its daily backup.' }
 
