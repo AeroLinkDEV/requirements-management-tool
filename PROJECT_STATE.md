@@ -794,7 +794,9 @@ Do not change CI topology from intuition alone. Read [product/docs/BROWSER_AND_B
 - The #1614 A2 installer source now defines a signed-package fresh-install/repair boundary for the planned
   Production and Development site installations, including per-site virtual service identities, non-secret
   service configuration with protected secrets, certificate-key ACL setup, and a 15-day daily-backup registration
-  contract.
+  contract. DEC-156 assigns scheduled backups to SYSTEM maintenance authority; API/PostgreSQL retain their
+  separate virtual service accounts. `-NoStart` stages the backup task disabled until explicit attended enabling.
+  Task registration does not establish successful backup execution or host commissioning.
   The company-host site is not live or qualified: the A3 source contract now defines clone-validated package
   upgrade/rollback and attended recovery, while host qualification remains pending. HOME remote-demo retirement remains
   an attended D6 operation only after exact SiteProduction identity/source and private full-DNS/VPN go-live proof.

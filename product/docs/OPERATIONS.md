@@ -158,10 +158,12 @@ key ring and trust-mode development cluster.
   are written and read by SID, never by parsing `icacls`, `schtasks` or `netsh` text. Creating and locking
   `C:\AeroLink` itself is the installer's job (#1614 1.7).
 - **Daily site backup.** The installer requests a versioned `Invoke-AeroLinkScheduledBackup.ps1` runner under
-  `\AeroLink\`, using the API virtual account with no interactive password, a daily trigger (02:00 by default),
+  `\AeroLink\`, using SYSTEM maintenance authority with no task password (DEC-156), a daily trigger (02:00 by default),
   start-when-available/ignore-overlap settings, and local retention of 15 days. The registration path refuses a
-  missing runner before changing Task Scheduler and fails closed on registration refusal. This remains the source
-  contract, not evidence that a task has been registered on the company host. The existing current-user workstation
+  missing runner before changing Task Scheduler and fails closed on registration refusal. `-NoStart` creates the
+  task disabled before registration, so start-when-available cannot arm a backup during preparation. Enabling and
+  actual backup acceptance are later attended steps. This source contract does not establish successful backup
+  execution or host commissioning. The existing current-user workstation
   schedule below remains a separate HOME/laptop convenience mode.
 - **Readiness.** Unless `-NoStart` is supplied, the installer starts PostgreSQL and the API and invokes
   `Test-AeroLinkHost.ps1`. That check is read-only and reports `PASS`, `WARN`, `FAIL` and `SKIP`; a `FAIL` makes
@@ -1724,8 +1726,12 @@ reader, and no process holds both (#1614 1.4):
   initialisation named another.
 
 So:
-- **The scheduled backup** runs as the API's service account, `NT SERVICE\AeroLink-<name>`. It backs up as
-  `aerolink_app`, which owns every object in `aerolink`.
+- **The scheduled backup** runs as SYSTEM (DEC-156), using the maintenance reader and `postgres` login. This is
+  administrator-level authority; it is not the API's application-role route. The default maintenance reader is
+  Administrators. A custom reader must be present in the SYSTEM token or the protected-secret read refuses;
+  the scheduler does not widen ACLs or rewrite the stored reader to make it work.
+- **A backup under the API's virtual service account** continues to use `aerolink_app`, which owns every object
+  in `aerolink`. The API and PostgreSQL service identities and their protected-secret bindings are unchanged.
 - **An operator's backup** is a backup taken by anyone else: manual, pre-restore or updater. It runs elevated and
   backs up as `postgres`.
 - **Every restore** runs elevated and logs in only as `postgres`: the isolated drill, Phase 3 and a production
@@ -1785,21 +1791,30 @@ through the Task Scheduler API; the installer (#1614 1.7) calls it. `New-AeroLin
 what it registers. The task:
 - runs `<program>\scripts\Invoke-AeroLinkScheduledBackup.ps1 -InstallationRoot <root>` daily, which backs up and
   then verifies;
-- runs as `NT SERVICE\AeroLink-<name>`, with logon type ServiceAccount: no password and no interactive user;
+- runs as SYSTEM, with logon type ServiceAccount and highest run level: no task password or interactive user;
+- is created disabled when the installer uses `-NoStart`; normal installation retains an enabled definition;
 - logs to `<root>\logs\scheduled-backup.log`.
 
-Whether Task Scheduler on the host accepts a virtual service account as a task principal still has to be proved on
-the host (Phase 2).
+The attended host refused the previous API virtual-account principal with `0x80070534`; Microsoft documents
+ServiceAccount logon for Local System, Local Service and Network Service. See
+[Task Scheduler logon types](https://learn.microsoft.com/en-us/windows/win32/taskschd/principal-logontype).
+Disabled task registration establishes registration only, not maintenance-secret access, backup execution,
+scheduled timing or commissioning. After the later attended
+installation/continuity acceptance and explicit enabling authorization, use `Enable-ScheduledTask` for exactly
+`\AeroLink\AeroLink backup (AeroLink-<name>)`; do not enable or run it during stopped preparation.
 
 **Proof.** `AeroLinkSiteBackup.Acceptance.ps1 -PostgresBin <bin>` (by hand, non-elevated, on a disposable cluster)
 keeps the two passwords in two separate protected stores, one per caller, so it cannot pass with the identities
 collapsed. It checks:
-1. the scheduled backup from a release-package layout, with the application password only;
+1. the application-role backup from a release-package layout, with the application password only;
 2. verification;
 3. the drill and an operator's backup with the superuser password only;
 4. a HOME-format archive restored into the site;
 5. ownership, rows, trigram search and writes;
 6. the evidence permissions after a move.
+
+These isolated role fixtures do not establish the real SYSTEM task's registration, token, protected-secret access
+or backup success; those remain actual-host acceptance evidence.
 
 It does not run a full production activation: that needs the site notification revocation from #1642, and a
 virtual account this machine cannot create.
