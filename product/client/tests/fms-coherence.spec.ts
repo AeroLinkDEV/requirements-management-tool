@@ -3,9 +3,9 @@ import { parseArinc424 } from '../src/fmsCdu/arinc424'
 import { DATALINK_PAGES } from '../src/fmsCdu/datalinkPages'
 import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator, legGeometry } from '../src/fmsCdu/flight'
-import { fromLocal, toLocal, type LatLon } from '../src/fmsCdu/fmsModel'
+import { distanceNm, fromLocal, longitudeDelta, toLocal, type LatLon } from '../src/fmsCdu/fmsModel'
 import { CORE_PAGES } from '../src/fmsCdu/fmsPages'
-import { NavDatabase } from '../src/fmsCdu/navData'
+import { NavDatabase, type NavEntry } from '../src/fmsCdu/navData'
 import { NAV_PAGES } from '../src/fmsCdu/navPages'
 import { PLANNING_PAGES } from '../src/fmsCdu/planningPages'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
@@ -238,6 +238,43 @@ test('a navaid across the date line is found as nearby (R17)', () => {
     airways: [], procedures: [],
   })
   expect(db.nearby({ lat: 0, lon: 179.95 }, 10).map(entry => entry.ident)).toEqual(['EASTF'])
+})
+
+// #1624: repeated navigation reads may reuse an answer only if it remains the exact nearest-first answer.
+// The rendered KBTV owner protects its deadline; this owner protects keys, ties, isolation and merge invalidation.
+test('nearby queries preserve exact range and stable order across reuse, caller edits and merge', () => {
+  const fix = (ident: string, lat: number, lon: number): NavEntry => ({ kind: 'fix', ident, position: { lat, lon } })
+  const entries = [fix('FAR', 0.5, 0), fix('B', 1 / 60, 0), fix('C', 1 / 60, 0), fix('A', 1 / 60, 0),
+    fix('WEST', 0, -2 / 60), fix('EAST', 0, 2 / 60), Object.freeze(fix('EDGE', 0, 179.95))]
+  const db = new NavDatabase({ cycle: { id: 'QUERY', from: '', to: '' }, entries, airways: [], procedures: [] })
+  const ids = (values: readonly NavEntry[]) => values.map(entry => entry.ident)
+  // Independent recomputing reference: no production memo, with the original comparator and input sequence.
+  const reference = (at: LatLon, nm: number) => entries.filter(({ position }) =>
+    Math.abs(position.lat - at.lat) * 60 < nm && Math.abs(longitudeDelta(at.lon, position.lon)) * 60 * Math.cos(at.lat * Math.PI / 180) < nm)
+    .sort((a, b) => distanceNm(at, a.position) - distanceNm(at, b.position))
+  const positions = [{ lat: 0, lon: 0 }, { lat: 0, lon: 0.05 }, { lat: 0.05, lon: 0 },
+    { lat: 0, lon: -179.95 }, { lat: -0, lon: 0 }, { lat: 0, lon: -0 }]
+  for (let round = 0; round < 3; round++) for (const at of positions) for (const nm of [5, 160, 1.5]) {
+    expect(ids(db.nearby(at, nm))).toEqual(ids(reference(at, nm)))
+    expect(ids(db.nearby(at, nm))).toEqual(ids(reference(at, nm)))
+  }
+  const at = { lat: 0, lon: 0 }
+  expect(ids(db.nearby(at, 5))).toEqual(['B', 'C', 'A', 'WEST', 'EAST'])
+  const computed = db.nearby(at, 0.5), kept = db.nearby(at, 5)
+  computed.push(entries[0]); kept.splice(0)
+  expect(db.nearby(at, 0.5)).toEqual([])
+  expect(ids(db.nearby(at, 5))).toEqual(['B', 'C', 'A', 'WEST', 'EAST'])
+  at.lat = 0.5
+  expect(ids(db.nearby(at, 0.5))).toEqual(['FAR'])
+  // A pre-frozen parent must not leave mutable coordinates underneath a reusable answer.
+  for (const entry of entries) {
+    expect(Object.isFrozen(entry)).toBe(true)
+    expect(Object.isFrozen(entry.position)).toBe(true)
+    expect(Object.isFrozen(db.find(entry.ident))).toBe(true)
+  }
+  const merged = db.merge({ cycle: db.cycle, entries: [fix('B', 10, 10), fix('NEW', 0, 0)], airways: [], procedures: [] })
+  expect(ids(merged.nearby({ lat: 0, lon: 0 }, 5))).toEqual(['NEW', 'C', 'A', 'WEST', 'EAST'])
+  expect(ids(db.nearby({ lat: 0, lon: 0 }, 5))).toEqual(['B', 'C', 'A', 'WEST', 'EAST'])
 })
 
 // ------------------------------------------------------------------------------------------------ R19
