@@ -259,6 +259,8 @@ try {
     # The archive may share a parent with source fixtures; choose an owned work root outside that parent.
     $externalWork = Join-Path $env:TEMP ('alhw-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
     New-Item -ItemType Directory -Path $externalWork | Out-Null
+    # Match admission's path normalization before sizing exact-boundary ZIP members (TEMP may use 8.3 aliases).
+    $externalWork = [IO.Path]::GetFullPath($externalWork)
     $context.WorkRoot = $externalWork
     $context | ConvertTo-Json | Set-Content -LiteralPath $contextPath -Encoding UTF8
     $hash = (Get-FileHash -LiteralPath $contextPath -Algorithm SHA256).Hash
