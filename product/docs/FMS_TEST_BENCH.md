@@ -450,6 +450,16 @@ browser protocol revision (the run order still starts every round with a 1x cell
 then a quiet-host browser A/A under that revision. Revision 1 refusal records and v1 interval-inferred records keep
 their identities and are reported `NOT_QUALIFIED`. Headless statistics revision 3 is unchanged.
 
+The headless report distinguishes the two comparisons in the
+[#1502 D10 owner amendment](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1502#issuecomment-6036397875)
+of 7 October 2026. **Comparison 5**, dual versus single kernel topology, is reported with ratios and descriptive
+uncertainty; it has no budget or pass/fail verdict. **Comparison 5a** is kernel overhead: the dual kernel at head
+versus the dual legacy composition at base, with the same build and topology. Its budget is at most a 5% p95
+increase and a 5% throughput decrease. The topology report declares that separate budget and reports 5a
+`NOT_QUALIFIED`, because its single-kernel reference supplies no separately identified dual-legacy baseline.
+It makes no 5a qualification claim. The declarations live in `perf/protocol.json`; the statistics method and
+existing qualification gates remain unchanged.
+
 ## Cockpit and station arrangements
 
 Engineering view remains the initial layout and immediate fallback. Cockpit view places the two physical CDUs
