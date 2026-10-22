@@ -407,7 +407,7 @@ public static partial class AeroLinkMaintenanceHost
         var restorePort = GetConfiguredRestorePort(configuration);
         var restoreScript = home?.RestoreScriptPath ?? ResolveCanonicalRestoreScript(installationRoot);
         ValidatePostgresBin(restorePostgresBin);
-        var restoreDatabase = "aerolink_continuity_restore_" + Guid.NewGuid().ToString("N")[..12];
+        var restoreDatabase = "restore_" + Guid.NewGuid().ToString("N")[..12];
         var restoreValidationRoot = Path.Combine(operationRoot, "restore-validation");
         Directory.CreateDirectory(restoreValidationRoot);
         RefusePendingContinuityOperations(restoreValidationRoot);

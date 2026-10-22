@@ -248,7 +248,7 @@ try {
     $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
     try {
         $writer = [IO.StreamWriter]::new($zip.CreateEntry('manifest.json').Open())
-        try { $writer.Write((@{FormatVersion=2; Instance=@{Classification='HomeCanonical';InstanceId=$instanceId}} | ConvertTo-Json)) } finally { $writer.Dispose() }
+        try { $writer.Write((@{FormatVersion=2; Instance=@{Classification='HomeCanonical';InstanceId=$instanceId}; Storage=@{ArchiveRoot='evidence'}} | ConvertTo-Json -Depth 4)) } finally { $writer.Dispose() }
     } finally { $zip.Dispose() }
     $contextPath = Join-Path $homeFixture 'context.json'
     $scriptPath = Join-Path $PSScriptRoot 'Restore-AeroLink.ps1'
@@ -264,6 +264,37 @@ try {
     $hash = (Get-FileHash -LiteralPath $contextPath -Algorithm SHA256).Hash
     $resolved = Get-AeroLinkHomeContinuityContext -Path $contextPath -Sha256 $hash
     if ($resolved.SourceInstallationRoot -ne $persistent -or $resolved.WorkRoot -ne $externalWork) { throw 'HOME continuity conflated source identity and disposable work.' }
+    # Authoring gate (#1667): admission must forecast where bytes actually go, including orphan
+    # evidence and the initial target name. The old all-members/all-destinations product rejects
+    # this safe archive; existing identity-only fixtures cannot detect it. Exercise the public reader.
+    $incoming = Join-Path $externalWork 'restore-validation\restore_123456789abc\.restore-incoming-123456789abc'
+    $relativeEvidence = '_quarantine/' + ('q' * (240 - $incoming.Length - 1 - '_quarantine/'.Length))
+    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Update)
+    try {
+        [void]$zip.CreateEntry('evidence/' + $relativeEvidence)
+        [void]$zip.CreateEntry('configuration/' + ('c' * (240 - (Join-Path $externalWork ('backup-verification\' + ('x' * 32))).Length - 1 - 'configuration/'.Length)))
+    } finally { $zip.Dispose() }
+    [void](Get-AeroLinkHomeContinuityContext -Path $contextPath -Sha256 $hash)
+    $refused=$false
+    try { [void](Get-AeroLinkHomeContinuityContext -Path $contextPath -Sha256 $hash -TargetDatabase 'restore_longer_initial_target') }
+    catch { if ($_.Exception.Message -notmatch '240-character operation budget') { throw }; $refused=$true }
+    if (-not $refused) { throw 'HOME admission ignored the actual initial restore target.' }
+    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Update)
+    try { [void]$zip.CreateEntry('evidence/' + $relativeEvidence + 'x') } finally { $zip.Dispose() }
+    $refused=$false
+    try { [void](Get-AeroLinkHomeContinuityContext -Path $contextPath -Sha256 $hash) }
+    catch { if ($_.Exception.Message -notmatch '240-character operation budget') { throw }; $refused=$true }
+    if (-not $refused) { throw 'HOME admission ignored over-budget orphan evidence.' }
+    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Update)
+    try { $zip.GetEntry('evidence/' + $relativeEvidence + 'x').Delete() } finally { $zip.Dispose() }
+    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Update)
+    try { [void]$zip.CreateEntry('evidence/../outside') } finally { $zip.Dispose() }
+    $refused=$false
+    try { [void](Get-AeroLinkHomeContinuityContext -Path $contextPath -Sha256 $hash) }
+    catch { if ($_.Exception.Message -notmatch 'Unsafe HOME archive path') { throw }; $refused=$true }
+    if (-not $refused) { throw 'HOME admission allowed archive traversal.' }
+    $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Update)
+    try { $zip.GetEntry('evidence/../outside').Delete() } finally { $zip.Dispose() }
     foreach ($change in @('instance','work','hash')) {
         $savedId=$context.SourceInstanceId; $savedWork=$context.WorkRoot
         if ($change -eq 'instance') { $context.SourceInstanceId=[Guid]::NewGuid().ToString('D') }

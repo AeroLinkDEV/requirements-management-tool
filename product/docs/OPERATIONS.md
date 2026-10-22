@@ -925,7 +925,12 @@ The export operation pins the context hash into its retained journal and checks 
 and publication. Cleanup continues to require the real operation/database OID/runtime/tool/path identities.
 
 Choose a HOME work root of at most 60 characters and separate package path of at most 120 characters.
-Admission preflights derived archive extraction, evidence/incoming/retained paths and journal/receipt atomic
+Export generates `restore_` plus twelve random hexadecimal characters for its fresh database name. Use a
+compact isolated name for the initial restore too; admission checks its actual `-TargetDatabase`, not only
+the export naming bound. The full operation GUID, fresh-target and database OID checks remain independent.
+Admission preflights every archive member at extraction/verification, and every storage-subtree descendant
+relative to `Storage.ArchiveRoot` at evidence/incoming destinations, including orphan/quarantine content.
+Isolated restore creates no retained-evidence destination. Admission also bounds journal/receipt atomic
 temporary suffixes against a conservative 240-character Windows PowerShell budget. These bounds are specific
 to this attended route; they do not qualify general deep-path handling. Neither work nor package staging may
 replace source, ring, connector, archive or tool custody.

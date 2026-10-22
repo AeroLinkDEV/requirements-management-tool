@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 function Get-AeroLinkHomeContinuityContext {
     <# Read-only admission of the genuine HOME layout for an isolated continuity restore, never Site apply. #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Sha256)
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Sha256,
+        [string]$TargetDatabase = ('restore_' + ('x' * 12)))
 
     function Assert-HomePath([string]$Value, [bool]$Directory) {
         if ([string]::IsNullOrWhiteSpace($Value) -or -not [IO.Path]::IsPathRooted($Value)) { throw 'HOME context paths must be absolute.' }
@@ -53,16 +54,26 @@ function Get-AeroLinkHomeContinuityContext {
     # This bounded HOME route does not claim general deep-path support (#1667). Preflight derived
     # verification/extraction/evidence paths and raw WinPS journal/receipt atomic temporary names.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $db = 'aerolink_continuity_restore_' + ('x' * 12)
+    if ($TargetDatabase -notmatch '^[a-zA-Z][a-zA-Z0-9_]{0,62}$' -or $TargetDatabase -notmatch '(restore|validation|test)') { throw 'The HOME isolated restore database name is unsafe.' }
+    $db = $TargetDatabase
     $validation = Join-Path $work 'restore-validation'
     $journal = Join-Path $validation "$db.operation.json"
     $paths = @($archive, "$archive.sha256", "$journal.receipt.json.writing-$('x' * 32)",
         (Join-Path $validation "$db.continuity.json.writing-$('x' * 32)"))
-    $staging = @((Join-Path $work "backup-verification\$('x' * 32)"),
-        (Join-Path $work "restore-work\$('x' * 32)"),
+    $extraction = @((Join-Path $work "backup-verification\$('x' * 32)"),
+        (Join-Path $work "restore-work\$('x' * 32)"))
+    $evidence = @(
         (Join-Path $validation "$db\evidence"),
-        (Join-Path $validation "$db\.restore-incoming-$('x' * 12)"),
-        (Join-Path $validation "$db\.restore-retained-$('x' * 12)"))
+        (Join-Path $validation "$db\.restore-incoming-$('x' * 12)"))
+    function Resolve-ArchiveDestination([string]$Stage, [string]$Member) {
+        if ([string]::IsNullOrWhiteSpace($Member) -or [IO.Path]::IsPathRooted($Member) -or
+            $Member.Contains(':') -or @($Member -split '[\\/]') -contains '..') { throw 'Unsafe HOME archive path.' }
+        $prefix = [IO.Path]::GetFullPath($Stage).TrimEnd('\','/') + '\'
+        $target = [IO.Path]::GetFullPath((Join-Path $Stage $Member.Replace('/', '\')))
+        if (-not $target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe HOME archive path.' }
+        if ($target.Length -gt 240) { throw 'A derived HOME archive/evidence path exceeds the WinPS 240-character operation budget.' }
+        return $target
+    }
     $zip = [IO.Compression.ZipFile]::OpenRead($archive)
     try {
         $manifestEntry = $zip.GetEntry('manifest.json')
@@ -70,13 +81,23 @@ function Get-AeroLinkHomeContinuityContext {
         $manifestReader = [IO.StreamReader]::new($manifestEntry.Open())
         try { $manifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
         if ($manifest.FormatVersion -ne 2 -or $manifest.Instance.Classification -cne 'HomeCanonical' -or [Guid]::Parse($manifest.Instance.InstanceId) -ne $expectedInstance) { throw 'The HOME archive does not match its source context.' }
+        # Extraction receives every member. Evidence copy receives only the storage subtree's
+        # relative contents, including directories, orphans and quarantine; no retained copy is
+        # created by isolated restore. Normalize before classifying so aliases cannot evade a bound.
+        $storageRoot = (Resolve-ArchiveDestination $extraction[1] ([string]$manifest.Storage.ArchiveRoot)).TrimEnd('\','/') + '\'
+        foreach ($member in @($manifest.Database.Dump, $manifest.AttachmentInventory)) {
+            if ($member) { foreach ($stage in $extraction) { [void](Resolve-ArchiveDestination $stage ([string]$member)) } }
+        }
         foreach ($entry in $zip.Entries) {
-            foreach ($stage in $staging) {
-                if ((Join-Path $stage $entry.FullName).Length -gt 240) { throw 'A derived HOME archive/evidence path exceeds the WinPS 240-character operation budget.' }
+            foreach ($stage in $extraction) { [void](Resolve-ArchiveDestination $stage $entry.FullName) }
+            $extracted = Resolve-ArchiveDestination $extraction[1] $entry.FullName
+            if ($extracted.StartsWith($storageRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                $relative = $extracted.Substring($storageRoot.Length)
+                if ($relative) { foreach ($stage in $evidence) { [void](Resolve-ArchiveDestination $stage $relative) } }
             }
         }
     } finally { $zip.Dispose() }
-    if (@($paths | Where-Object { $_.Length -gt 240 }).Count) { throw 'A derived HOME journal/receipt/archive path exceeds the WinPS operation budget.' }
+    if (@(($paths + $extraction + $evidence) | Where-Object { $_.Length -gt 240 }).Count) { throw 'A derived HOME journal/receipt/archive path exceeds the WinPS operation budget.' }
     return $context
 }
 
