@@ -13,18 +13,19 @@ const now = Date.parse('2026-09-10T01:00:00Z')
 const iso = offset => new Date(now + offset).toISOString()
 const hash = c => c.repeat(40)
 const api = `https://api.github.com/repos/${repository}`
-function fixture() {
-  const run = { id: 71, run_attempt: 1, name: 'Product quality gate', path: '.github/workflows/ci.yml', workflow_id: 72,
-    repository: { full_name: repository }, status: 'completed', conclusion: 'success', event: 'merge_group',
-    head_sha: hash('a'), head_branch: `gh-readonly-queue/main/pr-9-${hash('d')}`, check_suite_id: 73,
-    created_at: iso(-120_000), updated_at: iso(-10_000) }
+function fixture(event = 'merge_group') {
+  const diagnostic = event === 'workflow_dispatch'
+  const run = { id: diagnostic ? 90 : 71, run_attempt: 1, name: 'Product quality gate', path: '.github/workflows/ci.yml', workflow_id: 72,
+    repository: { full_name: repository }, status: 'completed', conclusion: 'success', event,
+    head_sha: hash('a'), head_branch: diagnostic ? 'main' : `gh-readonly-queue/main/pr-9-${hash('d')}`, check_suite_id: diagnostic ? 93 : 73,
+    created_at: iso(-120_000), run_started_at: iso(-120_000), updated_at: iso(-10_000) }
   const topology = deriveObserverTopology(run, hash('b'))
   const fixedNames = { changes: 'Classify changed product areas', 'metrics-tooling': 'CI metrics tooling tests',
     'backend-core-domain': 'Domain test suite', 'backend-core-infrastructure': 'Infrastructure test suite',
     client: 'Client lint, type-check, and build', 'script-contracts': 'Operator and recovery script contracts',
     'browser-production': 'Browser journeys on the production build', 'postgresql-smoke': 'PostgreSQL migrations and secure bootstrap',
     gate: 'Full Product evidence aggregate' }
-  const name = j => fixedNames[j.instance] ?? (j.group === 'backend-api' ? `API test suite (${j.instance.at(-1)}/3)` : `Browser journeys (${j.instance.at(-1)}/6)`)
+  const name = j => fixedNames[j.instance] ?? (j.group === 'backend-api' ? `API test suite (${j.instance.at(-1)}/3)` : `${diagnostic ? 'Full browser' : 'Browser'} journeys (${j.instance.at(-1)}/8)`)
   const fragments = topology.expectedJobs.map(j => buildFragment({ run: topology.expectedRun,
     job: { ...j, name: name(j), result: 'success', matrix: null },
     timings: { jobStartMs: now - 100_000, setupEndMs: now - 90_000, testEndMs: now - 80_000, jobEndMs: now - 70_000,
@@ -32,12 +33,13 @@ function fixture() {
     counts: { expected: 2, executed: 1, passed: 1, failed: 0, skipped: 1, flaky: null, source: 'trx', missing: null },
     cache: {}, classification: { docsOnly: false, backend: true, client: true, browser: true, postgresql: true, unavailable: false } }))
   const record = aggregateFragments({ fragments, runMeta: topology })
-  const jobs = topology.expectedJobs.map((j, i) => ({ id: 100 + i, name: name(j), run_id: run.id, run_attempt: 1,
+  const offset = diagnostic ? 1000 : 0
+  const jobs = topology.expectedJobs.map((j, i) => ({ id: offset + 100 + i, name: name(j), run_id: run.id, run_attempt: 1,
     head_sha: run.head_sha, status: 'completed', conclusion: 'success', started_at: iso(-100_000), completed_at: iso(-50_000),
-    check_run_url: `${api}/check-runs/${200 + i}` }))
-  const checks = jobs.map((j, i) => ({ id: 200 + i, name: j.name, app: { id: 15368 }, head_sha: run.head_sha,
+    check_run_url: `${api}/check-runs/${offset + 200 + i}` }))
+  const checks = jobs.map((j, i) => ({ id: offset + 200 + i, name: j.name, app: { id: 15368 }, head_sha: run.head_sha,
     status: 'completed', conclusion: 'success', check_suite: { id: run.check_suite_id } }))
-  checks.push({ id: 300, name: 'Trusted merge-queue binding', app: { id: 4834539 }, head_sha: run.head_sha,
+  checks.push({ id: offset + 300, name: 'Trusted merge-queue binding', app: { id: 4834539 }, head_sha: run.head_sha,
     status: 'completed', conclusion: 'success', completed_at: iso(-20_000), details_url: `https://github.com/${repository}/actions/runs/${run.id}` })
   const manifest = { schemaVersion: 'aerolink-validated-tree/v1', provenance: 'shadow', repository,
     workflow: run.name, workflowRef: topology.expectedRun.workflowRef, run: { id: run.id, attempt: 1, event: run.event }, event: run.event,
@@ -226,6 +228,73 @@ test('observer unavailability emits a refusal packet and no authority', async ()
     reader: { request: async () => { throw new Error('unavailable') } } })
   assert.notEqual(report.outcome, 'would_reuse')
   assert.equal(report.canSkip, false)
+})
+
+test('the collector requires every current native diagnostic browser job without granting authority (#1630)', async () => {
+  // Stored single-entry JSON artifacts exercise the real reader, not a replacement reconciler.
+  function archive(name, value) {
+    const filename = Buffer.from(name); const body = Buffer.from(JSON.stringify(value))
+    let crc = 0xffffffff
+    for (const byte of body) {
+      crc ^= byte
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+    }
+    crc = (crc ^ 0xffffffff) >>> 0
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50); local.writeUInt16LE(20, 4)
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(body.length, 18); local.writeUInt32LE(body.length, 22); local.writeUInt16LE(filename.length, 26)
+    const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6)
+    central.writeUInt32LE(crc, 16); central.writeUInt32LE(body.length, 20); central.writeUInt32LE(body.length, 24); central.writeUInt16LE(filename.length, 28)
+    const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10)
+    end.writeUInt32LE(central.length + filename.length, 12); end.writeUInt32LE(local.length + filename.length + body.length, 16)
+    return Buffer.concat([local, filename, body, central, filename, end])
+  }
+  for (const missing of [null, 'Full browser journeys (7/8)', 'Full browser journeys (8/8)']) {
+    const queue = fixture(); const diagnostic = fixture('workflow_dispatch')
+    const packets = [queue, diagnostic]; const archives = new Map(); const artifacts = new Map()
+    for (const packet of packets) {
+      const entries = [
+        [`ci-metrics-run-${packet.run.id}-1`, 'run-metrics.json', packet.evidence.record],
+        [`validated-tree-${packet.run.id}-1`, 'validated-tree.json', packet.evidence.manifest],
+        ...packet.evidence.fragments.map(f => [`ci-metrics-fragment-${f.job.instance}-1`, 'fragment.json', f]),
+      ]
+      artifacts.set(packet.run.id, entries.map(([name, file, data]) => {
+        const id = archives.size + 1; const zip = archive(file, data); archives.set(id, zip)
+        return { id, name, expired: false, size_in_bytes: zip.length }
+      }))
+    }
+    const reader = { zip: async id => archives.get(id), request: async path => {
+      const route = path.replace(`/repos/${repository}`, '').split('?')[0]
+      if (route === '/branches/main') return { ...queue.main, commit: { sha: hash('a') } }
+      if (route === '/actions/workflows/ci.yml') return queue.workflow
+      if (route === '/pulls/9') return { ...queue.pr, changed_files: 1 }
+      if (route === '/pulls/9/files') return [{ filename: queue.changedPaths[0] }]
+      if (route.endsWith('/pulls')) return [{ ...queue.pr, id: 9 }]
+      if (route.startsWith('/git/commits/')) return { ...queue.candidate, sha: route.split('/').at(-1) }
+      if (route.startsWith('/git/trees/')) return { tree: ['.github', 'product', 'test-planner', 'ci-metrics'].map(path => ({ path, sha: hash('b'), type: 'tree' })) }
+      if (route.startsWith('/compare/')) return { status: 'identical', merge_base_commit: { sha: hash('a') } }
+      if (route === `/commits/${hash('c')}/check-runs`) return { total_count: 1, check_runs: [{ ...queue.prReadiness.binding, name: 'Trusted merge-queue binding', id: 700, details_url: `https://github.com/${repository}/actions/runs/91` }] }
+      if (route === `/commits/${hash('a')}/check-runs`) return { total_count: queue.checks.length + diagnostic.jobs.length, check_runs: [...queue.checks, ...diagnostic.checks.filter(c => c.name !== 'Trusted merge-queue binding')] }
+      if (route === '/actions/runs/91') return queue.prReadiness.run
+      const packet = packets.find(p => route.startsWith(`/actions/runs/${p.run.id}`))
+      if (packet) {
+        if (route.endsWith('/jobs')) {
+          const jobs = packet.jobs.filter(j => packet === queue || j.name !== missing)
+          return { total_count: jobs.length, jobs }
+        }
+        if (route.endsWith('/artifacts')) return { total_count: artifacts.get(packet.run.id).length, artifacts: artifacts.get(packet.run.id) }
+        return packet.run
+      }
+      throw new Error(`Unexpected fixture GET: ${path}`)
+    } }
+    const { packet, report } = await collectQueueReuseShadow({ runId: 71, prNumber: 9, fallbackRunId: 90, reader, now,
+      compositionProof: () => queue.composition })
+    assert.deepEqual(packet.collectionErrors, [])
+    assert.equal(packet.fallback.passed, missing === null, packet.fallback.reason ?? missing)
+    if (missing) assert.equal(packet.fallback.reason, `Fallback required proof missing: ${missing}`)
+    else assert.equal(report.outcome, 'would_reuse', JSON.stringify(report.conditions.filter(c => !c.passed)))
+    assert.equal(report.canSkip, false)
+    assert.equal(report.adoptionEligible, false)
+  }
 })
 
 test('production consumers remain independent of every observer outcome and observation can be disabled', () => {

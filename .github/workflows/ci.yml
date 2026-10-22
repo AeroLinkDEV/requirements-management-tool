@@ -1176,16 +1176,14 @@ jobs:
     # opposite of what the queue is for.
     if: (github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number != '')) && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
-    # #1630 stage 1 temporarily raises only the outer infrastructure hang ceiling to forty minutes.
-    # Full 38651112066 cancelled a shard after 368/369 printed passes; peers finished in 29m49s and 29m07s.
-    # Keep six shards until the installed main verifier accepts complete six- or eight-shard evidence.
-    # Stage 2 moves both Full browser families to eight and restores their thirty-minute outer ceilings,
-    # following the staged #1352/#1368/#1381 precedent. Product assertions, performance limits and retries stay.
-    timeout-minutes: 40
+    # #1630 stage 2 follows installed-main six-or-eight support with eight shards in both Full families.
+    # Restore the thirty-minute infrastructure hang ceiling; native evidence must qualify the new packing.
+    # Product assertions, performance limits, retries and the complete planned test union stay unchanged.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       METRICS_JOB_ID: browser-pr
       METRICS_JOB_NAME: Browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})
@@ -1504,15 +1502,13 @@ jobs:
     # no information. validate and postgresql-smoke still run on every push as the safety net.
     if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && inputs.full_diagnostics == true)) && needs.changes.outputs.browser == 'true'
     runs-on: windows-latest
-    # #1630 stage 1 uses the same temporary forty-minute outer hang ceiling as browser-pr.
-    # Its six-shard matrix and metadata remain in place while main installs strict six-or-eight support.
-    # Stage 2 moves both Full browser families to eight and restores thirty minutes; no product assertion,
-    # performance threshold, retry limit, planned test or evidence publisher changes in this stage.
-    timeout-minutes: 40
+    # #1630 stage 2 matches browser-pr: eight shards and the restored thirty-minute outer hang ceiling.
+    # Scheduled/manual native proof remains distinct from PR proof; no planned test or publisher is removed.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       METRICS_JOB_ID: browser-full
       METRICS_JOB_NAME: Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})

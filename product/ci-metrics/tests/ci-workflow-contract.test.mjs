@@ -40,7 +40,7 @@ test('all browser lanes retain actual reports and failure traces after retry suc
   }
 })
 
-test('Full browser families retain bounded six-shard packing during #1630 stage 1', () => {
+test('Full browser families use bounded eight-shard packing with restored ceilings (#1630 stage 2)', () => {
   const workflow = workflowLines().join('\n')
   const group = workflow.split('\n').find((line) => line.startsWith('  group: quality-'))
   assert.ok(group.includes("github.event_name == 'schedule' && 'scheduled'"))
@@ -48,9 +48,8 @@ test('Full browser families retain bounded six-shard packing during #1630 stage 
   assert.ok(group.includes('inputs.pull_request_number || github.event.pull_request.number || github.ref'))
   for (const job of ['browser-pr', 'browser-full']) {
     const full = jobBodies(workflowLines())[job].join('\n')
-    assert.match(full, /^    timeout-minutes: 40$/m, job)
-    // The installed-main verifier gains eight-shard acceptance before either matrix moves.
-    assert.match(full, /shard: \[1, 2, 3, 4, 5, 6\]/, job)
+    assert.match(full, /^    timeout-minutes: 30$/m, job)
+    assert.match(full, /shard: \[1, 2, 3, 4, 5, 6, 7, 8\]/, job)
     assert.match(full, /scripts\/plan-journey-shard\.mjs listed\.txt/, job)
     assert.match(full, /\[ "\$actual" != "\$expected" \]/, job)
     assert.doesNotMatch(full, /playwright test --shard/, job)
