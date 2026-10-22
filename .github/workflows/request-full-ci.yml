@@ -415,7 +415,7 @@ jobs:
           echo "Bound exact Product Full run $run_id to PR #$PR_NUMBER head $HEAD_SHA using comparison base $BASE_SHA." >> "$GITHUB_STEP_SUMMARY"
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.MERGE_AUTHORITY_APP_CLIENT_ID }}
           private-key: ${{ secrets.MERGE_AUTHORITY_APP_PRIVATE_KEY }}
