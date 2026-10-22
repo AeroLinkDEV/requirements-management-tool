@@ -67,7 +67,7 @@ if ($HomeContinuityContextPath -or $HomeContinuityContextSha256) {
         (-not $CleanupContinuityOperation -and (-not $DisposableQualification -or -not $RequireFreshTarget -or -not $SkipCurrentCodeValidation -or -not $ContinuityReceiptPath)) -or
         ($CleanupContinuityOperation -and -not $ContinuityOperationJournalPath)) { throw 'The HOME context is restricted to fresh isolated continuity restore and bound cleanup.' }
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkHomeContinuity.psm1') -Force
-    $homeContinuityContext = Get-AeroLinkHomeContinuityContext -Path $HomeContinuityContextPath -Sha256 $HomeContinuityContextSha256
+    $homeContinuityContext = Get-AeroLinkHomeContinuityContext -Path $HomeContinuityContextPath -Sha256 $HomeContinuityContextSha256 -TargetDatabase $TargetDatabase
     foreach ($outputPath in @($ContinuityReceiptPath, $ContinuityOperationJournalPath)) {
         if ($outputPath -and ([IO.Path]::GetFullPath($outputPath) + '.receipt.json.writing-' + ('x' * 32)).Length -gt 240) { throw 'The HOME proof/journal temporary path exceeds the WinPS operation budget.' }
     }
