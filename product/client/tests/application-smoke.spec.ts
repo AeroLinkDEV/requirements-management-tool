@@ -28,7 +28,14 @@ test('AeroLink starts against the real API and presents a valid entry state', as
   const seedless = process.env.AEROLINK_E2E_SKIP_SHOWCASE_SEED === 'true'
   await login(page,'admin',{openProject:!seedless})
   await expect(page.getByText(/AeroLink/).first()).toBeVisible()
-  await expect(page.getByRole('heading', { name: seedless ? 'Create your first program' : 'Command Center' })).toBeVisible()
+  if (seedless) {
+    await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible()
+    const emptyProjects = page.getByRole('region', { name: 'No authorized projects', exact: true })
+    await expect(emptyProjects).toBeVisible()
+    await expect(emptyProjects.getByRole('heading', { name: 'No authorized projects', exact: true })).toBeVisible()
+  } else {
+    await expect(page.getByRole('heading', { name: 'Command Center', exact: true })).toBeVisible()
+  }
 })
 
 test('The sign-in story panel gives truthful workspace context without changing authentication', async ({ page }) => {
