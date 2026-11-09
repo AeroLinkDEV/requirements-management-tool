@@ -243,7 +243,7 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
       - name: Install .NET 10
         if: steps.nuget.outputs.cache-hit != 'true'
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       # Restore only. The entry is saved under the main-scoped key when the job ends.
@@ -351,7 +351,7 @@ jobs:
           key: integrity-extractor-v1-dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0-7a64d5c9c0c5cb76b57cb9328fab82743b879c975ddcfc03f15a8754ccaed4d3
           enableCrossOsArchive: true
       - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Cache NuGet packages
@@ -579,7 +579,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Cache NuGet packages
@@ -738,7 +738,7 @@ jobs:
           key: integrity-extractor-v1-dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0-7a64d5c9c0c5cb76b57cb9328fab82743b879c975ddcfc03f15a8754ccaed4d3
           enableCrossOsArchive: true
       - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Cache NuGet packages
@@ -1202,7 +1202,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Install Node.js
@@ -1398,7 +1398,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Install Node.js
@@ -1529,7 +1529,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Install Node.js
@@ -1682,7 +1682,7 @@ jobs:
           key: integrity-extractor-v1-dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0-7a64d5c9c0c5cb76b57cb9328fab82743b879c975ddcfc03f15a8754ccaed4d3
           enableCrossOsArchive: true
       - name: Install .NET 10
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5.2.0
         with:
           dotnet-version: 10.0.x
       - name: Restore and build API
